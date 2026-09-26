@@ -41,6 +41,7 @@ import androidx.navigation.navDeepLink
 import androidx.navigation.NavType
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.map
+import space.outboundos.android.BuildConfig
 import space.outboundos.android.data.repository.OutboundRepository
 import space.outboundos.android.model.Session
 import space.outboundos.android.ui.OutboundViewModelFactory
@@ -135,7 +136,7 @@ private fun AuthenticatedNavigation(
                     onSearch = viewModel::setSearch,
                     onRefresh = viewModel::refresh,
                     onOpenThread = { navController.navigate(Routes.conversation(it)) },
-                    onOpenDashboard = { uriHandler.openUri("https://app.outboundos.space") },
+                    onOpenDashboard = { uriHandler.openUri(BuildConfig.API_BASE_URL) },
                     onLogout = { scope.launch { repository.logout() } },
                 )
             }
@@ -146,7 +147,7 @@ private fun AuthenticatedNavigation(
                     state = state,
                     onRefresh = viewModel::refresh,
                     onOpenThread = { navController.navigate(Routes.conversation(it)) },
-                    onOpenDashboard = { uriHandler.openUri("https://app.outboundos.space") },
+                    onOpenDashboard = { uriHandler.openUri(BuildConfig.API_BASE_URL) },
                 )
             }
             composable(

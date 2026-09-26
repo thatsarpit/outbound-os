@@ -22,11 +22,11 @@ gradle wrapper --gradle-version 9.4.1
 
 Android Studio can also open this `android/` directory and sync it directly.
 
-The API base URL is a generated `BuildConfig` value. It defaults to `https://app.outboundos.space/`. Point a debug build at a local Express server with:
+The server address is a generated `BuildConfig` value, used for the API and for "Open dashboard". It defaults to the hosted `https://app.outboundos.space/`; **self-hosted installs build with their own address**, e.g. `-PoutboundOsBaseUrl=https://crm.example.com/`. Point a debug build at a local server with:
 
 ```bash
 ./gradlew :app:assembleDebug \
-  -PoutboundOsBaseUrl=http://10.0.2.2:3000/
+  -PoutboundOsBaseUrl=http://10.0.2.2:3001/
 ```
 
 The debug manifest permits cleartext HTTP for emulator/local development. Release builds do not.
