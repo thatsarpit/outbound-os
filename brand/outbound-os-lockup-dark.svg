@@ -1,0 +1,38 @@
+<svg width="640" height="168" viewBox="0 0 640 168" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="markGradientDark" x1="18" y1="12" x2="108" y2="118" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#031611"/>
+      <stop offset="0.54" stop-color="#0C7A50"/>
+      <stop offset="1" stop-color="#29C97A"/>
+    </linearGradient>
+    <linearGradient id="markStrokeDark" x1="34" y1="28" x2="94" y2="90" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#CFFFE4"/>
+      <stop offset="1" stop-color="#FFFFFF"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="16" y="20" width="128" height="128" rx="36" fill="url(#markGradientDark)"/>
+  <rect x="30" y="34" width="100" height="100" rx="28" fill="#FFFFFF" fill-opacity="0.08" stroke="#FFFFFF" stroke-opacity="0.18"/>
+  <path
+    d="M57 67C57 59.8203 62.8203 54 70 54H87C94.1797 54 100 59.8203 100 67V77C100 84.1797 94.1797 90 87 90H76L64 101V90H70C62.8203 90 57 84.1797 57 77V67Z"
+    stroke="url(#markStrokeDark)"
+    stroke-width="7"
+    stroke-linejoin="round"
+  />
+  <path
+    d="M66 79L74 68L80 74L92 58"
+    stroke="white"
+    stroke-width="7"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+  <circle cx="92" cy="58" r="5.25" fill="#B3FFD2"/>
+
+  <text x="176" y="82" fill="#07131D" font-family="Space Grotesk, Arial, sans-serif" font-size="62" font-weight="700" letter-spacing="-0.06em">
+    Outbound
+    <tspan fill="#119A62"> OS</tspan>
+  </text>
+  <text x="178" y="118" fill="#526579" font-family="Instrument Sans, Arial, sans-serif" font-size="20" font-weight="600" letter-spacing="0.14em">
+    SELF-HOSTED OUTBOUND SALES
+  </text>
+</svg>

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon-app.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Outbound OS — multichannel sales automation for B2B teams" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Outbound OS</title>
+    <!--
+      Applies the stored theme before first paint. Without this the page renders
+      in light, then flips to dark once React hydrates. Kept inline and
+      dependency-free on purpose — it must run before the stylesheet paints.
+    -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('outboundos_theme')
+          if (t !== 'light' && t !== 'dark' && t !== 'system') {
+            var legacy = localStorage.getItem('medsales_theme_v2')
+            t = legacy === 'light' || legacy === 'dark' ? legacy : 'system'
+          }
+          if (t === 'light' || t === 'dark') {
+            document.documentElement.setAttribute('data-theme', t)
+          }
+        } catch (e) {
+          /* storage blocked — fall back to the system preference */
+        }
+      })()
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

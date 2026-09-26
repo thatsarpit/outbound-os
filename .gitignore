@@ -1,0 +1,33 @@
+node_modules/
+.claude/
+.env
+.env.*
+# Examples document every setting and hold no secrets.
+!.env.example
+!**/.env.example
+out/
+dist/
+.next/
+output/
+data/
+*.log
+*.tsbuildinfo
+.vercel
+.wwebjs_auth/
+.wwebjs_cache/
+*.tar.gz
+*.tgz
+.codex-temp-*
+prisma/*.db
+prisma/*.db-*
+coderabbit_review.md
+.gemini_coderabbit_summary.md
+
+# macOS Finder metadata — was tracked by mistake.
+.DS_Store
+**/.DS_Store
+
+# Managed Chrome for Testing. Several hundred MB of binary, reinstalled with
+# `npm run browser:install` rather than committed.
+data/browsers/
+backups/

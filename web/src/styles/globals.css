@@ -1,0 +1,683 @@
+@import 'tailwindcss';
+@plugin "@tailwindcss/typography";
+
+/* ════════════════════════════════════════════════════════════════════════════
+   DESIGN SYSTEM RULES — Read before adding new UI.
+
+   ── Design principles (see DESIGN.md) ──
+   1. Ink first, colour last. Hierarchy comes from size, weight and space.
+      A primary button is solid ink, not a bright fill.
+   2. Every colour has exactly one job. Brand ≠ state ≠ channel. Green means
+      WhatsApp or success — never identity.
+   3. Flat and calm. No glass, no glow, no gradients behind data. Elevation is
+      a hairline border, then a 1px shadow, then (overlays only) a real one.
+   4. Tight geometry. Radii 4 / 7 / 10px. Big radii on dense elements read as toy.
+   5. Tabular numerals wherever digits stack — use `.tabular` or `tabular-nums`.
+   6. Density is a feature. Agents scan hundreds of rows.
+
+   Layout spacing scale (Tailwind gap-N / space-N / mt-N etc):
+     gap-2 (8px)   tight controls (icon + label, badge groups)
+     gap-3 (12px)  intra-control rows (form rows, button groups)
+     gap-4 (16px)  intra-card content blocks
+     gap-6 (24px)  between sibling cards / panels
+     gap-8 (32px)  between top-level page sections
+
+   Card / container padding (pick ONE per card variant, do not mix):
+     p-4 (16px)  compact cards (StatPill, list rows, dense tables)
+     p-5 (20px)  default cards (MetricCard, SectionCard on mobile)
+     p-6 (24px)  spacious cards (SectionCard on desktop, hero containers)
+
+   Radius — rounded-md (7px) is the default for cards and controls.
+     rounded-sm (4px)  chips, tags, tight inputs
+     rounded-md (7px)  DEFAULT — cards, buttons, inputs, panels
+     rounded-lg (10px) page-level containers, modals
+     Do NOT use rounded-2xl / rounded-3xl. They are legacy.
+
+   Heading hierarchy — use these tokens, not ad-hoc text-* utilities:
+     h1   text-2xl font-semibold tracking-tight       (one per page, page title)
+     h2   text-lg  font-semibold                      (section heading inside a card)
+     h3   text-sm  font-semibold uppercase tracking-wide text-text-muted
+
+   Color usage — ALWAYS use semantic tokens. Reject hardcoded hex in components.
+     bg-background / bg-surface / bg-surface-raised / bg-surface-overlay
+     border-border / border-border-subtle
+     text-text-primary / text-text-secondary / text-text-muted
+     bg-accent + text-background        (primary action — resolves to ink-on-light,
+                                         and inverts correctly in dark)
+     ring-focus / text-focus            (focus rings and links — the ONLY blue)
+     bg-success-muted / text-success    (and warning / danger / info)
+     text-whatsapp / text-email / text-imessage / text-telegram  (channel identity)
+     bg-hot / bg-warm / bg-cold         (lead tier)
+   Hex literals only allowed in: this file.
+
+   State components — use the canonical primitives:
+     <LoadingState variant="page|card|inline">  for any pending fetch UI
+     <EmptyState tone="waiting|filtered|unconfigured" action={...}>  for zero-data
+     <ErrorState onRetry={...}>  for failed fetches (never silently swallow)
+
+   See web/src/pages/dev-ui.tsx for the live catalog.
+════════════════════════════════════════════════════════════════════════════ */
+
+/* ════════════════════════════════════════════════════════════════════════════
+   LIGHT THEME — the base. Light is the default: it is what gets demoed,
+   screenshotted and printed. Dark is a real second theme, not an inversion.
+════════════════════════════════════════════════════════════════════════════ */
+:root {
+  color-scheme: light;
+
+  /* ── Grounds. Neutrals carry a faint cool bias toward the focus indigo, so
+     they read as chosen rather than inherited. ── */
+  --color-background: #fafafb;
+  --color-surface: #ffffff;
+  --color-surface-raised: #f4f4f7;
+  --color-surface-overlay: #ffffff;
+  --color-border: #e4e4ea;
+  --color-border-subtle: #efeff2;
+  --color-border-strong: #d2d2da;
+
+  --color-text-primary: #17171c;
+  --color-text-secondary: #55555f;
+  --color-text-muted: #85858f;
+
+  /* ── Accent = INK. Primary buttons are solid ink with `text-background`
+     as the foreground, which inverts correctly in dark. ── */
+  --color-accent: #17171c;
+  --color-accent-hover: #2e2e36;
+  --color-accent-muted: #f0f0f4;
+  --color-accent-border: #dcdce3;
+
+  /* -- Foregrounds for solid fills. These invert with the theme so a filled
+     button never ends up light-on-light or dark-on-dark. Always pair a
+     `bg-<name>` with its `text-<name>-fg`. -- */
+  --color-accent-fg: #fafafb;
+  --color-danger-fg: #ffffff;
+  --color-success-fg: #ffffff;
+  --color-warning-fg: #ffffff;
+  --color-info-fg: #ffffff;
+
+  /* ── Focus / links. The only blue in the system, used sparingly. ── */
+  --color-focus: #2c3fe0;
+  --color-focus-muted: #eef0fe;
+  --color-focus-border: #c7cdf8;
+
+  /* ── State. Never used for identity. ── */
+  --color-success: #15803d;
+  --color-success-muted: #eaf6ee;
+  --color-warning: #b45309;
+  --color-warning-muted: #fbf1e3;
+  --color-danger: #dc2626;
+  --color-danger-muted: #fdecec;
+  --color-info: #0369a1;
+  --color-info-muted: #e7f2f9;
+
+  /* ── Channel identity ──
+   * WhatsApp stays green and iMessage stays blue because people recognise
+   * those; email takes violet so it cannot blur into iMessage (an earlier set
+   * had them both blue, at ΔE 5.2). When the palette was last validated with
+   * an extra orange channel, the worst all-pairs separation was ΔE 9.2 under
+   * deuteranopia and 17.2 at normal vision; re-check if a channel is added.
+   * Colour is always paired with the channel's own icon — identity is never
+   * carried by colour alone.
+   */
+  --color-whatsapp: #047857;
+  --color-whatsapp-brand: #25d366;
+  --color-whatsapp-muted: color-mix(in srgb, #047857 10%, var(--color-surface));
+  --color-email: #7c3aed;
+  --color-email-muted: color-mix(in srgb, #7c3aed 10%, var(--color-surface));
+  --color-imessage: #0284c7;
+  --color-imessage-brand: #0b84ff;
+  --color-imessage-muted: color-mix(in srgb, #0284c7 10%, var(--color-surface));
+  --color-telegram: #0e7490;
+  --color-telegram-muted: color-mix(in srgb, #0e7490 10%, var(--color-surface));
+
+  /* ── Lead tier ── */
+  --color-hot: #dc2626;
+  --color-warm: #b45309;
+  --color-cold: #0369a1;
+
+  /* ── Chart palette ──
+   * Categorical series colours, used by Recharts via use-chart-theme.ts.
+   *
+   * VALIDATED — do not hand-edit. This exact order passes all six checks
+   * (lightness band, chroma floor, CVD separation, normal-vision floor,
+   * contrast) for deuteranopia, protanopia and tritanopia. Reordering the
+   * slots breaks adjacent-pair separation, so a series is identified by its
+   * slot number, never by cycling.
+   *
+   * Deliberately contains none of the reserved status hexes (success #15803d,
+   * warning #b45309, danger #dc2626): status colour must never double as
+   * "series 4". Both themes hold the same hue order at different steps, so a
+   * series keeps its identity when the theme flips.
+   */
+  --color-chart-1: #2c3fe0;
+  --color-chart-2: #be123c;
+  --color-chart-3: #0891b2;
+  --color-chart-4: #a16207;
+  --color-chart-5: #0e9f6e;
+  --color-chart-6: #7c3aed;
+  --color-chart-7: #db2777;
+  --color-chart-8: #4d7c0f;
+  --color-chart-grid: #ededf1;
+  --color-chart-axis: #85858f;
+
+  /* ── Elevation. Level 1 is a border; these are deliberately restrained. ── */
+  --shadow-sm: 0 1px 2px rgba(20, 20, 30, 0.06);
+  --shadow-md: 0 4px 12px rgba(20, 20, 30, 0.08);
+  --shadow-lg: 0 16px 40px rgba(20, 20, 30, 0.14);
+  /* Legacy token name kept so existing `shadow-glow` call sites degrade to a
+     normal shadow instead of breaking. Do not use in new code. */
+  --shadow-glow: 0 1px 2px rgba(20, 20, 30, 0.06);
+
+  /* ── Surfaces formerly rendered as frosted glass, now flat. ── */
+  --glass-bg: var(--color-surface);
+  --glass-border: var(--color-border);
+  --shimmer-tint: rgba(20, 20, 30, 0.05);
+
+  /* ── Control sizing ── */
+  --control-h: 40px;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   DARK THEME — defined twice on purpose:
+     • the media query (guarded so an explicit light choice still wins) covers
+       viewers who never touched the toggle, which is most of them;
+     • the [data-theme="dark"] block covers an explicit choice.
+   Only tokens are redefined here. Never style a component inside these blocks.
+════════════════════════════════════════════════════════════════════════════ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --color-background: #0b0b0e;
+    --color-surface: #141419;
+    --color-surface-raised: #1c1c22;
+    --color-surface-overlay: #22222a;
+    --color-border: #26262e;
+    --color-border-subtle: #1a1a20;
+    --color-border-strong: #383842;
+
+    --color-text-primary: #f7f7f9;
+    --color-text-secondary: #a0a0ac;
+    --color-text-muted: #6e6e7a;
+
+    --color-accent: #f7f7f9;
+    --color-accent-hover: #ffffff;
+    --color-accent-muted: #22222a;
+    --color-accent-border: #33333d;
+
+    /* Dark semantics are light hues, so their foregrounds go dark. */
+    --color-accent-fg: #17171c;
+    --color-danger-fg: #2a1618;
+    --color-success-fg: #06210f;
+    --color-warning-fg: #2a1d06;
+    --color-info-fg: #08202e;
+
+    --color-focus: #8b99ff;
+    --color-focus-muted: #191a33;
+    --color-focus-border: #33355e;
+
+    --color-success: #4ade80;
+    --color-success-muted: #10241a;
+    --color-warning: #fbbf24;
+    --color-warning-muted: #261c10;
+    --color-danger: #f87171;
+    --color-danger-muted: #2a1618;
+    --color-info: #38bdf8;
+    --color-info-muted: #0c2230;
+
+    --color-whatsapp: #059669;
+    --color-whatsapp-brand: #25d366;
+    --color-whatsapp-muted: color-mix(in srgb, #059669 16%, var(--color-surface));
+    --color-email: #9575f7;
+    --color-email-muted: color-mix(in srgb, #9575f7 16%, var(--color-surface));
+    --color-imessage: #0284c7;
+    --color-imessage-brand: #0b84ff;
+    --color-imessage-muted: color-mix(in srgb, #0284c7 16%, var(--color-surface));
+    --color-telegram: #22d3ee;
+    --color-telegram-muted: color-mix(in srgb, #22d3ee 16%, var(--color-surface));
+
+    --color-hot: #f87171;
+    --color-warm: #fbbf24;
+    --color-cold: #38bdf8;
+
+    --color-chart-1: #6d83f5;
+    --color-chart-2: #f43f5e;
+    --color-chart-3: #0e9bb8;
+    --color-chart-4: #c2740a;
+    --color-chart-5: #0ea373;
+    --color-chart-6: #9575f7;
+    --color-chart-7: #ec4899;
+    --color-chart-8: #65a30d;
+    --color-chart-grid: #24242c;
+    --color-chart-axis: #6e6e7a;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.55);
+    --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.65);
+    --shadow-glow: 0 1px 2px rgba(0, 0, 0, 0.5);
+
+    --glass-bg: var(--color-surface);
+    --glass-border: var(--color-border);
+    --shimmer-tint: rgba(255, 255, 255, 0.05);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-background: #0b0b0e;
+  --color-surface: #141419;
+  --color-surface-raised: #1c1c22;
+  --color-surface-overlay: #22222a;
+  --color-border: #26262e;
+  --color-border-subtle: #1a1a20;
+  --color-border-strong: #383842;
+
+  --color-text-primary: #f7f7f9;
+  --color-text-secondary: #a0a0ac;
+  --color-text-muted: #6e6e7a;
+
+  --color-accent: #f7f7f9;
+  --color-accent-hover: #ffffff;
+  --color-accent-muted: #22222a;
+  --color-accent-border: #33333d;
+
+  --color-accent-fg: #17171c;
+  --color-danger-fg: #2a1618;
+  --color-success-fg: #06210f;
+  --color-warning-fg: #2a1d06;
+  --color-info-fg: #08202e;
+
+  --color-focus: #8b99ff;
+  --color-focus-muted: #191a33;
+  --color-focus-border: #33355e;
+
+  --color-success: #4ade80;
+  --color-success-muted: #10241a;
+  --color-warning: #fbbf24;
+  --color-warning-muted: #261c10;
+  --color-danger: #f87171;
+  --color-danger-muted: #2a1618;
+  --color-info: #38bdf8;
+  --color-info-muted: #0c2230;
+
+  --color-whatsapp: #059669;
+  --color-whatsapp-brand: #25d366;
+  --color-whatsapp-muted: color-mix(in srgb, #059669 16%, var(--color-surface));
+  --color-email: #9575f7;
+  --color-email-muted: color-mix(in srgb, #9575f7 16%, var(--color-surface));
+  --color-imessage: #0284c7;
+  --color-imessage-brand: #0b84ff;
+  --color-imessage-muted: color-mix(in srgb, #0284c7 16%, var(--color-surface));
+
+  --color-hot: #f87171;
+  --color-warm: #fbbf24;
+  --color-cold: #38bdf8;
+
+  --color-chart-1: #6d83f5;
+  --color-chart-2: #f43f5e;
+  --color-chart-3: #0e9bb8;
+  --color-chart-4: #c2740a;
+  --color-chart-5: #0ea373;
+  --color-chart-6: #9575f7;
+  --color-chart-7: #ec4899;
+  --color-chart-8: #65a30d;
+  --color-chart-grid: #24242c;
+  --color-chart-axis: #6e6e7a;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.65);
+  --shadow-glow: 0 1px 2px rgba(0, 0, 0, 0.5);
+
+  --glass-bg: var(--color-surface);
+  --glass-border: var(--color-border);
+  --shimmer-tint: rgba(255, 255, 255, 0.05);
+}
+
+/* ── Tailwind Theme Tokens ── */
+@theme {
+  --color-background: var(--color-background);
+  --color-surface: var(--color-surface);
+  --color-surface-raised: var(--color-surface-raised);
+  --color-surface-overlay: var(--color-surface-overlay);
+  --color-border: var(--color-border);
+  --color-border-subtle: var(--color-border-subtle);
+  --color-border-strong: var(--color-border-strong);
+
+  --color-text-primary: var(--color-text-primary);
+  --color-text-secondary: var(--color-text-secondary);
+  --color-text-muted: var(--color-text-muted);
+
+  --color-accent: var(--color-accent);
+  --color-accent-hover: var(--color-accent-hover);
+  --color-accent-muted: var(--color-accent-muted);
+  --color-accent-border: var(--color-accent-border);
+
+  --color-accent-fg: var(--color-accent-fg);
+  --color-danger-fg: var(--color-danger-fg);
+  --color-success-fg: var(--color-success-fg);
+  --color-warning-fg: var(--color-warning-fg);
+  --color-info-fg: var(--color-info-fg);
+
+  --color-focus: var(--color-focus);
+  --color-focus-muted: var(--color-focus-muted);
+  --color-focus-border: var(--color-focus-border);
+
+  --color-success: var(--color-success);
+  --color-success-muted: var(--color-success-muted);
+  --color-warning: var(--color-warning);
+  --color-warning-muted: var(--color-warning-muted);
+  --color-danger: var(--color-danger);
+  --color-danger-muted: var(--color-danger-muted);
+  --color-info: var(--color-info);
+  --color-info-muted: var(--color-info-muted);
+
+  --color-whatsapp: var(--color-whatsapp);
+  --color-whatsapp-brand: var(--color-whatsapp-brand);
+  --color-whatsapp-muted: var(--color-whatsapp-muted);
+  --color-email: var(--color-email);
+  --color-email-muted: var(--color-email-muted);
+  --color-imessage: var(--color-imessage);
+  --color-imessage-brand: var(--color-imessage-brand);
+  --color-imessage-muted: var(--color-imessage-muted);
+  --color-telegram: var(--color-telegram);
+  --color-telegram-muted: var(--color-telegram-muted);
+
+  --color-hot: var(--color-hot);
+  --color-warm: var(--color-warm);
+  --color-cold: var(--color-cold);
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  /* Display and body are the same family. A second display face was one of the
+     strongest generated-design tells and bought nothing here. */
+  --font-display: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', monospace;
+
+  --radius-sm: 0.25rem; /* 4px  */
+  --radius-md: 0.4375rem; /* 7px  — DEFAULT */
+  --radius-lg: 0.625rem; /* 10px */
+  --radius-xl: 0.75rem; /* 12px — page containers only */
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-glow: var(--shadow-glow);
+}
+
+/* ── Base ── */
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background: var(--color-background);
+    color: var(--color-text-primary);
+    min-height: 100vh;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-display);
+    letter-spacing: -0.011em;
+  }
+
+  /* Digits line up in columns everywhere they appear. This single detail does
+     more for perceived professionalism than any other. */
+  table,
+  .tabular,
+  [data-numeric] {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One visible focus treatment across the whole app — the only blue. */
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  ::selection {
+    background: var(--color-focus-muted);
+    color: var(--color-text-primary);
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 6px;
+    border: 3px solid var(--color-background);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-text-muted);
+  }
+}
+
+/* ── Utilities ── */
+
+/* Formerly a frosted-glass treatment. Now a plain elevated surface: the 67
+   existing call sites all become flat cards without needing to be touched. */
+@utility glass {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow-sm);
+}
+
+@utility animate-fade-in {
+  animation: fade-in 0.16s ease-out;
+}
+
+@utility animate-slide-up {
+  animation: slide-up 0.16s ease-out;
+}
+
+@utility animate-slide-right {
+  animation: slide-right 0.16s ease-out;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slide-right {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@utility animate-slide-in-right {
+  animation: slide-in-right 0.18s ease-out;
+}
+
+@keyframes slide-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@utility animate-toast-out {
+  animation: toast-out 0.16s ease-in forwards;
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+}
+
+@utility scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Form Inputs ── */
+@layer base {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not(
+      [type='hidden']
+    ),
+  select,
+  textarea {
+    min-height: var(--control-h);
+  }
+}
+
+.form-input {
+  width: 100%;
+  min-height: var(--control-h);
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-md);
+  font-size: 0.875rem;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  outline: none;
+  transition:
+    border-color 0.14s ease-out,
+    box-shadow 0.14s ease-out;
+}
+
+.form-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.form-input:hover:not(:disabled) {
+  border-color: var(--color-accent-border);
+}
+
+.form-input:focus {
+  border-color: var(--color-focus);
+  box-shadow: 0 0 0 3px var(--color-focus-muted);
+}
+
+.form-input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Line clamp ── */
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── TipTap Email Editor ── */
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--color-text-muted);
+  pointer-events: none;
+  height: 0;
+}
+
+.tiptap:focus {
+  outline: none;
+}
+
+.tiptap ul,
+.tiptap ol {
+  padding-left: 1.25rem;
+}
+
+.tiptap blockquote {
+  border-left: 3px solid var(--color-border);
+  padding-left: 0.75rem;
+  color: var(--color-text-secondary);
+}
+
+@utility animate-shimmer {
+  animation: shimmer 1.4s infinite;
+  background: linear-gradient(90deg, transparent 0%, var(--shimmer-tint) 50%, transparent 100%);
+  background-size: 200% 100%;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Hover is a change of surface and border, not a lift. Cards that rise off the
+   page on hover were part of the old decorative language. */
+@utility card-hover {
+  transition:
+    border-color 0.14s ease-out,
+    background-color 0.14s ease-out;
+}
+
+.card-hover:hover {
+  border-color: var(--color-accent-border);
+  background-color: var(--color-surface-raised);
+}
+
+/* ── Motion preference ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

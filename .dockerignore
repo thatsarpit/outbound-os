@@ -1,0 +1,14 @@
+node_modules
+.git
+.wwebjs_auth
+.wwebjs_cache
+.claude
+.vercel
+.env
+*.tar.gz
+backups
+logs
+data
+dashboard
+web/node_modules
+web/dist

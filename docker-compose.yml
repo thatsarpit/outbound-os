@@ -1,0 +1,60 @@
+# Outbound OS — self-hosted
+#
+#   cp .env.example .env        # then fill in the values it asks for
+#   docker compose up -d
+#   open http://localhost:3001
+#
+# The first boot creates the database and the first admin (ADMIN_EMAIL /
+# ADMIN_PASSWORD; if no password is set, `docker compose logs app` shows a
+# generated one once).
+#
+# Everything the app stores lives in the `outboundos-data` volume. Back it up
+# with:  docker compose exec app bash scripts/backup.sh
+# (writes to /app/data/backups inside the same volume; copy it off the host
+# with `docker compose cp app:/app/data/backups ./backups`).
+#
+# Optional MCP server, so Claude or another AI client can work your CRM:
+#   docker compose --profile mcp up -d
+# It needs MCP_SERVICE_TOKEN (shared with the app) and MCP_BEARER_TOKEN in .env.
+
+services:
+  app:
+    build: .
+    image: outbound-os:local
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Inside the container the database is always in the mounted folder.
+      DATABASE_URL: file:/app/data/outboundos.db
+      API_PORT: "3001"
+      NODE_ENV: production
+    ports:
+      - "${OUTBOUNDOS_PORT:-3001}:3001"
+    volumes:
+      # A named volume keeps the image's file ownership, so the non-root app
+      # user can always write its database. A bind mount (./data) often
+      # arrives owned by root on Linux hosts and the app cannot start.
+      - outboundos-data:/app/data
+
+  mcp:
+    profiles: ["mcp"]
+    build:
+      context: .
+      dockerfile: mcp-outboundos/Dockerfile
+    image: outbound-os-mcp:local
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      BACKEND_URL: http://app:3001
+      PORT: "3010"
+      OAUTH_STORE_PATH: /app/data/mcp-oauth.json
+    ports:
+      - "${OUTBOUNDOS_MCP_PORT:-3010}:3010"
+    volumes:
+      - outboundos-mcp:/app/data
+    depends_on:
+      - app
+
+volumes:
+  outboundos-data:
+  outboundos-mcp:

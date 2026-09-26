@@ -1,0 +1,4 @@
+# SPA fallback. /api/* is handled by functions/api/[[path]].ts and must not be
+# caught here, so it is excluded before the catch-all.
+/api/*  /api/:splat  200
+/*      /index.html  200

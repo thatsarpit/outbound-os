@@ -1,0 +1,1493 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int       @id @default(autoincrement())
+  name         String
+  email        String    @unique
+  passwordHash String
+  // Platform role. `admin` here is a super-admin who can manage users + pools
+  // and bypass pool-scoped checks (used for support / ops). All other roles
+  // are scoped per-pool via the UserPool join below.
+  role         String    @default("agent")
+  // admin | manager | agent | viewer
+  // Login phone in E.164 digits (no +, no spaces). Optional: existing users
+  // keep email+password, and both routes issue the same JWT.
+  phone        String?   @unique
+  enabled      Boolean   @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  assignedLeads   Lead[]
+  poolMemberships UserPool[]
+  sentInvitations Invitation[]
+}
+
+model Lead {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId   Int?
+  id         Int     @id @default(autoincrement())
+  // The lead's id in the system it came from (a form, a marketplace, a CRM).
+  // Lets a source resend the same enquiry without creating a duplicate.
+  externalId String?
+  name       String
+  company    String?
+  mobile     String // deduplicate across sources
+  email      String?
+  country    String?
+  product    String?
+  quantity   String?
+  strength   String?
+  brand      String?
+
+  // Source tracking
+  source        String @default("manual") // webhook source slug | csv_import | manual | website | <channel>_inbound
+  importBatchId Int?
+
+  // Pipeline state
+  status String @default("new")
+  // new | wa_unavailable | wa_undelivered | contacted | replied | engaged | closed | paused
+
+  // Agent assignment (which team member owns this lead)
+  assignedToId Int? // FK to User.id — null = unassigned
+  assignedTo   User? @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  // WhatsApp info
+  isOnWhatsApp    Boolean?
+  assignedAccount Int      @default(0) // 0 = unassigned, 1 or 2
+
+  // Email outreach tracking
+  emailStatus                 String    @default("none") // none | queued | sent | replied | bounced
+  emailOptOut                 Boolean   @default(false)
+  emailOptOutAt               DateTime?
+  emailMarketingConsent       Boolean   @default(false)
+  emailMarketingConsentAt     DateTime?
+  emailMarketingConsentSource String?
+  assignedEmailAccountId      Int? // FK to EmailAccount used for this lead
+
+  // iMessage outreach tracking
+  imessageStatus            String           @default("none") // none | queued | sent | replied | failed
+  assignedIMessageAccountId Int? // FK to IMessageAccount used for this lead
+  assignedIMessageAccount   IMessageAccount? @relation("AssignedIMessageAccount", fields: [assignedIMessageAccountId], references: [id], onDelete: SetNull)
+  imessageFollowupCount     Int              @default(0)
+  lastImessageAt            DateTime?
+
+  // Telegram contact routing. Telegram user accounts can only message peers
+  // they are allowed to contact, so this is an explicit @username, phone, or
+  // numeric peer ID rather than an inferred campaign destination.
+  telegramPeer              String?
+  telegramStatus            String           @default("none") // none | sent | replied | failed
+  assignedTelegramAccountId Int?
+  assignedTelegramAccount   TelegramAccount? @relation("AssignedTelegramAccount", fields: [assignedTelegramAccountId], references: [id], onDelete: SetNull)
+
+  // Follow-up tracking
+  followupCount      Int       @default(0)
+  emailFollowupCount Int       @default(0)
+  maxFollowups       Int       @default(5)
+  lastMessageAt      DateTime?
+  lastEmailAt        DateTime?
+  repliedAt          DateTime?
+
+  // Lead Scoring
+  score           Int     @default(0) // 0-100 composite score
+  replySpeed      String? // fast | medium | slow | none
+  engagementLevel String  @default("none") // none | low | medium | high
+
+  // Lead freshness
+  consumedAt        DateTime? // when the buyer actually enquired, if the source reports it
+  leadTier          String? // HOT | WARM | COLD (computed from consumedAt)
+  leadTierUpdatedAt DateTime? // last time leadTier was recomputed by the daily decay job
+
+  // Metadata
+  notes       String?
+  tags        String? // comma-separated tags
+  lastError   String? // last send/follow-up error message
+  lastErrorAt DateTime? // when the last error occurred
+
+  // AI insights (from reply classifier)
+  lastReplyIntent String? // positive | negative | neutral | pricing_inquiry | demo_request | out_of_office | complaint | referral
+  aiInsights      String? // JSON: { intent, entities, nextAction, urgency, detectedAt }
+
+  // Lead enrichment (auto-filled from LLM web lookup)
+  enrichedData String? // JSON: { website, companySize, gstNumber, description, enrichedAt }
+
+  // Deal tracking (for campaign ROI)
+  dealValue   Float? // deal size (INR) when lead converts to closed
+  convertedAt DateTime? // when deal was closed/won
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Lead Pool assignment
+  poolId Int?
+  pool   LeadPool? @relation(fields: [poolId], references: [id])
+
+  messages      Message[]
+  campaignLeads CampaignLead[]
+  leadNotes     LeadNote[]
+  leadTasks     LeadTask[]
+  salesOrders   SalesOrder[]
+  customer      Customer?
+
+  @@unique([tenantId, externalId])
+  @@unique([tenantId, mobile])
+  @@index([status])
+  @@index([leadTier])
+  @@index([score])
+  @@index([createdAt])
+  @@index([convertedAt])
+  @@index([source])
+  @@index([assignedAccount])
+  @@index([assignedToId])
+  @@index([poolId])
+  @@index([assignedTelegramAccountId])
+}
+
+model Message {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId          Int?
+  id                Int              @id @default(autoincrement())
+  leadId            Int
+  lead              Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  direction         String // outbound | inbound
+  channel           String           @default("whatsapp") // whatsapp | email | imessage
+  content           String
+  waAccount         Int              @default(0) // WhatsApp account ID (0 if email)
+  emailAccountId    Int? // FK to EmailAccount (null if whatsapp)
+  imessageAccountId Int? // FK to IMessageAccount (null unless channel=imessage)
+  imessageAccount   IMessageAccount? @relation("IMessageAccountMessages", fields: [imessageAccountId], references: [id], onDelete: SetNull)
+  telegramAccountId Int? // FK to TelegramAccount (null unless channel=telegram)
+  telegramAccount   TelegramAccount? @relation("TelegramAccountMessages", fields: [telegramAccountId], references: [id], onDelete: SetNull)
+  status            String           @default("queued")
+  // queued | sending | sent | delivered | read | failed | permanently_failed | cancelled | bounced
+  retryCount        Int              @default(0)
+  maxRetries        Int              @default(3)
+  campaignId        Int?
+  scheduledAt       DateTime?
+  sentAt            DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @default(now()) @updatedAt
+
+  // WhatsApp delivery tracking (whatsapp-web.js message_ack values:
+  // 0 pending, 1 server (single tick), 2 device (double grey), 3 read (double blue), 4 played)
+  waMessageId      String? // _serialized id from sendMessage() — used to match ack events to row
+  ackStatus        Int       @default(0)
+  ackUpdatedAt     DateTime?
+  // Approved AiSensy API Campaign metadata. Populated only when this queue row
+  // must use a template campaign instead of the Project API free-form endpoint.
+  waCampaignName   String?
+  waTemplateParams String? // JSON array in approved-template variable order
+
+  // Email-specific fields
+  emailSubject         String? // Subject line (email only)
+  emailHtmlBody        String? // Rendered inline HTML retained by the async queue
+  emailMessageId       String? // SMTP Message-ID for threading
+  emailInReplyTo       String? // In-Reply-To header for threading
+  imessageMessageId    String? // BlueBubbles GUID for webhook deduplication
+  telegramMessageId    String? // Telegram message ID scoped to telegramAccountId
+  providerMessageId    String? // Remote message ID assigned by the sending provider
+  providerCampaignId   String? // Provider-side campaign identity (AiSensy dashboard reconciliation)
+  providerCreatedAt    DateTime? // Original provider timestamp when it differs from ingestion time
+  providerStatusReason String? // Stable failure/status reason retained for diagnostics
+  idempotencyKey       String? // Client-supplied key preventing duplicate manual/API sends
+  // Durable automation identity. Unlike provider/client idempotency keys this
+  // is global across nullable account FKs, so a reboot can safely reconcile a
+  // partially-created multi-channel outreach without inserting duplicates.
+  automationKey        String?
+  emailCc              String? // Comma-separated CC recipients
+  emailBcc             String? // Comma-separated BCC recipients
+  // Template performance tracking — compact identifier for the prompt variant that
+  // produced this body. Format: "<promptVersion>:<tier>:<step>" (e.g. "v1:WARM:initial").
+  // Used by /api/analytics/email-performance to compute reply rate per variant.
+  templateVariant      String?
+
+  // Media fields (WhatsApp image/PDF/video)
+  mediaUrl      String? // relative path: data/media/<filename>
+  mediaType     String? // image | pdf | video | audio | document
+  mediaCaption  String? // optional caption shown below media
+  mediaFilename String? // original filename shown to recipient
+
+  @@unique([tenantId, imessageMessageId])
+  @@unique([telegramAccountId, telegramMessageId])
+  @@unique([tenantId, automationKey])
+  @@index([leadId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([channel])
+  @@index([imessageAccountId])
+  @@index([telegramAccountId])
+  @@index([templateVariant])
+  @@index([waMessageId])
+  @@index([providerCampaignId])
+  @@index([ackStatus])
+}
+
+// Cache of whatsapp-web.js isRegisteredUser() results so we don't burn a send slot
+// (or pay the 1-2s lookup latency) on numbers we already know are not on WhatsApp.
+// Re-checked after 30 days in case the recipient activates WhatsApp later.
+model WhatsAppNumberCheck {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId     Int?
+  phone        String   @id
+  isRegistered Boolean
+  checkedAt    DateTime @default(now())
+  accountId    Int // which account performed the lookup
+}
+
+model Campaign {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId        Int?
+  id              Int     @id @default(autoincrement())
+  name            String
+  description     String?
+  // Pool that this campaign targets. Nullable during the B.5 rollout (legacy
+  // campaigns may exist with no pool); B.7 backfills + flips to NOT NULL.
+  poolId          Int?
+  channel         String  @default("whatsapp") // whatsapp | email | both | imessage
+  messageTemplate String // template with {{placeholders}} (WA body or email body)
+  emailSubject    String? // email subject template (email/both campaigns only)
+  emailTemplateId Int? // FK to EmailTemplate for HTML rendering (email campaigns)
+  senderAccountId Int? // specific WA or email account ID to send from
+  /// AiSensy API campaign whose approved template this campaign sends.
+  /// Set it and WhatsApp sends go out as that template rather than as free
+  /// text — the only transport WhatsApp accepts outside the 24h service
+  /// window, which is every cold lead. Null keeps the old free-text
+  /// behaviour for campaigns that reply inside an open conversation.
+  waCampaignName  String?
+  status          String  @default("draft")
+  // draft | scheduled | running | paused | completed
+  targetFilter    String? // JSON filter criteria
+
+  // A/B Testing
+  variantBTemplate String? // alternate message body (50% of leads get this)
+  variantBSubject  String? // alternate subject (email only)
+  variantACount    Int       @default(0)
+  variantBCount    Int       @default(0)
+  variantAReplies  Int       @default(0)
+  variantBReplies  Int       @default(0)
+  totalLeads       Int       @default(0)
+  sentCount        Int       @default(0)
+  failedCount      Int       @default(0)
+  replyCount       Int       @default(0)
+  scheduledAt      DateTime?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  campaignLeads CampaignLead[]
+}
+
+model CampaignLead {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId   Int?
+  id         Int       @id @default(autoincrement())
+  campaignId Int
+  campaign   Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  leadId     Int
+  lead       Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  status     String    @default("pending")
+  // pending | sent | failed | replied
+  sentAt     DateTime?
+  variant    String    @default("A") // A | B (for A/B testing)
+
+  @@unique([campaignId, leadId])
+  @@index([campaignId])
+  @@index([status])
+}
+
+model MediaFile {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId     Int?
+  id           Int      @id @default(autoincrement())
+  filename     String // stored filename (UUID-based)
+  originalName String // original upload name
+  mimeType     String
+  size         Int // bytes
+  path         String // relative: data/media/<filename>
+  createdAt    DateTime @default(now())
+}
+
+model WhatsAppAccount {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId Int?
+  id       Int    @id @default(autoincrement())
+  name     String
+  phone    String @default("")
+  status   String @default("disconnected")
+  // connected | disconnected | qr_pending | banned | sleeping
+
+  // Role: outreach = cold reach-out sender (round-robin pool);
+  // client_relations = post-sale/support number, NEVER picked for cold outreach
+  // or fallback (getNextAccount filters it out) so it stays warm and un-banned.
+  role String @default("outreach") // outreach | client_relations
+
+  // ── Transport ──
+  // Only the official API remains; whatsapp-web.js was removed. Kept as a
+  // column so existing rows stay readable.
+  waAccountType String @default("cloud_api") // cloud_api
+
+  // Who delivers this account's messages: Meta's Cloud API directly, or
+  // AiSensy as a Business Solution Provider. See services/whatsappProviders.js.
+  provider         String @default("meta") // meta | aisensy
+  // Language code of the account's approved templates, e.g. en, en_US, hi.
+  // Meta needs it on every template send; AiSensy stores it on the campaign.
+  templateLanguage String @default("en")
+  // WhatsApp Business Account id. Optional; used to list approved templates.
+  metaWabaId       String @default("")
+
+  // AiSensy Project API credentials. AiSensy is our Meta BSP: they hold the
+  // WhatsApp Business Account, and we call their passthrough of the Cloud API
+  // rather than graph.facebook.com directly.
+  //   aisensyProjectId — {project_id} path segment on apis.aisensy.com
+  //   aisensyApiKey    — value for the X-AiSensy-Project-API-Pwd header
+  //                      (AES-256-GCM encrypted at rest)
+  // NOTE: the Project API is a Pro-plan feature. On Basic only the template
+  // campaign API exists, which cannot send free-form session replies.
+  aisensyProjectId String @default("")
+  aisensyApiKey    String @default("")
+
+  // Approved-template outreach uses AiSensy's API Campaign endpoint. This is
+  // a separate credential from the Project API password used for free-form
+  // replies inside Meta's 24-hour customer-service window.
+  aisensyCampaignApiKey String @default("")
+  defaultCampaignName   String @default("")
+
+  // Meta Cloud API credentials, used when provider = meta.
+  //   cloudApiPhoneId — the phone number id from Meta's WhatsApp → API Setup
+  //   cloudApiToken   — a permanent System User access token
+  //                     (AES-256-GCM encrypted at rest)
+  cloudApiToken   String @default("")
+  cloudApiPhoneId String @default("")
+
+  // ── Lifecycle ──
+  enabled   Boolean @default(false) // Only init Chrome when true
+  autoSleep Boolean @default(true) // Auto-sleep after idle timeout
+
+  // ── Per-Account Persona ──
+  /// Blank by default on purpose. A fresh install must state who it is
+  /// rather than inherit an identity from whoever wrote the code.
+  personaName     String @default("")
+  personaGender   String @default("")
+  personaTitle    String @default("sales representative")
+  companyName     String @default("")
+  companyCity     String @default("")
+  companyIndustry String @default("")
+  companyCerts    String @default("")
+  companyUSP      String @default("")
+
+  // ── Per-Account Rate Limits ──
+  // Conservative defaults — looks human, protects account warmth.
+  // hourlyLimit:    2/hour (hard cap 3) so 5 sends spread across the day
+  // dailyLimit:     20/day total ceiling (initial + follow-ups + replies)
+  // newLeadsPerDay: 5 NEW leads contacted per account per day (initial outreach budget;
+  //                 follow-ups to existing leads do NOT count against this)
+  hourlyLimit    Int @default(2)
+  dailyLimit     Int @default(20)
+  newLeadsPerDay Int @default(5)
+
+  // ── Per-Account Follow-up Config ──
+  maxFollowups   Int    @default(5)
+  followupDelays String @default("[0,240,1440,2880,4320]") // JSON array in minutes
+
+  // ── Counters (reset at midnight IST by resetDailyCounters) ──
+  messagesSentToday      Int      @default(0)
+  newLeadsContactedToday Int      @default(0)
+  lastResetAt            DateTime @default(now())
+  createdAt              DateTime @default(now())
+
+  // Back-relation: email accounts that borrow this WA account's persona
+  emailAccounts EmailAccount[] @relation("EmailAccountPersona")
+
+  // Lead pool connections (many-to-many)
+  leadPools LeadPoolWhatsApp[]
+}
+
+model SystemConfig {
+  key   String @id
+  value String
+}
+
+model ActivityLog {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId  Int?
+  id        Int      @id @default(autoincrement())
+  type      String // send | reply | error | poll | system | account
+  accountId Int? // which WA account (null for system events)
+  leadId    Int?
+  message   String
+  meta      String? // JSON blob for extra context
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([type, createdAt])
+  @@index([leadId])
+}
+
+model ImportBatch {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId   Int?
+  id         Int      @id @default(autoincrement())
+  filename   String
+  totalRows  Int      @default(0)
+  imported   Int      @default(0)
+  duplicates Int      @default(0)
+  failed     Int      @default(0)
+  status     String   @default("processing") // processing | completed | failed
+  createdAt  DateTime @default(now())
+}
+
+model WebhookSubscription {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId        Int?
+  id              Int       @id @default(autoincrement())
+  name            String
+  url             String
+  events          String    @default("[]") // JSON array: ["lead.replied","lead.engaged","lead.status_changed"]
+  secret          String    @default("") // HMAC-SHA256 signing secret
+  enabled         Boolean   @default(true)
+  lastTriggeredAt DateTime?
+  failCount       Int       @default(0)
+  createdAt       DateTime  @default(now())
+}
+
+model EmailTemplate {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId  Int?
+  id        Int      @id @default(autoincrement())
+  name      String
+  subject   String // subject line template (supports {{variables}})
+  htmlBody  String // HTML body (supports {{variables}})
+  textBody  String   @default("") // plain-text fallback
+  variables String   @default("[]") // JSON array of variable names used
+  category  String   @default("outreach") // outreach | followup | campaign
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model WebhookSource {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId       Int?
+  id             Int       @id @default(autoincrement())
+  name           String // e.g. "JustDial", "TradeIndia", "Website Form"
+  source         String    @unique // slug used in URL: /api/webhooks/inbound/:source
+  apiKey         String // random hex key for auth
+  fieldMap       String    @default("{}") // JSON: { name: "contact_name", mobile: "phone", ... }
+  // Pool that owns leads ingested through this webhook. Required so a partner
+  // team's webhook can never accidentally feed leads into the team pool.
+  poolId         Int?
+  enabled        Boolean   @default(true)
+  lastReceivedAt DateTime?
+  totalReceived  Int       @default(0)
+  createdAt      DateTime  @default(now())
+}
+
+model LeadNote {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId  Int?
+  id        Int      @id @default(autoincrement())
+  leadId    Int
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  content   String
+  type      String   @default("note") // note | call | meeting | email_manual
+  createdAt DateTime @default(now())
+}
+
+model LeadTask {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId  Int?
+  id        Int       @id @default(autoincrement())
+  leadId    Int
+  lead      Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  title     String
+  dueAt     DateTime?
+  done      Boolean   @default(false)
+  createdAt DateTime  @default(now())
+}
+
+model EmailAccount {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId Int?
+  id       Int    @id @default(autoincrement())
+  name     String // Display name (e.g. "Sales - Gmail")
+  email    String // sender email address
+  provider String @default("custom") // gmail | outlook | zoho | custom
+
+  // SMTP settings (outbound)
+  smtpHost   String
+  smtpPort   Int     @default(587)
+  smtpSecure Boolean @default(false) // true = TLS on connect (465), false = STARTTLS (587)
+  smtpUser   String
+  smtpPass   String // AES-256-GCM encrypted
+
+  // IMAP settings (inbound reply detection)
+  imapHost   String  @default("")
+  imapPort   Int     @default(993)
+  imapSecure Boolean @default(true)
+  imapUser   String  @default("")
+  imapPass   String  @default("") // AES-256-GCM encrypted
+
+  // Sender persona (overrides global profile for this account)
+  senderName String @default("") // Display name in From header
+  signature  String @default("") // HTML signature appended to emails
+
+  // Brand persona link — points at the WhatsAppAccount whose persona
+  // (personaName, companyName, companyCity, companyCerts, companyUSP, etc.)
+  // should be used by the LLM when generating email bodies for this account.
+  // Required for sending — `getPersonaProfileForEmail` refuses to send when null.
+  whatsappAccountId Int?
+  whatsappAccount   WhatsAppAccount? @relation("EmailAccountPersona", fields: [whatsappAccountId], references: [id])
+
+  // Rate limits
+  dailyLimit  Int      @default(200)
+  hourlyLimit Int      @default(30)
+  sentToday   Int      @default(0)
+  lastResetAt DateTime @default(now())
+
+  // State
+  enabled    Boolean   @default(true)
+  status     String    @default("pending") // pending | verified | error
+  lastError  String?
+  lastSyncAt DateTime? // last IMAP sync timestamp
+
+  // Lead pool connections (many-to-many)
+  leadPools LeadPoolEmail[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, email])
+}
+
+model LeadPool {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId    Int?
+  id          Int      @id @default(autoincrement())
+  name        String
+  slug        String
+  description String?
+  isDefault   Boolean  @default(false)
+  color       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  leads            Lead[]
+  whatsappAccounts LeadPoolWhatsApp[]
+  emailAccounts    LeadPoolEmail[]
+  members          UserPool[]
+  invitations      Invitation[]
+
+  @@unique([tenantId, slug])
+}
+
+// Per-pool membership and role. Lookups happen on every authorized request
+// once Phase B.3's requirePoolAccess middleware lands, so the (userId,
+// poolId) unique key doubles as a covering index.
+model UserPool {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId  Int?
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  poolId    Int
+  // manager | agent | viewer — scoped to this pool only.
+  role      String   @default("agent")
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pool      LeadPool @relation(fields: [poolId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, poolId])
+  @@index([poolId])
+}
+
+model LeadPoolWhatsApp {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId          Int?
+  id                Int             @id @default(autoincrement())
+  poolId            Int
+  whatsappAccountId Int
+  pool              LeadPool        @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  whatsappAccount   WhatsAppAccount @relation(fields: [whatsappAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([poolId, whatsappAccountId])
+}
+
+model LeadPoolEmail {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId       Int?
+  id             Int          @id @default(autoincrement())
+  poolId         Int
+  emailAccountId Int
+  pool           LeadPool     @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  emailAccount   EmailAccount @relation(fields: [emailAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([poolId, emailAccountId])
+}
+
+model Invitation {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId    Int?
+  id          Int       @id @default(autoincrement())
+  email       String
+  role        String    @default("agent")
+  poolId      Int?
+  token       String    @unique
+  expiresAt   DateTime
+  createdById Int
+  acceptedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  createdBy User      @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  pool      LeadPool? @relation(fields: [poolId], references: [id], onDelete: SetNull)
+
+  @@index([token])
+  @@index([email])
+  @@index([createdAt])
+}
+
+model IMessageAccount {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId   Int?
+  id         Int       @id @default(autoincrement())
+  name       String // e.g. "Mac Mini" or "MacBook"
+  serverUrl  String // https://imessage.example.com (BlueBubbles server URL)
+  password   String // AES-256-GCM encrypted BlueBubbles server password
+  appleId    String    @default("") // Apple ID signed into Messages.app (reference only)
+  enabled    Boolean   @default(true)
+  status     String    @default("unknown") // online | offline | unknown
+  lastPingAt DateTime?
+
+  // Rate limits
+  hourlyLimit Int      @default(15)
+  dailyLimit  Int      @default(100)
+  sentToday   Int      @default(0)
+  lastResetAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignedLeads Lead[]    @relation("AssignedIMessageAccount")
+  messages      Message[] @relation("IMessageAccountMessages")
+}
+
+model TelegramAccount {
+  /// Owning tenant. Nullable during migration; required once tenant scoping is
+  /// enforced across the older channel tables.
+  tenantId Int?
+  id       Int  @id @default(autoincrement())
+
+  name        String
+  apiId       Int
+  apiHash     String // AES-256-GCM encrypted Telegram app API hash
+  phoneNumber String
+
+  // Teleproto StringSession values contain the MTProto authorization key and
+  // are credentials. Both completed and in-progress sessions stay encrypted.
+  session        String @default("")
+  pendingSession String @default("")
+  phoneCodeHash  String @default("")
+  telegramUserId String @default("")
+  username       String @default("")
+  displayName    String @default("")
+
+  enabled         Boolean   @default(true)
+  manualOnly      Boolean   @default(true)
+  status          String    @default("disconnected") // disconnected | code_required | password_required | connected | error
+  lastError       String?
+  lastConnectedAt DateTime?
+
+  dailyLimit  Int      @default(40)
+  sentToday   Int      @default(0)
+  lastResetAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignedLeads Lead[]    @relation("AssignedTelegramAccount")
+  messages      Message[] @relation("TelegramAccountMessages")
+
+  @@unique([apiId, phoneNumber])
+  @@index([enabled])
+  @@index([status])
+}
+
+model AccessRequest {
+  /// Owning tenant. Nullable during migration; required once backfilled.
+  tenantId          Int?
+  id                Int      @id @default(autoincrement())
+  name              String   @default("")
+  workEmail         String
+  company           String
+  role              String   @default("")
+  teamSize          String   @default("")
+  monthlyLeadVolume String   @default("")
+  primaryChannel    String   @default("")
+  currentWorkflow   String   @default("")
+  painPoint         String   @default("")
+  notes             String   @default("")
+  source            String   @default("website")
+  status            String   @default("new")
+  ipHash            String   @default("")
+  createdAt         DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([status])
+  @@index([workEmail])
+  @@index([company])
+}
+
+/// Short-lived one-time codes for phone login.
+///
+/// The code itself is NEVER stored — only a SHA-256 hash, so a database read
+/// cannot be replayed as a login. Codes are single-use (`consumedAt`), expire
+/// in minutes, and lock out after `maxAttempts` wrong guesses, which is what
+/// keeps a 6-digit space from being brute-forced.
+model PhoneOtp {
+  id          Int       @id @default(autoincrement())
+  phone       String // normalized E.164 digits
+  codeHash    String // sha256(code) — plaintext is never persisted
+  purpose     String    @default("login")
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(5)
+  consumedAt  DateTime?
+  expiresAt   DateTime
+  requestIp   String?
+  createdAt   DateTime  @default(now())
+
+  @@index([phone, expiresAt])
+  @@index([expiresAt])
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// PLATFORM / BILLING — SCAFFOLDING, NOT YET WIRED
+//
+// Added Sep 2026 for the shift from "our own sales tool" to "a platform other
+// businesses subscribe to". These models are ADDITIVE: nothing existing
+// references them yet, so the running instance is unaffected until the code
+// that uses them lands.
+//
+// ⚠️  THE HARD PART IS NOT THESE TABLES.
+// Every one of the 27 existing models is tenant-unaware, and ~750 Prisma
+// queries across 32 files run unscoped. Several global @unique constraints
+// actively prevent two customers coexisting — `Lead.mobile @unique` is the
+// clearest: if two customers both sell to the same buyer, the second cannot
+// create the lead at all. Adding `tenantId` here does not fix that; it marks
+// where the boundary has to go.
+//
+// Migration is NOT run automatically. When ready:
+//   npx prisma migrate dev --name platform_billing_scaffold
+// ════════════════════════════════════════════════════════════════════════════
+
+/// A customer of the platform — one business, one workspace, one bill.
+/// Every tenant-owned row must eventually carry `tenantId`.
+model Tenant {
+  id     Int    @id @default(autoincrement())
+  /// URL-safe identifier. Used for a subdomain or path prefix per customer.
+  slug   String @unique
+  name   String
+  /// active | trialing | suspended | cancelled — gates access independently of
+  /// the subscription so support can suspend without touching billing.
+  status String @default("trialing")
+
+  /// Billing contact. Deliberately separate from any User: the person who pays
+  /// is often not a person who logs in.
+  billingEmail String?
+  /// ISO 3166-1 alpha-2. Decides tax treatment and which processor to route to.
+  country      String?
+  /// Indian customers need this on the invoice; foreign ones will not have it.
+  gstin        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscriptions Subscription[]
+  invoices      Invoice[]
+  usageRecords  UsageRecord[]
+  provisioning  ProvisioningJob[]
+
+  @@index([status])
+}
+
+/// A sellable plan. Prices live in PlanPrice so one plan can be sold in
+/// several currencies and intervals without duplicating the feature set.
+model Plan {
+  id          Int     @id @default(autoincrement())
+  code        String  @unique
+  name        String
+  description String?
+  /// Ordering for display. Lower is cheaper/earlier.
+  rank        Int     @default(0)
+  /// Publicly purchasable. Custom/enterprise plans stay false.
+  isPublic    Boolean @default(true)
+
+  /// Entitlement limits. Null means unlimited. These are the numbers the
+  /// pricing page quotes and the app has to enforce.
+  maxSeats           Int?
+  maxWhatsAppNumbers Int?
+  maxMailboxes       Int?
+  maxMonthlyMessages Int?
+  maxLeads           Int?
+
+  /// Feature flags carried as JSON so adding an entitlement does not require a
+  /// migration. Keys should be stable and documented.
+  features String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  prices        PlanPrice[]
+  subscriptions Subscription[]
+}
+
+/// One plan, one currency, one billing interval.
+model PlanPrice {
+  id       Int    @id @default(autoincrement())
+  planId   Int
+  plan     Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+  /// ISO 4217. INR for domestic, USD/GBP/AUD for export.
+  currency String
+  /// Minor units (paise, cents) — never floats for money.
+  amount   Int
+  /// month | year
+  interval String @default("month")
+
+  /// Processor-side identifier (Razorpay plan id, Stripe price id).
+  externalId String?
+
+  active Boolean @default(true)
+
+  @@unique([planId, currency, interval])
+}
+
+/// A tenant's live subscription to a plan.
+model Subscription {
+  id       Int    @id @default(autoincrement())
+  tenantId Int
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  planId   Int
+  plan     Plan   @relation(fields: [planId], references: [id])
+
+  /// trialing | active | past_due | paused | cancelled | expired
+  status String @default("trialing")
+
+  /// Which processor owns this subscription, and its id there. Kept generic so
+  /// domestic (Razorpay) and international (a merchant of record) can coexist.
+  provider           String?
+  providerSubId      String?
+  providerCustomerId String?
+
+  quantity Int @default(1)
+
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  trialEndsAt        DateTime?
+  cancelAt           DateTime?
+  cancelledAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoices Invoice[]
+
+  @@unique([provider, providerSubId])
+  @@index([tenantId, status])
+}
+
+/// A bill issued to a tenant. Doubles as the GST invoice record for Indian
+/// customers, which is why number/place-of-supply/tax fields are first class.
+model Invoice {
+  id             Int           @id @default(autoincrement())
+  tenantId       Int
+  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  subscriptionId Int?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  /// Human-facing sequential number. Must be gapless per financial year for
+  /// GST — generate it in a transaction, never from a timestamp.
+  number String @unique
+
+  /// draft | open | paid | void | uncollectible
+  status String @default("draft")
+
+  currency   String
+  /// All amounts in minor units.
+  subtotal   Int
+  taxTotal   Int    @default(0)
+  total      Int
+  amountPaid Int    @default(0)
+
+  /// GST specifics. Null for export invoices, which are zero-rated under LUT —
+  /// confirm treatment with an accountant before relying on this.
+  placeOfSupply   String?
+  taxRate         Int?
+  isReverseCharge Boolean @default(false)
+
+  issuedAt DateTime?
+  dueAt    DateTime?
+  paidAt   DateTime?
+
+  providerInvoiceId String?
+  pdfUrl            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments Payment[]
+
+  @@index([tenantId, status])
+}
+
+model Payment {
+  id        Int     @id @default(autoincrement())
+  invoiceId Int
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  /// razorpay | stripe | paddle | manual
+  provider          String
+  providerPaymentId String?
+  /// card | upi | netbanking | wallet | bank_transfer
+  method            String?
+
+  currency String
+  amount   Int
+  /// created | authorized | captured | failed | refunded
+  status   String @default("created")
+
+  failureReason String?
+  capturedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, providerPaymentId])
+  @@index([invoiceId, status])
+}
+
+/// Metered usage, aggregated per period. Written by the sending paths so
+/// entitlement checks and overage billing read from one place.
+model UsageRecord {
+  id       Int    @id @default(autoincrement())
+  tenantId Int
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// whatsapp_messages | emails | leads | seats | ai_generations
+  metric      String
+  /// The period this count belongs to, truncated to the billing interval.
+  periodStart DateTime
+  quantity    Int      @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, metric, periodStart])
+  @@index([tenantId, periodStart])
+}
+
+/// Onboarding work for a new tenant: obtaining a WhatsApp number, connecting
+/// mailboxes, verifying a domain. These are long-running, partly manual, and
+/// frequently fail on the customer's side — so they are tracked, not fired and
+/// forgotten.
+model ProvisioningJob {
+  id       Int    @id @default(autoincrement())
+  tenantId Int
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  /// whatsapp_waba | whatsapp_number | email_domain | mailbox
+  kind   String
+  /// pending | awaiting_customer | in_progress | blocked | completed | failed
+  status String @default("pending")
+
+  /// Free-form provider payload — Meta WABA ids, DNS records to add, the
+  /// verification state a support agent needs to see.
+  payload    String?
+  /// What the customer or operator must do next, in plain language.
+  nextAction String?
+  lastError  String?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([kind, status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sales: orders, customer invoices, shipments.
+//
+// Deliberately NOT reusing Invoice/Payment above — those bill tenants for their
+// subscription to this product. These bill *our customers* for goods. The two
+// have different numbering, tax treatment and lifecycles, and conflating them
+// would make both wrong.
+//
+// Money follows the same convention as billing: integer minor units in the
+// order's currency (paise for INR, cents for USD). Never floats — 0.1 + 0.2 in
+// a total is a real bug, not a hypothetical one.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A confirmed deal. Created when a lead converts, and the spine that invoices
+/// and shipments hang off.
+model SalesOrder {
+  id         Int       @id @default(autoincrement())
+  tenantId   Int?
+  /// The lead this came from, when it came from one. Nullable because orders
+  /// also arrive from repeat customers who were never a tracked lead.
+  leadId     Int?
+  lead       Lead?     @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  /// The buying relationship this order belongs to.
+  customerId Int?
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  /// Who fulfils this order. Defaulted from the lead's tags, then stored.
+  supplierId Int?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  paymentMethodId Int?
+  paymentMethod   PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+
+  /// Human-facing reference, unique per tenant. Generated in a transaction so
+  /// concurrent confirmations cannot collide.
+  orderNumber String
+
+  /// draft | confirmed | in_production | ready_to_ship | shipped | delivered | cancelled
+  status String @default("draft")
+
+  // Customer snapshot. Copied rather than joined so a later edit to the lead
+  // never silently rewrites history on an order already sent to a customer.
+  customerName    String
+  customerCompany String?
+  customerEmail   String?
+  customerPhone   String?
+  country         String?
+  billingAddress  String?
+  shippingAddress String?
+
+  currency      String @default("USD")
+  subtotal      Int    @default(0)
+  discountTotal Int    @default(0)
+  taxTotal      Int    @default(0)
+  total         Int    @default(0)
+
+  /// Export terms. Free text because the useful values differ per buyer and a
+  /// enum would need a migration every time a new one shows up.
+  incoterms         String?
+  portOfDestination String?
+  paymentTerms      String?
+
+  // ── Settlement ──
+  /// absorb | pass_on. Whether the payment fee comes out of what we receive,
+  /// or is added to what the customer is invoiced. Defaults from the payment
+  /// method but is per-order, because the same method is handled differently
+  /// deal to deal.
+  feeMode   String @default("absorb")
+  /// The fee actually applied, in the order's currency. Stored rather than
+  /// recomputed so a later change to the payment method's rate cannot rewrite
+  /// the economics of an order that already settled.
+  feeAmount Int    @default(0)
+
+  /// Order currency → INR, in units of 1/10,000 rupee per unit of currency, so
+  /// 83.4567 is 834567. Integer to keep the rate out of floating point.
+  fxRateToInr       Int?
+  /// What actually hit the bank, in paise. Entered from the statement when it
+  /// is known: intermediary and correspondent bank charges mean the computed
+  /// figure and the real credit rarely match, and the real one is what the
+  /// books need.
+  amountReceivedInr Int?
+
+  /// What the supplier charges for this order, in paise. Summed from the line
+  /// items, which is where the supplier's quoted price per product lives.
+  procurementCostInr Int @default(0)
+
+  notes       String?
+  createdById Int?
+
+  confirmedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  items         SalesOrderItem[]
+  invoices      SalesInvoice[]
+  shipments     Shipment[]
+  notifications OrderNotification[]
+
+  @@unique([tenantId, orderNumber])
+  @@index([status])
+  @@index([leadId])
+  @@index([customerId])
+  @@index([supplierId])
+  @@index([createdAt])
+  @@index([tenantId, status])
+}
+
+/// One line on an order. Prices are captured per line so a later price change
+/// does not rewrite what the customer agreed to.
+model SalesOrderItem {
+  id      Int        @id @default(autoincrement())
+  orderId Int
+  order   SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// The catalogue entry this line came from, when it came from one. Nullable
+  /// because a one-off still has to be sellable without first creating a
+  /// product for it.
+  productId Int?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  /// Name is kept on the line as well as the product, so renaming a catalogue
+  /// entry never rewrites what an old invoice said.
+  productName String
+  strength    String?
+  /// Packing description, e.g. "10x10 blister". Free text on purpose.
+  packing     String?
+  hsnCode     String?
+
+  quantity  Int    @default(1)
+  /// Box, strip, vial — whatever the buyer ordered in.
+  unit      String @default("unit")
+  unitPrice Int    @default(0)
+  lineTotal Int    @default(0)
+
+  /// What the supplier charges us per unit, in paise. Quoted per deal rather
+  /// than fixed, so it is captured on the line and not derived from a margin
+  /// percentage.
+  procurementUnitCost Int @default(0)
+  /// quantity × procurementUnitCost, in paise.
+  procurementTotal    Int @default(0)
+
+  sortOrder Int @default(0)
+
+  @@index([orderId])
+  @@index([productId])
+}
+
+/// A customer-facing invoice for an order.
+model SalesInvoice {
+  id       Int        @id @default(autoincrement())
+  tenantId Int?
+  orderId  Int
+  order    SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// Gapless per tenant per financial year — GST requires it. Allocated in the
+  /// same transaction that creates the row.
+  number String
+
+  /// draft | issued | paid | partially_paid | void
+  status String @default("draft")
+
+  currency   String @default("USD")
+  subtotal   Int    @default(0)
+  taxTotal   Int    @default(0)
+  total      Int    @default(0)
+  amountPaid Int    @default(0)
+
+  /// Exports are zero-rated under LUT, so taxRate is usually null here.
+  /// Confirm treatment with an accountant before relying on it.
+  taxRate       Int?
+  placeOfSupply String?
+
+  issuedAt DateTime?
+  dueAt    DateTime?
+  paidAt   DateTime?
+
+  pdfUrl String?
+  notes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, number])
+  @@index([orderId])
+  @@index([status])
+}
+
+/// A physical shipment against an order. Tracking is refreshed by a poller, so
+/// the raw carrier payload is kept for when a status string is unrecognised.
+model Shipment {
+  id       Int        @id @default(autoincrement())
+  tenantId Int?
+  orderId  Int
+  order    SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  /// dhl | fedex | ups | bluedart | delhivery | aramex | other
+  carrier        String?
+  trackingNumber String?
+  /// Filled from a per-carrier template when the number is set, so the UI can
+  /// always offer a working link even when polling is unavailable.
+  trackingUrl    String?
+
+  /// pending | in_transit | out_for_delivery | delivered | exception | returned
+  status String @default("pending")
+
+  /// What the carrier last said, verbatim. Kept because carrier vocabularies
+  /// differ and an unmapped status should be visible rather than swallowed.
+  lastStatusRaw String?
+  lastCheckedAt DateTime?
+  /// Set when a tracking refresh fails, so a silently stale shipment is
+  /// distinguishable from one that genuinely has not moved.
+  lastError     String?
+
+  shippedAt         DateTime?
+  estimatedDelivery DateTime?
+  deliveredAt       DateTime?
+
+  packageCount Int?
+  weightGrams  Int?
+  notes        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orderId])
+  @@index([status])
+  @@index([trackingNumber])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CRM: customers and the updates they receive.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A buying relationship, as opposed to a Lead, which is someone we are still
+/// trying to reach. A lead becomes a customer on their first order; a customer
+/// can also exist with no lead behind them (a repeat buyer who arrived by
+/// phone, or one imported from an older system).
+///
+/// Rollups (totalOrders / lifetimeValue / lastOrderAt) are denormalised because
+/// the customer list sorts and filters on them, and recomputing across every
+/// order on each page load does not hold up. They are recalculated whenever an
+/// order's money or status changes — never edited by hand.
+model Customer {
+  id       Int  @id @default(autoincrement())
+  tenantId Int?
+
+  /// The lead this relationship started from, if it started from one.
+  leadId Int?  @unique
+  lead   Lead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  name    String
+  company String?
+  email   String?
+  phone   String?
+  country String?
+
+  billingAddress  String?
+  shippingAddress String?
+  /// Indian buyers need this on the invoice; export buyers will not have one.
+  gstin           String?
+  taxId           String?
+
+  /// active | dormant | blocked
+  status   String @default("active")
+  /// Default currency for new orders, so repeat orders do not have to be re-set.
+  currency String @default("USD")
+
+  /// Preferred channel for order updates: email | whatsapp | both | none.
+  /// "none" is honoured — a customer who asks not to be messaged must stay
+  /// unmessaged even when an order moves.
+  notifyChannel String @default("both")
+
+  totalOrders   Int       @default(0)
+  lifetimeValue Int       @default(0)
+  lastOrderAt   DateTime?
+
+  notes String?
+  tags  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders        SalesOrder[]
+  notifications OrderNotification[]
+
+  @@index([status])
+  @@index([lastOrderAt])
+  @@index([email])
+  @@index([tenantId, status])
+}
+
+/// An update sent to a customer about an order — confirmation, dispatch,
+/// delivery. Recorded so the same event cannot be sent twice, and so "did
+/// they actually get told" is answerable.
+model OrderNotification {
+  id       Int  @id @default(autoincrement())
+  tenantId Int?
+
+  orderId    Int
+  order      SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customerId Int?
+  customer   Customer?  @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  /// order_confirmed | order_shipped | order_delivered | invoice_issued |
+  /// payment_received | custom
+  event   String
+  /// email | whatsapp
+  channel String
+
+  /// pending | sent | failed | skipped
+  status String @default("pending")
+
+  /// Where it actually went. Snapshotted so a later contact-detail edit does
+  /// not rewrite the delivery record.
+  recipient String?
+  subject   String?
+  body      String?
+
+  /// The approved WhatsApp template used, if any. Free-text WhatsApp is only
+  /// deliverable inside the 24h service window, so order updates go out as
+  /// utility templates.
+  templateName String?
+
+  error  String?
+  sentAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([orderId, event, channel])
+  @@index([orderId])
+  @@index([customerId])
+  @@index([status])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Settlement: what the customer pays, what actually lands in rupees, and what
+// is left after the supplier is paid.
+//
+// Every figure below is integer minor units of its own currency, same as the
+// rest of the money in this schema. An order priced in USD keeps cents; the
+// INR columns keep paise. Never mix the two in one column.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// How a customer pays, and what that costs.
+///
+/// Rates are configurable rather than hardcoded because they change and differ
+/// per account — PayPal and the card rails take a percentage, an Indian bank
+/// transfer and Bitcoin take nothing.
+model PaymentMethod {
+  id       Int  @id @default(autoincrement())
+  tenantId Int?
+
+  name     String
+  /// Percentage cost, in basis points, so 10% is 1000 and 2.9% is 290.
+  /// Basis points because a percent stored as an integer cannot express 2.9%
+  /// and stored as a float invites rounding drift in money.
+  feeBps   Int    @default(0)
+  /// Flat per-transaction cost in minor units of the order's currency.
+  feeFixed Int    @default(0)
+
+  /// Whether this method's fee is added to the customer's invoice by default
+  /// rather than absorbed. Only a default — each order can override it,
+  /// because the same method gets handled differently deal to deal.
+  passOnByDefault Boolean @default(false)
+
+  enabled   Boolean @default(true)
+  sortOrder Int     @default(0)
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders   SalesOrder[]
+  products Product[]
+
+  @@unique([tenantId, name])
+  @@index([enabled])
+}
+
+/// Who fulfils the order.
+///
+/// Which supplier an order goes to follows from where the lead came from, so
+/// `matchTag` is checked against a lead's tags to pre-select one. It is only a
+/// default — the order stores its own supplierId once set.
+model Supplier {
+  id       Int  @id @default(autoincrement())
+  tenantId Int?
+
+  name          String
+  /// Lead tag that routes to this supplier, e.g. "acme". Case-insensitive.
+  matchTag      String?
+  /// Tie-break when a lead carries more than one supplier's tag — lower wins.
+  /// A lead can legitimately carry two suppliers' tags (an account-wide tag
+  /// plus the tag of the sheet it also arrived on). Without an explicit order
+  /// the winner was whichever sorted first by name.
+  matchPriority Int     @default(100)
+
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+  /// Currency the supplier quotes procurement prices in.
+  currency     String  @default("INR")
+
+  enabled Boolean @default(true)
+  notes   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders   SalesOrder[]
+  products Product[]
+
+  @@unique([tenantId, name])
+  @@index([enabled])
+}
+
+/// A thing you sell.
+///
+/// Order lines were free text, so the same product was retyped on every order
+/// and nothing could add up what actually sells — 2,142 distinct product
+/// strings sit in the lead data, many of them the same item spelled
+/// differently.
+///
+/// Prices here are DEFAULTS that pre-fill a line, never constraints. Both the
+/// sell price and the supplier's cost move deal to deal, which is exactly why
+/// the line keeps its own copy once written.
+model Product {
+  id       Int  @id @default(autoincrement())
+  tenantId Int?
+
+  name     String
+  /// "12mg", "350mg And 500mg" — kept separate from the name so two strengths
+  /// of one molecule are two products rather than two spellings.
+  strength String?
+  /// "10x10 blister", "1 vial" — how it ships.
+  packing  String?
+  hsnCode  String?
+  /// Your own reference, if you use one.
+  sku      String?
+
+  /// What a quantity of 1 means: box, strip, vial.
+  defaultUnit String @default("box")
+
+  /// Usual sell price in minor units of sellCurrency. Pre-fills a line only
+  /// when the order is in the same currency — converting a stale default
+  /// would invent a number nobody quoted.
+  sellPrice    Int?
+  sellCurrency String @default("USD")
+
+  /// Usual supplier cost in paise. Pre-fills the line's procurement cost.
+  costInr Int?
+
+  /// Who this is usually bought from. A default for the order's supplier when
+  /// the lead's tags do not decide it.
+  supplierId Int?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  active Boolean @default(true)
+  notes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orderItems      SalesOrderItem[]
+  paymentMethod   PaymentMethod?   @relation(fields: [paymentMethodId], references: [id])
+  paymentMethodId Int?
+
+  @@unique([tenantId, name, strength])
+  @@index([active])
+  @@index([supplierId])
+  @@index([name])
+}
