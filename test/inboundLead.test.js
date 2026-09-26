@@ -203,3 +203,20 @@ describe('Inbound lead mapping — the real Engyne Cloud lead.captured event', (
     assert.notEqual(m.product, 'approved');
   });
 });
+
+describe('Inbound lead mapping — email consent', () => {
+  test('only an explicit yes counts', () => {
+    for (const yes of [true, 'true', 'yes', 'on', '1', 'Checked']) {
+      assert.equal(mapInboundLead({ email: 'a@example.test', consent: yes }).emailConsent, true, String(yes));
+    }
+    for (const no of [false, 'false', 'no', '0', '', undefined, 'maybe']) {
+      assert.equal(mapInboundLead({ email: 'a@example.test', consent: no }).emailConsent, false, String(no));
+    }
+  });
+
+  test('reads the common checkbox names', () => {
+    assert.equal(mapInboundLead({ email: 'a@example.test', marketing_consent: 'yes' }).emailConsent, true);
+    assert.equal(mapInboundLead({ email: 'a@example.test', newsletter: 'on' }).emailConsent, true);
+  });
+});
+

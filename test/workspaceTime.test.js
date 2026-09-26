@@ -63,3 +63,22 @@ describe('workspace time zone helpers', () => {
     assert.equal(workspaceTzOffsetMinutes(new Date('2026-09-20T00:00:00Z'), 'UTC'), 0);
   });
 });
+
+describe('lead-local send time', () => {
+  test('schedules 09:30 in the lead\'s country, today if still ahead', async () => {
+    const { getOptimalSendTime } = await import('../src/utils/timezone.js');
+    // 07:00 UTC is 12:30 in India, so India's 09:30 has passed: tomorrow.
+    const now = new Date('2026-09-20T07:00:00.000Z');
+    assert.equal(getOptimalSendTime('India', now).toISOString(), '2026-09-21T04:00:00.000Z');
+    // 07:00 UTC is 08:00 in the UK (offset table uses +0), so 09:30 is today.
+    assert.equal(getOptimalSendTime('United Kingdom', now).toISOString(), '2026-09-20T09:30:00.000Z');
+    // US uses -6: 07:00 UTC is 01:00 there, so 09:30 local is 15:30 UTC today.
+    assert.equal(getOptimalSendTime('USA', now).toISOString(), '2026-09-20T15:30:00.000Z');
+  });
+
+  test('treats an unknown country as UTC', async () => {
+    const { getOptimalSendTime } = await import('../src/utils/timezone.js');
+    const now = new Date('2026-09-20T10:00:00.000Z');
+    assert.equal(getOptimalSendTime('Atlantis', now).toISOString(), '2026-09-21T09:30:00.000Z');
+  });
+});

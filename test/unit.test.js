@@ -396,31 +396,23 @@ describe('Email template rendering — interpolation', () => {
 
 // ── 7. Public site config — domain-aware defaults ────────────────────────────
 describe('Public site config — domain defaults', () => {
-  test('uses outboundos.space defaults when env is empty', async () => {
+  test('is empty rather than borrowing someone else\'s domain', async () => {
     const { resolvePublicSiteConfig } = await import('../src/utils/publicSiteConfig.js');
-    const config = resolvePublicSiteConfig({});
-    assert.equal(config.siteUrl, 'https://outboundos.space');
-    assert.equal(config.appUrl, 'https://app.outboundos.space/login');
-    assert.equal(config.contactEmail, 'hello@outboundos.space');
-    assert.equal(config.requestAccessEndpoint, 'https://app.outboundos.space/api/public/request-access');
+    assert.deepEqual(resolvePublicSiteConfig({}), { siteUrl: '', mailDomain: '', contactEmail: '' });
   });
 
-  test('derives contact email from custom site domain', async () => {
+  test('derives the email domain from the business website', async () => {
     const { resolvePublicSiteConfig } = await import('../src/utils/publicSiteConfig.js');
-    const config = resolvePublicSiteConfig({
-      NEXT_PUBLIC_SITE_URL: 'https://www.example.org',
-      NEXT_PUBLIC_APP_URL: 'https://app.example.org/login',
-    });
+    const config = resolvePublicSiteConfig({ BUSINESS_WEBSITE: 'https://www.example.org' });
+    assert.equal(config.siteUrl, 'https://www.example.org');
+    assert.equal(config.mailDomain, 'example.org');
     assert.equal(config.contactEmail, 'hello@example.org');
-    assert.equal(config.requestAccessEndpoint, 'https://app.example.org/api/public/request-access');
   });
 
   test('builds local-part addresses against the resolved domain', async () => {
     const { buildProjectEmailAddress } = await import('../src/utils/publicSiteConfig.js');
-    const email = buildProjectEmailAddress('sales', {
-      NEXT_PUBLIC_SITE_URL: 'https://www.example.org',
-    });
-    assert.equal(email, 'sales@example.org');
+    assert.equal(buildProjectEmailAddress('sales', { BUSINESS_WEBSITE: 'https://www.example.org' }), 'sales@example.org');
+    assert.throws(() => buildProjectEmailAddress('sales', {}), /No email domain/);
   });
 });
 
@@ -452,12 +444,12 @@ describe('System email preference — automated sender selection', () => {
     assert.equal(account?.id, 4);
   });
 
-  test('falls back to project-domain mailbox for system mail', async () => {
+  test('prefers a mailbox on the business\'s own domain for system mail', async () => {
     const { chooseSystemSenderAccount, resolveSystemEmailPreference } = await import('../src/utils/systemEmailPreference.js');
-    const preference = resolveSystemEmailPreference({ env: {}, configMap: {} });
+    const preference = resolveSystemEmailPreference({ env: { BUSINESS_WEBSITE: 'https://acme.example' }, configMap: {} });
     const account = chooseSystemSenderAccount([
       { id: 1, email: 'sender@external-mail.com', sentToday: 0, createdAt: '2026-03-01T00:00:00.000Z' },
-      { id: 5, email: 'hello@outboundos.space', sentToday: 4, createdAt: '2026-03-02T00:00:00.000Z' },
+      { id: 5, email: 'hello@acme.example', sentToday: 4, createdAt: '2026-03-02T00:00:00.000Z' },
     ], preference);
     assert.equal(account?.id, 5);
   });

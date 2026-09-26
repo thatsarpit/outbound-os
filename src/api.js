@@ -37,7 +37,6 @@ import brevoMarketingCampaigns from './services/brevoMarketingCampaigns.js';
 import interventionEngine from './services/interventionEngine.js';
 import reportingService from './services/reportingService.js';
 import recoveryCoordinator from './services/recoveryCoordinator.js';
-import requestAccessService from './services/requestAccess.js';
 import resourceMonitor from './utils/resourceMonitor.js';
 import webhookDispatcher from './services/webhookDispatcher.js';
 import { mapInboundLead, isSendableMobile } from './utils/inboundLead.js';
@@ -499,20 +498,6 @@ if (AUTH_PROVIDER === 'local') {
   });
 }
 
-// ======================== PUBLIC MARKETING API ========================
-
-app.post('/api/public/request-access', async (req, res) => {
-  try {
-    const result = await requestAccessService.submit(req.body || {}, req);
-    res.status(201).json(result);
-  } catch (e) {
-    if (e.code === 'RATE_LIMIT') return res.status(429).json({ error: e.message, code: e.code });
-    if (e.code === 'VALIDATION') return res.status(422).json({ error: e.message, code: e.code });
-    logger.error(`Request access submission failed: ${e.message}`);
-    res.status(500).json({ error: 'Unable to submit request right now.' });
-  }
-});
-
 // ── Public liveness probe (uptime monitors, container healthcheck) ───────────
 // Mounted before the global /api auth gate. Deliberately minimal — does NOT
 // leak per-account state, queue depth, or other internal signals. Returns
@@ -614,6 +599,17 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
       existingLead && cleanMobile && !isSendableMobile(existingLead.mobile),
     );
 
+    // A ticked "email me" box on the sender's form. Recorded with when and
+    // where it was given; never removed here — an opt-out goes through the
+    // unsubscribe path, not a later form that happened to leave the box empty.
+    const consent = mapped.emailConsent && email
+      ? {
+          emailMarketingConsent: true,
+          emailMarketingConsentAt: now,
+          emailMarketingConsentSource: `webhook:${req.params.source}`,
+        }
+      : {};
+
     const lead = existingLead
       ? await prisma.lead.update({
           where: { id: existingLead.id },
@@ -628,11 +624,13 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
             ...(product && !existingLead.product ? { product } : {}),
             ...(country && !existingLead.country ? { country } : {}),
             ...(quantity && !existingLead.quantity ? { quantity } : {}),
+            ...(consent.emailMarketingConsent && !existingLead.emailMarketingConsent ? consent : {}),
           },
         })
       : await prisma.lead.create({
           data: {
         name, mobile: mobileValue, email, company, product, country, quantity,
+        ...consent,
         source: req.params.source, status: 'new',
         consumedAt: now, leadTier: 'HOT',
         poolId: webhookPoolId,
@@ -3370,7 +3368,7 @@ app.post('/api/email/accounts/:id/test', requireRole('admin'), async (req, res) 
   }
 });
 
-// Daily two-domain prospecting batch. Queue creation is idempotent by day;
+// Daily marketing batch, rotated across the configured senders. Queue creation is idempotent by day;
 // actual delivery remains governed by the global sending pause.
 app.get('/api/email/daily/status', requireRole('manager'), async (req, res) => {
   try { res.json(await dailyEmailScheduler.getStatus()); }

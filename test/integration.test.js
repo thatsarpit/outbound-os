@@ -661,7 +661,7 @@ describe('Daily Brevo marketing campaign gates', () => {
     });
     assert.equal(res.status, 200);
     assert.equal(res.body.skipped, true);
-    assert.equal(res.body.reason, 'exactly_two_campaign_senders_required');
+    assert.equal(res.body.reason, 'campaign_senders_required');
 
     const mode = await prisma.systemConfig.findUnique({ where: { key: 'email.daily.delivery_mode' } });
     const messagesAfter = await prisma.message.count({ where: { channel: 'email' } });
@@ -860,6 +860,24 @@ describe('Lead webhook from a plain HTML form', () => {
     assert.ok(lead, 'lead was created from the form post');
     assert.equal(lead.name, 'Form Visitor');
     assert.equal(lead.product, 'Need 500 units');
+    assert.equal(lead.emailMarketingConsent, false, 'no box ticked, no consent');
+  });
+
+  test('records email consent only when the form says yes', async () => {
+    const source = await request('POST', '/api/webhooks/sources/from-preset', {
+      headers: authHeader(),
+      body: { presetId: 'website', name: 'Newsletter form' },
+    });
+    const post = (body) => request('POST', `${source.body.webhookUrl}?apiKey=${source.body.apiKey}`, { body });
+    await post({ name: 'Yes Please', email: 'yes@example.test', phone: '+44 7700 900124', email_consent: 'on' });
+    await post({ name: 'No Thanks', email: 'no@example.test', phone: '+44 7700 900125', email_consent: 'false' });
+
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const yes = await prisma.lead.findFirst({ where: { email: 'yes@example.test' } });
+    const no = await prisma.lead.findFirst({ where: { email: 'no@example.test' } });
+    assert.equal(yes.emailMarketingConsent, true);
+    assert.match(yes.emailMarketingConsentSource, /^webhook:website-/);
+    assert.equal(no.emailMarketingConsent, false);
   });
 
   test('other API routes still refuse form-encoded bodies', async () => {

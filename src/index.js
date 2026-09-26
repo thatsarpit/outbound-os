@@ -11,7 +11,6 @@ import telegramService from './services/telegram.js';
 import interventionEngine from './services/interventionEngine.js';
 import reportingService from './services/reportingService.js';
 import recoveryCoordinator from './services/recoveryCoordinator.js';
-import websiteIntegrationSync from './services/websiteIntegrationSync.js';
 import { startApiServer, broadcastEvent } from './api.js';
 import prisma from './utils/prismaClient.js';
 import { ensureDefaultAdmin } from './auth/rbac.js';
@@ -27,7 +26,7 @@ import { loadWorkspaceProfile } from './services/workspaceProfile.js';
  * Schedule:
  *  - Message queue:  every 2 min
  *  - Retry failed:   every 15 min
- *  - Counter reset:  midnight IST
+ *  - Counter reset:  midnight in BUSINESS_TIMEZONE
  */
 
 const INSTANCE_NAME = process.env.INSTANCE_NAME || 'default';
@@ -64,16 +63,6 @@ async function main() {
 
     logger.info('Step 3/4: Starting schedulers...');
 
-    // The website's Cloudflare inbox persists consented enquiries and Brevo
-    // callbacks while this Mac is asleep. Reconcile it immediately on boot,
-    // then every two minutes; acknowledged IDs make every replay idempotent.
-    await websiteIntegrationSync.run().catch((error) =>
-      logger.warn(`Website integration startup sync skipped: ${error.message}`));
-    cron.schedule('*/2 * * * *', async () => {
-      try { await websiteIntegrationSync.run(); }
-      catch (error) { logger.error(`Website integration sync error: ${error.message}`); }
-    });
-
     // Process message queue every 2 minutes (priority sorted: HOT > WARM > COLD)
     cron.schedule('*/2 * * * *', async () => {
       try {
@@ -103,9 +92,6 @@ async function main() {
       }
     });
 
-    // ── 5 Timezone-Aware Outreach Windows ──────────────────────────────
-    // Each cron fires at an IST time that matches 9:30 AM for that region
-
     // Timezone-window outreach was removed: outreach is now driven deliberately
     // through MCP/agent calls rather than five daily blasts against the whole
     // database. Fresh leads still get an immediate first touch via
@@ -119,7 +105,7 @@ async function main() {
     // day's worth of new outreach from that timezone bucket.
     // ───────────────────────────────────────────────────────────────────
 
-    // Recalculate all lead scores daily at 6 AM IST
+    // Recalculate all lead scores daily at 06:00 workspace time
     cron.schedule('0 6 * * *', async () => {
       logger.info('📊 Running daily lead score recalculation...');
       try {
@@ -158,7 +144,7 @@ async function main() {
       }
     });
 
-    // Reset daily message counters at midnight IST
+    // Reset daily message counters at midnight workspace time
     cron.schedule('0 0 * * *', async () => {
       await whatsappManager.resetDailyCounters();
       await emailService.resetDailyCounters();
@@ -185,7 +171,7 @@ async function main() {
       catch (error) { logger.error(`iMessage queue processing error: ${error.message}`); }
     });
 
-    // Prune ActivityLog rows older than 30 days (runs at 3 AM IST daily)
+    // Prune ActivityLog rows older than 30 days (03:00 workspace time)
     cron.schedule('0 3 * * *', async () => {
       try {
         const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
@@ -265,14 +251,14 @@ async function main() {
 
     logger.info(`📤 WA message queue: every 2 min (priority: HOT→WARM→COLD)`);
     logger.info(`📧 Email queue: every 2 min | IMAP sync: every 5 min`);
-    logger.info(`📬 Daily email selection: 06:05 IST + startup catch-up (two-domain rotation)`);
+    const tz = config.businessHours.timezone;
+    logger.info(`📬 Daily marketing email: once a day (${tz}) when enabled, rotating senders`);
     logger.info(`💬 iMessage queue: every 1 min`);
     logger.info(`📨 Weekly report: ${reportSchedules.weekly.description}`);
     logger.info(`📨 Monthly report: ${reportSchedules.monthly.description}`);
     logger.info(`🔄 Failed retry: every 15 min`);
-    logger.info(`📅 DB outreach: daily 10 AM IST (25 leads/batch)`);
-    logger.info(`📊 Score recalc: daily 6 AM IST`);
-    logger.info(`🕐 Counter reset: midnight IST (WA + Email)`);
+    logger.info(`📊 Score recalc: daily 06:00 (${tz})`);
+    logger.info(`🕐 Counter reset: midnight (${tz}) (WA + Email)`);
     logger.info(`📊 Pace: ${paceMode} — ${dailyLim} WA msgs/day/account, ${config.whatsapp.hourlyLimit}/hr`);
     logger.info(`⏱️  Delays: ${config.whatsapp.minDelay / 1000}–${config.whatsapp.maxDelay / 1000}s between WA msgs`);
 

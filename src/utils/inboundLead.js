@@ -58,7 +58,20 @@ const ALIASES = {
   product: ['product', 'title', 'subject', 'enquiry', 'requirement'],
   country: ['country'],
   quantity: ['quantity', 'quantityRaw', 'quantity_text'],
+  // A "yes, email me" checkbox on the sender's form. Only an explicit yes
+  // counts — see consentGiven().
+  consent: ['email_consent', 'marketing_consent', 'consent', 'opt_in', 'optin', 'newsletter', 'subscribe'],
 };
+
+/**
+ * True only for an unmistakable yes. A missing box, "false", "0" or "no" are
+ * all no — marketing email without consent is the one mistake here that has
+ * legal consequences.
+ */
+export function consentGiven(value) {
+  if (value === true) return true;
+  return ['true', 'yes', 'on', '1', 'y', 'checked', 'granted'].includes(String(value ?? '').trim().toLowerCase());
+}
 
 // Where the lead itself might sit inside a sender's envelope, nearest first.
 // Engyne Cloud posts `{event, deliveryId, data: {lead: {...}, decision: {...}}}`,
@@ -114,5 +127,6 @@ export function mapInboundLead(payload, fieldMap = {}) {
     product: resolve('product'),
     country: resolve('country'),
     quantity: resolve('quantity'),
+    emailConsent: consentGiven(resolve('consent')),
   };
 }

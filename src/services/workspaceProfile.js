@@ -83,7 +83,7 @@ const FIELDS = {
   BUSINESS_TAGLINE: { clean: text(120), apply: (v) => { businessProfile.businessTagline = v; }, read: () => businessProfile.businessTagline },
   BUSINESS_WEBSITE: {
     clean: url,
-    apply: (v) => { businessProfile.businessWebsite = v; config.business.website = v; },
+    apply: (v) => { businessProfile.businessWebsite = v; config.business.website = v; process.env.BUSINESS_WEBSITE = v; },
     read: () => businessProfile.businessWebsite,
   },
   BUSINESS_CATALOGUE_URL: { clean: url, apply: (v) => { businessProfile.businessCatalogueUrl = v; }, read: () => businessProfile.businessCatalogueUrl },

@@ -482,6 +482,7 @@ function CreatedSource({
   <input name="email" type="email" placeholder="Email">
   <input name="phone" placeholder="WhatsApp number">
   <textarea name="message" placeholder="What do you need?"></textarea>
+  <label><input type="checkbox" name="email_consent" value="yes"> Email me offers and updates</label>
   <button type="submit">Send</button>
 </form>`
   const isForm = created.card.name === 'Website form'

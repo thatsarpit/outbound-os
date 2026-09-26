@@ -1,46 +1,40 @@
-const DEFAULT_SITE_URL = 'https://outboundos.space';
-const DEFAULT_APP_ORIGIN = 'https://app.outboundos.space';
-const DEFAULT_APP_URL = `${DEFAULT_APP_ORIGIN}/login`;
-const DEFAULT_REQUEST_ACCESS_PATH = '/api/public/request-access';
-const DEFAULT_CONTACT_LOCAL_PART = 'hello';
+/**
+ * The workspace's public web identity: its website, and the email domain that
+ * goes with it. Used to pick a system sender on the business's own domain and
+ * to suggest addresses in the email CLI.
+ *
+ * Everything derives from BUSINESS_WEBSITE (set in onboarding or Settings);
+ * EMAIL_DEFAULT_DOMAIN and CONTACT_EMAIL override. With nothing configured the
+ * values are empty rather than pointing at somebody else's domain.
+ */
 
 function trimValue(value) {
   return String(value || '').trim();
 }
 
-function normalizeUrl(value, fallback) {
-  const raw = trimValue(value) || fallback;
-  try {
-    const url = new URL(raw);
-    return url.toString().replace(/\/$/, '');
-  } catch {
-    return fallback;
-  }
-}
-
-function normalizeEmail(value, fallback) {
-  const raw = trimValue(value).toLowerCase();
-  return raw || fallback;
-}
-
-function inferOriginFromUrl(value, fallback) {
+function normalizeUrl(value) {
   const raw = trimValue(value);
-  if (!raw) return fallback;
-
+  if (!raw) return '';
   try {
-    return new URL(raw).origin;
+    return new URL(raw).toString().replace(/\/$/, '');
   } catch {
-    return fallback;
+    return '';
   }
 }
 
 export function inferMailDomainFromSiteUrl(siteUrl) {
   try {
-    const hostname = new URL(siteUrl).hostname.toLowerCase();
-    return hostname.replace(/^www\./, '');
+    return new URL(siteUrl).hostname.toLowerCase().replace(/^www\./, '');
   } catch {
-    return 'outboundos.space';
+    return '';
   }
+}
+
+export function resolvePublicSiteConfig(env = process.env) {
+  const siteUrl = normalizeUrl(env.BUSINESS_WEBSITE || env.PUBLIC_SITE_URL || env.NEXT_PUBLIC_SITE_URL);
+  const mailDomain = trimValue(env.EMAIL_DEFAULT_DOMAIN).toLowerCase() || inferMailDomainFromSiteUrl(siteUrl);
+  const contactEmail = trimValue(env.CONTACT_EMAIL).toLowerCase() || (mailDomain ? `hello@${mailDomain}` : '');
+  return { siteUrl, mailDomain, contactEmail };
 }
 
 export function buildProjectEmailAddress(localPart, env = process.env) {
@@ -54,6 +48,9 @@ export function buildProjectEmailAddress(localPart, env = process.env) {
   }
 
   const { mailDomain } = resolvePublicSiteConfig(env);
+  if (!mailDomain) {
+    throw new Error('No email domain: set BUSINESS_WEBSITE or EMAIL_DEFAULT_DOMAIN, or pass --email.');
+  }
   return `${cleanedLocalPart}@${mailDomain}`;
 }
 
@@ -63,46 +60,10 @@ export function buildDefaultEmailSignature({
   env = process.env,
 } = {}) {
   const { siteUrl } = resolvePublicSiteConfig(env);
-  const resolvedSender = trimValue(senderName) || trimValue(companyName) || 'Outbound OS';
-  const resolvedCompany = trimValue(companyName) || 'Outbound OS';
-
-  return `<strong>${resolvedSender}</strong><br>${resolvedCompany}<br><a href="${siteUrl}">${siteUrl}</a>`;
-}
-
-export function resolvePublicSiteConfig(env = process.env) {
-  const siteUrl = normalizeUrl(
-    env.NEXT_PUBLIC_SITE_URL || env.PUBLIC_SITE_URL,
-    DEFAULT_SITE_URL
-  );
-  const appOrigin = normalizeUrl(
-    env.NEXT_PUBLIC_APP_ORIGIN || env.APP_ORIGIN || inferOriginFromUrl(env.NEXT_PUBLIC_APP_URL, DEFAULT_APP_ORIGIN),
-    DEFAULT_APP_ORIGIN
-  );
-  const appUrl = normalizeUrl(
-    env.NEXT_PUBLIC_APP_URL || `${appOrigin}/login`,
-    DEFAULT_APP_URL
-  );
-  const requestAccessEndpoint = normalizeUrl(
-    env.NEXT_PUBLIC_REQUEST_ACCESS_ENDPOINT || `${appOrigin}${DEFAULT_REQUEST_ACCESS_PATH}`,
-    `${DEFAULT_APP_ORIGIN}${DEFAULT_REQUEST_ACCESS_PATH}`
-  );
-  const mailDomain = normalizeEmail(
-    env.EMAIL_DEFAULT_DOMAIN,
-    inferMailDomainFromSiteUrl(siteUrl)
-  );
-  const contactEmail = normalizeEmail(
-    env.NEXT_PUBLIC_CONTACT_EMAIL || env.CONTACT_EMAIL,
-    `${DEFAULT_CONTACT_LOCAL_PART}@${mailDomain}`
-  );
-
-  return {
-    siteUrl,
-    appOrigin,
-    appUrl,
-    requestAccessEndpoint,
-    contactEmail,
-    mailDomain,
-  };
+  const resolvedCompany = trimValue(companyName) || trimValue(env.BUSINESS_NAME) || 'Outbound OS';
+  const resolvedSender = trimValue(senderName) || resolvedCompany;
+  const link = siteUrl ? `<br><a href="${siteUrl}">${siteUrl}</a>` : '';
+  return `<strong>${resolvedSender}</strong><br>${resolvedCompany}${link}`;
 }
 
 export default {

@@ -116,13 +116,6 @@ const config = {
     port: parseEnvInt("API_PORT", 3001),
   },
 
-  requestAccess: {
-    calendarUrl: process.env.REQUEST_ACCESS_CALENDAR_URL || "",
-    notifyEmail: process.env.REQUEST_ACCESS_NOTIFY_EMAIL || process.env.REPORTS_ADMIN_EMAIL || process.env.ADMIN_EMAIL || "",
-    rateLimitWindowMs: parseEnvInt("REQUEST_ACCESS_RATE_LIMIT_WINDOW_MS", 60 * 60 * 1000),
-    maxRequestsPerWindow: parseEnvInt("REQUEST_ACCESS_MAX_PER_WINDOW", 8),
-    minIntervalMs: parseEnvInt("REQUEST_ACCESS_MIN_INTERVAL_MS", 30 * 1000),
-  },
 };
 
 export default config;

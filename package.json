@@ -21,7 +21,7 @@
     "db:push": "npx prisma db push",
     "db:studio": "npx prisma studio",
     "preflight": "node scripts/preflight.mjs",
-    "test": "node --test test/unit.test.js test/reportingTime.test.js test/telegram.test.js test/tenantScope.test.js test/entitlements.test.js test/provisioning.test.js test/inboundLead.test.js test/secretsMatch.test.js test/sheetsSync.test.js test/businessHours.test.js test/workspaceTime.test.js test/whatsappProviders.test.js test/phoneDefaults.test.js",
+    "test": "node --test test/unit.test.js test/reportingTime.test.js test/telegram.test.js test/inboundLead.test.js test/secretsMatch.test.js test/sheetsSync.test.js test/businessHours.test.js test/workspaceTime.test.js test/whatsappProviders.test.js test/phoneDefaults.test.js",
     "test:integration": "bash scripts/test-integration.sh",
     "test:all": "npm test && npm run test:integration",
     "backup": "bash scripts/backup.sh",

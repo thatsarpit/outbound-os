@@ -62,7 +62,7 @@ class RecoveryCoordinator {
     await writeConfig({ [KEYS.startedAt]: new Date().toISOString() });
 
     // Await startup recovery before declaring the runtime healthy. This makes
-    // a launchd restart deterministic: catch-up is part of boot, not a best-
+    // a restart deterministic: catch-up is part of boot, not a best-
     // effort timeout that disappears if the process restarts again.
     await this.runRecovery({ reason: 'startup' });
 
@@ -139,8 +139,8 @@ class RecoveryCoordinator {
       const stuck = await followupEngine.recoverStuckMessages();
       let dailyEmail = { skipped: true, reason: 'not_run' };
       try {
-        // Idempotent by IST date: this catches a 06:05 cron missed while the
-        // Mac slept without ever selecting the daily batch twice.
+        // Idempotent by workspace date: this catches a daily run missed while the
+        // server was down, without ever selecting the daily batch twice.
         dailyEmail = await dailyEmailScheduler.run();
       } catch (error) {
         dailyEmail = { failed: true, error: error.message };

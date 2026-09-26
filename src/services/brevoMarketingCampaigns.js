@@ -169,7 +169,7 @@ class BrevoMarketingCampaigns {
       prisma.lead.count({ where: { emailMarketingConsent: true, emailOptOut: false, email: { not: null } } }),
       prisma.lead.count({ where: { emailOptOut: true } }),
     ]);
-    const configuredBrevoSenders = accounts.length === 2
+    const configuredBrevoSenders = accounts.length > 0
       && accounts.every((account) => account.provider === 'brevo' && account.enabled && account.status === 'verified');
     const folderId = positiveInteger(folderRow?.value);
     const webhookUrl = configuredBrevoWebhookUrl();
@@ -407,7 +407,7 @@ class BrevoMarketingCampaigns {
     if (readiness.globallyPaused && !allowWhileGloballyPaused) {
       return { handled: true, skipped: true, reason: 'sending_paused', readiness };
     }
-    if (!readiness.configuredBrevoSenders) return { handled: true, skipped: true, reason: 'two_verified_brevo_senders_required', readiness };
+    if (!readiness.configuredBrevoSenders) return { handled: true, skipped: true, reason: 'verified_brevo_senders_required', readiness };
     if (!readiness.folderConfigured) return { handled: true, skipped: true, reason: 'brevo_marketing_folder_required', readiness };
     if (!readiness.webhookConfigured) return { handled: true, skipped: true, reason: 'brevo_webhook_configuration_required', readiness };
     if (allocations.some(({ lead }) => !lead.emailMarketingConsent || lead.emailOptOut)) {

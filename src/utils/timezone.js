@@ -1,16 +1,10 @@
 /**
- * Timezone Engine
- * Maps country names → UTC offsets → optimal IST send time
+ * Lead-local send time.
  *
- * Strategy: message each lead at 9:30 AM *their* local time.
- * That maps to a specific IST time for each region.
- *
- * Windows (IST):
- *   AUSTRALIA   06:30  (09:30 AEST / UTC+10)
- *   SOUTH_ASIA  09:30  (09:30 IST  / UTC+5.5 — Nepal, Bangladesh, India, Middle East)
- *   EUROPE      14:00  (09:30 BST  / UTC+1)
- *   USA_EAST    19:30  (09:30 EST  / UTC-5 — NY, FL, TX, Ontario)
- *   USA_WEST    22:00  (09:30 PST  / UTC-8 — CA, OR, WA, BC)
+ * First contact lands best at the start of the recipient's working day, so a
+ * queued message is scheduled for 09:30 in the lead's own country — whatever
+ * zone the workspace itself is in. Countries are matched by name to a
+ * representative UTC offset; an unknown country is treated as UTC.
  */
 
 /** UTC offset (in hours) for each country name (lowercase partial match) */
@@ -96,21 +90,11 @@ const COUNTRY_OFFSETS = {
   'south africa': 2,
 };
 
-/**
- * Window definitions: each window fires at a specific IST hour
- * and targets leads in a UTC offset band.
- */
-export const WINDOWS = {
-  AUSTRALIA:  { istHour: 6,  istMin: 30, utcOffsetMin: 8,  utcOffsetMax: 12, label: '🦘 Australia' },
-  SOUTH_ASIA: { istHour: 10, istMin: 0,  utcOffsetMin: 3,  utcOffsetMax: 7,  label: '🌏 South Asia / Middle East' },
-  EUROPE:     { istHour: 14, istMin: 0,  utcOffsetMin: -1, utcOffsetMax: 2,  label: '🇪🇺 Europe' },
-  USA_EAST:   { istHour: 19, istMin: 30, utcOffsetMin: -6, utcOffsetMax: -3, label: '🇺🇸 USA East & SA' },
-  USA_WEST:   { istHour: 22, istMin: 0,  utcOffsetMin: -9, utcOffsetMax: -7, label: '🌎 USA West' },
-  DEFAULT:    { istHour: 14, istMin: 30, utcOffsetMin: -99, utcOffsetMax: 99, label: '🌐 Other' },
-};
+const SEND_HOUR = 9;
+const SEND_MINUTE = 30;
 
 /**
- * Get UTC offset for a country string (case-insensitive partial match)
+ * UTC offset (hours) for a country string, case-insensitive partial match.
  * Returns 0 if unknown.
  */
 export function getCountryOffset(country) {
@@ -119,75 +103,22 @@ export function getCountryOffset(country) {
   for (const [key, offset] of Object.entries(COUNTRY_OFFSETS)) {
     if (lower.includes(key) || key.includes(lower)) return offset;
   }
-  return 0; // default UTC
+  return 0;
 }
 
 /**
- * Get the send window for a country
- */
-export function getWindowForCountry(country) {
-  const offset = getCountryOffset(country);
-  for (const [name, w] of Object.entries(WINDOWS)) {
-    if (name === 'DEFAULT') continue;
-    if (offset >= w.utcOffsetMin && offset <= w.utcOffsetMax) return { name, ...w };
-  }
-  return { name: 'DEFAULT', ...WINDOWS.DEFAULT };
-}
-
-/**
- * Calculate the next IST datetime when we should send to a lead in this country.
- * Returns a Date object (may be today or tomorrow depending on current IST time).
+ * The next moment it is 09:30 for a lead in `country` — later today in their
+ * time if that is still ahead, otherwise tomorrow.
  *
  * @param {string} country
- * @returns {Date} - UTC Date representing the next optimal send time
+ * @param {Date} [now]
+ * @returns {Date}
  */
-export function getOptimalSendTime(country) {
-  const window = getWindowForCountry(country);
-
-  // Get current IST time
-  const nowUtc = new Date();
-  const istOffsetMs = 5.5 * 60 * 60 * 1000;
-  const nowIst = new Date(nowUtc.getTime() + istOffsetMs);
-
-  // Build target IST time today
-  const targetIst = new Date(nowIst);
-  targetIst.setUTCHours(window.istHour, window.istMin, 0, 0);
-
-  // If the window already passed today, schedule for tomorrow
-  if (targetIst <= nowIst) {
-    targetIst.setUTCDate(targetIst.getUTCDate() + 1);
-  }
-
-  // Convert back to UTC for storage
-  return new Date(targetIst.getTime() - istOffsetMs);
-}
-
-/**
- * Check if now is within ±45 minutes of a window's IST time
- */
-export function isWindowActive(windowName) {
-  const window = WINDOWS[windowName];
-  if (!window) return false;
-
-  const nowUtc = new Date();
-  const istOffsetMs = 5.5 * 60 * 60 * 1000;
-  const nowIst = new Date(nowUtc.getTime() + istOffsetMs);
-  const nowHour = nowIst.getUTCHours();
-  const nowMin = nowIst.getUTCMinutes();
-  const nowTotalMin = nowHour * 60 + nowMin;
-  const windowTotalMin = window.istHour * 60 + window.istMin;
-
-  let diff = Math.abs(nowTotalMin - windowTotalMin);
-  if (diff > 720) diff = 1440 - diff; // Handle midnight loop (e.g., 23:55 to 00:05)
-  return diff <= 45;
-}
-
-/**
- * Get all window names sorted by their IST hour
- */
-export function getWindowsSortedByTime() {
-  return Object.entries(WINDOWS)
-    .filter(([name]) => name !== 'DEFAULT')
-    .sort((a, b) => (a[1].istHour * 60 + a[1].istMin) - (b[1].istHour * 60 + b[1].istMin))
-    .map(([name, w]) => ({ name, ...w }));
+export function getOptimalSendTime(country, now = new Date()) {
+  const offsetMs = getCountryOffset(country) * 60 * 60 * 1000;
+  // Shift into the lead's wall clock, set 09:30 there, shift back.
+  const local = new Date(now.getTime() + offsetMs);
+  const target = new Date(Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), SEND_HOUR, SEND_MINUTE));
+  if (target.getTime() <= local.getTime()) target.setUTCDate(target.getUTCDate() + 1);
+  return new Date(target.getTime() - offsetMs);
 }

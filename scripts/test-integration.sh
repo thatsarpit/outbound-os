@@ -14,8 +14,6 @@ export DATABASE_URL="file:${TEST_DB_PATH}"
 # configured for the live Cloudflare webhook and website event feed.
 export BREVO_WEBHOOK_PUBLIC_URL=""
 export BREVO_WEBHOOK_SECRET=""
-export WEBSITE_INTEGRATION_FEED_URL=""
-export WEBSITE_INTEGRATION_SECRET=""
 export AUTH_PROVIDER="local"
 export CLERK_PUBLISHABLE_KEY=""
 export CLERK_SECRET_KEY=""

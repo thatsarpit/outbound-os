@@ -31,7 +31,7 @@ model User {
 }
 
 model Lead {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId   Int?
   id         Int     @id @default(autoincrement())
   // The lead's id in the system it came from (a form, a marketplace, a CRM).
@@ -151,7 +151,7 @@ model Lead {
 }
 
 model Message {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId          Int?
   id                Int              @id @default(autoincrement())
   leadId            Int
@@ -233,7 +233,7 @@ model Message {
 // (or pay the 1-2s lookup latency) on numbers we already know are not on WhatsApp.
 // Re-checked after 30 days in case the recipient activates WhatsApp later.
 model WhatsAppNumberCheck {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId     Int?
   phone        String   @id
   isRegistered Boolean
@@ -242,7 +242,7 @@ model WhatsAppNumberCheck {
 }
 
 model Campaign {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId        Int?
   id              Int     @id @default(autoincrement())
   name            String
@@ -286,7 +286,7 @@ model Campaign {
 }
 
 model CampaignLead {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId   Int?
   id         Int       @id @default(autoincrement())
   campaignId Int
@@ -304,7 +304,7 @@ model CampaignLead {
 }
 
 model MediaFile {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId     Int?
   id           Int      @id @default(autoincrement())
   filename     String // stored filename (UUID-based)
@@ -316,7 +316,7 @@ model MediaFile {
 }
 
 model WhatsAppAccount {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId Int?
   id       Int    @id @default(autoincrement())
   name     String
@@ -416,7 +416,7 @@ model SystemConfig {
 }
 
 model ActivityLog {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId  Int?
   id        Int      @id @default(autoincrement())
   type      String // send | reply | error | poll | system | account
@@ -432,7 +432,7 @@ model ActivityLog {
 }
 
 model ImportBatch {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId   Int?
   id         Int      @id @default(autoincrement())
   filename   String
@@ -445,7 +445,7 @@ model ImportBatch {
 }
 
 model WebhookSubscription {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId        Int?
   id              Int       @id @default(autoincrement())
   name            String
@@ -459,7 +459,7 @@ model WebhookSubscription {
 }
 
 model EmailTemplate {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId  Int?
   id        Int      @id @default(autoincrement())
   name      String
@@ -473,7 +473,7 @@ model EmailTemplate {
 }
 
 model WebhookSource {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId       Int?
   id             Int       @id @default(autoincrement())
   name           String // e.g. "JustDial", "TradeIndia", "Website Form"
@@ -490,7 +490,7 @@ model WebhookSource {
 }
 
 model LeadNote {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId  Int?
   id        Int      @id @default(autoincrement())
   leadId    Int
@@ -501,7 +501,7 @@ model LeadNote {
 }
 
 model LeadTask {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId  Int?
   id        Int       @id @default(autoincrement())
   leadId    Int
@@ -513,7 +513,7 @@ model LeadTask {
 }
 
 model EmailAccount {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId Int?
   id       Int    @id @default(autoincrement())
   name     String // Display name (e.g. "Sales - Gmail")
@@ -567,7 +567,7 @@ model EmailAccount {
 }
 
 model LeadPool {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId    Int?
   id          Int      @id @default(autoincrement())
   name        String
@@ -591,7 +591,7 @@ model LeadPool {
 // once Phase B.3's requirePoolAccess middleware lands, so the (userId,
 // poolId) unique key doubles as a covering index.
 model UserPool {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId  Int?
   id        Int      @id @default(autoincrement())
   userId    Int
@@ -607,7 +607,7 @@ model UserPool {
 }
 
 model LeadPoolWhatsApp {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId          Int?
   id                Int             @id @default(autoincrement())
   poolId            Int
@@ -619,7 +619,7 @@ model LeadPoolWhatsApp {
 }
 
 model LeadPoolEmail {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId       Int?
   id             Int          @id @default(autoincrement())
   poolId         Int
@@ -631,7 +631,7 @@ model LeadPoolEmail {
 }
 
 model Invitation {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId    Int?
   id          Int       @id @default(autoincrement())
   email       String
@@ -652,7 +652,7 @@ model Invitation {
 }
 
 model IMessageAccount {
-  /// Owning tenant. Nullable during migration; required once backfilled.
+  /// Reserved for a future multi-workspace mode; always null today.
   tenantId   Int?
   id         Int       @id @default(autoincrement())
   name       String // e.g. "Mac Mini" or "MacBook"
@@ -717,31 +717,6 @@ model TelegramAccount {
   @@index([status])
 }
 
-model AccessRequest {
-  /// Owning tenant. Nullable during migration; required once backfilled.
-  tenantId          Int?
-  id                Int      @id @default(autoincrement())
-  name              String   @default("")
-  workEmail         String
-  company           String
-  role              String   @default("")
-  teamSize          String   @default("")
-  monthlyLeadVolume String   @default("")
-  primaryChannel    String   @default("")
-  currentWorkflow   String   @default("")
-  painPoint         String   @default("")
-  notes             String   @default("")
-  source            String   @default("website")
-  status            String   @default("new")
-  ipHash            String   @default("")
-  createdAt         DateTime @default(now())
-
-  @@index([createdAt])
-  @@index([status])
-  @@index([workEmail])
-  @@index([company])
-}
-
 /// Short-lived one-time codes for phone login.
 ///
 /// The code itself is NEVER stored — only a SHA-256 hash, so a database read
@@ -764,272 +739,12 @@ model PhoneOtp {
   @@index([expiresAt])
 }
 
-// ════════════════════════════════════════════════════════════════════════════
-// PLATFORM / BILLING — SCAFFOLDING, NOT YET WIRED
-//
-// Added Sep 2026 for the shift from "our own sales tool" to "a platform other
-// businesses subscribe to". These models are ADDITIVE: nothing existing
-// references them yet, so the running instance is unaffected until the code
-// that uses them lands.
-//
-// ⚠️  THE HARD PART IS NOT THESE TABLES.
-// Every one of the 27 existing models is tenant-unaware, and ~750 Prisma
-// queries across 32 files run unscoped. Several global @unique constraints
-// actively prevent two customers coexisting — `Lead.mobile @unique` is the
-// clearest: if two customers both sell to the same buyer, the second cannot
-// create the lead at all. Adding `tenantId` here does not fix that; it marks
-// where the boundary has to go.
-//
-// Migration is NOT run automatically. When ready:
-//   npx prisma migrate dev --name platform_billing_scaffold
-// ════════════════════════════════════════════════════════════════════════════
-
-/// A customer of the platform — one business, one workspace, one bill.
-/// Every tenant-owned row must eventually carry `tenantId`.
-model Tenant {
-  id     Int    @id @default(autoincrement())
-  /// URL-safe identifier. Used for a subdomain or path prefix per customer.
-  slug   String @unique
-  name   String
-  /// active | trialing | suspended | cancelled — gates access independently of
-  /// the subscription so support can suspend without touching billing.
-  status String @default("trialing")
-
-  /// Billing contact. Deliberately separate from any User: the person who pays
-  /// is often not a person who logs in.
-  billingEmail String?
-  /// ISO 3166-1 alpha-2. Decides tax treatment and which processor to route to.
-  country      String?
-  /// Indian customers need this on the invoice; foreign ones will not have it.
-  gstin        String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  subscriptions Subscription[]
-  invoices      Invoice[]
-  usageRecords  UsageRecord[]
-  provisioning  ProvisioningJob[]
-
-  @@index([status])
-}
-
-/// A sellable plan. Prices live in PlanPrice so one plan can be sold in
-/// several currencies and intervals without duplicating the feature set.
-model Plan {
-  id          Int     @id @default(autoincrement())
-  code        String  @unique
-  name        String
-  description String?
-  /// Ordering for display. Lower is cheaper/earlier.
-  rank        Int     @default(0)
-  /// Publicly purchasable. Custom/enterprise plans stay false.
-  isPublic    Boolean @default(true)
-
-  /// Entitlement limits. Null means unlimited. These are the numbers the
-  /// pricing page quotes and the app has to enforce.
-  maxSeats           Int?
-  maxWhatsAppNumbers Int?
-  maxMailboxes       Int?
-  maxMonthlyMessages Int?
-  maxLeads           Int?
-
-  /// Feature flags carried as JSON so adding an entitlement does not require a
-  /// migration. Keys should be stable and documented.
-  features String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  prices        PlanPrice[]
-  subscriptions Subscription[]
-}
-
-/// One plan, one currency, one billing interval.
-model PlanPrice {
-  id       Int    @id @default(autoincrement())
-  planId   Int
-  plan     Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
-  /// ISO 4217. INR for domestic, USD/GBP/AUD for export.
-  currency String
-  /// Minor units (paise, cents) — never floats for money.
-  amount   Int
-  /// month | year
-  interval String @default("month")
-
-  /// Processor-side identifier (Razorpay plan id, Stripe price id).
-  externalId String?
-
-  active Boolean @default(true)
-
-  @@unique([planId, currency, interval])
-}
-
-/// A tenant's live subscription to a plan.
-model Subscription {
-  id       Int    @id @default(autoincrement())
-  tenantId Int
-  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  planId   Int
-  plan     Plan   @relation(fields: [planId], references: [id])
-
-  /// trialing | active | past_due | paused | cancelled | expired
-  status String @default("trialing")
-
-  /// Which processor owns this subscription, and its id there. Kept generic so
-  /// domestic (Razorpay) and international (a merchant of record) can coexist.
-  provider           String?
-  providerSubId      String?
-  providerCustomerId String?
-
-  quantity Int @default(1)
-
-  currentPeriodStart DateTime?
-  currentPeriodEnd   DateTime?
-  trialEndsAt        DateTime?
-  cancelAt           DateTime?
-  cancelledAt        DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  invoices Invoice[]
-
-  @@unique([provider, providerSubId])
-  @@index([tenantId, status])
-}
-
-/// A bill issued to a tenant. Doubles as the GST invoice record for Indian
-/// customers, which is why number/place-of-supply/tax fields are first class.
-model Invoice {
-  id             Int           @id @default(autoincrement())
-  tenantId       Int
-  tenant         Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  subscriptionId Int?
-  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
-
-  /// Human-facing sequential number. Must be gapless per financial year for
-  /// GST — generate it in a transaction, never from a timestamp.
-  number String @unique
-
-  /// draft | open | paid | void | uncollectible
-  status String @default("draft")
-
-  currency   String
-  /// All amounts in minor units.
-  subtotal   Int
-  taxTotal   Int    @default(0)
-  total      Int
-  amountPaid Int    @default(0)
-
-  /// GST specifics. Null for export invoices, which are zero-rated under LUT —
-  /// confirm treatment with an accountant before relying on this.
-  placeOfSupply   String?
-  taxRate         Int?
-  isReverseCharge Boolean @default(false)
-
-  issuedAt DateTime?
-  dueAt    DateTime?
-  paidAt   DateTime?
-
-  providerInvoiceId String?
-  pdfUrl            String?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  payments Payment[]
-
-  @@index([tenantId, status])
-}
-
-model Payment {
-  id        Int     @id @default(autoincrement())
-  invoiceId Int
-  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-
-  /// razorpay | stripe | paddle | manual
-  provider          String
-  providerPaymentId String?
-  /// card | upi | netbanking | wallet | bank_transfer
-  method            String?
-
-  currency String
-  amount   Int
-  /// created | authorized | captured | failed | refunded
-  status   String @default("created")
-
-  failureReason String?
-  capturedAt    DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([provider, providerPaymentId])
-  @@index([invoiceId, status])
-}
-
-/// Metered usage, aggregated per period. Written by the sending paths so
-/// entitlement checks and overage billing read from one place.
-model UsageRecord {
-  id       Int    @id @default(autoincrement())
-  tenantId Int
-  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  /// whatsapp_messages | emails | leads | seats | ai_generations
-  metric      String
-  /// The period this count belongs to, truncated to the billing interval.
-  periodStart DateTime
-  quantity    Int      @default(0)
-
-  updatedAt DateTime @updatedAt
-
-  @@unique([tenantId, metric, periodStart])
-  @@index([tenantId, periodStart])
-}
-
-/// Onboarding work for a new tenant: obtaining a WhatsApp number, connecting
-/// mailboxes, verifying a domain. These are long-running, partly manual, and
-/// frequently fail on the customer's side — so they are tracked, not fired and
-/// forgotten.
-model ProvisioningJob {
-  id       Int    @id @default(autoincrement())
-  tenantId Int
-  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  /// whatsapp_waba | whatsapp_number | email_domain | mailbox
-  kind   String
-  /// pending | awaiting_customer | in_progress | blocked | completed | failed
-  status String @default("pending")
-
-  /// Free-form provider payload — Meta WABA ids, DNS records to add, the
-  /// verification state a support agent needs to see.
-  payload    String?
-  /// What the customer or operator must do next, in plain language.
-  nextAction String?
-  lastError  String?
-
-  startedAt   DateTime?
-  completedAt DateTime?
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@index([tenantId, status])
-  @@index([kind, status])
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Sales: orders, customer invoices, shipments.
 //
-// Deliberately NOT reusing Invoice/Payment above — those bill tenants for their
-// subscription to this product. These bill *our customers* for goods. The two
-// have different numbering, tax treatment and lifecycles, and conflating them
-// would make both wrong.
-//
-// Money follows the same convention as billing: integer minor units in the
-// order's currency (paise for INR, cents for USD). Never floats — 0.1 + 0.2 in
-// a total is a real bug, not a hypothetical one.
+// Money is integer minor units in the order's currency (cents for USD, paise
+// for INR). Never floats — 0.1 + 0.2 in a total is a real bug, not a
+// hypothetical one.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// A confirmed deal. Created when a lead converts, and the spine that invoices

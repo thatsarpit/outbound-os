@@ -69,7 +69,9 @@ class DailyEmailScheduler {
 
   async ensureDefaults() {
     for (const [key, value] of [
-      [KEYS.enabled, 'true'], [KEYS.batchSize, '100'], [KEYS.perSenderQuota, '50'],
+      // Off until an admin turns it on: a new install must never start a
+      // daily marketing send by itself.
+      [KEYS.enabled, 'false'], [KEYS.batchSize, '100'], [KEYS.perSenderQuota, '50'],
       // Daily promotional email is always modeled as a marketing campaign.
       // A deliberate launch gate in brevoMarketingCampaigns keeps it dormant
       // until operators verify senders, consent, provider IP, and the pause.
@@ -87,7 +89,7 @@ class DailyEmailScheduler {
     const senderConfig = await prisma.systemConfig.findUnique({ where: { key: KEYS.senderIds } });
     if (!senderConfig) {
       const senders = await prisma.emailAccount.findMany({
-        where: { enabled: true }, select: { id: true }, orderBy: { id: 'asc' }, take: 2,
+        where: { enabled: true, provider: 'brevo' }, select: { id: true }, orderBy: { id: 'asc' },
       });
       await setConfig(KEYS.senderIds, JSON.stringify(senders.map((sender) => sender.id)));
     }
@@ -182,16 +184,18 @@ class DailyEmailScheduler {
       let senderIds = [];
       try { senderIds = JSON.parse(config[KEYS.senderIds] || '[]').map(Number).filter(Number.isInteger); } catch {}
       senderIds = [...new Set(senderIds)];
-      if (senderIds.length !== 2) {
-        return { skipped: true, reason: 'exactly_two_campaign_senders_required', accountCount: senderIds.length };
+      // One sender works; more spread the daily volume across domains, which
+      // protects each domain's reputation.
+      if (senderIds.length === 0) {
+        return { skipped: true, reason: 'campaign_senders_required', accountCount: 0 };
       }
       const accountRows = await prisma.emailAccount.findMany({ where: { id: { in: senderIds } } });
       const accountById = new Map(accountRows.map((account) => [account.id, account]));
       let accounts = senderIds.map((id) => accountById.get(id)).filter(Boolean);
       accounts = await Promise.all(accounts.map((account) => emailService._resetAccountCounterIfNeeded(account)));
       const readyAccounts = accounts.filter((account) => account.enabled && account.status === 'verified');
-      if (readyAccounts.length !== 2) {
-        return { skipped: true, reason: 'two_verified_senders_required', accountCount: readyAccounts.length };
+      if (readyAccounts.length === 0) {
+        return { skipped: true, reason: 'verified_senders_required', accountCount: 0 };
       }
 
       const perSenderQuota = Math.max(1, Math.min(Number(config[KEYS.perSenderQuota] || 50), 150));
