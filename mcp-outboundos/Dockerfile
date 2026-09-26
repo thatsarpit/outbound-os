@@ -2,7 +2,7 @@
 # Lightweight: just Node + the MCP SDK.
 # Build context must be the repo root so we can copy mcp-outboundos/.
 
-FROM node:20-slim
+FROM node:24-slim
 
 # curl for healthcheck
 RUN apt-get update && apt-get install -y curl --no-install-recommends && \

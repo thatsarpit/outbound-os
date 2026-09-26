@@ -4,6 +4,9 @@
   "type": "module",
   "private": true,
   "description": "MCP server for Outbound OS — Streamable HTTP transport",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "start": "node src/server.js",
     "dev": "node --watch src/server.js"

@@ -4,7 +4,7 @@
 
 - `docker compose logs app` shows the reason. A migration error names the
   migration and the table.
-- Manual installs: Node.js 20 or newer (`node --version`), then `npm ci` and
+- Manual installs: Node.js 24 or newer (`node --version`), then `npm ci` and
   `npx prisma migrate deploy`.
 - `npm run preflight -- .env` reports configuration mistakes.
 

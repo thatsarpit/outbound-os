@@ -34,7 +34,7 @@ to `http://` or `localhost`.
 
 ## Manual (development)
 
-Needs Node.js 20+.
+Needs Node.js 24+.
 
 ```bash
 cp .env.example .env
