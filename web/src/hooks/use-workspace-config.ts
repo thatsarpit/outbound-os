@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toast-store'
 
@@ -32,6 +32,7 @@ export interface BrandConfig {
  * monolithic settings.tsx — do not change them or the cache behaviour drifts.
  */
 export function useWorkspaceConfig() {
+  const queryClient = useQueryClient()
   const { data: config, isLoading: configLoading } = useQuery({
     queryKey: ['config'],
     queryFn: async () => {
@@ -50,24 +51,23 @@ export function useWorkspaceConfig() {
     },
   })
 
+  // Every editable workspace field, keyed by its env-var name. Saved values
+  // live in the database; see src/services/workspaceProfile.js.
+  const { data: profile } = useQuery({
+    queryKey: ['workspace-profile'],
+    queryFn: async () => {
+      const res = await api.get<Record<string, string>>('/workspace/profile')
+      if (!res) throw new Error('Empty response')
+      return res
+    },
+  })
+
   const [envForm, setEnvForm] = useState<Record<string, string>>({})
   const [configForm, setConfigForm] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    if (brand) {
-      setEnvForm({
-        BUSINESS_NAME: brand.businessName || '',
-        BUSINESS_CITY: brand.businessCity || '',
-        BUSINESS_COUNTRY: brand.businessCountry || '',
-        BUSINESS_INDUSTRY: brand.businessIndustry || '',
-        BUSINESS_CERTIFICATIONS: brand.businessCertifications || '',
-        DASHBOARD_BRAND_NAME: brand.brandName || '',
-        AI_PERSONA_NAME: brand.personaName || '',
-        AI_PERSONA_GENDER: brand.personaGender || '',
-        AI_PERSONA_TITLE: brand.personaTitle || '',
-      })
-    }
-  }, [brand])
+    if (profile) setEnvForm({ ...profile })
+  }, [profile])
 
   useEffect(() => {
     if (config) {
@@ -81,8 +81,13 @@ export function useWorkspaceConfig() {
   }, [config])
 
   const envMutation = useMutation({
-    mutationFn: (data: Record<string, string>) => api.post('/config/env', data),
-    onSuccess: () => toast.success('Workspace profile saved'),
+    mutationFn: (data: Record<string, string>) => api.put('/workspace/profile', data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['workspace-profile'] })
+      queryClient.invalidateQueries({ queryKey: ['brand'] })
+      queryClient.invalidateQueries({ queryKey: ['onboarding-status'] })
+      toast.success('Workspace profile saved')
+    },
     onError: (e: Error) => toast.error(`Failed to save workspace profile: ${e.message}`),
   })
 

@@ -15,6 +15,7 @@ import websiteIntegrationSync from './services/websiteIntegrationSync.js';
 import { startApiServer, broadcastEvent } from './api.js';
 import prisma from './utils/prismaClient.js';
 import { ensureDefaultAdmin } from './auth/rbac.js';
+import { loadWorkspaceProfile } from './services/workspaceProfile.js';
 
 /**
  * Outbound OS — B2B Sales Automation Platform
@@ -39,6 +40,10 @@ async function main() {
   try {
     // ── Step 0: Ensure default admin user exists ──
     await ensureDefaultAdmin();
+
+    // Settings saved in the dashboard override .env; apply them before any
+    // service reads the business profile, time zone or country code.
+    await loadWorkspaceProfile();
 
     // ── Step 0b: Restore persisted pause flag so a crash-while-paused
     // instance doesn't silently start sending again on the next boot. ──

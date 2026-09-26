@@ -1,4 +1,4 @@
-import { Building2, Loader2, Settings2, UserRound } from 'lucide-react'
+import { Building2, Globe, Loader2, Settings2, UserRound } from 'lucide-react'
 import { SettingsPanel } from '@/components/settings/settings-panel'
 import { ActionButton } from '@/components/settings/settings-action-button'
 import { SettingsField, ToggleField } from '@/components/settings/settings-fields'
@@ -68,6 +68,69 @@ export default function WorkspaceSettingsPage() {
             label="Certifications"
             value={envForm.BUSINESS_CERTIFICATIONS || ''}
             onChange={(v) => setEnvForm({ ...envForm, BUSINESS_CERTIFICATIONS: v })}
+          />
+        </div>
+      </SettingsPanel>
+
+      <SettingsPanel
+        icon={Globe}
+        title="Location, contact and email"
+        description="When your day starts, how phone numbers are read, and what outreach emails link to and sign with."
+        footer={
+          <ActionButton
+            onClick={() => envMutation.mutate(envForm)}
+            pending={envMutation.isPending}
+            label="Save"
+          />
+        }
+      >
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <SettingsField
+            label="Time zone (e.g. Europe/London)"
+            value={envForm.BUSINESS_TIMEZONE || ''}
+            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_TIMEZONE: v })}
+          />
+          <SettingsField
+            label="Home country calling code (1, 44, 91…)"
+            value={envForm.DEFAULT_COUNTRY_CODE || ''}
+            onChange={(v) => setEnvForm({ ...envForm, DEFAULT_COUNTRY_CODE: v })}
+          />
+          <SettingsField
+            label="Currency for reports (USD, EUR, INR…)"
+            value={envForm.BUSINESS_CURRENCY || ''}
+            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_CURRENCY: v })}
+          />
+          <SettingsField
+            label="Website"
+            value={envForm.BUSINESS_WEBSITE || ''}
+            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_WEBSITE: v })}
+            placeholder="https://"
+          />
+          <SettingsField
+            label="Product catalogue link"
+            value={envForm.BUSINESS_CATALOGUE_URL || ''}
+            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_CATALOGUE_URL: v })}
+            placeholder="https://"
+          />
+          <SettingsField
+            label="Your WhatsApp number (with country code)"
+            value={envForm.BUSINESS_WHATSAPP_NUMBER || ''}
+            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_WHATSAPP_NUMBER: v })}
+          />
+          <SettingsField
+            label="Sign outreach emails as"
+            value={envForm.EMAIL_SIGNATURE_NAME || ''}
+            onChange={(v) => setEnvForm({ ...envForm, EMAIL_SIGNATURE_NAME: v })}
+          />
+          <SettingsField
+            label="Email footer note (registrations, licences)"
+            value={envForm.EMAIL_FOOTER_NOTE || ''}
+            onChange={(v) => setEnvForm({ ...envForm, EMAIL_FOOTER_NOTE: v })}
+          />
+          <SettingsField
+            label="Tagline"
+            value={envForm.BUSINESS_TAGLINE || ''}
+            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_TAGLINE: v })}
           />
         </div>
       </SettingsPanel>

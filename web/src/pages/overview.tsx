@@ -24,6 +24,7 @@ import { StageDistribution } from '@/components/ui/stage-distribution'
 import { BarList } from '@/components/ui/bar-list'
 import { SectionCard } from '@/components/ui/section-card'
 import { PageHeader } from '@/components/ui/page-header'
+import { SetupChecklist } from '@/components/onboarding/setup-checklist'
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts'
 import { ChartFrame } from '@/components/ui/chart-frame'
 
@@ -150,6 +151,8 @@ export default function OverviewPage() {
         title="Overview"
         description="Live pipeline health across every connected channel."
       />
+
+      <SetupChecklist />
 
       {/* Headline metrics */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">

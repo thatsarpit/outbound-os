@@ -45,6 +45,9 @@ import { secretsMatch } from './utils/secretsMatch.js';
 import sheetsSync from './services/sheetsSync.js';
 import whatsappCloudApi from './services/whatsappCloudApi.js';
 import { WHATSAPP_PROVIDERS, credentialState, publicCredentialSummary } from './services/whatsappProviders.js';
+import {
+  getWorkspaceProfile, saveWorkspaceProfile, isOnboardingDismissed, setOnboardingDismissed,
+} from './services/workspaceProfile.js';
 import imessageService, { normalizeIMessageServerUrl } from './services/imessage.js';
 import telegramService from './services/telegram.js';
 import {
@@ -2676,56 +2679,83 @@ app.get('/api/config/brand', (req, res) => {
   });
 });
 
-import fs from 'fs';
-import { exec } from 'child_process';
-
-// Allowlist of env keys that the dashboard is permitted to modify
-// This prevents arbitrary injection of sensitive vars like DATABASE_URL
-const ALLOWED_ENV_KEYS = new Set([
-  'AI_PERSONA_NAME', 'AI_PERSONA_GENDER', 'AI_PERSONA_TITLE',
-  'BUSINESS_NAME', 'BUSINESS_CITY', 'BUSINESS_COUNTRY', 'BUSINESS_INDUSTRY',
-  'BUSINESS_CERTIFICATIONS', 'BUSINESS_USP', 'BUSINESS_WEBSITE',
-  'DASHBOARD_BRAND_NAME',
-  'WA_HOURLY_LIMIT', 'WA_DAILY_LIMIT', 'WA_MIN_DELAY', 'WA_MAX_DELAY',
-  'WARMUP_MODE', 'WA_WARMUP_WEEK',
-]);
-
-// Escape regex metacharacters in a string (used to build safe RegExp from env key names)
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-app.post('/api/config/env', requireRole('admin'), (req, res) => {
+// POST /api/config/env — kept for the Workspace settings form. It used to
+// rewrite .env and `pm2 reload`, which silently did nothing in Docker (no
+// PM2, and the container never re-reads .env). Values now go through the
+// workspace profile: stored in the database and applied immediately.
+app.post('/api/config/env', requireRole('admin'), async (req, res) => {
   try {
-    const envPath = path.join(__dirname, '..', '.env');
-    let envContent = '';
-    if (fs.existsSync(envPath)) {
-      envContent = fs.readFileSync(envPath, 'utf8');
-    }
-    
-    for (const [key, val] of Object.entries(req.body)) {
-      // Validate key: must be in allowlist and match valid env-var-name pattern
-      if (!key || !ALLOWED_ENV_KEYS.has(key)) continue;
-      if (!/^[A-Z][A-Z0-9_]*$/.test(key)) continue;
-      if (typeof val !== 'string') continue;
-      // Sanitize value: escape double quotes and strip literal newlines to prevent injection
-      const safeVal = val.replace(/"/g, '\\"').replace(/[\r\n]/g, ' ');
-      // Build regex with properly escaped key to prevent regex injection
-      const regex = new RegExp(`^${escapeRegex(key)}=.*`, 'm');
-      if (envContent.match(regex)) {
-        envContent = envContent.replace(regex, `${key}="${safeVal}"`);
-      } else {
-        envContent += `\n${key}="${safeVal}"`;
-      }
-    }
-    fs.writeFileSync(envPath, envContent.trim() + '\n');
-    
-    // Non-blocking reload of PM2 cluster
-    exec('pm2 reload outbound-os', (err) => {
-      if (err) logger.error(`PM2 config reload failed: ${err}`);
+    const profile = await saveWorkspaceProfile(req.body || {});
+    res.json({ success: true, message: 'Saved.', profile });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message, fields: error.fields });
+  }
+});
+
+// ======================== WORKSPACE & ONBOARDING ========================
+
+app.get('/api/workspace/profile', requireRole('manager'), (_req, res) => {
+  res.json(getWorkspaceProfile());
+});
+
+app.put('/api/workspace/profile', requireRole('admin'), async (req, res) => {
+  try {
+    res.json(await saveWorkspaceProfile(req.body || {}));
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message, fields: error.fields });
+  }
+});
+
+// What a new workspace still has to do. Drives the setup wizard and the
+// "finish setting up" checklist on the overview.
+app.get('/api/onboarding/status', requireRole('manager'), async (_req, res) => {
+  try {
+    const profile = getWorkspaceProfile();
+    const [whatsappAccounts, emailAccounts, telegramAccounts, imessageAccounts, leadSources, leads, users, dismissed] = await Promise.all([
+      prisma.whatsAppAccount.findMany({
+        where: { enabled: true },
+        select: { provider: true, cloudApiPhoneId: true, cloudApiToken: true, aisensyProjectId: true, aisensyApiKey: true, aisensyCampaignApiKey: true },
+      }),
+      prisma.emailAccount.count({ where: { enabled: true } }),
+      prisma.telegramAccount.count({ where: { enabled: true, status: 'connected' } }),
+      prisma.iMessageAccount.count({ where: { enabled: true } }),
+      prisma.webhookSource.count({ where: { enabled: true } }),
+      prisma.lead.count(),
+      prisma.user.count({ where: { enabled: true } }),
+      isOnboardingDismissed(),
+    ]);
+    const channels = {
+      whatsapp: whatsappAccounts.some((account) => credentialState(account).ready),
+      email: emailAccounts > 0,
+      telegram: telegramAccounts > 0,
+      imessage: imessageAccounts > 0,
+    };
+    const steps = {
+      profile: Boolean(profile.BUSINESS_NAME),
+      channel: Object.values(channels).some(Boolean),
+      leadSource: leadSources > 0 || leads > 0,
+      team: users > 1,
+    };
+    res.json({
+      dismissed,
+      complete: steps.profile && steps.channel && steps.leadSource,
+      steps,
+      channels,
+      counts: { leadSources, leads, users },
+      profile: {
+        BUSINESS_NAME: profile.BUSINESS_NAME,
+        BUSINESS_TIMEZONE: profile.BUSINESS_TIMEZONE,
+      },
     });
-    
-    res.json({ success: true, message: 'Settings saved and server restarted successfully.' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/onboarding/dismiss', requireRole('admin'), async (req, res) => {
+  try {
+    await setOnboardingDismissed(req.body?.dismissed !== false);
+    res.json({ ok: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -877,3 +877,70 @@ describe('Lead webhook from a plain HTML form', () => {
   });
 });
 
+// ── Workspace profile and onboarding ─────────────────────────────────────────
+
+describe('Workspace profile and onboarding', () => {
+  test('a new workspace reports what is left to set up', async () => {
+    const res = await request('GET', '/api/onboarding/status', { headers: authHeader() });
+    assert.equal(res.status, 200);
+    assert.equal(typeof res.body.steps.profile, 'boolean');
+    assert.equal(typeof res.body.channels.whatsapp, 'boolean');
+    assert.equal(res.body.dismissed, false);
+  });
+
+  test('saves the profile to the database and applies it at once', async () => {
+    const save = await request('PUT', '/api/workspace/profile', {
+      headers: authHeader(),
+      body: {
+        BUSINESS_NAME: 'Harbor Supply Co.',
+        BUSINESS_TIMEZONE: 'Europe/London',
+        DEFAULT_COUNTRY_CODE: '+44',
+        BUSINESS_WEBSITE: 'https://harbor.example',
+        NOT_A_FIELD: 'ignored',
+      },
+    });
+    assert.equal(save.status, 200);
+    assert.equal(save.body.BUSINESS_NAME, 'Harbor Supply Co.');
+    assert.equal(save.body.DEFAULT_COUNTRY_CODE, '44');
+    assert.equal(save.body.NOT_A_FIELD, undefined);
+
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const row = await prisma.systemConfig.findUnique({ where: { key: 'workspace.BUSINESS_TIMEZONE' } });
+    assert.equal(row.value, 'Europe/London');
+
+    const brand = await request('GET', '/api/config/brand', { headers: authHeader() });
+    assert.equal(brand.body.businessName, 'Harbor Supply Co.');
+    assert.equal(brand.body.timezone, 'Europe/London');
+
+    const status = await request('GET', '/api/onboarding/status', { headers: authHeader() });
+    assert.equal(status.body.steps.profile, true);
+  });
+
+  test('rejects an invalid value without saving any of the batch', async () => {
+    const res = await request('PUT', '/api/workspace/profile', {
+      headers: authHeader(),
+      body: { BUSINESS_NAME: 'Should not save', BUSINESS_TIMEZONE: 'Mars/Olympus' },
+    });
+    assert.equal(res.status, 400);
+    assert.ok(res.body.fields.BUSINESS_TIMEZONE);
+    const after = await request('GET', '/api/workspace/profile', { headers: authHeader() });
+    assert.equal(after.body.BUSINESS_NAME, 'Harbor Supply Co.');
+  });
+
+  test('the old settings form endpoint saves through the same path', async () => {
+    const res = await request('POST', '/api/config/env', {
+      headers: authHeader(),
+      body: { BUSINESS_CITY: 'Leeds' },
+    });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.profile.BUSINESS_CITY, 'Leeds');
+  });
+
+  test('the checklist can be dismissed', async () => {
+    const res = await request('POST', '/api/onboarding/dismiss', { headers: authHeader(), body: {} });
+    assert.equal(res.status, 200);
+    const status = await request('GET', '/api/onboarding/status', { headers: authHeader() });
+    assert.equal(status.body.dismissed, true);
+  });
+});
+

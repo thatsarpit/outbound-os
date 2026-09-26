@@ -21,6 +21,8 @@ export const ROUTE_CAPABILITIES = [
   { route: '/channels', capability: 'page.integrations' },
   { route: '/integrations', capability: 'page.integrations' },
   { route: '/settings', capability: 'page.settings' },
+  // First-run setup writes workspace settings, so it is admin-only too.
+  { route: '/setup', capability: 'page.settings' },
 ] as const
 
 export const ROLE_PAGE_CAPABILITIES: Record<AppRole, string[]> = {

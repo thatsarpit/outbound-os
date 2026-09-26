@@ -10,6 +10,7 @@ import { TooltipProvider } from '@/components/ui'
 
 /* ── Page imports ── */
 const LoginPage = lazy(() => import('@/pages/login'))
+const SetupPage = lazy(() => import('@/pages/setup'))
 const OverviewPage = lazy(() => import('@/pages/overview'))
 const InboxPage = lazy(() => import('@/pages/inbox'))
 const LeadsPage = lazy(() => import('@/pages/leads'))
@@ -153,6 +154,7 @@ const PAGE_ROUTES: Array<{ path: string; element: React.ReactNode }> = [
   { path: 'team', element: <TeamPage /> },
   { path: 'activity', element: <ActivityPage /> },
   { path: 'account', element: <AccountPage /> },
+  { path: 'setup', element: <SetupPage /> },
 ]
 
 const pageRoutes = () =>

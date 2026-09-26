@@ -10,11 +10,14 @@ import businessProfile from '../businessProfile.js';
 const REPORT_TYPES = new Set(['weekly', 'monthly']);
 // Day-month-year reads the same way in most of the world; en-US would not.
 const REPORT_LOCALE = 'en-GB';
-const currencyFormatter = new Intl.NumberFormat(REPORT_LOCALE, {
-  style: 'currency',
-  currency: process.env.BUSINESS_CURRENCY || 'USD',
-  maximumFractionDigits: 0,
-});
+// Read per report, so a currency changed in the dashboard applies at once.
+const currencyFormatter = {
+  format: (value) => new Intl.NumberFormat(REPORT_LOCALE, {
+    style: 'currency',
+    currency: process.env.BUSINESS_CURRENCY || 'USD',
+    maximumFractionDigits: 0,
+  }).format(value),
+};
 
 function formatDate(date, options = {}) {
   return new Intl.DateTimeFormat(REPORT_LOCALE, {
