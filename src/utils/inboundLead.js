@@ -117,16 +117,19 @@ export function mapInboundLead(payload, fieldMap = {}) {
     return null;
   };
 
-  const rawMobile = resolve('mobile');
+  // Public forms feed this, so every field is capped: a bot pasting a
+  // megabyte into "name" should not become a megabyte-long lead.
+  const clip = (value, max) => (value == null ? null : value.slice(0, max));
+  const rawMobile = clip(resolve('mobile'), 40);
   return {
-    name: resolve('name') || 'Unknown',
+    name: clip(resolve('name'), 200) || 'Unknown',
     rawMobile,
     mobile: normalizeInboundMobile(rawMobile),
-    email: resolve('email'),
-    company: resolve('company'),
-    product: resolve('product'),
-    country: resolve('country'),
-    quantity: resolve('quantity'),
+    email: clip(resolve('email'), 254),
+    company: clip(resolve('company'), 200),
+    product: clip(resolve('product'), 1000),
+    country: clip(resolve('country'), 100),
+    quantity: clip(resolve('quantity'), 100),
     emailConsent: consentGiven(resolve('consent')),
   };
 }

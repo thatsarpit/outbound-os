@@ -962,3 +962,101 @@ describe('Workspace profile and onboarding', () => {
   });
 });
 
+// ── Role checks ──────────────────────────────────────────────────────────────
+
+describe('View-only users cannot change or export data', () => {
+  test('a viewer can read leads but not delete a number, cancel sends or export', async () => {
+    const created = await request('POST', '/api/users', {
+      headers: authHeader(),
+      body: { name: 'Read Only', email: 'viewer@example.test', password: 'viewer password 123', role: 'viewer' },
+    });
+    assert.equal(created.status, 200);
+    const login = await request('POST', '/api/auth/login', {
+      body: { email: 'viewer@example.test', password: 'viewer password 123' },
+    });
+    const headers = { Authorization: `Bearer ${login.body.token}` };
+
+    assert.equal((await request('GET', '/api/leads', { headers })).status, 200);
+    assert.equal((await request('DELETE', '/api/whatsapp/accounts/1', { headers })).status, 403);
+    assert.equal((await request('POST', '/api/messages/cancel-all', { headers })).status, 403);
+    assert.equal((await request('GET', '/api/export/csv', { headers })).status, 403);
+    assert.equal((await request('GET', '/api/config', { headers })).status, 403);
+    assert.equal((await request('POST', '/api/leads', { headers, body: { name: 'X', mobile: '15550001111' } })).status, 403);
+  });
+});
+
+describe('Provider webhooks refuse unauthenticated deliveries', () => {
+  test('AiSensy webhook is closed until a secret is set', async () => {
+    const fake = { topic: 'message.sender.user', data: { message: { phone_number: '15550002222', message_content: { text: 'fake reply' } } } };
+    const res = await request('POST', '/webhook/whatsapp-cloud', { body: fake });
+    assert.equal(res.status, 401);
+  });
+
+  test('iMessage webhook needs its secret', async () => {
+    const res = await request('POST', '/webhook/imessage', { body: { type: 'new-message' } });
+    assert.equal(res.status, 401);
+    const ok = await request('POST', '/webhook/imessage?token=test-imessage-webhook-secret', { body: { type: 'noop' } });
+    assert.equal(ok.status, 200);
+  });
+});
+
+describe('Plain HTML form niceties', () => {
+  let target;
+  const postForm = (fields, headers = {}) => new Promise((resolve, reject) => {
+    const body = new URLSearchParams(fields).toString();
+    const url = new URL(target, baseUrl);
+    const req = http.request({
+      method: 'POST', hostname: url.hostname, port: url.port, path: url.pathname + url.search,
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(body), ...headers },
+    }, (res) => {
+      let text = '';
+      res.on('data', (c) => { text += c; });
+      res.on('end', () => resolve({ status: res.statusCode, location: res.headers.location, text }));
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
+
+  test('setup', async () => {
+    const source = await request('POST', '/api/webhooks/sources/from-preset', {
+      headers: authHeader(), body: { presetId: 'website', name: 'Nicety form' },
+    });
+    target = `${source.body.webhookUrl}?apiKey=${source.body.apiKey}`;
+  });
+
+  test('shows a thank-you page instead of JSON', async () => {
+    const res = await postForm({ name: 'Page Viewer', email: 'page@example.test' });
+    assert.equal(res.status, 200);
+    assert.match(res.text, /Thank you/);
+  });
+
+  test('silently drops a filled spam trap', async () => {
+    const res = await postForm({ name: 'Bot', email: 'bot@example.test', _gotcha: 'http://spam.example' });
+    assert.equal(res.status, 200);
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    assert.equal(await prisma.lead.count({ where: { email: 'bot@example.test' } }), 0);
+  });
+
+  test('redirects back only to the form\'s own site', async () => {
+    const same = await postForm(
+      { name: 'Back Home', email: 'home@example.test', _next: 'https://shop.example/thanks' },
+      { Origin: 'https://shop.example' },
+    );
+    assert.equal(same.status, 303);
+    assert.equal(same.location, 'https://shop.example/thanks');
+
+    const elsewhere = await postForm(
+      { name: 'Phish Target', email: 'phish@example.test', _next: 'https://evil.example/login' },
+      { Origin: 'https://shop.example' },
+    );
+    assert.equal(elsewhere.status, 200, 'no open redirect');
+  });
+
+  test('caps oversized fields', async () => {
+    await postForm({ name: 'N'.repeat(5000), email: 'long@example.test' });
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const lead = await prisma.lead.findFirst({ where: { email: 'long@example.test' } });
+    assert.equal(lead.name.length, 200);
+  });
+});
+

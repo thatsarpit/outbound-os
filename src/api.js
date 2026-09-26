@@ -522,6 +522,38 @@ app.get('/healthz', async (_req, res) => {
 // It was previously defined ~5,000 lines further down, which put it behind
 // requireRole('viewer') — so every external sender, which by definition has no
 // Clerk session, got "Not signed in." and no lead ever arrived.
+/**
+ * What a visitor sees after a plain HTML form posts to a lead webhook:
+ * either a redirect back to the form's own site (_next), or a small thank-you
+ * page instead of raw JSON.
+ *
+ * _next is only followed to the host the form was submitted from (its Origin
+ * or Referer). Anything else would make this server an open redirect: the
+ * webhook key sits in public form HTML, so anyone could otherwise build a link
+ * that bounces through your domain to a phishing page.
+ */
+function sendFormThanks(req, res, payload) {
+  const next = String(payload?._next || '').trim();
+  if (next) {
+    try {
+      const target = new URL(next);
+      const origin = req.get('origin') || req.get('referer') || '';
+      const fromHost = origin ? new URL(origin).host : '';
+      if (/^https?:$/.test(target.protocol) && fromHost && target.host === fromHost) {
+        return res.redirect(303, target.toString());
+      }
+    } catch { /* invalid URL: fall through to the thank-you page */ }
+  }
+  const name = String(businessProfile.businessName || 'us')
+    .replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  res.status(200).type('html').send(`<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Thank you</title>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#f5f6f8;color:#1f2328;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0;padding:16px}
+main{background:#fff;border:1px solid #dde1e6;border-radius:12px;padding:32px;max-width:420px;text-align:center}
+h1{font-size:20px;margin:0 0 8px}p{margin:0;color:#565d66;line-height:1.6}</style></head>
+<body><main><h1>Thank you</h1><p>Your message reached ${name}. We will get back to you shortly.</p></main></body></html>`);
+}
+
 app.post('/api/webhooks/inbound/:source', async (req, res) => {
   try {
     const ws = await prisma.webhookSource.findUnique({ where: { source: req.params.source } });
@@ -535,7 +567,16 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
       return res.status(401).json({ error: 'Invalid API key' });
     }
 
-    const payload = req.body;
+    const payload = req.body || {};
+    const fromHtmlForm = Boolean(req.is('application/x-www-form-urlencoded'));
+
+    // Spam trap: a hidden field humans never fill in (Formspree calls it
+    // _gotcha). Bots fill every field, so a value here means a bot. Answer as
+    // if it worked, so the bot learns nothing, and store nothing.
+    if (String(payload._gotcha ?? '').trim()) {
+      return fromHtmlForm ? sendFormThanks(req, res, payload) : res.json({ ok: true });
+    }
+
     let fieldMap;
     try { fieldMap = JSON.parse(ws.fieldMap || '{}'); } catch { fieldMap = {}; }
 
@@ -678,6 +719,7 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
       sheetsSync.dispatch('lead.created', lead).catch(() => {});
     }
 
+    if (fromHtmlForm) return sendFormThanks(req, res, payload);
     res.json({ ok: true, leadId: lead.id, created: !existingLead, outreach });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -1468,7 +1510,7 @@ app.get('/api/leads/:id', async (req, res, next) => {
   }
 });
 
-app.post('/api/leads', async (req, res) => {
+app.post('/api/leads', requireRole('agent'), async (req, res) => {
   try {
     const { name, mobile, company, email, product, country, quantity, tags, notes } = req.body;
     if (!name || !mobile) return res.status(400).json({ error: 'Name and mobile are required' });
@@ -1516,7 +1558,7 @@ app.post('/api/leads', async (req, res) => {
   }
 });
 
-app.patch('/api/leads/:id', async (req, res) => {
+app.patch('/api/leads/:id', requireRole('agent'), async (req, res) => {
   try {
     const updates = {};
     const allowed = [
@@ -1705,7 +1747,7 @@ app.get('/api/users', requireRole('manager'), async (req, res) => {
 });
 
 
-app.post('/api/leads/:id/check-wa', async (req, res) => {
+app.post('/api/leads/:id/check-wa', requireRole('agent'), async (req, res) => {
   try {
     const lead = await prisma.lead.findUnique({ where: { id: parseInt(req.params.id) } });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
@@ -1726,7 +1768,7 @@ app.post('/api/leads/:id/check-wa', async (req, res) => {
   }
 });
 
-app.post('/api/leads/:id/rescore', async (req, res) => {
+app.post('/api/leads/:id/rescore', requireRole('agent'), async (req, res) => {
   try {
     const score = await leadScorer.calculateScore(parseInt(req.params.id));
     const lead = await prisma.lead.findUnique({ where: { id: parseInt(req.params.id) } });
@@ -1940,7 +1982,7 @@ app.post('/api/leads/:id/ai-outreach/draft-email', requireRole('agent'), async (
 
 // ======================== CSV IMPORT / EXPORT ========================
 
-app.post('/api/import/csv', upload.single('file'), async (req, res) => {
+app.post('/api/import/csv', requireRole('manager'), upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No CSV file uploaded' });
 
@@ -2125,7 +2167,7 @@ app.get('/api/import/batches', async (req, res) => {
   }
 });
 
-app.get('/api/export/csv', async (req, res) => {
+app.get('/api/export/csv', requireRole('manager'), async (req, res) => {
   try {
     const csvString = await csvExporter.exportLeads(req.query);
     res.setHeader('Content-Type', 'text/csv');
@@ -2420,7 +2462,7 @@ app.get('/api/whatsapp/status', async (req, res) => {
     }
   });
 
-  app.post('/api/whatsapp/accounts', async (req, res) => {
+  app.post('/api/whatsapp/accounts', requireRole('admin'), async (req, res) => {
     try {
       const account = await whatsappManager.addAccount(req.body);
       res.json({ success: true, account });
@@ -2429,7 +2471,7 @@ app.get('/api/whatsapp/status', async (req, res) => {
     }
   });
 
-  app.post('/api/whatsapp/accounts/:id/enable', async (req, res) => {
+  app.post('/api/whatsapp/accounts/:id/enable', requireRole('admin'), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id) || id < 1) return res.status(400).json({ error: 'Invalid account id' });
@@ -2440,7 +2482,7 @@ app.get('/api/whatsapp/status', async (req, res) => {
     }
   });
 
-  app.post('/api/whatsapp/accounts/:id/disable', async (req, res) => {
+  app.post('/api/whatsapp/accounts/:id/disable', requireRole('admin'), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id) || id < 1) return res.status(400).json({ error: 'Invalid account id' });
@@ -2451,7 +2493,7 @@ app.get('/api/whatsapp/status', async (req, res) => {
     }
   });
 
-  app.put('/api/whatsapp/accounts/:id', async (req, res) => {
+  app.put('/api/whatsapp/accounts/:id', requireRole('admin'), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id) || id < 1) return res.status(400).json({ error: 'Invalid account id' });
@@ -2475,7 +2517,7 @@ app.get('/api/whatsapp/status', async (req, res) => {
     }
   });
 
-  app.delete('/api/whatsapp/accounts/:id', async (req, res) => {
+  app.delete('/api/whatsapp/accounts/:id', requireRole('admin'), async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       if (isNaN(id) || id < 1) return res.status(400).json({ error: 'Invalid account id' });
@@ -2489,7 +2531,7 @@ app.get('/api/whatsapp/status', async (req, res) => {
 
   // ── WhatsApp Admin Operations ──
 
-  app.post('/api/whatsapp/reset-counters', async (req, res) => {
+  app.post('/api/whatsapp/reset-counters', requireRole('admin'), async (req, res) => {
     try {
       await prisma.whatsAppAccount.updateMany({
         data: { messagesSentToday: 0, lastResetAt: new Date() }
@@ -2502,7 +2544,7 @@ app.get('/api/whatsapp/status', async (req, res) => {
 
   // ── Message Admin Operations ──
 
-  app.post('/api/messages/cancel-all', async (req, res) => {
+  app.post('/api/messages/cancel-all', requireRole('manager'), async (req, res) => {
     try {
       const result = await prisma.message.updateMany({
         where: { status: 'queued', direction: 'outbound' },
@@ -2643,7 +2685,7 @@ app.get('/api/whatsapp/status', async (req, res) => {
     }
   });
 
-app.get('/api/config', async (req, res) => {
+app.get('/api/config', requireRole('manager'), async (req, res) => {
   try {
     const configs = await prisma.systemConfig.findMany();
     const configMap = Object.fromEntries(configs.map((c) => [c.key, c.value]));
@@ -4247,7 +4289,7 @@ app.get('/api/analytics/team', requireRole('manager'), async (req, res) => {
 });
 
 // PATCH /api/leads/:id/deal — record deal value when a lead closes
-app.patch('/api/leads/:id/deal', async (req, res) => {
+app.patch('/api/leads/:id/deal', requireRole('agent'), async (req, res) => {
   try {
     const { dealValue, convertedAt } = req.body;
     if (dealValue == null) return res.status(400).json({ error: 'dealValue required' });
@@ -4265,7 +4307,7 @@ app.patch('/api/leads/:id/deal', async (req, res) => {
 });
 
 // ======================== LEAD ENRICHMENT ========================
-app.post('/api/leads/:id/enrich', async (req, res) => {
+app.post('/api/leads/:id/enrich', requireRole('agent'), async (req, res) => {
   try {
     const lead = await prisma.lead.findUnique({ where: { id: parseInt(req.params.id) } });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
@@ -4351,7 +4393,7 @@ app.get('/api/leads/duplicates', async (req, res) => {
 
 // POST /api/leads/merge — merge secondary lead into primary
 // Moves all messages, notes, tasks to primary. Deletes secondary.
-app.post('/api/leads/merge', async (req, res) => {
+app.post('/api/leads/merge', requireRole('manager'), async (req, res) => {
   try {
     const { primaryId, secondaryId } = req.body;
     if (!primaryId || !secondaryId) return res.status(400).json({ error: 'primaryId and secondaryId required' });
@@ -4402,7 +4444,7 @@ app.post('/api/leads/merge', async (req, res) => {
 
 // ======================== GOOGLE SHEETS SYNC ========================
 // GET /api/settings/sheets-webhook
-app.get('/api/settings/sheets-webhook', async (req, res) => {
+app.get('/api/settings/sheets-webhook', requireRole('manager'), async (req, res) => {
   try {
     const rows = await prisma.systemConfig.findMany({
       where: { key: { in: ['sheets.webhook_url', 'sheets.enabled', 'sheets.events'] } },
@@ -4418,7 +4460,7 @@ app.get('/api/settings/sheets-webhook', async (req, res) => {
 });
 
 // POST /api/settings/sheets-webhook
-app.post('/api/settings/sheets-webhook', async (req, res) => {
+app.post('/api/settings/sheets-webhook', requireRole('admin'), async (req, res) => {
   try {
     const { url, enabled = true, events } = req.body;
     if (!url) return res.status(400).json({ error: 'url required' });
@@ -4439,7 +4481,7 @@ app.post('/api/settings/sheets-webhook', async (req, res) => {
 });
 
 // POST /api/settings/sheets-webhook/test
-app.post('/api/settings/sheets-webhook/test', async (req, res) => {
+app.post('/api/settings/sheets-webhook/test', requireRole('admin'), async (req, res) => {
   try {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: 'url required' });
@@ -4449,7 +4491,7 @@ app.post('/api/settings/sheets-webhook/test', async (req, res) => {
 });
 
 // DELETE /api/settings/sheets-webhook
-app.delete('/api/settings/sheets-webhook', async (req, res) => {
+app.delete('/api/settings/sheets-webhook', requireRole('admin'), async (req, res) => {
   try {
     await prisma.systemConfig.deleteMany({
       where: { key: { in: ['sheets.webhook_url', 'sheets.enabled', 'sheets.events'] } },
@@ -4460,7 +4502,7 @@ app.delete('/api/settings/sheets-webhook', async (req, res) => {
 });
 
 // ======================== WEBHOOK SUBSCRIPTIONS ========================
-app.get('/api/webhooks/subscriptions', async (req, res) => {
+app.get('/api/webhooks/subscriptions', requireRole('manager'), async (req, res) => {
   try {
     const subs = await prisma.webhookSubscription.findMany({ orderBy: { createdAt: 'desc' } });
     res.json(subs.map((s) => ({ ...s, secret: s.secret ? '••••••••' : '' })));
@@ -4594,7 +4636,7 @@ app.get('/api/leads/:id/timeline', async (req, res) => {
 
 // ======================== MEDIA FILE LIBRARY ========================
 // POST /api/media/upload — upload an image/PDF/video for WA sending
-app.post('/api/media/upload', mediaUpload.single('file'), async (req, res) => {
+app.post('/api/media/upload', requireRole('agent'), mediaUpload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file provided' });
     const ext = path.extname(req.file.originalname) || '';
@@ -4631,7 +4673,7 @@ app.get('/api/media', async (req, res) => {
 });
 
 // DELETE /api/media/:id
-app.delete('/api/media/:id', async (req, res) => {
+app.delete('/api/media/:id', requireRole('agent'), async (req, res) => {
   try {
     const f = await prisma.mediaFile.findUnique({ where: { id: parseInt(req.params.id) } });
     if (!f) return res.status(404).json({ error: 'File not found' });
@@ -4649,7 +4691,7 @@ app.delete('/api/media/:id', async (req, res) => {
 // reachable URL or a media ID obtained by uploading to POST /{phone_id}/media.
 // data/media is not served publicly, so neither is available yet. Returning 501
 // keeps the failure legible instead of surfacing an opaque upstream error.
-app.post('/api/leads/:id/send-media', async (req, res) => {
+app.post('/api/leads/:id/send-media', requireRole('agent'), async (req, res) => {
   res.status(501).json({
     error: 'WhatsApp media sending is not available yet — it needs the Cloud API media upload flow. Send the file as a link in a text message for now.',
   });
@@ -4938,29 +4980,27 @@ function aisensyAlreadyHandled(notificationId) {
 }
 
 /**
- * Verify X-AiSensy-Signature over the raw request body.
+ * Authenticate an AiSensy webhook delivery. Accepted when either:
+ *   - X-AiSensy-Signature is HMAC-SHA256 (hex) of the raw body with
+ *     AISENSY_WEBHOOK_SECRET, or
+ *   - the webhook URL carries ?token=<AISENSY_WEBHOOK_SECRET>, for accounts
+ *     where AiSensy does not sign deliveries (set the URL in their dashboard
+ *     as https://<host>/webhook/whatsapp-cloud?token=<secret>).
  *
- * Returns true when the signature is valid OR when no secret is configured
- * (in which case the endpoint is unauthenticated and says so loudly).
- *
- * NOTE: AiSensy's docs state the header carries a "signed payload" but do not
- * publish the algorithm. HMAC-SHA256 hex over the raw body is the conventional
- * scheme and what is implemented here. Confirm with AiSensy support before
- * relying on it — until AISENSY_WEBHOOK_SECRET is set this endpoint accepts
- * anything that reaches it, which means anyone who learns the URL can inject
- * fake inbound replies. That is a go-live blocker, not a nice-to-have.
+ * With no secret configured every delivery is rejected. An open endpoint here
+ * would let anyone who learns the URL inject fake replies, which stop
+ * follow-ups and can mark leads as interested.
  */
 function aisensySignatureValid(req) {
   const secret = process.env.AISENSY_WEBHOOK_SECRET;
-  if (!secret) return true;
+  if (!secret) return false;
 
-  const provided = req.get('X-AiSensy-Signature') || '';
-  if (!provided || !req.rawBody) return false;
-
-  const expected = crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex');
-  const a = Buffer.from(provided.replace(/^sha256=/, ''), 'utf8');
-  const b = Buffer.from(expected, 'utf8');
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
+  const provided = String(req.get('X-AiSensy-Signature') || '').replace(/^sha256=/, '');
+  if (provided && req.rawBody) {
+    const expected = crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex');
+    if (secretsEqual(provided, expected)) return true;
+  }
+  return secretsEqual(req.query.token, secret);
 }
 
 /** Map an AiSensy message status onto our Message.ackStatus scale. */
@@ -5052,15 +5092,13 @@ app.get('/webhook/whatsapp-cloud', (_req, res) => res.status(200).send('ok'));
 
 app.post('/webhook/whatsapp-cloud', async (req, res) => {
   if (!aisensySignatureValid(req)) {
-    logger.warn('AiSensy webhook rejected — bad X-AiSensy-Signature');
-    return res.sendStatus(403);
+    logger.warn(process.env.AISENSY_WEBHOOK_SECRET
+      ? 'AiSensy webhook rejected — bad signature or token'
+      : 'AiSensy webhook rejected — set AISENSY_WEBHOOK_SECRET to accept AiSensy webhooks');
+    return res.sendStatus(401);
   }
   // Ack before doing any work; AiSensy retries anything that is not 2xx.
   res.sendStatus(200);
-
-  if (!process.env.AISENSY_WEBHOOK_SECRET) {
-    logger.warn('⚠️ AiSensy webhook is UNAUTHENTICATED — set AISENSY_WEBHOOK_SECRET before going live');
-  }
 
   try {
     const { id: notificationId, topic, data, project_id: projectId, delivery_attempt: attempt } = req.body || {};
@@ -5271,18 +5309,13 @@ app.post('/webhook/brevo', async (req, res) => {
 app.post('/webhook/imessage', async (req, res) => {
   const secret = process.env.IMESSAGE_WEBHOOK_SECRET || '';
   const provided = String(req.get('x-outboundos-webhook-secret') || req.query.token || '');
-  const remoteAddress = String(req.ip || req.socket?.remoteAddress || '');
-  const isLoopback = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(remoteAddress);
-  const validSecret = secret && provided &&
-    Buffer.byteLength(secret) === Buffer.byteLength(provided) &&
-    crypto.timingSafeEqual(Buffer.from(secret), Buffer.from(provided));
-
-  // If an operator configured a secret it is mandatory even on loopback; this
-  // prevents another local process from impersonating BlueBubbles. Without a
-  // configured secret, retain the localhost-only bootstrap path and reject all
-  // tunnel/public traffic.
-  if ((secret && !validSecret) || (!secret && !isLoopback)) {
-    logger.warn('[iMessage webhook] Rejected request with missing or invalid secret');
+  // Always required. The old localhost exception trusted whatever reached the
+  // app as 127.0.0.1, which includes public traffic behind a local proxy that
+  // does not forward the client address.
+  if (!secret || !secretsEqual(provided, secret)) {
+    logger.warn(secret
+      ? '[iMessage webhook] Rejected request with missing or invalid secret'
+      : '[iMessage webhook] Rejected — set IMESSAGE_WEBHOOK_SECRET to accept BlueBubbles webhooks');
     return res.sendStatus(401);
   }
 
@@ -5546,7 +5579,7 @@ app.post('/api/campaigns/:id/test-send', requireRole('manager'), async (req, res
 });
 
 // ======================== INBOUND WEBHOOKS ========================
-app.get('/api/webhooks/sources', async (req, res) => {
+app.get('/api/webhooks/sources', requireRole('manager'), async (req, res) => {
   try {
     const sources = await prisma.webhookSource.findMany({ orderBy: { createdAt: 'desc' } });
     // Never expose raw apiKey — send masked version
@@ -5735,7 +5768,7 @@ app.get('/api/leads/:id/notes', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/leads/:id/notes', async (req, res) => {
+app.post('/api/leads/:id/notes', requireRole('agent'), async (req, res) => {
   try {
     const { content, type = 'note' } = req.body;
     if (!content?.trim()) return res.status(400).json({ error: 'content required' });
@@ -5746,7 +5779,7 @@ app.post('/api/leads/:id/notes', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/leads/:id/notes/:noteId', async (req, res) => {
+app.delete('/api/leads/:id/notes/:noteId', requireRole('agent'), async (req, res) => {
   try {
     await prisma.leadNote.delete({ where: { id: parseInt(req.params.noteId) } });
     res.json({ ok: true });
@@ -5764,7 +5797,7 @@ app.get('/api/leads/:id/tasks', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/leads/:id/tasks', async (req, res) => {
+app.post('/api/leads/:id/tasks', requireRole('agent'), async (req, res) => {
   try {
     const { title, dueAt } = req.body;
     if (!title?.trim()) return res.status(400).json({ error: 'title required' });
@@ -5775,7 +5808,7 @@ app.post('/api/leads/:id/tasks', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.patch('/api/leads/:id/tasks/:taskId', async (req, res) => {
+app.patch('/api/leads/:id/tasks/:taskId', requireRole('agent'), async (req, res) => {
   try {
     const { done, title, dueAt } = req.body;
     const data = {};
@@ -5787,7 +5820,7 @@ app.patch('/api/leads/:id/tasks/:taskId', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/leads/:id/tasks/:taskId', async (req, res) => {
+app.delete('/api/leads/:id/tasks/:taskId', requireRole('agent'), async (req, res) => {
   try {
     await prisma.leadTask.delete({ where: { id: parseInt(req.params.taskId) } });
     res.json({ ok: true });

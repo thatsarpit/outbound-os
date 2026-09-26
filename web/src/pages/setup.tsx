@@ -483,6 +483,10 @@ function CreatedSource({
   <input name="phone" placeholder="WhatsApp number">
   <textarea name="message" placeholder="What do you need?"></textarea>
   <label><input type="checkbox" name="email_consent" value="yes"> Email me offers and updates</label>
+  <!-- Spam trap: leave hidden and empty. -->
+  <input type="text" name="_gotcha" style="display:none" tabindex="-1" autocomplete="off">
+  <!-- Optional: page on your site to show after sending. -->
+  <input type="hidden" name="_next" value="https://your-website.com/thank-you">
   <button type="submit">Send</button>
 </form>`
   const isForm = created.card.name === 'Website form'
