@@ -49,7 +49,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/analytics', label: 'Analytics', icon: BarChart3, capability: 'page.analytics' },
   { to: '/team', label: 'Team', icon: UserCog, capability: 'page.team' },
   { to: '/activity', label: 'Activity', icon: History, capability: 'page.activity' },
-  { to: '/channels', label: 'Channels', icon: Radio, capability: 'page.integrations' },
+  { to: '/integrations', label: 'Integrations', icon: Radio, capability: 'page.integrations' },
   { to: '/settings', label: 'Settings', icon: Settings, capability: 'page.settings' },
 ]
 
@@ -66,7 +66,7 @@ const NAV_GROUPS: Array<{ label: string; routes: string[] }> = [
   { label: 'Operate', routes: ['/overview', '/inbox', '/leads', '/pipeline'] },
   { label: 'Sell', routes: ['/orders', '/products', '/customers', '/revenue'] },
   { label: 'Grow', routes: ['/campaigns', '/templates', '/import', '/analytics'] },
-  { label: 'Configure', routes: ['/team', '/channels', '/activity', '/settings'] },
+  { label: 'Configure', routes: ['/team', '/integrations', '/activity', '/settings'] },
 ]
 
 /** Every nav item must live in a group, or it silently will not render. */

@@ -7,7 +7,8 @@ export interface OnboardingStatus {
   complete: boolean
   steps: { profile: boolean; channel: boolean; leadSource: boolean; team: boolean }
   channels: { whatsapp: boolean; email: boolean; telegram: boolean; imessage: boolean }
-  counts: { leadSources: number; leads: number; users: number }
+  counts: { leadSources: number; leads: number; users: number; outgoingWebhooks: number }
+  integrations: { googleSheets: boolean; outgoingWebhooks: boolean; mcp: boolean }
   profile: { BUSINESS_NAME: string; BUSINESS_TIMEZONE: string }
 }
 

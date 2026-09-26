@@ -53,7 +53,7 @@ const NAV_ROUTES: { to: string; label: string; icon: React.ElementType; capabili
   { to: '/import', label: 'Import', icon: Upload, capability: 'page.import' },
   { to: '/team', label: 'Team', icon: UserCog, capability: 'page.team' },
   { to: '/activity', label: 'Activity', icon: History, capability: 'page.activity' },
-  { to: '/channels', label: 'Channels', icon: Plug, capability: 'page.integrations' },
+  { to: '/integrations', label: 'Integrations', icon: Plug, capability: 'page.integrations' },
   { to: '/settings', label: 'Settings', icon: Settings, capability: 'page.settings' },
 ]
 

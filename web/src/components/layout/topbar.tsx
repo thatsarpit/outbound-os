@@ -29,7 +29,7 @@ const PAGE_TITLES: Array<{ route: string; title: string }> = [
   { route: '/templates', title: 'Templates' },
   { route: '/import', title: 'Import' },
   { route: '/channels', title: 'Channels' },
-  { route: '/integrations', title: 'Channels' },
+  { route: '/integrations', title: 'Integrations' },
   { route: '/settings', title: 'Settings' },
 ]
 

@@ -301,12 +301,34 @@ async function main() {
 }
 
 // ── Graceful shutdown ──
+let shuttingDown = false;
+
 async function gracefulShutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
   logger.info(`${signal} received — shutting down Outbound OS gracefully...`);
 
-  // Stop accepting new HTTP connections (give in-flight requests up to 5s)
+  // Never hang: a stuck step must not keep the process alive until Docker or
+  // systemd kills it mid-write.
+  setTimeout(() => {
+    logger.error('Shutdown took longer than 15s — forcing exit');
+    process.exit(1);
+  }, 15_000).unref();
+
+  // Stop accepting new connections and give in-flight requests up to 5s.
+  // close() alone waits for every open connection, and an open dashboard
+  // keeps its live-updates stream open indefinitely, so shutdown used to
+  // hang for as long as anyone had the app open.
   if (global.__httpServer) {
-    await new Promise(resolve => global.__httpServer.close(resolve)).catch(() => {});
+    const server = global.__httpServer;
+    await new Promise((resolve) => {
+      server.close(() => resolve());
+      server.closeIdleConnections?.();
+      setTimeout(() => {
+        server.closeAllConnections?.();
+        resolve();
+      }, 5_000).unref();
+    }).catch(() => {});
   }
 
   try {

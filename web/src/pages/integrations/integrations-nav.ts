@@ -1,9 +1,16 @@
-import { Mail, MessageSquare, Send, Sheet, Webhook } from 'lucide-react'
+import { LayoutGrid, Mail, MessageSquare, Send, Sheet, Webhook } from 'lucide-react'
 
 /**
  * Channel catalog for the /integrations/* sub-routes.
  */
 export const INTEGRATION_TABS = [
+  {
+    id: 'all',
+    to: '/integrations/all',
+    label: 'All',
+    description: 'Everything Outbound OS connects to: channels, lead sources and data exports.',
+    icon: LayoutGrid,
+  },
   {
     id: 'whatsapp',
     to: '/integrations/whatsapp',

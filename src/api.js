@@ -2711,7 +2711,7 @@ app.put('/api/workspace/profile', requireRole('admin'), async (req, res) => {
 app.get('/api/onboarding/status', requireRole('manager'), async (_req, res) => {
   try {
     const profile = getWorkspaceProfile();
-    const [whatsappAccounts, emailAccounts, telegramAccounts, imessageAccounts, leadSources, leads, users, dismissed] = await Promise.all([
+    const [whatsappAccounts, emailAccounts, telegramAccounts, imessageAccounts, leadSources, leads, users, dismissed, sheetsRow, subscriptions] = await Promise.all([
       prisma.whatsAppAccount.findMany({
         where: { enabled: true },
         select: { provider: true, cloudApiPhoneId: true, cloudApiToken: true, aisensyProjectId: true, aisensyApiKey: true, aisensyCampaignApiKey: true },
@@ -2723,6 +2723,8 @@ app.get('/api/onboarding/status', requireRole('manager'), async (_req, res) => {
       prisma.lead.count(),
       prisma.user.count({ where: { enabled: true } }),
       isOnboardingDismissed(),
+      prisma.systemConfig.findUnique({ where: { key: 'sheets.enabled' } }),
+      prisma.webhookSubscription.count(),
     ]);
     const channels = {
       whatsapp: whatsappAccounts.some((account) => credentialState(account).ready),
@@ -2741,7 +2743,12 @@ app.get('/api/onboarding/status', requireRole('manager'), async (_req, res) => {
       complete: steps.profile && steps.channel && steps.leadSource,
       steps,
       channels,
-      counts: { leadSources, leads, users },
+      counts: { leadSources, leads, users, outgoingWebhooks: subscriptions },
+      integrations: {
+        googleSheets: sheetsRow?.value === 'true',
+        outgoingWebhooks: subscriptions > 0,
+        mcp: Boolean(process.env.MCP_SERVICE_TOKEN),
+      },
       profile: {
         BUSINESS_NAME: profile.BUSINESS_NAME,
         BUSINESS_TIMEZONE: profile.BUSINESS_TIMEZONE,

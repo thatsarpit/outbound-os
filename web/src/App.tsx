@@ -11,6 +11,7 @@ import { TooltipProvider } from '@/components/ui'
 /* ── Page imports ── */
 const LoginPage = lazy(() => import('@/pages/login'))
 const SetupPage = lazy(() => import('@/pages/setup'))
+const IntegrationCataloguePage = lazy(() => import('@/pages/integrations/catalogue'))
 const OverviewPage = lazy(() => import('@/pages/overview'))
 const InboxPage = lazy(() => import('@/pages/inbox'))
 const LeadsPage = lazy(() => import('@/pages/leads'))
@@ -192,7 +193,8 @@ export default function App() {
                       <Route path="commerce" element={<CommerceSettingsPage />} />
                     </Route>
                     <Route path="integrations" element={<IntegrationsLayout />}>
-                      <Route index element={<WhatsAppIntegrationPage />} />
+                      <Route index element={<IntegrationCataloguePage />} />
+                      <Route path="all" element={<IntegrationCataloguePage />} />
                       <Route path="whatsapp" element={<WhatsAppIntegrationPage />} />
                       <Route path="email" element={<EmailIntegrationPage />} />
                       <Route path="telegram" element={<TelegramIntegrationPage />} />
@@ -213,7 +215,8 @@ export default function App() {
                   <Route index element={<RoleHomeRoute />} />
                   {pageRoutes()}
                   <Route path="integrations" element={<IntegrationsLayout />}>
-                    <Route index element={<Navigate to="/integrations/whatsapp" replace />} />
+                    <Route index element={<Navigate to="/integrations/all" replace />} />
+                    <Route path="all" element={<IntegrationCataloguePage />} />
                     <Route path="whatsapp" element={<WhatsAppIntegrationPage />} />
                     <Route path="email" element={<EmailIntegrationPage />} />
                     <Route path="telegram" element={<TelegramIntegrationPage />} />
