@@ -16,11 +16,18 @@
 # Optional MCP server, so Claude or another AI client can work your CRM:
 #   docker compose --profile mcp up -d
 # It needs MCP_SERVICE_TOKEN (shared with the app) and MCP_BEARER_TOKEN in .env.
+#
+# Images: Compose pulls the published image from GitHub Container Registry
+# and only builds from this folder if it cannot. Pin a version with
+# OUTBOUNDOS_VERSION=0.2.0 in .env (default: latest release). To update:
+#   docker compose pull && docker compose up -d
+# To run your own changes instead:  docker compose up -d --build
 
 services:
   app:
+    image: ghcr.io/thatsarpit/outbound-os:${OUTBOUNDOS_VERSION:-latest}
     build: .
-    image: outbound-os:local
+    pull_policy: missing
     restart: unless-stopped
     env_file: .env
     environment:
@@ -38,10 +45,11 @@ services:
 
   mcp:
     profiles: ["mcp"]
+    image: ghcr.io/thatsarpit/outbound-os-mcp:${OUTBOUNDOS_VERSION:-latest}
     build:
       context: .
       dockerfile: mcp-outboundos/Dockerfile
-    image: outbound-os-mcp:local
+    pull_policy: missing
     restart: unless-stopped
     env_file: .env
     environment:

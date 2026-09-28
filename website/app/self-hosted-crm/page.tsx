@@ -26,7 +26,7 @@ const faq = [
   },
   {
     q: 'How do I update it?',
-    a: 'Pull the new code and rebuild: git pull, then docker compose up -d --build. Database migrations run automatically when the app starts.',
+    a: 'Pull the new release and restart: docker compose pull, then docker compose up -d. Database migrations run automatically when the app starts.',
   },
   {
     q: 'Can I run it without Docker?',
@@ -213,10 +213,10 @@ export default function SelfHostedCrmPage() {
           <div>
             <h3>Updates</h3>
             <p>
-              Pull and rebuild. Migrations run on start, and your data volume
-              is untouched by the rebuild.
+              Pull the new image and restart. Migrations run on start, and
+              your data volume is untouched.
             </p>
-            <Code label="Update">{'git pull\ndocker compose up -d --build'}</Code>
+            <Code label="Update">{'git pull\ndocker compose pull && docker compose up -d'}</Code>
           </div>
         </div>
       </section>

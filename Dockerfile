@@ -1,5 +1,7 @@
 # ── Stage 1: Build the React dashboard ──────────────────────────────────────────
-FROM node:24-slim AS web-builder
+# The dashboard is static files, identical on every CPU, so it is built on the
+# build machine's own platform — multi-arch images then emulate only stage 2.
+FROM --platform=$BUILDPLATFORM node:24-slim AS web-builder
 WORKDIR /web
 COPY web/package*.json ./
 RUN npm ci
@@ -14,6 +16,13 @@ RUN npm run build
 
 # ── Stage 2: Production runtime ──────────────────────────────────────────────────
 FROM node:24-slim
+
+LABEL org.opencontainers.image.title="Outbound OS" \
+      org.opencontainers.image.description="Open-source, self-hosted WhatsApp CRM and outreach platform" \
+      org.opencontainers.image.source="https://github.com/thatsarpit/outbound-os" \
+      org.opencontainers.image.url="https://outboundos.space" \
+      org.opencontainers.image.documentation="https://outboundos.space/docs/install" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
 
 # SQLite for the database, curl for the healthcheck, openssl for Prisma.
 RUN apt-get update && apt-get install -y \

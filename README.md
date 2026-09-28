@@ -148,10 +148,14 @@ docker compose cp app:/app/data/backups ./backups
 
 ```bash
 git pull
-docker compose up -d --build
+docker compose pull && docker compose up -d
 ```
 
-Database migrations run automatically on start.
+Compose runs the published images from GitHub Container Registry
+(`ghcr.io/thatsarpit/outbound-os`, amd64 and arm64). Pin a version with
+`OUTBOUNDOS_VERSION=0.2.0` in `.env`. Database migrations run automatically
+on start. Running your own changes? `docker compose up -d --build` builds
+from this folder instead.
 
 ---
 

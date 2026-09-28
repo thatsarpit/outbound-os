@@ -4,6 +4,13 @@
 
 FROM node:24-slim
 
+LABEL org.opencontainers.image.title="Outbound OS MCP server" \
+      org.opencontainers.image.description="MCP server that lets Claude and other AI agents work an Outbound OS CRM" \
+      org.opencontainers.image.source="https://github.com/thatsarpit/outbound-os" \
+      org.opencontainers.image.url="https://outboundos.space/mcp" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      io.modelcontextprotocol.server.name="io.github.thatsarpit/outbound-os"
+
 # curl for healthcheck
 RUN apt-get update && apt-get install -y curl --no-install-recommends && \
     rm -rf /var/lib/apt/lists/*

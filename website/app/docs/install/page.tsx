@@ -43,9 +43,9 @@ export default function InstallDoc() {
         them.
       </p>
       <p>
-        The first start builds the image, creates the database, runs the
-        migrations and generates the instance&rsquo;s secret keys. It takes a
-        minute or two.
+        The first start downloads the ready-made image (for Intel and ARM
+        servers), creates the database, runs the migrations and generates the
+        instance&rsquo;s secret keys. It usually takes under a minute.
       </p>
 
       <h2 id="sign-in">2. Sign in</h2>

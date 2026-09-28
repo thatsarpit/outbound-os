@@ -76,22 +76,35 @@ docker compose up -d`}
           for anything that needs a new setting.
         </li>
         <li>Take a backup.</li>
-        <li>Pull and rebuild:</li>
+        <li>Pull the new images and restart:</li>
       </ol>
-      <Code label="Terminal">{'git pull\ndocker compose up -d --build'}</Code>
+      <Code label="Terminal">{'git pull\ndocker compose pull && docker compose up -d'}</Code>
       <p>
-        Database migrations run automatically before the app starts. If you
-        run the MCP server, add <code>--profile mcp</code> to the second
-        command so it is rebuilt too.
+        Compose runs the published images from GitHub Container Registry, for
+        both Intel and ARM servers. Database migrations run automatically
+        before the app starts. If you run the MCP server, add{' '}
+        <code>--profile mcp</code> to both commands.
+      </p>
+      <p>
+        To stay on one version, set <code>OUTBOUNDOS_VERSION=0.2.0</code> in{' '}
+        <code>.env</code>. Running your own changes to the code?{' '}
+        <code>docker compose up -d --build</code> builds from the folder
+        instead.
       </p>
 
       <h2 id="rollback">Roll back</h2>
       <p>
-        Check out the previous release tag, rebuild, and restore the backup
-        you took before upgrading. Migrations only move forward, so a database
-        that has already been migrated should not be run with older code.
+        Set <code>OUTBOUNDOS_VERSION</code> back to the previous release,
+        start it, and restore the backup you took before upgrading.
+        Migrations only move forward, so a database that has already been
+        migrated should not be run with older code.
       </p>
-      <Code label="Terminal">{'git checkout v0.1.0\ndocker compose up -d --build'}</Code>
+      <Code label=".env, then Terminal">{'OUTBOUNDOS_VERSION=0.2.0\n\ndocker compose pull && docker compose up -d'}</Code>
+      <p>
+        Versions before 0.2.0 have no published image. To go back to one of
+        those, check out its tag and build it:{' '}
+        <code>git checkout v0.1.0 &amp;&amp; docker compose up -d --build</code>.
+      </p>
     </DocsShell>
   )
 }
