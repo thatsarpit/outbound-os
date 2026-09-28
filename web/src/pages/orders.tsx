@@ -1,3 +1,4 @@
+import { useHomeCurrency } from '@/hooks/use-home-currency'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -17,7 +18,7 @@ import { productsApi } from '@/api/endpoints/products'
 import {
   salesApi,
   formatMoney,
-  formatInr,
+  formatHome,
   type OrderStatus,
   type SalesOrder,
   type ShipmentStatus,
@@ -382,6 +383,7 @@ function NewOrderDrawer({
   onClose: () => void
   onCreated: (o: SalesOrder) => void
 }) {
+  const home = useHomeCurrency()
   const [form, setForm] = useState({
     customerName: '',
     customerCompany: '',
@@ -545,7 +547,7 @@ function NewOrderDrawer({
               value={form.currency}
               onChange={(e) => setForm({ ...form, currency: e.target.value })}
             >
-              {['USD', 'EUR', 'GBP', 'AUD', 'INR'].map((c) => (
+              {[...new Set(['USD', 'EUR', 'GBP', 'AUD', 'CAD', 'AED', 'INR', home])].map((c) => (
                 <option key={c}>{c}</option>
               ))}
             </select>
@@ -683,11 +685,11 @@ function NewOrderDrawer({
                   value={it.unitPrice}
                   onChange={(e) => setItem(idx, { unitPrice: e.target.value })}
                 />
-                {/* What the supplier quotes, in rupees — this is what turns a
-                    sale total into a profit. */}
+                {/* What the supplier quotes, in the home currency — this is
+                    what turns a sale total into a profit. */}
                 <input
                   className={inputClass}
-                  placeholder="Cost ₹"
+                  placeholder={`Cost ${home}`}
                   inputMode="decimal"
                   value={it.cost}
                   onChange={(e) => setItem(idx, { cost: e.target.value })}
@@ -708,7 +710,7 @@ function NewOrderDrawer({
               Subtotal {formatMoney(previewTotal, form.currency)}
             </span>
             {previewCost > 0 && (
-              <span className="text-text-muted">Supplier cost {formatInr(previewCost)}</span>
+              <span className="text-text-muted">Supplier cost {formatHome(previewCost, home)}</span>
             )}
           </div>
         </div>

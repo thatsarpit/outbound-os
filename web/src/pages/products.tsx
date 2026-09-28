@@ -1,3 +1,4 @@
+import { useHomeCurrency } from '@/hooks/use-home-currency'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Package2, Plus, Sparkles, Trash2, TrendingUp } from 'lucide-react'
@@ -34,6 +35,7 @@ export default function ProductsPage() {
   const chartTheme = useChartTheme()
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
+  const home = useHomeCurrency()
   const [draft, setDraft] = useState({ name: '', strength: '', unit: 'box', sell: '', cost: '' })
 
   const invalidate = () => {
@@ -174,7 +176,7 @@ export default function ProductsPage() {
                   <th className="px-2 py-2 text-left font-medium">Strength</th>
                   <th className="px-2 py-2 text-left font-medium">Unit</th>
                   <th className="px-2 py-2 text-right font-medium">Sell</th>
-                  <th className="px-2 py-2 text-right font-medium">Cost ₹</th>
+                  <th className="px-2 py-2 text-right font-medium">Cost {home}</th>
                   <th className="px-2 py-2 text-left font-medium">Supplier</th>
                   <th className="px-2 py-2 text-left font-medium">Status</th>
                   <th className="px-2 py-2" />
@@ -299,7 +301,7 @@ export default function ProductsPage() {
             <span className="text-[12px] font-medium text-text-secondary">Strength</span>
             <input
               className={cn(inputClass, 'mt-1')}
-              placeholder="12mg"
+              placeholder="e.g. 500 ml"
               value={draft.strength}
               onChange={(e) => setDraft({ ...draft, strength: e.target.value })}
             />
@@ -323,7 +325,7 @@ export default function ProductsPage() {
             />
           </label>
           <label className="w-24">
-            <span className="text-[12px] font-medium text-text-secondary">Cost ₹</span>
+            <span className="text-[12px] font-medium text-text-secondary">Cost {home}</span>
             <input
               className={cn(inputClass, 'mt-1 text-right')}
               inputMode="decimal"

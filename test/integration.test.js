@@ -1060,3 +1060,20 @@ describe('Plain HTML form niceties', () => {
   });
 });
 
+describe('Settlement in the home currency', () => {
+  test('an order already in the home currency converts 1:1 without a rate', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const order = await prisma.salesOrder.create({
+      data: {
+        orderNumber: 'TEST-HOME-1', customerName: 'Home Buyer', currency: 'USD',
+        subtotal: 100000, total: 100000, procurementCostInr: 60000,
+      },
+    });
+    const res = await request('GET', `/api/orders/${order.id}/settlement`, { headers: authHeader() });
+    assert.equal(res.status, 200);
+    assert.equal(res.body.homeCurrency, 'USD');
+    assert.equal(res.body.landedInr, 100000);
+    assert.equal(res.body.profitInr, 40000);
+  });
+});
+

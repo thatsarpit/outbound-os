@@ -21,12 +21,13 @@ export function formatCount(n: number): string {
   return n.toLocaleString()
 }
 
-export function formatCurrency(n: number): string {
-  return new Intl.NumberFormat('en-IN', {
-    style: 'currency',
-    currency: 'INR',
-    maximumFractionDigits: 0,
-  }).format(n)
+/** Whole-unit money for summaries. Pass the workspace currency (useHomeCurrency). */
+export function formatCurrency(n: number, currency = 'USD'): string {
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 0 }).format(n)
+  } catch {
+    return `${currency} ${Math.round(n).toLocaleString()}`
+  }
 }
 
 // Date formatting now lives in `@/lib/format-date`. This re-export keeps

@@ -8,8 +8,15 @@ import { computeSettlement, suppliersForLeadTags } from '../services/settlement.
  *
  * Rates live in the database rather than the code because they change and
  * differ per account. Fee rates are basis points (10% = 1000); FX is
- * 1/10,000 rupee per unit of currency (83.4567 = 834567).
+ * 1/10,000 of a home-currency unit per unit of the order's currency
+ * (83.4567 = 834567).
+ *
+ * "Home currency" is BUSINESS_CURRENCY: what suppliers are paid in and what
+ * lands in the bank. The columns are named *Inr for historical reasons; they
+ * hold home-currency minor units whatever that currency is.
  */
+
+const homeCurrency = () => process.env.BUSINESS_CURRENCY || 'USD';
 
 const router = express.Router();
 const toInt = (v, d = 0) => {
@@ -106,7 +113,7 @@ router.post('/suppliers', requireRole('manager'), async (req, res) => {
         contactName: b.contactName || null,
         contactEmail: b.contactEmail || null,
         contactPhone: b.contactPhone || null,
-        currency: b.currency || 'INR',
+        currency: b.currency || homeCurrency(),
         enabled: b.enabled !== false,
         notes: b.notes || null,
       },
@@ -165,13 +172,16 @@ router.get('/orders/:id/settlement', requireRole('agent'), async (req, res) => {
       feeBps: order.paymentMethod?.feeBps ?? 0,
       feeFixed: order.paymentMethod?.feeFixed ?? 0,
       feeMode: order.feeMode,
-      fxRateToInr: order.fxRateToInr,
+      // An order already in the home currency converts 1:1 without anyone
+      // having to type a rate.
+      fxRateToInr: order.fxRateToInr ?? (order.currency === homeCurrency() ? 10000 : null),
       procurementCostInr: order.procurementCostInr,
       amountReceivedInr: order.amountReceivedInr,
     });
     res.json({
       ...result,
       currency: order.currency,
+      homeCurrency: homeCurrency(),
       paymentMethod: order.paymentMethod,
       supplier: order.supplier,
       feeMode: order.feeMode,

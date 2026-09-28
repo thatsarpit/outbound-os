@@ -1,9 +1,12 @@
 /**
- * Order settlement: what the customer pays, what lands in rupees, what is left.
+ * Order settlement: what the customer pays, what lands in the home currency
+ * (BUSINESS_CURRENCY), and what is left. Fields named *Inr hold home-currency
+ * minor units; the names predate supporting any currency.
  *
  * All money is integer minor units of its own currency — cents for a USD
- * order, paise for the INR columns. Rates are integers too: fee rates in basis
- * points (10% = 1000), FX in 1/10,000 rupee per unit (83.4567 = 834567).
+ * order, and the home currency's minor units for the *Inr columns. Rates are
+ * integers too: fee rates in basis points (10% = 1000), FX in 1/10,000 of a
+ * home-currency unit per order-currency unit (83.4567 = 834567).
  * Nothing here touches a float, because a float total is a rounding bug that
  * only shows up once the numbers are real.
  *
@@ -13,9 +16,9 @@
  *     → fee applied, either absorbed or passed on
  *     → net receivable (order currency)
  *     → × FX rate
- *     → landed INR
- *     − procurement cost (INR)
- *     = profit (INR)
+ *     → landed (home currency)
+ *     − procurement cost (home currency)
+ *     = profit (home currency)
  *
  * Where an actual bank credit has been recorded it replaces the computed
  * landed figure, because correspondent bank charges mean the two rarely agree
@@ -32,7 +35,7 @@ function divRound(numerator, denominator) {
 }
 
 const BPS_DIVISOR = 10000;   // basis points
-const FX_DIVISOR = 10000;    // 1/10,000 rupee per currency unit
+const FX_DIVISOR = 10000;    // 1/10,000 home-currency unit per order-currency unit
 
 /**
  * @param {object} input
@@ -42,7 +45,7 @@ const FX_DIVISOR = 10000;    // 1/10,000 rupee per currency unit
  * @param {number} [input.feeBps]            payment method percentage, basis points
  * @param {number} [input.feeFixed]          payment method flat fee, order currency
  * @param {'absorb'|'pass_on'} [input.feeMode]
- * @param {number|null} [input.fxRateToInr]  1/10,000 rupee per unit of currency
+ * @param {number|null} [input.fxRateToInr]  1/10,000 home-currency unit per unit of order currency
  * @param {number} [input.procurementCostInr] paise
  * @param {number|null} [input.amountReceivedInr] actual bank credit, paise
  */

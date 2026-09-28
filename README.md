@@ -53,6 +53,33 @@ database.
 Every inbound source is a **signed webhook** with a field map, so a new source
 is a settings change, not a code change. Presets exist for the ones above.
 
+### Website forms
+
+Point any HTML form at a lead source — the setup wizard gives you a ready-made
+one — and it works like a hosted form backend:
+
+```html
+<form action="https://your-host/api/webhooks/inbound/<source>?apiKey=<key>" method="post">
+  <input name="name" required>
+  <input name="email" type="email">
+  <input name="phone">
+  <textarea name="message"></textarea>
+  <label><input type="checkbox" name="email_consent" value="yes"> Email me updates</label>
+  <input type="text" name="_gotcha" style="display:none" tabindex="-1" autocomplete="off">
+  <input type="hidden" name="_next" value="https://your-site.com/thanks">
+  <button>Send</button>
+</form>
+```
+
+- `_gotcha` is a spam trap: bots fill it, people never see it, and those
+  submissions are dropped.
+- `_next` sends the visitor back to a page on your own site; without it they
+  see a short thank-you page.
+- A ticked `email_consent` (or `marketing_consent`, `newsletter`) records
+  marketing consent with its time and source. Unticked means no consent.
+- JSON posts from Zapier, Make, n8n or your own code use the same address, with
+  the key in an `x-api-key` header.
+
 ---
 
 ## Quick start (Docker)
@@ -134,11 +161,15 @@ list, with explanations, is in [`.env.example`](.env.example).
 | `AUTH_PROVIDER` | `local` | `local` = email + password; `clerk` = Clerk-hosted sign-in |
 | `BUSINESS_NAME`, `BUSINESS_WEBSITE`, … | — | Your identity in outgoing messages and emails |
 | `BUSINESS_TIMEZONE` | `UTC` | When "today" starts; daily limits and reports use it |
+| `DEFAULT_COUNTRY_CODE` | — | Calling code added to numbers typed without one (1, 44, 91…) |
+| `BUSINESS_CURRENCY` | `USD` | Currency for supplier costs, profit and reports |
 | `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN` | — | Receiving WhatsApp replies from Meta |
 | `CORS_ORIGIN` | — | Only if the dashboard is served from another origin |
 
 `JWT_SECRET` and `LEAD_SYNC_ENCRYPTION_KEY` are generated on first boot if you
-leave them blank.
+leave them blank. Business details, time zone, country code and currency can
+also be set in the setup wizard or **Settings → Workspace**; values saved there
+win over `.env`.
 
 ---
 

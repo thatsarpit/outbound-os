@@ -2716,6 +2716,8 @@ app.get('/api/config/brand', (req, res) => {
     personaGender: businessProfile.personaGender,
     personaTitle: businessProfile.personaTitle,
     timezone: businessProfile.timezone,
+    // Home currency: what supplier costs, bank credits and profit are in.
+    currency: process.env.BUSINESS_CURRENCY || 'USD',
   });
 });
 

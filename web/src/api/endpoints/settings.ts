@@ -9,6 +9,8 @@ export interface WorkspaceConfig {
 }
 
 export interface BrandConfig {
+  /** Home currency (BUSINESS_CURRENCY). */
+  currency?: string
   brandName: string
   tagline: string
   businessName: string

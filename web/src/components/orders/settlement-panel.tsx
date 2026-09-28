@@ -4,7 +4,7 @@ import { TrendingUp, AlertTriangle } from 'lucide-react'
 import {
   salesApi,
   formatMoney,
-  formatInr,
+  formatHome,
   bpsToPercent,
   fxToDisplay,
   displayToFx,
@@ -14,12 +14,13 @@ import { SectionCard } from '@/components/ui/section-card'
 import { Badge } from '@/components/ui/badge'
 import { toast } from '@/stores/toast-store'
 import { cn } from '@/lib/utils'
+import { useHomeCurrency } from '@/hooks/use-home-currency'
 
 /**
  * What the order is actually worth.
  *
  * The chain reads top to bottom because that is the order the money moves in:
- * goods → payment fee → what we receive → converted to rupees → less what the
+ * goods → payment fee → what we receive → converted to the home currency → less what the
  * supplier charges → profit. Showing only the final number would hide where a
  * thin margin came from.
  */
@@ -60,6 +61,7 @@ function Row({
 
 export function SettlementPanel({ order }: { order: SalesOrder }) {
   const queryClient = useQueryClient()
+  const home = useHomeCurrency()
   const [fx, setFx] = useState(fxToDisplay(order.fxRateToInr))
   const [received, setReceived] = useState(
     order.amountReceivedInr !== null ? String(order.amountReceivedInr / 100) : '',
@@ -98,7 +100,7 @@ export function SettlementPanel({ order }: { order: SalesOrder }) {
   return (
     <SectionCard
       title="Settlement"
-      description="What lands in rupees after fees, and what is left after the supplier."
+      description={`What lands in ${home} after fees, and what is left after the supplier.`}
     >
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block">
@@ -161,11 +163,11 @@ export function SettlementPanel({ order }: { order: SalesOrder }) {
         </label>
 
         <label className="block">
-          <span className="text-[12px] font-medium text-text-secondary">Rate {cur} → INR</span>
+          <span className="text-[12px] font-medium text-text-secondary">Rate {cur} → {home}</span>
           <input
             className={cn(inputClass, 'mt-1')}
             inputMode="decimal"
-            placeholder="83.5000"
+            placeholder={cur === home ? '1.0000' : '83.5000'}
             value={fx}
             onChange={(e) => setFx(e.target.value)}
             onBlur={() => {
@@ -192,20 +194,22 @@ export function SettlementPanel({ order }: { order: SalesOrder }) {
         <div className="my-2 border-t border-border-subtle" />
 
         <Row
-          label="Lands in rupees"
+          label={`Lands in ${home}`}
           hint={
             settlement?.usingActual
               ? 'from bank statement'
               : order.fxRateToInr
                 ? 'at the rate above'
-                : 'set a rate'
+                : cur === home
+                  ? 'same currency'
+                  : 'set a rate'
           }
-          value={formatInr(settlement?.landedInr)}
+          value={formatHome(settlement?.landedInr, home)}
         />
         <Row
           label="Supplier cost"
           hint={settlement?.supplier?.name}
-          value={settlement ? `−${formatInr(settlement.procurementCostInr)}` : '—'}
+          value={settlement ? `−${formatHome(settlement.procurementCostInr, home)}` : '—'}
           muted
         />
 
@@ -223,7 +227,7 @@ export function SettlementPanel({ order }: { order: SalesOrder }) {
                 profit === null ? 'text-text-muted' : profit >= 0 ? 'text-success' : 'text-danger',
               )}
             >
-              {formatInr(profit)}
+              {formatHome(profit, home)}
             </span>
             {margin !== null && (
               <Badge variant={margin >= 0 ? 'success' : 'danger'}>{margin.toFixed(1)}%</Badge>
@@ -240,7 +244,7 @@ export function SettlementPanel({ order }: { order: SalesOrder }) {
       </div>
 
       <label className="mt-3 block border-t border-border pt-3">
-        <span className="text-[12px] font-medium text-text-secondary">Actually received (₹)</span>
+        <span className="text-[12px] font-medium text-text-secondary">Actually received ({home})</span>
         <input
           className={cn(inputClass, 'mt-1')}
           inputMode="decimal"

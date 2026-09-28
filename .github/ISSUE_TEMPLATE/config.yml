@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and setup help
+    url: https://github.com/thatsarpit/outbound-os/discussions
+    about: Ask how to set something up, or share how you use Outbound OS.
+  - name: Report a security vulnerability
+    url: https://github.com/thatsarpit/outbound-os/security/advisories/new
+    about: Please report security problems privately, not as an issue.

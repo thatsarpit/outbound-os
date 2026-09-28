@@ -65,6 +65,7 @@ export interface Settlement {
   marginPct: number | null
   usingActual: boolean
   currency: string
+  homeCurrency: string
   feeMode: 'absorb' | 'pass_on'
   fxRateToInr: number | null
   paymentMethod: PaymentMethod | null
@@ -85,7 +86,7 @@ export interface OrderItem {
   unit: string
   unitPrice: number
   lineTotal: number
-  /** What the supplier charges per unit, in paise. */
+  /** What the supplier charges per unit, in home-currency minor units. */
   procurementUnitCost: number
   procurementTotal: number
   sortOrder: number
@@ -157,7 +158,7 @@ export interface SalesOrder {
   paymentMethodId: number | null
   feeMode: 'absorb' | 'pass_on'
   feeAmount: number
-  /** 1/10,000 rupee per unit of the order currency: 83.4567 = 834567. */
+  /** 1/10,000 home-currency unit per unit of the order currency: 83.4567 = 834567. */
   fxRateToInr: number | null
   amountReceivedInr: number | null
   procurementCostInr: number
@@ -273,16 +274,20 @@ export const salesApi = {
     ),
 }
 
-/** Paise → rupees, with Indian digit grouping. */
-export function formatInr(paise: number | null | undefined) {
-  if (paise === null || paise === undefined) return '—'
-  return `₹${(paise / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+/**
+ * A home-currency amount (supplier cost, bank credit, profit). These arrive in
+ * fields named *Inr, which hold the workspace currency's minor units whatever
+ * that currency is. See useHomeCurrency.
+ */
+export function formatHome(minorUnits: number | null | undefined, homeCurrency: string) {
+  if (minorUnits === null || minorUnits === undefined) return '—'
+  return formatMoney(minorUnits, homeCurrency)
 }
 
 /** Basis points → a readable percent: 1000 → "10%", 290 → "2.9%". */
 export const bpsToPercent = (bps: number) => `${(bps / 100).toFixed(bps % 100 === 0 ? 0 : 1)}%`
 
-/** FX stored as 1/10,000 rupee per unit → a readable rate. */
+/** FX stored as 1/10,000 home-currency unit per order-currency unit → a readable rate. */
 export const fxToDisplay = (fx: number | null) => (fx ? (fx / 10000).toFixed(4) : '')
 export const displayToFx = (v: string) => Math.round((Number(v) || 0) * 10000)
 

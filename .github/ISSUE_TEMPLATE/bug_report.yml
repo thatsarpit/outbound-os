@@ -1,0 +1,69 @@
+name: Bug report
+description: Something does not work the way it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. **Security problems:** please do not file them here — use
+        [private vulnerability reporting](https://github.com/thatsarpit/outbound-os/security/advisories/new).
+
+        Never paste real lead data, phone numbers, API keys or tokens. Replace them with fake values.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Go to …
+        2. Click …
+        3. See …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Release tag, or `git rev-parse --short HEAD`.
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How do you run it?
+      options:
+        - Docker Compose
+        - Manual (npm start)
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - WhatsApp (Meta Cloud API)
+        - WhatsApp (AiSensy)
+        - Email
+        - Telegram
+        - iMessage
+        - Lead webhooks / forms
+        - Campaigns and follow-ups
+        - Dashboard
+        - Sign-in
+        - Install / upgrade
+        - MCP server
+        - Other
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: From `docker compose logs app`. Remove anything personal first.
+      render: shell

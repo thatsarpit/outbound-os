@@ -1,3 +1,4 @@
+import { useHomeCurrency } from '@/hooks/use-home-currency'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { useChartTheme } from '@/hooks/use-chart-theme'
@@ -102,6 +103,7 @@ function SectionMessage({ children }: { children: React.ReactNode }) {
 }
 
 export default function AnalyticsPage() {
+  const home = useHomeCurrency()
   const chartTheme = useChartTheme()
   const timezoneOffset = typeof window === 'undefined' ? 0 : new Date().getTimezoneOffset()
   const range: AnalyticsRange = '30d'
@@ -608,9 +610,9 @@ export default function AnalyticsPage() {
         ) : (
           <>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <Figure label="Revenue" value={formatCurrency(campaignRoi.pipeline.totalDealValue)} />
+              <Figure label="Revenue" value={formatCurrency(campaignRoi.pipeline.totalDealValue, home)} />
               <Figure label="Converted" value={formatCount(campaignRoi.pipeline.convertedLeads)} />
-              <Figure label="Avg deal" value={formatCurrency(campaignRoi.pipeline.avgDealValue)} />
+              <Figure label="Avg deal" value={formatCurrency(campaignRoi.pipeline.avgDealValue, home)} />
             </div>
 
             {/* Mobile */}
@@ -622,7 +624,7 @@ export default function AnalyticsPage() {
                       {camp.name}
                     </p>
                     <p className="shrink-0 text-[13px] font-semibold tabular-nums text-text-primary">
-                      {formatCurrency(camp.revenue)}
+                      {formatCurrency(camp.revenue, home)}
                     </p>
                   </div>
                   <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] tabular-nums text-text-muted">
@@ -668,7 +670,7 @@ export default function AnalyticsPage() {
                         {formatCount(camp.converted)}
                       </td>
                       <td className="py-2 text-right font-medium tabular-nums text-text-primary">
-                        {formatCurrency(camp.revenue)}
+                        {formatCurrency(camp.revenue, home)}
                       </td>
                     </tr>
                   ))}
