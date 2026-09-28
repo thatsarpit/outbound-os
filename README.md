@@ -1,6 +1,36 @@
-# Outbound OS
+<p align="center">
+  <img src="brand/outbound-os-mark.svg" width="56" height="56" alt="">
+</p>
 
-**Self-hosted outbound sales for teams whose leads arrive everywhere.**
+<h1 align="center">Outbound OS</h1>
+
+<p align="center">
+  <strong>The open-source WhatsApp CRM that answers every lead in seconds<br>and follows up until they reply.</strong>
+</p>
+
+<p align="center">
+  Self-hosted · Meta's official WhatsApp Cloud API · Email, Telegram and iMessage · An MCP server for AI agents
+</p>
+
+<p align="center">
+  <a href="https://github.com/thatsarpit/outbound-os/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/thatsarpit/outbound-os/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/thatsarpit/outbound-os/releases"><img alt="Release" src="https://img.shields.io/github/v/release/thatsarpit/outbound-os?color=16a34a"></a>
+  <a href="https://github.com/thatsarpit/outbound-os/pkgs/container/outbound-os"><img alt="Docker image" src="https://img.shields.io/badge/docker-ghcr.io-2496ED?logo=docker&logoColor=white"></a>
+  <a href="LICENSE"><img alt="License: AGPL v3" src="https://img.shields.io/badge/license-AGPL--3.0-blue"></a>
+  <a href="https://outboundos.space"><img alt="Website" src="https://img.shields.io/badge/web-outboundos.space-17171c"></a>
+</p>
+
+<p align="center">
+  <a href="https://outboundos.space">Website</a> ·
+  <a href="https://outboundos.space/docs/install">Install in 5 minutes</a> ·
+  <a href="https://outboundos.space/docs">Docs</a> ·
+  <a href="https://outboundos.space/mcp">MCP for AI agents</a> ·
+  <a href="https://github.com/thatsarpit/outbound-os/discussions">Discussions</a>
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/demo.gif" width="860" alt="A lead from IndiaMART gets a WhatsApp message two seconds after enquiring; when they reply, the scheduled follow-ups are cancelled">
+</p>
 
 Leads come in from your website, marketplaces, ad forms and spreadsheets.
 Outbound OS puts them in one queue, contacts them within seconds on WhatsApp,
@@ -8,8 +38,10 @@ email, Telegram or iMessage, follows up on a schedule, and stops the moment
 someone replies. It runs on your own server, and your leads never leave your
 database.
 
-[![CI](https://github.com/thatsarpit/outbound-os/actions/workflows/ci.yml/badge.svg)](https://github.com/thatsarpit/outbound-os/actions/workflows/ci.yml)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+**Why it exists.** It was built to run a real export sales desk: enquiries
+from IndiaMART and the web at all hours, buyers in dozens of time zones, and
+follow-ups that kept slipping. It still runs that desk in production. Now it
+is open source, so any team can run their own.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.png">
@@ -110,13 +142,14 @@ one — and it works like a hosted form backend:
 
 ## Quick start (Docker)
 
-You need a machine with Docker. A 1–2 GB VM is plenty for a small team.
+You need a machine with Docker. A 1–2 GB VM is plenty for a small team, on
+Intel or ARM.
 
 ```bash
 git clone https://github.com/thatsarpit/outbound-os.git
 cd outbound-os
 cp .env.example .env          # set ADMIN_EMAIL; everything else can wait
-docker compose up -d
+docker compose up -d          # pulls the published image; nothing to build
 ```
 
 Open <http://localhost:3001> and sign in as `ADMIN_EMAIL`. If you did not set
@@ -232,10 +265,34 @@ npm run lint --prefix web && npm run build --prefix web
 Adding a lead source or a channel? Read
 [`docs/integrations.md`](docs/integrations.md) first.
 
+## AI agents (MCP)
+
+Outbound OS ships an [MCP](https://modelcontextprotocol.io) server, so Claude
+and other AI clients can search leads, import lists, build and start
+campaigns, and read analytics on your live data — with your approval on
+anything that sends.
+
+```bash
+# .env: MCP_SERVICE_TOKEN and MCP_BEARER_TOKEN (openssl rand -hex 32 each)
+docker compose --profile mcp up -d
+claude mcp add --transport http outbound-os https://mcp.your-host.com/mcp \
+  --header "Authorization: Bearer <MCP_BEARER_TOKEN>"
+```
+
+claude.ai and the Claude apps connect as a custom connector through OAuth.
+Full guide and the list of tools: [outboundos.space/mcp](https://outboundos.space/mcp).
+
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). Issues labelled `good first issue`
-are a good place to start.
+Contributions are welcome — code, docs, translations, bug reports.
+
+- Start with an issue labelled
+  [`good first issue`](https://github.com/thatsarpit/outbound-os/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+- Read [`CONTRIBUTING.md`](CONTRIBUTING.md); coding agents and their users,
+  [`AGENTS.md`](AGENTS.md).
+- Questions and ideas go to [Discussions](https://github.com/thatsarpit/outbound-os/discussions).
+- Comparing options? [How Outbound OS compares](https://outboundos.space/alternatives)
+  with hosted WhatsApp platforms, stated fairly.
 
 ## Security
 
