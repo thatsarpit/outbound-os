@@ -32,6 +32,7 @@ import fetch from 'node-fetch';
 import prisma from '../utils/prismaClient.js';
 import config from '../config.js';
 import logger from '../utils/logger.js';
+import { cloudApiAddressee } from '../utils/whatsappAddress.js';
 import { createDecipheriv, createCipheriv, randomBytes, createHash } from 'crypto';
 
 import { WHATSAPP_PROVIDERS, credentialState, providerOf } from './whatsappProviders.js';
@@ -296,13 +297,14 @@ class WhatsAppCloudApiService {
    * @param {number|null} accountId — WhatsAppAccount.id
    */
   async sendTextMessage(phone, text, accountId = null) {
-    const to = this.normalizePhone(phone);
-    if (!to) return { success: false, reason: 'invalid_phone', rawError: 'Empty phone number' };
+    const addressee = cloudApiAddressee(phone, (value) => this.normalizePhone(value));
+    if (!addressee) return { success: false, reason: 'invalid_phone', rawError: 'Empty phone number' };
+    const to = addressee.to || addressee.recipient;
 
     const result = await this._postMessage({
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
-      to,
+      ...addressee,
       type: 'text',
       text: { preview_url: false, body: text },
     }, accountId, `text → *${to.slice(-4)}`);
@@ -414,14 +416,15 @@ class WhatsAppCloudApiService {
    * @param {number|null} accountId
    */
   async sendTemplate(phone, templateName, languageCode = 'en', components = [], accountId = null) {
-    const to = this.normalizePhone(phone);
-    if (!to) return { success: false, reason: 'invalid_phone', rawError: 'Empty phone number' };
+    const addressee = cloudApiAddressee(phone, (value) => this.normalizePhone(value));
+    if (!addressee) return { success: false, reason: 'invalid_phone', rawError: 'Empty phone number' };
+    const to = addressee.to || addressee.recipient;
     if (!templateName) return { success: false, reason: 'template_invalid', rawError: 'templateName is required' };
 
     const result = await this._postMessage({
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
-      to,
+      ...addressee,
       type: 'template',
       template: {
         name: templateName,
@@ -448,8 +451,9 @@ class WhatsAppCloudApiService {
    * @param {number|null} accountId
    */
   async sendMediaMessage(phone, mediaUrl, mediaType = 'document', caption = '', filename = '', accountId = null) {
-    const to = this.normalizePhone(phone);
-    if (!to) return { success: false, reason: 'invalid_phone', rawError: 'Empty phone number' };
+    const addressee = cloudApiAddressee(phone, (value) => this.normalizePhone(value));
+    if (!addressee) return { success: false, reason: 'invalid_phone', rawError: 'Empty phone number' };
+    const to = addressee.to || addressee.recipient;
     if (!/^https?:\/\//i.test(mediaUrl || '')) {
       return { success: false, reason: 'invalid_media_url', rawError: 'mediaUrl must be a public http(s) URL' };
     }
@@ -461,7 +465,7 @@ class WhatsAppCloudApiService {
     return this._postMessage({
       messaging_product: 'whatsapp',
       recipient_type: 'individual',
-      to,
+      ...addressee,
       type: mediaType,
       [mediaType]: mediaPayload,
     }, accountId, `${mediaType} → *${to.slice(-4)}`);

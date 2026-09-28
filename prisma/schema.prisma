@@ -79,6 +79,14 @@ model Lead {
   imessageFollowupCount     Int              @default(0)
   lastImessageAt            DateTime?
 
+  // WhatsApp identity beyond the phone number. Meta identifies every user by a
+  // business-scoped user id (BSUID, e.g. "US.13491208655302741918") and omits
+  // the phone number for people who use a WhatsApp username and have not been
+  // in touch in the last 30 days. Stored so their messages match this lead and
+  // replies can be addressed to the BSUID when no number is known.
+  waUserId   String? @unique
+  waUsername String?
+
   // Telegram contact routing. Telegram user accounts can only message peers
   // they are allowed to contact, so this is an explicit @username, phone, or
   // numeric peer ID rather than an inferred campaign destination.
@@ -180,6 +188,13 @@ model Message {
   waMessageId      String? // _serialized id from sendMessage() — used to match ack events to row
   ackStatus        Int       @default(0)
   ackUpdatedAt     DateTime?
+  // What Meta says this message costs, from the pricing block on its status
+  // webhooks: category (marketing | utility | authentication | service | …),
+  // type (regular = charged, free_customer_service, free_entry_point) and
+  // whether it is billable. Meta sends no amount; rates are on its rate card.
+  pricingCategory  String?
+  pricingType      String?
+  billable         Boolean?
   // Approved AiSensy API Campaign metadata. Populated only when this queue row
   // must use a template campaign instead of the Project API free-form endpoint.
   waCampaignName   String?
@@ -225,6 +240,7 @@ model Message {
   @@index([telegramAccountId])
   @@index([templateVariant])
   @@index([waMessageId])
+  @@index([pricingCategory])
   @@index([providerCampaignId])
   @@index([ackStatus])
 }

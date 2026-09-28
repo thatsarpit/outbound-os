@@ -745,6 +745,104 @@ describe('Meta WhatsApp webhook', () => {
     assert.equal(receipt.ackStatus, 3);
     assert.equal(receipt.status, 'read');
   });
+
+  const metaDelivery = (value) => ({
+    object: 'whatsapp_business_account',
+    entry: [{
+      id: 'WABA-1',
+      changes: [{
+        field: 'messages',
+        value: {
+          messaging_product: 'whatsapp',
+          metadata: { display_phone_number: '15550000000', phone_number_id: 'PNID-TEST-1' },
+          ...value,
+        },
+      }],
+    }],
+  });
+  const deliver = async (payload) => {
+    const res = await request('POST', '/webhook/meta', { body: payload, headers: { 'X-Hub-Signature-256': sign(payload) } });
+    assert.equal(res.status, 200);
+    await settle();
+  };
+
+  test('keeps a message from a username user Meta sends without a phone number', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    await deliver(metaDelivery({
+      contacts: [{ profile: { name: 'Priya Shah', username: 'priya.imports' }, user_id: 'IN.84629173550129' }],
+      messages: [{
+        from_user_id: 'IN.84629173550129', id: 'wamid.BSUID-1', timestamp: '1790000100',
+        type: 'text', text: { body: 'Do you ship to Pune?' },
+      }],
+    }));
+
+    const lead = await prisma.lead.findUnique({ where: { waUserId: 'IN.84629173550129' } });
+    assert.ok(lead, 'a lead was created for the username user');
+    assert.equal(lead.waUsername, 'priya.imports');
+    assert.equal(lead.name, 'Priya Shah');
+    assert.equal(lead.mobile, 'no-phone:IN.84629173550129');
+    const first = await prisma.message.findFirst({ where: { waMessageId: 'wamid.BSUID-1', direction: 'inbound' } });
+    assert.equal(first?.leadId, lead.id);
+
+    // A second message with only the user id lands on the same lead.
+    await deliver(metaDelivery({
+      contacts: [{ profile: { name: 'Priya Shah' }, user_id: 'IN.84629173550129' }],
+      messages: [{
+        from_user_id: 'IN.84629173550129', id: 'wamid.BSUID-2', timestamp: '1790000200',
+        type: 'text', text: { body: '200 units please' },
+      }],
+    }));
+    const second = await prisma.message.findFirst({ where: { waMessageId: 'wamid.BSUID-2', direction: 'inbound' } });
+    assert.equal(second?.leadId, lead.id);
+    assert.equal(await prisma.lead.count({ where: { waUserId: 'IN.84629173550129' } }), 1);
+  });
+
+  test('learns a known lead\'s user id, then matches it when the number is withheld', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const lead = await prisma.lead.create({ data: { name: 'Known Buyer', mobile: '15551230077', source: 'manual' } });
+
+    await deliver(metaDelivery({
+      contacts: [{ profile: { name: 'Known Buyer' }, wa_id: '15551230077', user_id: 'US.55512300770001' }],
+      messages: [{
+        from: '15551230077', from_user_id: 'US.55512300770001', id: 'wamid.BOTH-1', timestamp: '1790000300',
+        type: 'text', text: { body: 'Hi again' },
+      }],
+    }));
+    const learnt = await prisma.lead.findUnique({ where: { id: lead.id } });
+    assert.equal(learnt.waUserId, 'US.55512300770001');
+
+    await deliver(metaDelivery({
+      contacts: [{ profile: { name: 'Known Buyer' }, user_id: 'US.55512300770001' }],
+      messages: [{
+        from_user_id: 'US.55512300770001', id: 'wamid.IDONLY-1', timestamp: '1790000400',
+        type: 'text', text: { body: 'Any update?' },
+      }],
+    }));
+    const matched = await prisma.message.findFirst({ where: { waMessageId: 'wamid.IDONLY-1', direction: 'inbound' } });
+    assert.equal(matched?.leadId, lead.id, 'the phone-less message found the existing lead');
+  });
+
+  test('records Meta\'s pricing from a status update', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const lead = await prisma.lead.create({ data: { name: 'Priced Buyer', mobile: '15551230088', source: 'manual' } });
+    const outbound = await prisma.message.create({
+      data: {
+        leadId: lead.id, direction: 'outbound', channel: 'whatsapp', content: 'Template',
+        status: 'sent', waMessageId: 'wamid.PRICED-1',
+      },
+    });
+    await deliver(metaDelivery({
+      statuses: [{
+        id: 'wamid.PRICED-1', status: 'delivered', recipient_id: '15551230088', recipient_user_id: 'US.55512300880001',
+        pricing: { billable: true, pricing_model: 'PMP', category: 'marketing', type: 'regular' },
+      }],
+    }));
+    const priced = await prisma.message.findUnique({ where: { id: outbound.id } });
+    assert.equal(priced.pricingCategory, 'marketing');
+    assert.equal(priced.pricingType, 'regular');
+    assert.equal(priced.billable, true);
+    assert.equal(priced.status, 'delivered');
+  });
 });
 
 // ── Built-in sign-in ─────────────────────────────────────────────────────────

@@ -39,6 +39,8 @@ import reportingService from './services/reportingService.js';
 import recoveryCoordinator from './services/recoveryCoordinator.js';
 import resourceMonitor from './utils/resourceMonitor.js';
 import webhookDispatcher from './services/webhookDispatcher.js';
+import { workspaceTimezone, zonedParts, zonedTimeToUtc } from './utils/workspaceTime.js';
+import { whatsappAddress } from './utils/whatsappAddress.js';
 import { mapInboundLead, isSendableMobile } from './utils/inboundLead.js';
 import { secretsMatch } from './utils/secretsMatch.js';
 import sheetsSync from './services/sheetsSync.js';
@@ -337,7 +339,16 @@ async function sendManualWhatsAppMessage({ leadId, text }) {
     throw error;
   }
 
-  const result = await whatsappManager.sendMessage(lead.mobile, text.trim(), accountId);
+  // The lead's number, or — for someone Meta identifies only by their
+  // WhatsApp username — their business-scoped user id.
+  const address = whatsappAddress(lead);
+  if (!address) {
+    const error = new Error('This lead has no WhatsApp number or WhatsApp user id to reply to.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const result = await whatsappManager.sendMessage(address, text.trim(), accountId);
   if (!result.success) {
     const error = new Error(`WhatsApp send failed: ${result.reason || 'unknown error'}`);
     error.statusCode = 500;
@@ -352,6 +363,9 @@ async function sendManualWhatsAppMessage({ leadId, text }) {
       channel: 'whatsapp',
       content: text.trim(),
       waAccount: accountId,
+      // Without the provider id, delivery receipts and pricing for this
+      // message could only be matched by guessing from the number.
+      waMessageId: result.waMessageId || null,
       status: 'sent',
       sentAt: new Date(),
     },
@@ -3912,6 +3926,51 @@ export function startApiServer() {
 
 // ======================== CONVERSION FUNNEL ========================
 // GET /api/analytics/funnel?range=30d&source=website&country=India&tier=HOT
+// GET /api/analytics/whatsapp-pricing — this month's WhatsApp messages as
+// Meta will bill them, grouped by pricing category, from the pricing block
+// on its status webhooks. Meta sends categories, not amounts; rates are on
+// its rate card. From 1 October 2026 service replies are charged too.
+app.get('/api/analytics/whatsapp-pricing', async (_req, res) => {
+  try {
+    const timeZone = workspaceTimezone();
+    const now = zonedParts(new Date(), timeZone);
+    const since = zonedTimeToUtc(now.year, now.month, 1, 0, 0, timeZone);
+    const scope = { channel: 'whatsapp', direction: 'outbound', createdAt: { gte: since } };
+
+    const [grouped, unpriced] = await Promise.all([
+      prisma.message.groupBy({
+        by: ['pricingCategory', 'billable'],
+        where: { ...scope, pricingCategory: { not: null } },
+        _count: { _all: true },
+      }),
+      prisma.message.count({
+        where: { ...scope, pricingCategory: null, status: { in: ['sent', 'delivered', 'read'] } },
+      }),
+    ]);
+
+    const byCategory = {};
+    for (const row of grouped) {
+      const key = row.pricingCategory;
+      byCategory[key] ||= { category: key, billable: 0, free: 0 };
+      if (row.billable === false) byCategory[key].free += row._count._all;
+      else byCategory[key].billable += row._count._all;
+    }
+    const categories = Object.values(byCategory).sort((a, b) => (b.billable + b.free) - (a.billable + a.free));
+    res.json({
+      since: since.toISOString(),
+      timeZone,
+      categories,
+      billable: categories.reduce((sum, c) => sum + c.billable, 0),
+      free: categories.reduce((sum, c) => sum + c.free, 0),
+      // Sent through a provider that reports no pricing (AiSensy campaigns),
+      // or not yet acknowledged by Meta.
+      unpriced,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/analytics/funnel', async (req, res) => {
   try {
     const { range = '30d', source, country, tier } = req.query;
@@ -5019,7 +5078,7 @@ function aisensyAckStatus(status) {
  * Record a delivery receipt (sent / delivered / read / failed) from either
  * WhatsApp provider against the outbound message it belongs to.
  */
-async function applyWhatsAppDeliveryStatus({ provider, waMessageId, status: rawStatus, phone: rawPhone, failureCode, failureReason }) {
+async function applyWhatsAppDeliveryStatus({ provider, waMessageId, status: rawStatus, phone: rawPhone, failureCode, failureReason, pricing }) {
   const status = String(rawStatus || '').toLowerCase();
   const ack = aisensyAckStatus(status);
   const failed = status === 'failed';
@@ -5029,7 +5088,17 @@ async function applyWhatsAppDeliveryStatus({ provider, waMessageId, status: rawS
   const forward = failed ? { status: 'failed' }
     : ack >= 3 ? { status: 'read' }
       : ack >= 2 ? { status: 'delivered' } : {};
-  const data = { ackStatus: ack, ackUpdatedAt: new Date(), ...forward };
+  // Meta's per-message pricing: what the message will be billed as. There is
+  // no amount in the webhook — rates are on Meta's rate card — but the
+  // category and whether it is billable are enough to count spend by type.
+  const priced = pricing && typeof pricing === 'object'
+    ? {
+        ...(pricing.category ? { pricingCategory: String(pricing.category).slice(0, 40) } : {}),
+        ...(pricing.type ? { pricingType: String(pricing.type).slice(0, 40) } : {}),
+        ...(typeof pricing.billable === 'boolean' ? { billable: pricing.billable } : {}),
+      }
+    : {};
+  const data = { ackStatus: ack, ackUpdatedAt: new Date(), ...forward, ...priced };
 
   let updated = { count: 0 };
   if (waMessageId) {
@@ -5239,17 +5308,39 @@ app.post('/webhook/meta', async (req, res) => {
           : null;
         const accountId = account?.id || 0;
 
+        // Who sent what. Meta identifies every user by a business-scoped user
+        // id (user_id / from_user_id) and omits the phone number (wa_id /
+        // from) for people using a WhatsApp username who have not been in
+        // touch for 30 days. Skipping messages without `from` silently lost
+        // them; the user id is enough to find or create their lead.
+        const contactsByUserId = new Map();
+        const contactsByPhone = new Map();
+        for (const contact of value.contacts || []) {
+          if (contact?.user_id) contactsByUserId.set(String(contact.user_id), contact);
+          if (contact?.wa_id) contactsByPhone.set(String(contact.wa_id), contact);
+        }
+
         for (const msg of value.messages || []) {
-          if (!msg?.from || aisensyAlreadyHandled(`meta:${msg.id}`)) continue;
+          if (aisensyAlreadyHandled(`meta:${msg?.id}`)) continue;
+          const contact = (msg?.from_user_id && contactsByUserId.get(String(msg.from_user_id)))
+            || (msg?.from && contactsByPhone.get(String(msg.from)))
+            || (value.contacts?.length === 1 ? value.contacts[0] : null);
+          const phone = msg?.from || contact?.wa_id || '';
+          const waUserId = msg?.from_user_id || contact?.user_id || '';
+          if (!phone && !waUserId) continue;
           const text = metaInboundText(msg);
           if (!text) continue;
           const sentAt = Number(msg.timestamp);
-          logger.info(`📥 Meta inbound from *${String(msg.from).slice(-4)} (type=${msg.type || 'text'})`);
-          await replyDetector.handleReply(String(msg.from), text, accountId, {
+          const who = phone ? `*${String(phone).slice(-4)}` : `user id *${String(waUserId).slice(-4)}`;
+          logger.info(`📥 Meta inbound from ${who} (type=${msg.type || 'text'})`);
+          await replyDetector.handleReply(String(phone), text, accountId, {
             source: 'meta',
             messageId: msg.id,
             timestamp: Number.isFinite(sentAt) && sentAt > 0 ? new Date(sentAt * 1000).toISOString() : undefined,
             messageType: msg.type,
+            waUserId: waUserId ? String(waUserId) : undefined,
+            waUsername: contact?.profile?.username || undefined,
+            senderName: contact?.profile?.name || undefined,
           });
         }
 
@@ -5262,6 +5353,7 @@ app.post('/webhook/meta', async (req, res) => {
             phone: receipt?.recipient_id,
             failureCode: error?.code,
             failureReason: error?.title || error?.message,
+            pricing: receipt?.pricing,
           });
         }
       }

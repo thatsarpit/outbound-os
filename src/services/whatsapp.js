@@ -3,6 +3,11 @@ import prisma from '../utils/prismaClient.js';
 import config from '../config.js';
 import logger from '../utils/logger.js';
 import { formatPhoneForWA } from '../utils/delay.js';
+import { isBsuid } from '../utils/whatsappAddress.js';
+
+/** A number formatted for WhatsApp, or a business-scoped user id passed through
+    untouched (usernames: see utils/whatsappAddress.js). */
+const destinationFor = (address) => (isBsuid(address) ? String(address).trim() : formatPhoneForWA(address));
 import whatsappCloudApi from './whatsappCloudApi.js';
 
 /**
@@ -240,7 +245,7 @@ class WhatsAppManager {
       return { success: false, accountId: selectedAccountId, reason: 'account_paused' };
     }
 
-    const formattedPhone = formatPhoneForWA(phone);
+    const formattedPhone = destinationFor(phone);
     if (!formattedPhone) {
       logger.error(`Invalid phone number format`);
       return { success: false, accountId: selectedAccountId, reason: 'invalid_phone' };
@@ -337,7 +342,7 @@ class WhatsAppManager {
       return { success: false, accountId: selectedAccountId, reason: 'account_paused' };
     }
 
-    const formattedPhone = formatPhoneForWA(phone);
+    const formattedPhone = destinationFor(phone);
     if (!formattedPhone) {
       return { success: false, accountId: selectedAccountId, reason: 'invalid_phone' };
     }
@@ -399,7 +404,7 @@ class WhatsAppManager {
       return { success: false, accountId: selectedAccountId, reason: 'account_not_ready' };
     }
 
-    const formattedPhone = formatPhoneForWA(phone);
+    const formattedPhone = destinationFor(phone);
     if (!formattedPhone) return { success: false, accountId: selectedAccountId, reason: 'invalid_phone' };
 
     // Infer the Cloud API media type from the file extension.

@@ -1,4 +1,5 @@
 import prisma from '../utils/prismaClient.js';
+import { isBsuid } from '../utils/whatsappAddress.js';
 import logger from '../utils/logger.js';
 import leadScorer from './leadScorer.js';
 import activityLog, { EVENT_TYPES } from '../utils/activityLog.js';
@@ -216,12 +217,45 @@ class ReplyDetector {
     return pool?.id || null;
   }
 
+  /**
+   * Keep a lead's WhatsApp user id and username current, so a later message
+   * that carries only the user id — no number — still finds this lead.
+   */
+  async _rememberWhatsAppUser(lead, waUserId, waUsername) {
+    const username = waUsername ? String(waUsername).slice(0, 100) : null;
+    const data = {
+      ...(lead.waUserId !== waUserId ? { waUserId } : {}),
+      ...(username && lead.waUsername !== username ? { waUsername: username } : {}),
+    };
+    if (Object.keys(data).length === 0) return;
+    try {
+      await prisma.lead.update({ where: { id: lead.id }, data });
+    } catch (error) {
+      // Another lead already holds this user id (two records for one person).
+      // Leave both as they are rather than guess which to merge.
+      if (error?.code === 'P2002') {
+        logger.warn(`WhatsApp user id *${waUserId.slice(-4)} already belongs to another lead; not moved to Lead ${lead.id}`);
+        return;
+      }
+      throw error;
+    }
+  }
+
   async _createInboundLead(candidates, accountId, channel, meta = {}) {
-    const mobile = [...candidates]
+    const number = [...candidates]
       .map((candidate) => this._normalizeDigits(candidate))
       .filter((candidate) => candidate.length >= 8 && candidate.length <= 16)
       .sort((a, b) => b.length - a.length)[0];
-    if (!mobile) return null;
+    // A WhatsApp user known only by their business-scoped user id still gets
+    // a lead. Lead.mobile is required and unique, so it carries the same
+    // non-numeric `no-phone:` placeholder email-only leads use; replies are
+    // addressed to waUserId instead.
+    const waUserId = channel === 'whatsapp' && isBsuid(meta.waUserId) ? String(meta.waUserId).trim() : null;
+    if (!number && !waUserId) return null;
+    const mobile = number || `no-phone:${waUserId}`;
+    const waIdentity = waUserId
+      ? { waUserId, ...(meta.waUsername ? { waUsername: String(meta.waUsername).slice(0, 100) } : {}) }
+      : {};
 
     const poolId = await this._resolveInboundPoolId(channel, accountId);
     const channelLabel = channel === 'imessage'
@@ -230,11 +264,17 @@ class ReplyDetector {
         ? 'Email'
         : 'WhatsApp';
     const senderName = String(meta.senderName || '').trim();
+    const fallbackName = number
+      ? `${channelLabel} contact · ${number.slice(-4)}`
+      : meta.waUsername
+        ? `@${String(meta.waUsername).slice(0, 60)}`
+        : `${channelLabel} user · ${waUserId.slice(-4)}`;
     try {
       return await prisma.lead.create({
         data: {
-          name: senderName || `${channelLabel} contact · ${mobile.slice(-4)}`,
+          name: senderName || fallbackName,
           mobile,
+          ...waIdentity,
           source: `${channel}_inbound`,
           status: 'new',
           poolId,
@@ -279,10 +319,14 @@ class ReplyDetector {
       const channel = ['whatsapp', 'email', 'imessage'].includes(meta.channel)
         ? meta.channel
         : 'whatsapp';
-      if (!fromPhone || typeof fromPhone !== 'string') {
+      // WhatsApp users on a username may arrive with only a business-scoped
+      // user id and no number (see utils/whatsappAddress.js).
+      const waUserId = channel === 'whatsapp' && isBsuid(meta.waUserId) ? String(meta.waUserId).trim() : null;
+      if ((!fromPhone || typeof fromPhone !== 'string') && !waUserId) {
         logger.warn('handleReply called with invalid fromPhone');
         return;
       }
+      if (typeof fromPhone !== 'string') fromPhone = '';
 
       const candidates = this._buildCandidates(fromPhone, meta);
       let lead = meta.leadId
@@ -290,7 +334,14 @@ class ReplyDetector {
             where: { id: Number(meta.leadId) },
             include: { messages: { orderBy: { createdAt: 'desc' }, take: 6 } },
           })
-        : await this._findLead(candidates, accountId);
+        : null;
+      if (!lead && waUserId) {
+        lead = await prisma.lead.findUnique({
+          where: { waUserId },
+          include: { messages: { orderBy: { createdAt: 'desc' }, take: 6 } },
+        });
+      }
+      if (!lead && !meta.leadId) lead = await this._findLead(candidates, accountId);
 
       if (!lead) {
         lead = await this._createInboundLead(candidates, accountId, channel, meta);
@@ -308,6 +359,7 @@ class ReplyDetector {
       }
 
       this._bindLeadIdentities(lead.id, accountId, candidates);
+      if (waUserId) await this._rememberWhatsAppUser(lead, waUserId, meta.waUsername);
 
       const inboundWhere = { leadId: lead.id, direction: 'inbound' };
       const [inboundCount, previousInbound] = await Promise.all([

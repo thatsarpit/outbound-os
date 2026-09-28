@@ -1500,6 +1500,21 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
     /\/config\/brand/,
     { brandName: 'Outbound OS', businessName: 'Acme Supplies', currency: 'USD', timezone: 'Europe/London' },
   ],
+  [
+    /\/analytics\/whatsapp-pricing/,
+    {
+      since: '2026-09-01T00:00:00.000Z',
+      timeZone: 'Europe/London',
+      categories: [
+        { category: 'marketing', billable: 412, free: 0 },
+        { category: 'utility', billable: 96, free: 38 },
+        { category: 'service', billable: 0, free: 281 },
+      ],
+      billable: 508,
+      free: 319,
+      unpriced: 12,
+    },
+  ],
 ]
 
 function installFixtureFetch() {

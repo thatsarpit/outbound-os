@@ -16,6 +16,7 @@ import { StatCard, MiniStat } from '@/components/settings/settings-stats'
 import { SettingsField, TextareaField, ReadOnlyField } from '@/components/settings/settings-fields'
 import { WhatsAppAccountGrid } from '@/components/settings/whatsapp-account-grid'
 import { WhatsAppConnectionPanel } from '@/components/settings/whatsapp-connection-panel'
+import { WhatsAppPricingPanel } from '@/components/settings/whatsapp-pricing-panel'
 import { useWhatsAppAccounts } from '@/hooks/use-whatsapp-accounts'
 import { formatDate } from '@/lib/format-date'
 
@@ -71,6 +72,8 @@ export default function WhatsAppSettingsPage() {
           onSelect={setSelectedAccountId}
         />
       </SettingsPanel>
+
+      <WhatsAppPricingPanel />
 
       {selectedAccount && accountForm && (
         <>
