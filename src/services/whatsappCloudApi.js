@@ -44,7 +44,7 @@ const REQUEST_TIMEOUT_MS = parseInt(process.env.AISENSY_TIMEOUT_MS, 10) || 20000
 // ── Credential encryption ───────────────────────────────────────────────────
 // Key derivation is deliberately identical to emailService.js so there is one
 // secret to rotate, not two. An earlier version padded a raw string into a
-// 32-byte buffer and fell back to the literal 'medsales-key' when no env var
+// 32-byte buffer and fell back to a literal key when no env var
 // was set — which meant tokens could be encrypted under a key that is published
 // in this repository. Never reintroduce a default.
 //

@@ -1,5 +1,5 @@
 /**
- * MedSales Unit Tests — node:test (built-in, no deps)
+ * Outbound OS unit tests — node:test (built-in, no deps)
  * Run: node --test test/unit.test.js
  */
 import { test, describe } from 'node:test';
