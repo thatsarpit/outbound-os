@@ -13,10 +13,65 @@
  *   { intent, urgency, nextAction, summary, confidence }
  */
 
+// Phrases that mean "stop messaging me" wherever they appear in a reply.
+// Leads write in their own language, so the common ways of saying it in the
+// languages Outbound OS is used with are here too. Only unambiguous phrases:
+// a word that also means something harmless ("para", "basta con…") belongs
+// in OPT_OUT_WORDS, which must be the whole message.
 const OPT_OUT = [
+  // English
   'stop', 'unsubscribe', 'opt out', 'opt-out', 'remove me', 'do not contact',
   "don't contact", 'take me off', 'no longer interested', 'leave me alone',
+  // Hindi and Hinglish
+  'बंद करो', 'बंद करें', 'मत भेजो', 'मैसेज मत', 'अनसब्सक्राइब',
+  'band karo', 'band kar do', 'mat bhejo', 'message mat karo', 'msg mat karo',
+  // Spanish
+  'darme de baja', 'dar de baja', 'no me escriban', 'no me escribas', 'no me contacten',
+  'no más mensajes', 'deja de escribirme', 'dejen de escribirme', 'cancelar suscripción',
+  // Portuguese
+  'pare de me mandar', 'parem de me mandar', 'não quero mais receber', 'sair da lista',
+  'descadastrar', 'não me mande mais', 'cancelar inscrição',
+  // French
+  'désabonner', 'me désinscrire', 'ne plus recevoir', "arrêtez de m'écrire", 'arrêtez de m’écrire',
+  // German
+  'abmelden', 'nicht mehr kontaktieren', 'keine nachrichten mehr', 'hören sie auf',
+  // Italian
+  'disiscrivimi', 'cancellami', 'non contattatemi', 'non scrivetemi più',
+  // Indonesian and Malay
+  'berhenti berlangganan', 'jangan hubungi', 'jangan kirim',
+  // Turkish
+  'abonelikten çık', 'mesaj atmayın', 'rahatsız etmeyin',
+  // Russian
+  'отписаться', 'не пишите', 'больше не пишите',
+  // Arabic
+  'إلغاء الاشتراك', 'الغاء الاشتراك', 'لا تراسلني', 'توقف عن',
 ];
+
+// Single words that are an opt-out only when they are the whole reply, the
+// way SMS STOP keywords work: "PARAR" on its own means stop; "sem parar"
+// ("non-stop") inside a sentence does not.
+const OPT_OUT_WORDS = new Set([
+  'stop', 'stopp', 'unsubscribe', 'parar', 'pare', 'sair', 'baja', 'cancelar',
+  'arrêt', 'arrêter', 'arret', 'arreter', 'basta', 'berhenti', 'iptal', 'dur',
+  'стоп', 'хватит', 'توقف', 'إلغاء', 'الغاء', 'बंद', 'रोको',
+]);
+
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// Whole-word match that works beyond ASCII: \b only knows Latin letters, so
+// it would never find a boundary around Devanagari or Arabic. Letters, marks
+// and digits all count as part of a word.
+const OPT_OUT_PATTERN = new RegExp(
+  `(?<![\\p{L}\\p{M}\\p{N}])(${OPT_OUT.map(escapeRegex).join('|')})(?![\\p{L}\\p{M}\\p{N}])`,
+  'u',
+);
+
+function isOptOut(text) {
+  if (OPT_OUT_PATTERN.test(text)) return true;
+  // Keep combining marks (\p{M}): Devanagari vowel signs are marks, and
+  // stripping them would turn "बंद" into "बद".
+  const bare = text.replace(/[^\p{L}\p{M}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
+  return OPT_OUT_WORDS.has(bare);
+}
 
 const COMPLAINT = [
   'spam', 'scam', 'fraud', 'harass', 'report you', 'illegal', 'complain',
@@ -37,7 +92,10 @@ const POSITIVE = [
 
 const QUESTION = ['?', 'what', 'when', 'where', 'which', 'can you', 'could you', 'do you'];
 
-const NEGATIVE_SOFT = ['not interested', 'no thanks', 'no thank you', 'not now', 'already have'];
+const NEGATIVE_SOFT = [
+  'not interested', 'no thanks', 'no thank you', 'not now', 'already have',
+  'nahi chahiye', 'नहीं चाहिए', 'no me interesa', 'não tenho interesse', 'pas intéressé', 'kein interesse',
+];
 
 const has = (text, list) => list.some((k) => text.includes(k));
 
@@ -49,15 +107,16 @@ const has = (text, list) => list.some((k) => text.includes(k));
 export function classifyReply(_lead, replyText) {
   const raw = String(replyText || '').trim();
   if (!raw) return null;
-  const text = raw.toLowerCase();
+  const text = raw.normalize('NFC').toLowerCase();
   const summary = raw.replace(/\s+/g, ' ').slice(0, 140);
 
   // Order matters: opt-out and complaint win over everything.
   if (has(text, COMPLAINT)) {
     return { intent: 'complaint', urgency: 'high', nextAction: 'stop_contact', summary, confidence: 'high' };
   }
-  // "stop" is matched as a whole word so "stockist" or "nonstop" don't trigger it.
-  if (new RegExp(`\\b(${OPT_OUT.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`).test(text)) {
+  // Opt-out phrases match whole words only, so "stockist" or "nonstop" don't
+  // trigger "stop".
+  if (isOptOut(text)) {
     return { intent: 'negative', urgency: 'high', nextAction: 'stop_contact', summary, confidence: 'high' };
   }
   if (has(text, OUT_OF_OFFICE)) {

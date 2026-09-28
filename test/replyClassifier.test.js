@@ -1,0 +1,57 @@
+/**
+ * Reply classification: opt-outs must pause a lead in any language a buyer
+ * writes in, without catching ordinary replies that contain the same letters.
+ * Run: node --test test/replyClassifier.test.js
+ */
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { classifyReply } from '../src/services/replyClassifier.js';
+
+const stops = (text) => classifyReply(null, text)?.nextAction === 'stop_contact';
+
+describe('Opt-outs', () => {
+  test('English', () => {
+    for (const text of ['STOP', 'Please stop', 'Unsubscribe me', 'remove me from your list', "Don't contact me again"]) {
+      assert.equal(stops(text), true, text);
+    }
+  });
+
+  test('other languages, anywhere in the message', () => {
+    for (const text of [
+      'बंद करो', 'कृपया मैसेज मत भेजो', 'bhai band karo ye', 'mat bhejo',
+      'Quiero darme de baja', 'no me escriban más', 'por favor, no más mensajes',
+      'Quero sair da lista', 'descadastrar', 'Merci de me désinscrire', 'Bitte abmelden',
+      'cancellami', 'Tolong jangan hubungi saya', 'Lütfen mesaj atmayın', 'Больше не пишите',
+      'إلغاء الاشتراك من فضلك',
+    ]) {
+      assert.equal(stops(text), true, text);
+    }
+  });
+
+  test('one-word opt-outs count only as the whole reply', () => {
+    for (const text of ['PARAR', 'Sair.', 'baja', 'stopp', 'berhenti', 'iptal', 'Стоп!', 'توقف', 'बंद']) {
+      assert.equal(stops(text), true, text);
+    }
+  });
+
+  test('ordinary replies that contain those letters are not opt-outs', () => {
+    for (const text of [
+      'We are a stockist in Lagos', 'nonstop delivery please', 'Trabajamos sem parar',
+      'basta con 500 unidades', 'Can you cancelar the old quote and send a new one?',
+      'Please send the price for bandages', 'dura 2 semanas?',
+    ]) {
+      assert.equal(stops(text), false, text);
+    }
+  });
+
+  test('complaints still win, and soft refusals stop too', () => {
+    assert.equal(classifyReply(null, 'This is spam')?.intent, 'complaint');
+    assert.equal(classifyReply(null, 'nahi chahiye')?.nextAction, 'stop_contact');
+    assert.equal(classifyReply(null, 'No me interesa, gracias')?.nextAction, 'stop_contact');
+  });
+
+  test('buying signals are not mistaken for opt-outs', () => {
+    assert.equal(classifyReply(null, 'Yes, send me the price list')?.intent, 'positive');
+    assert.equal(classifyReply(null, 'Out of office until Monday')?.intent, 'out_of_office');
+  });
+});
