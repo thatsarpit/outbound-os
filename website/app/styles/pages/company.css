@@ -1,0 +1,65 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   COMPANY
+
+   The page pairs a factual introduction with operating coordinates, then
+   loosens into a full-width audience statement. It avoids belief cards and
+   gives unknown company-history facts no visual placeholder to embellish.
+════════════════════════════════════════════════════════════════════════════ */
+
+.company-hero {
+  display: grid;
+  gap: 40px 64px;
+}
+
+.company-hero .eyebrow { margin-bottom: 20px; }
+.company-hero h1 { max-width: 18ch; }
+.company-hero .lede { margin-top: 22px; }
+
+@media (min-width: 900px) {
+  .company-hero {
+    grid-template-columns: 7fr 5fr;
+    align-items: end;
+  }
+}
+
+.company-coordinates { padding: 0; }
+.company-coordinates > div { padding: 20px 24px; }
+.company-coordinates > div + div { border-top: var(--rule); }
+
+.company-coordinates dt {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.company-coordinates dd {
+  margin-top: 4px;
+  color: var(--text);
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+
+.company-product .eyebrow { display: block; margin-bottom: 8px; }
+.company-product h3 + p,
+.company-thesis h3 + p { margin-top: 7px; }
+
+.company-audience { max-width: 58rem; }
+.company-audience .eyebrow { margin-bottom: 14px; }
+.company-audience h2 { max-width: 26ch; }
+.company-audience h2 + p { margin-top: 18px; }
+
+.company-close {
+  display: grid;
+  gap: 28px;
+}
+
+.company-close h2 { max-width: 23ch; }
+.company-close p { margin-top: 12px; max-width: 50ch; }
+.company-close .btn { justify-self: start; }
+
+@media (min-width: 780px) {
+  .company-close {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 48px;
+  }
+}

@@ -1,0 +1,21 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   ROADMAP
+
+   Status is always adjacent to the list it governs. No timeline graphic is
+   used because the product is not publishing dates it cannot yet support.
+════════════════════════════════════════════════════════════════════════════ */
+
+.roadmap-hero { max-width: 50rem; }
+.roadmap-hero h1 { max-width: 20ch; }
+.roadmap-hero__note { margin-top: 24px; padding-top: 18px; border-top: var(--rule); color: var(--text-muted); font-size: 13px; }
+.roadmap-section .section-head .badge { margin-bottom: 18px; }
+.roadmap-list h3 + p { margin-top: 7px; }
+.roadmap-method h2 { margin-top: 12px; }
+
+.roadmap-close { display: grid; gap: 28px; }
+.roadmap-close h2 { max-width: 22ch; }
+.roadmap-close p { margin-top: 12px; max-width: 50ch; }
+.roadmap-close .btn { justify-self: start; }
+@media (min-width: 780px) {
+  .roadmap-close { grid-template-columns: 1fr auto; align-items: center; gap: 48px; }
+}

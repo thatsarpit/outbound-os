@@ -1,0 +1,91 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   TOKENS — shared with the product dashboard (web/src/styles/globals.css).
+
+   The site and the app are one brand. A visitor who signs up should not feel
+   they changed companies. Values here are copied from the dashboard, not
+   re-invented: same ink, same paper, same hairlines.
+
+   Principles carried over:
+     1. Ink first, colour last. Hierarchy comes from size, weight and space.
+     2. Every colour has one job. Green means WhatsApp. Blue means a link.
+     3. Flat and calm. No glass, no glow, no gradients. Elevation is a hairline.
+     4. Tight geometry. 4 / 7 / 10px. Big radii read as toy.
+     5. Tabular numerals wherever digits stack.
+
+   Hex literals belong in this file and nowhere else.
+════════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Paper and ink ── */
+  --bg: #fafafb;
+  --surface: #ffffff;
+  --surface-raised: #f4f4f7;
+
+  --border: #e4e4ea;
+  --border-subtle: #efeff2;
+  --border-strong: #d2d2da;
+
+  --text: #17171c;
+  --text-secondary: #55555f;
+  --text-muted: #6b6b75;
+
+  /* ── Action. Solid ink, never a bright fill. ── */
+  --accent: #17171c;
+  --accent-hover: #2e2e36;
+  --accent-fg: #fafafb;
+  --accent-muted: #f0f0f4;
+
+  /* ── The only blue: links and focus. ── */
+  --focus: #2c3fe0;
+  --focus-muted: #eef0fe;
+  --focus-border: #c7cdf8;
+
+  /* ── State. Never used for identity or decoration. ── */
+  --success: #15803d;
+  --success-muted: #eaf6ee;
+  --warning: #b45309;
+  --warning-muted: #fbf1e3;
+  --danger: #dc2626;
+  --danger-muted: #fdecec;
+
+  /* ── Channel identity. Matches the app's channel colours exactly. ── */
+  --whatsapp: #047857;
+  --email: #7c3aed;
+  --indiamart: #b45309;
+
+  /* ── Geometry. Three radii, no more. ── */
+  --r-sm: 4px;
+  --r-md: 7px;
+  --r-lg: 10px;
+
+  /* ── Elevation. A hairline first, a whisper of shadow second. ── */
+  --shadow-sm: 0 1px 2px rgba(20, 20, 30, 0.04);
+  --shadow-md: 0 4px 12px rgba(20, 20, 30, 0.08);
+
+  /* ── Editorial measure. Prose stops being readable past ~72ch. ── */
+  --measure: 68ch;
+  --measure-tight: 46ch;
+
+  /* ── Page frame ── */
+  --page-max: 1180px;
+  --page-pad: 24px;
+  --rule: 1px solid var(--border);
+  --rule-subtle: 1px solid var(--border-subtle);
+
+  /* ── Vertical rhythm. Sections vary; these are the steps they vary between. ── */
+  --space-section: 88px;
+  --space-section-tight: 56px;
+
+  /* ── Type ── */
+  --font-sans:
+    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+}
+
+@media (max-width: 720px) {
+  :root {
+    --page-pad: 20px;
+    --space-section: 60px;
+    --space-section-tight: 40px;
+  }
+}

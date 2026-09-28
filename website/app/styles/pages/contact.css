@@ -1,0 +1,48 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   CONTACT
+
+   This page ends with its directory rather than an inverted sales band. Each
+   row can hold the context its route needs, and the action stays visually
+   subordinate to the reason for contacting the company.
+════════════════════════════════════════════════════════════════════════════ */
+
+.contact-hero { max-width: 46rem; }
+.contact-hero .eyebrow { margin-bottom: 20px; }
+.contact-hero h1 { max-width: 18ch; }
+.contact-hero .lede { margin-top: 22px; }
+
+.contact-route {
+  display: grid;
+  gap: 22px 32px;
+}
+
+.contact-route__label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.contact-route h3 + p { margin-top: 7px; }
+.contact-route p { font-size: 14px; }
+.contact-route > .btn { justify-self: start; }
+
+.contact-route__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 24px;
+}
+
+@media (min-width: 720px) {
+  .contact-route {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+  }
+
+  .contact-route__actions {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

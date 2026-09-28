@@ -1,0 +1,41 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   LANDING PAGES — WhatsApp CRM, self-hosted CRM, form backend, open source,
+   alternatives. One hero shape and a few reading blocks, so each page's
+   argument, not its decoration, is what differs.
+════════════════════════════════════════════════════════════════════════════ */
+
+.landing-hero { max-width: 50rem; }
+.landing-hero .eyebrow { display: block; margin-bottom: 20px; }
+.landing-hero h1 { max-width: 20ch; }
+.landing-hero .lede { margin-top: 22px; }
+
+.landing-shot { margin-top: 8px; }
+
+/* A heading rail beside a column of short, bold-led points. */
+.points { display: grid; gap: 0; border-top: var(--rule); }
+.points > div { padding-block: 20px; border-bottom: var(--rule); }
+.points h3 { font-size: 1rem; }
+.points p { margin-top: 6px; color: var(--text-secondary); }
+
+.comparison--compact { min-width: 560px; }
+.comparison td { color: var(--text-secondary); }
+.comparison td strong { color: var(--text); font-weight: 560; }
+
+.landing-note {
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: var(--measure);
+}
+
+.landing-cols { display: grid; gap: 32px; }
+@media (min-width: 900px) { .landing-cols { grid-template-columns: 1fr 1fr; gap: 48px; } }
+.landing-cols h3 { font-size: 1rem; margin-bottom: 10px; }
+
+.section-head .cta-link { margin-top: 20px; }
+
+/* Alternatives */
+.alt-verdict__heading { font-size: 1.25rem; margin-bottom: 18px; }
+.alt-together__link { margin-top: 20px; }
+.alt-card__title { font-size: 1.125rem; margin: 0; }
+.dir-card:hover .alt-card__title { text-decoration: underline; text-underline-offset: 3px; }

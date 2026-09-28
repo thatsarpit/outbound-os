@@ -1,0 +1,23 @@
+# Cloudflare Pages response headers.
+
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
+  Strict-Transport-Security: max-age=31536000
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://nexcure.outboundos.space; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+
+# Build output is content-hashed: cache it for a year.
+/_next/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/screenshots/*
+  Cache-Control: public, max-age=604800
+
+/og/*
+  Cache-Control: public, max-age=86400
+  Content-Type: image/png
+
+/llms.txt
+  Content-Type: text/plain; charset=utf-8

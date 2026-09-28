@@ -1,0 +1,90 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   CAPABILITIES
+
+   This is the densest marketing page. Local rules make the index and nested
+   capability groups scan cleanly without turning the whole catalogue into a
+   wall of cards.
+════════════════════════════════════════════════════════════════════════════ */
+
+.capabilities-lead h1 { max-width: 19ch; }
+.capabilities-lead h1 + .lede { margin-top: 22px; }
+
+/* ── Group index ──────────────────────────────────────────────────────────
+   A utility panel: compact links, steady left edges and no decorative icon
+   competing with the group names. */
+
+.capabilities-index-wrap { align-items: center; }
+
+.capabilities-index {
+  display: grid;
+  gap: 0 28px;
+  padding-block: 12px;
+}
+
+@media (min-width: 560px) {
+  .capabilities-index { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.capabilities-index a {
+  padding-block: 10px;
+  border-bottom: var(--rule-subtle);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.capabilities-index a:hover { color: var(--text); }
+
+/* Anchored headings clear the fixed site header when opened from the index. */
+.capability-anchor { scroll-margin-top: 96px; }
+
+/* ── Capability inventories ───────────────────────────────────────────────
+   Headings and explanations use the same small gap everywhere; the outer
+   section rhythm varies, so this repetition reads as taxonomy, not template. */
+
+.capability-list h3 + p,
+.capability-list h4 + p {
+  margin-top: 7px;
+}
+
+.capability-list p { font-size: 14px; }
+.capability-list--compact article:first-child { padding-top: 0; }
+
+.capabilities-channel-split { margin-top: 48px; }
+
+.capability-group__head { max-width: var(--measure-tight); }
+.capability-group__head .eyebrow { margin-bottom: 11px; }
+.capability-group__head h2 + p,
+.capability-group__head h3 + p { margin-top: 10px; }
+.capability-group__head + .stack { margin-top: 24px; }
+
+.capabilities-controls .capability-group + .capability-group {
+  padding-top: 40px;
+  border-top: var(--rule);
+}
+
+@media (min-width: 900px) {
+  .capabilities-controls .capability-group + .capability-group {
+    padding-top: 0;
+    border-top: 0;
+  }
+}
+
+/* ── Closing band ───────────────────────────────────────────────────────── */
+
+.capabilities-close {
+  display: grid;
+  gap: 28px;
+}
+
+.capabilities-close h2 { max-width: 22ch; }
+.capabilities-close p { margin-top: 12px; max-width: 48ch; }
+.capabilities-close .btn { justify-self: start; }
+
+@media (min-width: 860px) {
+  .capabilities-close {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 48px;
+  }
+}

@@ -1,0 +1,20 @@
+/* ── Legal pages ───────────────────────────────────────────────────────────
+   Narrow measure, generous leading, no cards. These are documents; they
+   should look like documents. */
+
+.legal h1 { margin-top: 14px; }
+
+.legal__notice {
+  margin-top: 28px;
+  padding: 18px 20px;
+  border: var(--rule);
+  border-left: 2px solid var(--warning);
+  border-radius: var(--r-md);
+  background: var(--warning-muted);
+}
+.legal__notice p { color: var(--text); font-size: 14px; margin: 0; max-width: none; }
+
+.legal__body { margin-top: 44px; }
+.legal__body h2 { font-size: 1.0625rem; letter-spacing: -0.014em; }
+.legal__body h2 + p { margin-top: 10px; }
+.legal__body > section + section { border-top: var(--rule-subtle); padding-top: 28px; }

@@ -1,0 +1,9 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   PRICING — two options side by side: self-hosted (free) and managed hosting.
+════════════════════════════════════════════════════════════════════════════ */
+
+.price-options > article { display: flex; flex-direction: column; padding: 32px; }
+.price-options h2 { font-size: 2rem; margin-top: 10px; }
+.price-options__lede { margin-top: 10px; color: var(--text-secondary); }
+.price-options .checks { margin-top: 24px; flex: 1; }
+.price-options__cta { margin-top: 32px; }

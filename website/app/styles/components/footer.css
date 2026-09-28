@@ -1,0 +1,39 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   FOOTER
+
+   A B2B footer is a sitemap and a set of trust signals, not a farewell. It is
+   where a buyer looks for the things the marketing pages avoid: legal entity,
+   policies, a real contact route.
+════════════════════════════════════════════════════════════════════════════ */
+
+.footer { border-top: var(--rule); background: var(--surface); margin-top: var(--space-section); }
+
+.footer__inner { padding-block: 48px 32px; }
+
+.footer__top { display: grid; gap: 40px; }
+@media (min-width: 760px) { .footer__top { grid-template-columns: 1.4fr 3fr; gap: 64px; } }
+
+.footer__brand-line { margin-top: 14px; font-size: 14px; color: var(--text-secondary); max-width: 34ch; }
+
+.footer__cols { display: grid; gap: 32px; grid-template-columns: repeat(2, 1fr); }
+@media (min-width: 620px) { .footer__cols { grid-template-columns: repeat(4, 1fr); } }
+
+.footer__col h2 { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 14px; }
+.footer__col ul { display: flex; flex-direction: column; gap: 10px; }
+.footer__col a { font-size: 14px; color: var(--text-secondary); transition: color 0.15s ease; }
+.footer__col a:hover { color: var(--text); }
+
+.footer__bottom {
+  margin-top: 44px;
+  padding-top: 22px;
+  border-top: var(--rule-subtle);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.footer__legal { display: flex; flex-wrap: wrap; gap: 18px; }
+.footer__legal a:hover { color: var(--text); }

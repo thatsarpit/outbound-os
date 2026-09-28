@@ -1,0 +1,272 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   LAYOUT
+
+   The failure mode of a generated marketing site is one rhythm repeated: a
+   centred heading, then a three-column card grid, over and over, until every
+   section carries equal weight and the page says nothing.
+
+   So the primitives here are deliberately uneven. `.split` is 5/7, not 6/6.
+   `.stack` is a hairline-ruled list, not cards. `.band` inverts. Sections
+   choose a rhythm; they do not all get the same one.
+════════════════════════════════════════════════════════════════════════════ */
+
+.page {
+  width: 100%;
+  max-width: var(--page-max);
+  margin-inline: auto;
+  padding-inline: var(--page-pad);
+}
+
+/* Narrow column for long-form reading (legal, docs, story). */
+.page--prose { max-width: 760px; }
+
+/* ── Section rhythm ────────────────────────────────────────────────────────
+   A section is separated by space. Where two sections would otherwise blur
+   together, a hairline does the work instead of a background colour. */
+
+.section { padding-block: var(--space-section); }
+.section--tight { padding-block: var(--space-section-tight); }
+.section--ruled { border-top: var(--rule); }
+.section--raised { background: var(--surface-raised); }
+
+/* The first section on a page sits under a fixed header. */
+.section--lead { padding-top: calc(var(--space-section) + 24px); }
+
+/* ── Section header ────────────────────────────────────────────────────────
+   Left-aligned by default. Centred headings are for posters; a dense page
+   reads down the left edge. */
+
+.section-head { max-width: var(--measure); }
+.section-head .eyebrow { display: block; margin-bottom: 14px; }
+.section-head :is(h1, h2) + p { margin-top: 16px; }
+.section-head + * { margin-top: 40px; }
+
+/* ── Split: an uneven two-column. The narrow side holds the argument, the
+   wide side holds the evidence. ── */
+
+.split {
+  display: grid;
+  gap: 40px;
+}
+
+/* Grid and flex children default to `min-width: auto`, which refuses to shrink
+   below min-content. A long word, or a child with its own minimum, then widens
+   the track past the container and the page scrolls sideways — which is how the
+   hero came to be 375px wide inside a 335px content box on a 375px viewport.
+   Setting it to 0 lets children shrink to the track instead of the reverse. */
+.split > * { min-width: 0; }
+
+@media (min-width: 900px) {
+  .split {
+    grid-template-columns: 5fr 7fr;
+    gap: 64px;
+    align-items: start;
+  }
+  .split--reverse { grid-template-columns: 7fr 5fr; }
+  .split--even { grid-template-columns: 1fr 1fr; }
+  /* The argument column stays put while the evidence scrolls past it. */
+  .split__sticky { position: sticky; top: 104px; }
+}
+
+/* ── Grid: for genuinely parallel items only. Three across is a claim that
+   the three things are peers — do not use it for a list of unequal points. ── */
+
+.grid { display: grid; gap: 1px; background: var(--border); border: var(--rule); border-radius: var(--r-lg); overflow: hidden; }
+.grid > * { background: var(--surface); padding: 24px; }
+
+@media (min-width: 640px) { .grid--2 { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 900px) {
+  .grid--3 { grid-template-columns: repeat(3, 1fr); }
+  .grid--4 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (min-width: 1100px) { .grid--4 { grid-template-columns: repeat(4, 1fr); } }
+
+/* ── Stack: a ruled list. Denser than cards and reads as one object rather
+   than N floating ones — the right default for sequential or unequal items. ── */
+
+.stack { border-top: var(--rule); }
+.stack > * { border-bottom: var(--rule); padding-block: 24px; }
+
+/* ── Band: the one inverted surface. Used at most once per page, to mark the
+   moment the page asks for something. ── */
+
+.band {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: var(--r-lg);
+  padding: 40px;
+}
+.band h2, .band h3 { color: var(--accent-fg); }
+.band p { color: color-mix(in srgb, var(--accent-fg) 72%, transparent); }
+
+@media (min-width: 720px) { .band { padding: 56px; } }
+
+/* ── Panel: a bordered surface. Elevation is the hairline; the shadow is
+   almost invisible and only separates it from the page beneath. ── */
+
+.panel {
+  background: var(--surface);
+  border: var(--rule);
+  border-radius: var(--r-lg);
+  padding: 24px;
+}
+.panel--flush { padding: 0; overflow: hidden; }
+
+/* ── Figures: numbers with a label. Tabular so columns of digits line up. ── */
+
+.figure__value {
+  display: block;
+  font-size: 1.75rem;
+  font-weight: 560;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.figure__label { display: block; margin-top: 4px; font-size: 13px; color: var(--text-muted); }
+
+/* ── Flow: vertical spacing between siblings, set once. ── */
+
+.flow > * + * { margin-top: 16px; }
+.flow-sm > * + * { margin-top: 8px; }
+.flow-lg > * + * { margin-top: 28px; }
+
+/* Visually hidden content remains available to screen readers and forms the
+   accessible label for compact controls such as the billing switch. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Comparison table ────────────────────────────────────────────────────
+   Pricing needs exact repeated-field comparison. The scroll belongs to this
+   surface on narrow screens, so the page itself never overflows. */
+
+.comparison-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: var(--rule);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+
+.comparison {
+  width: 100%;
+  min-width: 780px;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.comparison th,
+.comparison td {
+  padding: 13px 16px;
+  border-bottom: var(--rule-subtle);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.comparison thead th {
+  color: var(--text);
+  font-weight: 560;
+  background: var(--surface-raised);
+  border-bottom: var(--rule);
+}
+
+.comparison tbody th {
+  width: 28%;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.comparison tr:last-child :is(th, td) { border-bottom: 0; }
+.comparison__group th {
+  padding-top: 24px;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: var(--surface);
+  border-bottom: var(--rule);
+}
+
+/* ── Status ledger ───────────────────────────────────────────────────────
+   Roadmaps are a state register, not a feature-card gallery. Each item keeps
+   its status, promise and boundary in one ruled row. */
+
+.status-ledger { border-top: var(--rule); }
+.status-ledger > * {
+  display: grid;
+  gap: 10px 24px;
+  padding-block: 24px;
+  border-bottom: var(--rule);
+}
+
+@media (min-width: 720px) {
+  .status-ledger > * { grid-template-columns: minmax(10rem, 2fr) 5fr; }
+}
+
+/* ── Skip link — keyboard users land here first. ── */
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 8px;
+  z-index: 100;
+  background: var(--surface);
+  border: var(--rule);
+  border-radius: var(--r-md);
+  padding: 10px 14px;
+  font-size: 14px;
+}
+.skip-link:focus { left: 16px; }
+
+/* Focus is visible everywhere, and it is the only blue on the page. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── Product shot placeholder ──────────────────────────────────────────────
+   Reads as a reserved frame, not as a broken image. The flat raised surface
+   stays intentionally quieter than the product screenshot it will replace. */
+
+.shot {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  /* A full-width 16:10 frame is ~740px tall on a 1180px page — most of a
+     viewport given over to a placeholder. Cap it so the reserved space reads
+     as "a screenshot goes here", not as a hole in the page. */
+  max-height: 420px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--r-lg);
+  background: var(--surface-raised);
+}
+
+.shot__label {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: var(--surface);
+  border: var(--rule);
+  border-radius: var(--r-sm);
+  padding: 5px 10px;
+}

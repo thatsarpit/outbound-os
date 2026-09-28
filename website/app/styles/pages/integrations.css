@@ -1,0 +1,18 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   INTEGRATIONS — directory and per-integration pages.
+════════════════════════════════════════════════════════════════════════════ */
+
+.integrations-hero { max-width: 49rem; }
+.integrations-hero .eyebrow { margin-bottom: 20px; }
+.integrations-hero h1 { max-width: 19ch; }
+.integrations-hero .lede { margin-top: 22px; }
+
+/* ── Integration detail ── */
+.integration-hero { max-width: 49rem; }
+.integration-hero .eyebrow { margin-bottom: 20px; }
+.integration-hero .lede { margin-top: 22px; }
+.integration-hero__more { margin-top: 16px; color: var(--text-secondary); max-width: var(--measure); }
+.integration-body { align-items: start; }
+.integration-checks { margin-top: 24px; }
+.integration-steps__heading { font-size: 1.25rem; margin-bottom: 16px; }
+.integration-code { margin-top: 28px; }

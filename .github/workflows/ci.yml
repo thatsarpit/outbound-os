@@ -47,6 +47,30 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
 
+  website:
+    name: Website
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - name: Every page is in the sitemap and has a share image
+        run: |
+          pages=$(find out -name '*.html' ! -name '404.html' ! -name '_not-found.html' | wc -l)
+          urls=$(grep -c '<loc>' out/sitemap.xml)
+          cards=$(ls out/og/*.png | wc -l)
+          echo "pages=$pages sitemap=$urls cards=$cards"
+          test "$pages" -eq "$urls"
+          test "$cards" -eq "$urls"
+
   docker:
     name: Docker image boots
     runs-on: ubuntu-latest

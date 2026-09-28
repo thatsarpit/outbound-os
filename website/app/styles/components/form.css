@@ -1,0 +1,91 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   FORMS
+
+   Matches the input styling in the product dashboard (web/src/pages/account.tsx)
+   so a person who fills in a form here and later uses the app is not meeting
+   two different products.
+════════════════════════════════════════════════════════════════════════════ */
+
+.form { display: flex; flex-direction: column; gap: 18px; }
+
+.form__row { display: grid; gap: 18px; }
+@media (min-width: 620px) { .form__row { grid-template-columns: 1fr 1fr; } }
+
+.field { display: block; border: 0; padding: 0; margin: 0; min-width: 0; }
+
+.field__label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 7px;
+}
+
+.field__optional { font-weight: 400; color: var(--text-muted); }
+
+.field__input {
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 11px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--surface);
+  border: var(--rule);
+  border-radius: var(--r-md);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.field__input::placeholder { color: var(--text-muted); }
+
+.field__input:focus {
+  outline: none;
+  border-color: var(--focus);
+  box-shadow: 0 0 0 3px var(--focus-muted);
+}
+
+textarea.field__input { resize: vertical; min-height: 96px; line-height: 1.55; }
+
+select.field__input {
+  color-scheme: light;
+}
+
+/* ── Chips: a multi-select that reads as a set of answers, not a listbox. ── */
+
+.chips { display: flex; flex-wrap: wrap; gap: 7px; }
+
+.chip {
+  height: 32px;
+  padding-inline: 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: var(--rule);
+  border-radius: var(--r-md);
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.chip:hover { background: var(--surface-raised); color: var(--text); }
+
+/* Selected is ink-on-paper inverted — the same "this is chosen" signal the
+   dashboard uses, so it needs no legend. */
+.chip[aria-pressed='true'] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+.form__footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 18px;
+  padding-top: 6px;
+}
+
+.form__note { font-size: 13px; color: var(--text-muted); margin: 0; }
+/* A rejected submission is the one message in this form the visitor must not
+   miss, so it carries colour rather than sitting in muted helper grey. */
+.form__note--error { color: var(--danger, #b42318); font-weight: 500; }

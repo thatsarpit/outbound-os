@@ -1,0 +1,120 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   PLATFORM
+
+   The platform page carries more operational detail than the home page. Its
+   local styles organise labels, sequences and comparison lists; surfaces,
+   geometry and section rhythm still come from the shared primitives.
+════════════════════════════════════════════════════════════════════════════ */
+
+.platform-lead .section-head h1 { max-width: 17ch; }
+.platform-lead .section-head h1 + .lede { margin-top: 22px; }
+
+/* ── Compact operating map ────────────────────────────────────────────────
+   This is a table of stages in panel form, not a second version of the full
+   process. The right edge answers what each stage produces at a glance. */
+
+.platform-map .eyebrow { margin-bottom: 16px; }
+.platform-map ol { border-top: var(--rule); }
+
+.platform-map li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
+  align-items: baseline;
+  padding-block: 11px;
+  border-bottom: var(--rule);
+}
+
+.platform-map li span {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 560;
+}
+
+.platform-map li small {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: right;
+}
+
+/* ── End-to-end process ───────────────────────────────────────────────────
+   The fixed metadata gutter names responsibility before the reader reaches
+   the explanatory copy. It collapses above the text on small screens. */
+
+.platform-process > li {
+  display: grid;
+  gap: 14px;
+}
+
+@media (min-width: 640px) {
+  .platform-process > li {
+    grid-template-columns: 10rem minmax(0, 1fr);
+    gap: 28px;
+  }
+}
+
+.platform-process__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  padding-top: 2px;
+}
+
+.platform-process h3 + p,
+.platform-views h3 + p,
+.platform-constraints h3 + p {
+  margin-top: 7px;
+}
+
+/* ── Approval boundary ────────────────────────────────────────────────────
+   Both columns use rule markers. Bullets would make a control inventory read
+   like a generic checklist and add visual noise beside the badge vocabulary. */
+
+.platform-boundary .eyebrow { margin-bottom: 9px; }
+.platform-boundary h3 { margin-bottom: 16px; }
+.platform-boundary ul { display: flex; flex-direction: column; gap: 11px; }
+
+.platform-boundary li {
+  position: relative;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.platform-boundary li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.72em;
+  width: 9px;
+  height: 1px;
+  background: var(--border-strong);
+}
+
+/* ── Workspace and controls ─────────────────────────────────────────────── */
+
+.platform-workspace { align-items: center; }
+.platform-workspace .section-head + * { margin-top: 28px; }
+.platform-views { border-top: var(--rule); }
+.platform-constraints article:first-child { padding-top: 0; }
+
+/* ── Closing band ───────────────────────────────────────────────────────── */
+
+.platform-close {
+  display: grid;
+  gap: 28px;
+}
+
+.platform-close h2 { max-width: 20ch; }
+.platform-close p { margin-top: 12px; max-width: 48ch; }
+.platform-close .btn { justify-self: start; }
+
+@media (min-width: 860px) {
+  .platform-close {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 48px;
+  }
+}

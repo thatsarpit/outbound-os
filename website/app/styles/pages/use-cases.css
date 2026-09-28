@@ -1,0 +1,68 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   USE CASES
+
+   Roles are parallel; workflows are sequential. The page-local styles make
+   that distinction visible while leaving all surfaces and section spacing to
+   the shared system.
+════════════════════════════════════════════════════════════════════════════ */
+
+.use-cases-lead h1 { max-width: 18ch; }
+.use-cases-lead h1 + .lede { margin-top: 22px; }
+
+.use-cases-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin-top: 28px;
+}
+
+.use-case-anchor { scroll-margin-top: 96px; }
+
+.use-cases-industries .eyebrow { margin-bottom: 8px; }
+.use-cases-industries h3 + p { margin-top: 7px; }
+.use-cases-industries p { font-size: 14px; }
+.use-case-proven__eyebrow { margin-top: 18px; }
+
+/* ── Buyer jobs ───────────────────────────────────────────────────────────
+   These cells need enough internal rhythm to remain useful as footer anchor
+   targets, without turning role names into oversized persona headlines. */
+
+.use-cases-jobs .eyebrow { margin-bottom: 10px; }
+.use-cases-jobs h3 + p { margin-top: 9px; }
+.use-cases-jobs p { font-size: 14px; }
+
+/* ── Workflow sequences ───────────────────────────────────────────────────
+   Phase labels replace numbers because the useful information is what kind of
+   handoff occurs — intake, team decision, stop condition — not its position. */
+
+.use-case-flow .eyebrow { margin-bottom: 8px; }
+.use-case-flow h3 + p { margin-top: 7px; }
+.use-case-flow p { font-size: 14px; }
+.use-case-flow--compact > :first-child { padding-top: 0; }
+
+.use-case-manager {
+  align-items: center;
+  margin-top: 44px;
+}
+
+.use-cases-limits > :first-child { padding-top: 0; }
+.use-cases-limits h3 + p { margin-top: 7px; }
+
+/* ── Closing band ───────────────────────────────────────────────────────── */
+
+.use-cases-close {
+  display: grid;
+  gap: 28px;
+}
+
+.use-cases-close h2 { max-width: 20ch; }
+.use-cases-close p { margin-top: 12px; max-width: 46ch; }
+.use-cases-close .btn { justify-self: start; }
+
+@media (min-width: 860px) {
+  .use-cases-close {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 48px;
+  }
+}

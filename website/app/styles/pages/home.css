@@ -1,0 +1,182 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   HOME
+
+   The home page alternates a proof-bearing split, a sequential stack, a
+   command surface, an industry ledger and a status register. That variation
+   is deliberate: different arguments should not all look like feature cards.
+════════════════════════════════════════════════════════════════════════════ */
+
+.home-hero { align-items: center; }
+.home-hero-section .shot { min-height: 300px; }
+.hero { max-width: 46rem; }
+.hero .eyebrow { display: block; margin-bottom: 20px; }
+.hero h1 { max-width: 15ch; }
+.hero .lede { margin-top: 22px; }
+
+.hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  margin-top: 32px;
+}
+
+.hero__note {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: var(--rule);
+  font-size: 13px;
+  color: var(--text-muted);
+  max-width: 60ch;
+}
+
+/* Numbered sequence: fixed tabular gutter, flexible explanation. */
+.steps { border-top: var(--rule); }
+.steps > li {
+  display: grid;
+  grid-template-columns: 3rem 1fr;
+  gap: 4px 16px;
+  padding-block: 26px;
+  border-bottom: var(--rule);
+}
+@media (min-width: 760px) {
+  .steps > li { grid-template-columns: 5rem 1fr; gap: 32px; }
+}
+.steps__n {
+  padding-top: 2px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+.steps h3 + p,
+.home-problems h3 + p,
+.home-limits h3 + p { margin-top: 7px; }
+
+/* MCP command/result surface. Monospace appears only for real tool names. */
+.home-mcp { align-items: center; }
+.mcp-example { padding: 0; overflow: hidden; }
+.mcp-example__line {
+  display: grid;
+  grid-template-columns: 4rem 1fr;
+  gap: 18px;
+  padding: 20px 22px;
+  border-bottom: var(--rule-subtle);
+}
+.mcp-example__speaker {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.mcp-example__line p { color: var(--text); font-size: 14px; }
+.mcp-example__tools {
+  padding: 16px 22px;
+  color: var(--text-muted);
+  background: var(--surface-raised);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.home-mcp .section-head > p + p { margin-top: 12px; }
+.home-mcp .cta-link { margin-top: 24px; }
+
+/* Industry examples are unequal rows: label in a narrow rail, job in the
+   reading column. The proven use case gets a raised fill, not a fake badge. */
+.home-use-cases > article {
+  display: grid;
+  gap: 12px 32px;
+}
+@media (min-width: 720px) {
+  .home-use-cases > article { grid-template-columns: minmax(11rem, 2fr) 5fr; }
+}
+.home-use-cases h3 + p { margin-top: 7px; }
+.home-use-cases .link { display: inline-block; margin-top: 12px; font-size: 13px; }
+.home-use-cases__proven { background: var(--surface-raised); padding-inline: 20px; }
+
+.home-roadmap > article { align-items: start; }
+.home-roadmap .badge { justify-self: start; }
+.home-roadmap p { font-size: 14px; }
+
+/* Closing band is shared across pages. */
+.band__inner { display: grid; gap: 28px; }
+@media (min-width: 860px) {
+  .band__inner {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 48px;
+  }
+}
+.band__inner h2 { max-width: 22ch; }
+.band__inner p { margin-top: 12px; max-width: 50ch; }
+.band__actions { display: flex; flex-wrap: wrap; gap: 10px; }
+
+@media (max-width: 899px) {
+  .home-hero .shot { order: 2; }
+}
+
+/* The loop diagram sits above the numbered detail; the numbers then read as
+   elaboration rather than as the primary explanation. */
+.home-loop { margin-bottom: 40px; }
+
+/* MCP demo: the exchange is the evidence, so it gets equal weight rather than
+   sitting in the narrow column. */
+.mcp-demo { align-items: start; }
+
+.platform-flow { margin-top: 8px; }
+
+/* Capabilities: board sits above its detail list inside one grid column. */
+.cap-column { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+.cap-board { margin-bottom: 4px; }
+
+/* ── Open-source home additions ── */
+.hero__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin: 28px 0 0;
+  padding: 20px 0 0;
+  list-style: none;
+  border-top: var(--rule);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.hero__facts li { display: inline-flex; align-items: center; gap: 8px; }
+.hero__facts li::before {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--success);
+}
+
+.home-shot { margin-top: 36px; }
+
+.home-why h3 { font-size: 1rem; }
+.home-why p { margin-top: 8px; color: var(--text-secondary); font-size: 14px; }
+.home-why__more { margin-top: 24px; }
+
+.home-connects {
+  display: grid;
+  gap: 32px;
+  margin-top: 8px;
+}
+@media (min-width: 760px) { .home-connects { grid-template-columns: repeat(3, 1fr); gap: 48px; } }
+.home-connects h3 {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-bottom: 12px;
+  border-bottom: var(--rule);
+}
+.home-connects ul { list-style: none; margin: 0; padding: 0; }
+.home-connects li { border-bottom: var(--rule-subtle); }
+.home-connects a {
+  display: block;
+  padding-block: 11px;
+  color: var(--text);
+  font-weight: 500;
+}
+.home-connects a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.steps p a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }

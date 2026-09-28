@@ -1,0 +1,47 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   MCP
+
+   Tool names use monospace because they are literal API surface. Everything
+   else remains in Inter so the page reads as product guidance, not a terminal
+   costume.
+════════════════════════════════════════════════════════════════════════════ */
+
+.mcp-hero { align-items: center; }
+.mcp-hero .section-head h1 { max-width: 17ch; }
+.mcp-hero__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 22px; margin-top: 30px; }
+
+.mcp-surface { padding: 0; overflow: hidden; }
+.mcp-surface__head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; background: var(--surface-raised); border-bottom: var(--rule); }
+.mcp-surface__head .mono { color: var(--text-muted); font-size: 11px; }
+.mcp-surface dl > div { display: grid; grid-template-columns: 5rem 1fr; gap: 18px; padding: 17px 20px; border-bottom: var(--rule-subtle); }
+.mcp-surface dl > div:last-child { border-bottom: 0; }
+.mcp-surface dt { color: var(--text); font-size: 13px; font-weight: 560; }
+.mcp-surface dd { color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+
+.mcp-anchor { scroll-margin-top: 60px; }
+.mcp-workflows article { padding-block: 28px; }
+.mcp-prompt { color: var(--text); font-size: 1.0625rem; font-weight: 500; line-height: 1.45; }
+.mcp-workflows h3 { margin-top: 14px; }
+.mcp-workflows h3 + p { margin-top: 7px; }
+.mcp-workflows code { display: block; margin-top: 14px; color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
+
+.mcp-tool-register > article > div { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.mcp-tool-register p { font-size: 14px; }
+
+.mcp-setup li { display: grid; grid-template-columns: 2.5rem 1fr; gap: 16px; }
+.mcp-setup li > span { color: var(--text-muted); font-size: 12px; }
+.mcp-setup h3 + p,
+.mcp-limits h3 + p { margin-top: 7px; }
+
+.mcp-close { display: grid; gap: 28px; }
+.mcp-close h2 { max-width: 22ch; }
+.mcp-close p { margin-top: 12px; max-width: 48ch; }
+.mcp-close .btn { justify-self: start; }
+@media (min-width: 780px) {
+  .mcp-close { grid-template-columns: 1fr auto; align-items: center; gap: 48px; }
+}
+
+/* Full tool register. */
+.mcp-tools h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
+.mcp-tools ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.mcp-tools code { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-secondary); }

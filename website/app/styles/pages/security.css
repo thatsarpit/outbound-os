@@ -1,0 +1,73 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   SECURITY
+
+   Implemented controls and formal assurance gaps stay visually separate.
+   The first is a definition ledger; the second is a status list where the
+   unavailable label cannot be mistaken for a certification badge.
+════════════════════════════════════════════════════════════════════════════ */
+
+.security-hero { max-width: 50rem; }
+.security-hero .eyebrow { margin-bottom: 20px; }
+.security-hero h1 { max-width: 20ch; }
+.security-hero .lede { margin-top: 22px; }
+
+.security-ledger dt {
+  color: var(--text);
+  font-size: 0.9375rem;
+  font-weight: 560;
+}
+
+.security-ledger dd {
+  margin-top: 7px;
+  color: var(--text-secondary);
+}
+
+.security-credentials {
+  display: grid;
+  gap: 24px 48px;
+}
+
+.security-credentials .eyebrow { margin-bottom: 12px; }
+
+@media (min-width: 820px) {
+  .security-credentials {
+    grid-template-columns: 5fr 7fr;
+    align-items: center;
+    padding: 32px;
+  }
+}
+
+.security-assurance { margin-top: 40px; }
+
+.security-assurance > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 16px 24px;
+  align-items: start;
+}
+
+.security-assurance h3 + p { margin-top: 7px; }
+.security-assurance p { font-size: 14px; }
+
+.security-question {
+  margin-top: 28px;
+  max-width: var(--measure-tight);
+  font-size: 14px;
+}
+
+.security-disclosure {
+  display: grid;
+  gap: 28px;
+}
+
+.security-disclosure h2 { max-width: 20ch; }
+.security-disclosure p { margin-top: 12px; max-width: 52ch; }
+.security-disclosure .btn { justify-self: start; }
+
+@media (min-width: 780px) {
+  .security-disclosure {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    gap: 48px;
+  }
+}

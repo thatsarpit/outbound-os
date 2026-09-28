@@ -1,0 +1,98 @@
+import { ImageResponse } from 'next/og'
+import { site } from '@/lib/site-content'
+
+export const socialImageSize = { width: 1200, height: 630 }
+
+/** A flat brand card shared by Open Graph and X, one per page. No decorative
+ * gradient: the mark, the page's own headline and the product line carry it. */
+export async function createSocialCard({
+  eyebrow = 'Open-source WhatsApp CRM',
+  headline = 'Answer every lead in seconds. Follow up until they reply.',
+}: { eyebrow?: string; headline?: string } = {}) {
+  const size = headline.length > 60 ? 58 : headline.length > 34 ? 66 : 78
+  return new ImageResponse(
+    (
+      <div
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          padding: '72px 78px',
+          background: 'rgb(250 250 251)',
+          color: 'rgb(23 23 28)',
+          fontFamily: 'Inter, Arial, sans-serif',
+          border: '1px solid rgb(228 228 234)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <div
+            style={{
+              width: 64,
+              height: 64,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'rgb(250 250 251)',
+            }}
+          >
+            <svg viewBox="0 0 32 32" width="64" height="64">
+              <path
+                fillRule="evenodd"
+                clipRule="evenodd"
+                fill="rgb(23 23 28)"
+                d="M11 3H21A8 8 0 0 1 29 11V21A8 8 0 0 1 21 29H11A8 8 0 0 1 3 21V11A8 8 0 0 1 11 3ZM13 9.5H22.5V19H19.5V14.6L12.1 22L10 19.9L17.4 12.5H13V9.5Z"
+              />
+            </svg>
+          </div>
+          <div style={{ display: 'flex', fontSize: 38, fontWeight: 600, letterSpacing: '-0.03em' }}>
+            {site.name}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+          <div
+            style={{
+              display: 'flex',
+              fontSize: 24,
+              fontWeight: 600,
+              color: 'rgb(22 128 72)',
+              letterSpacing: '0.01em',
+            }}
+          >
+            {eyebrow}
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              maxWidth: 1000,
+              fontSize: size,
+              lineHeight: 1.06,
+              fontWeight: 600,
+              letterSpacing: '-0.04em',
+            }}
+          >
+            {headline}
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            paddingTop: 22,
+            borderTop: '1px solid rgb(228 228 234)',
+            fontSize: 19,
+            color: 'rgb(133 133 143)',
+          }}
+        >
+          <span>outboundos.space</span>
+          <span>Free · Open source · Self-hosted</span>
+        </div>
+      </div>
+    ),
+    socialImageSize,
+  )
+}

@@ -1,0 +1,35 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   BADGES
+
+   A badge states a fact — a channel, a status, a stage. It is not decoration,
+   and it is never a container: radius stays at 4px, because a pill of this
+   size next to 7px cards reads as a different design.
+════════════════════════════════════════════════════════════════════════════ */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding-inline: 8px;
+  border-radius: var(--r-sm);
+  border: var(--rule);
+  background: var(--surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.badge__dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; flex: none; }
+
+/* Channel identity — same colours the product uses, so a channel means the
+   same thing on the site as it does in the app. */
+.badge--whatsapp { color: var(--whatsapp); }
+.badge--email { color: var(--email); }
+.badge--indiamart { color: var(--indiamart); }
+
+/* State — reserved for genuine state. Never for emphasis. */
+.badge--planned { color: var(--text-muted); border-style: dashed; }
+.badge--development { color: var(--warning); }
+.badge--live { color: var(--success); }

@@ -1,0 +1,68 @@
+/* ════════════════════════════════════════════════════════════════════════════
+   BUTTONS
+
+   Primary is solid ink — the same as the dashboard's primary action. A bright
+   fill would make the CTA the loudest thing on every screen and would not
+   survive next to the product's own UI.
+
+   No hover lift, no glow. Buttons change colour on hover; they do not move.
+════════════════════════════════════════════════════════════════════════════ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding-inline: 18px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.btn--primary { background: var(--accent); color: var(--accent-fg); }
+.btn--primary:hover { background: var(--accent-hover); }
+
+.btn--secondary {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.btn--secondary:hover { background: var(--surface-raised); }
+
+.btn--ghost { background: transparent; color: var(--text-secondary); }
+.btn--ghost:hover { background: var(--surface-raised); color: var(--text); }
+
+/* On the inverted band the roles flip: paper on ink. */
+.band .btn--primary { background: var(--accent-fg); color: var(--accent); }
+.band .btn--primary:hover { background: var(--surface); }
+.band .btn--secondary {
+  background: transparent;
+  color: var(--accent-fg);
+  border-color: color-mix(in srgb, var(--accent-fg) 34%, transparent);
+}
+.band .btn--secondary:hover { background: color-mix(in srgb, var(--accent-fg) 10%, transparent); }
+
+.btn--lg { height: 44px; padding-inline: 22px; font-size: 15px; }
+.btn--sm { height: 32px; padding-inline: 12px; font-size: 13px; }
+
+.btn[disabled], .btn[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
+
+/* An inline link that behaves as a call to action without becoming a button. */
+.cta-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  border-bottom: 1px solid var(--border-strong);
+  padding-bottom: 2px;
+  transition: border-color 0.15s ease, gap 0.15s ease;
+}
+.cta-link:hover { border-color: var(--text); gap: 9px; }

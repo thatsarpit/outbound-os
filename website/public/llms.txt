@@ -1,0 +1,54 @@
+# Outbound OS
+
+> Outbound OS is a free, open-source (AGPL-3.0), self-hosted WhatsApp CRM and outreach platform. It captures leads from website forms, Facebook Lead Ads, IndiaMART and any webhook, contacts each lead on WhatsApp, email, Telegram or iMessage within seconds, runs follow-ups that stop when the lead replies, and keeps the conversation, pipeline, orders and invoices on one lead record. It runs with one Docker Compose command and includes an MCP server so Claude and other AI clients can work the CRM.
+
+Key facts:
+
+- License: AGPL-3.0. Free for any use, including commercial. No paid tier; optional managed hosting by the maintainers.
+- Source: https://github.com/thatsarpit/outbound-os
+- Stack: Node.js 24, Express, Prisma, SQLite; React dashboard; Docker Compose.
+- WhatsApp: Meta's official WhatsApp Cloud API directly, or AiSensy, chosen per number. It never automates the WhatsApp phone apps. Meta bills template messages to the user's own WhatsApp Business account.
+- Not included: chatbot builder, Instagram DMs, click-to-WhatsApp ad tools.
+
+## Docs
+
+- [Install with Docker](https://outboundos.space/docs/install): requirements, first admin, setup wizard, HTTPS
+- [Configuration reference](https://outboundos.space/docs/configuration): every .env setting
+- [Connect the WhatsApp Cloud API](https://outboundos.space/docs/whatsapp-cloud-api): Meta app, permanent token, webhook, first-contact template
+- [Website forms and lead webhooks](https://outboundos.space/docs/website-forms): addresses, keys, field names, test mode
+- [Set up the MCP server](https://outboundos.space/docs/mcp): tokens, Claude Code, claude.ai connector
+- [Backups, restores and upgrades](https://outboundos.space/docs/backups-and-upgrades)
+
+## Product
+
+- [Open-source WhatsApp CRM](https://outboundos.space/whatsapp-crm)
+- [Self-hosted CRM](https://outboundos.space/self-hosted-crm)
+- [Form backend](https://outboundos.space/form-backend): HTML forms with _gotcha and _next that create leads and reply on WhatsApp
+- [Capabilities](https://outboundos.space/capabilities)
+- [Integrations](https://outboundos.space/integrations)
+- [MCP server and tool list](https://outboundos.space/mcp)
+- [Pricing](https://outboundos.space/pricing)
+- [Roadmap](https://outboundos.space/roadmap)
+
+## Integrations
+
+- [WhatsApp Cloud API](https://outboundos.space/integrations/whatsapp-cloud-api)
+- [AiSensy](https://outboundos.space/integrations/aisensy)
+- [IndiaMART Lead Manager Push API](https://outboundos.space/integrations/indiamart)
+- [Facebook Lead Ads](https://outboundos.space/integrations/facebook-lead-ads)
+- [Zapier, Make and n8n](https://outboundos.space/integrations/zapier)
+- [Google Sheets](https://outboundos.space/integrations/google-sheets)
+- [Outgoing webhooks](https://outboundos.space/integrations/webhooks)
+- [Email (SMTP/IMAP)](https://outboundos.space/integrations/email)
+
+## Comparisons
+
+- [Outbound OS vs Wati](https://outboundos.space/alternatives/wati)
+- [Outbound OS vs AiSensy](https://outboundos.space/alternatives/aisensy)
+- [Outbound OS vs Interakt](https://outboundos.space/alternatives/interakt)
+
+## Optional
+
+- [Security](https://outboundos.space/security)
+- [About](https://outboundos.space/company)
+- [Managed hosting](https://outboundos.space/managed-hosting)

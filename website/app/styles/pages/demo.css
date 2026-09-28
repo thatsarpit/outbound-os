@@ -1,0 +1,39 @@
+/* ── Demo page ─────────────────────────────────────────────────────────────
+   The form gets the wider column; the expectations column is narrower because
+   it is read once, while the form is worked through. */
+
+.demo__body { margin-top: 44px; }
+#request { scroll-margin-top: 80px; }
+
+.demo__aside h2 { margin-bottom: 12px; font-size: 1.125rem; }
+
+/* A list where each item is a statement of fact. The marker is a rule rather
+   than a bullet — a dense page has enough dots in it already. */
+.ticks { display: flex; flex-direction: column; gap: 12px; }
+
+.ticks li {
+  position: relative;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.ticks li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.62em;
+  width: 9px;
+  height: 1px;
+  background: var(--border-strong);
+}
+
+.ticks--muted li { color: var(--text-muted); }
+
+.demo__note {
+  border-top: var(--rule);
+  padding-top: 20px;
+}
+.demo__note h3 { margin-bottom: 6px; font-size: 1rem; }
+.demo__note p { font-size: 14px; }

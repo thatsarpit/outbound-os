@@ -1,0 +1,10 @@
+# Cloudflare Pages config for the marketing site.
+#
+# The site is a Next.js static export (`output: 'export'` in next.config.mjs),
+# so there is no server runtime to host — Pages serves ./out directly.
+#
+# Deploy:  npx wrangler pages deploy out --project-name=outboundos-site
+# Requires `npx wrangler login` first (or CLOUDFLARE_API_TOKEN in the env).
+name = "outboundos-site"
+pages_build_output_dir = "out"
+compatibility_date = "2026-09-01"
