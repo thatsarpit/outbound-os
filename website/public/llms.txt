@@ -7,7 +7,7 @@ Key facts:
 - License: AGPL-3.0. Free for any use, including commercial. No paid tier; optional managed hosting by the maintainers.
 - Source: https://github.com/thatsarpit/outbound-os
 - Stack: Node.js 24, Express, Prisma, SQLite; React dashboard; Docker Compose.
-- WhatsApp: Meta's official WhatsApp Cloud API directly, or AiSensy, chosen per number. It never automates the WhatsApp phone apps. Meta bills template messages to the user's own WhatsApp Business account.
+- WhatsApp: Meta's official WhatsApp Cloud API directly, or AiSensy, chosen per number. It never automates the WhatsApp phone apps. Meta bills messages (templates, and from 1 October 2026 service replies) to the user's own WhatsApp Business account; Outbound OS adds no markup.
 - Not included: chatbot builder, Instagram DMs, click-to-WhatsApp ad tools.
 
 ## Docs

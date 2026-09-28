@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 import { Breadcrumbs, Faq, InstallBand, Related, Screenshot } from '@/components/content'
 import { buildMetadata } from '@/lib/metadata'
-import { LogoPair } from '@/components/logo-pair'
+import { HeroScene } from '@/components/visuals/hero-scene'
 import { site } from '@/lib/site-content'
 
 export const metadata = buildMetadata(
@@ -26,7 +26,7 @@ const faq = [
   },
   {
     q: 'How much does WhatsApp messaging cost?',
-    a: 'Meta charges per template message, by category (marketing, utility, authentication) and by the recipient’s country. Replies inside the 24-hour customer-service window are free. Rates change, so check Meta’s current pricing page for your markets.',
+    a: 'Meta charges per message, billed to your own WhatsApp Business account. Template messages are priced by category (marketing, utility, authentication) and the recipient’s country, and from 1 October 2026 replies inside the 24-hour customer-service window are charged per message too. Rates change, so check Meta’s current pricing page for your markets.',
   },
   {
     q: 'Can several people share one WhatsApp number?',
@@ -45,27 +45,40 @@ const faq = [
 export default function WhatsAppCrmPage() {
   return (
     <>
-      <section className="section section--lead hero-ground">
-        <div className="page landing-hero">
-          <Breadcrumbs trail={[{ name: 'WhatsApp CRM', path: '/whatsapp-crm' }]} />
-          <LogoPair brands={['outboundos', 'whatsapp', 'meta']} />
-          <p className="eyebrow">WhatsApp CRM</p>
-          <h1>The open-source WhatsApp CRM that does the chasing.</h1>
-          <p className="lede">
-            Outbound OS connects your WhatsApp Business number through
-            Meta&rsquo;s official Cloud API, messages every new lead within
-            seconds, and follows up until they reply — with the whole thread
-            on a shared lead record your team can work together. Free, and
-            it runs on your own server.
-          </p>
-          <div className="hero__actions">
-            <Link href="/docs/install" className="btn btn--primary btn--lg">
-              Install free
-            </Link>
-            <Link href="/docs/whatsapp-cloud-api" className="cta-link">
-              Connect WhatsApp in 15 minutes
-              <ArrowRight size={15} aria-hidden="true" />
-            </Link>
+      <section className="stage-wrap">
+        <div className="stage">
+          <div className="stage__aurora" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </div>
+          <div className="stage__grid" aria-hidden="true" />
+          <div className="page stage__inner">
+            <div className="stage__copy">
+              <Breadcrumbs trail={[{ name: 'WhatsApp CRM', path: '/whatsapp-crm' }]} />
+              <span className="stage__badge">
+                <b>WhatsApp CRM</b>
+                Official Cloud API · free and open source
+              </span>
+              <h1>
+                The open-source WhatsApp CRM that <span className="glow">does the chasing.</span>
+              </h1>
+              <p className="stage__lede">
+                Outbound OS connects your WhatsApp Business number through
+                Meta&rsquo;s official Cloud API, messages every new lead within
+                seconds, and follows up until they reply — with the whole
+                thread on a shared lead record your team works together.
+              </p>
+              <div className="stage__actions">
+                <Link href="/docs/install" className="btn btn--brand btn--lg">
+                  Install free
+                </Link>
+                <Link href="/docs/whatsapp-cloud-api" className="btn btn--glass btn--lg">
+                  Connect WhatsApp in 15 minutes
+                </Link>
+              </div>
+            </div>
+            <HeroScene />
           </div>
         </div>
       </section>
@@ -230,9 +243,9 @@ export default function WhatsAppCrmPage() {
             <div>
               <h3>WhatsApp messages: Meta&rsquo;s rates</h3>
               <p>
-                Meta bills template messages to your WhatsApp Business account,
-                by category and the recipient&rsquo;s country. Replies within
-                the 24-hour window are free.
+                Meta bills messages to your own WhatsApp Business account, by
+                category and the recipient&rsquo;s country. From 1 October 2026
+                that includes replies inside the 24-hour window.
               </p>
             </div>
             <div>

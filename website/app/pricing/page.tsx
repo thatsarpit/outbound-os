@@ -16,7 +16,7 @@ const faq = [
   },
   {
     q: 'What does WhatsApp cost?',
-    a: 'Meta charges per template message, by category and the recipient’s country, billed to your WhatsApp Business account. Replies within the 24-hour customer-service window are free. Outbound OS adds nothing on top. If you send through AiSensy, their plan applies instead.',
+    a: 'Meta charges per message, by category and the recipient’s country, billed to your own WhatsApp Business account — templates, and from 1 October 2026 replies inside the 24-hour window too. Outbound OS adds nothing on top. If you send through AiSensy, their plan applies instead.',
   },
   {
     q: 'What server do I need?',
@@ -107,11 +107,11 @@ export default function PricingPage() {
               <p>Any machine with Docker; 1–2 GB of memory is enough for a team.</p>
             </div>
             <div>
-              <h3>WhatsApp template messages</h3>
+              <h3>WhatsApp messages</h3>
               <p>
-                Billed by Meta to your WhatsApp Business account, by category
-                and the recipient&rsquo;s country. Service replies within 24
-                hours are free.
+                Billed by Meta to your own WhatsApp Business account, by
+                category and the recipient&rsquo;s country — templates, and
+                from 1 October 2026 service replies too.
               </p>
             </div>
             <div>

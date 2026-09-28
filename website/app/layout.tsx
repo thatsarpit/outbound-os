@@ -4,6 +4,7 @@ import localFont from 'next/font/local'
 import './globals.css'
 import { MarketingLayout } from '@/components/marketing-layout'
 import { JsonLd } from '@/components/json-ld'
+import { RevealRoot } from '@/components/reveal'
 import { buildMetadata } from '@/lib/metadata'
 import { site } from '@/lib/site-content'
 import { graph, organizationLd, softwareLd, sourceCodeLd, websiteLd } from '@/lib/structured-data'
@@ -51,6 +52,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             Pages add their own nodes (FAQ, breadcrumbs, articles) beside it. */}
         <JsonLd data={graph(organizationLd(), websiteLd(), softwareLd(), sourceCodeLd())} />
         <MarketingLayout>{children}</MarketingLayout>
+        <RevealRoot />
       </body>
     </html>
   )

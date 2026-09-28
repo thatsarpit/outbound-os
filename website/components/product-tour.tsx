@@ -1,6 +1,6 @@
 'use client'
 
-import { useId, useState, type KeyboardEvent } from 'react'
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { Inbox, LayoutDashboard, Plug, Sparkles, MessageCircle } from 'lucide-react'
 
 /**
@@ -54,9 +54,32 @@ const SHOTS = [
   },
 ] as const
 
+const DWELL_MS = 6000
+
 export function ProductTour() {
   const [active, setActive] = useState(0)
+  const [auto, setAuto] = useState(true)
+  const [inView, setInView] = useState(false)
+  const [hover, setHover] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
   const base = useId()
+
+  // Plays through the screens while it is on screen and not being looked at
+  // closely; any click or key press hands control to the visitor.
+  useEffect(() => {
+    const el = root.current
+    if (!el) return
+    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { threshold: 0.35 })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  const playing = auto && inView && !hover
+  useEffect(() => {
+    if (!playing || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    const timer = window.setTimeout(() => setActive((a) => (a + 1) % SHOTS.length), DWELL_MS)
+    return () => window.clearTimeout(timer)
+  }, [playing, active])
 
   const onKey = (event: KeyboardEvent<HTMLButtonElement>) => {
     const last = SHOTS.length - 1
@@ -68,12 +91,19 @@ export function ProductTour() {
       : null
     if (next === null) return
     event.preventDefault()
+    setAuto(false)
     setActive(next)
     document.getElementById(`${base}-tab-${next}`)?.focus()
   }
 
   return (
-    <div className="tour">
+    <div
+      className="tour"
+      ref={root}
+      data-playing={playing ? 'true' : undefined}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
       <div className="tour__tabs" role="tablist" aria-label="Product screens">
         {SHOTS.map((shot, index) => (
           <button
@@ -85,15 +115,20 @@ export function ProductTour() {
             aria-controls={`${base}-panel-${index}`}
             tabIndex={index === active ? 0 : -1}
             className="tour__tab"
-            onClick={() => setActive(index)}
+            onClick={() => {
+              setAuto(false)
+              setActive(index)
+            }}
             onKeyDown={onKey}
           >
             <shot.Icon size={15} aria-hidden="true" />
             {shot.label}
+            {index === active && auto && <span className="tour__progress" key={active} aria-hidden="true" />}
           </button>
         ))}
       </div>
 
+      <div className="tour__stage">
       <div className="tour__frame">
         <div className="tour__chrome" aria-hidden="true">
           <span className="ui__dots">
@@ -124,6 +159,7 @@ export function ProductTour() {
             />
           </div>
         ))}
+      </div>
       </div>
       <p className="tour__caption" aria-live="polite">
         {SHOTS[active].caption} <span>Sample data.</span>

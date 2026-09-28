@@ -12,6 +12,8 @@
 @import './styles/components/ui-preview.css';
 @import './styles/components/content.css';
 @import './styles/components/visuals.css';
+@import './styles/components/hero.css';
+@import './styles/components/showcase.css';
 
 /* Pages */
 @import './styles/pages/home.css';

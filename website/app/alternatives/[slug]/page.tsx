@@ -29,7 +29,7 @@ export default async function AlternativePage({ params }: { params: Promise<Para
   const rows: [string, string, string][] = [
     ['What it is', 'Open-source software you run yourself', alt.theyAre],
     ['Where your data lives', 'Your own server and database', 'The vendor’s cloud'],
-    ['Paying for it', 'Free software; you pay for your server, and Meta bills template messages to your account', 'Subscription plans plus message charges — see their pricing page'],
+    ['Paying for it', 'Free software; you pay for your server, and Meta bills WhatsApp messages to your own account', 'Subscription plans plus message charges — see their pricing page'],
     ['Source code', 'Open, AGPL-3.0', 'Closed'],
     ['Lead capture', 'Webhooks with presets for forms, Facebook Lead Ads, IndiaMART, TradeIndia, JustDial, Zapier', 'Through their integrations'],
     ['First contact', 'Automatic, within seconds of a lead arriving', 'Through their automation features'],

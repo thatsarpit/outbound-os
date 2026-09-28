@@ -1,9 +1,13 @@
 import Link from 'next/link'
 import { ArrowRight, Database, GitFork, Wallet } from 'lucide-react'
-import { FirstTouch } from '@/components/visuals/first-touch'
+import { HeroScene } from '@/components/visuals/hero-scene'
+import { Logo, LogoTile } from '@/components/brand-logo'
 import { IntegrationHub } from '@/components/visuals/integration-hub'
 import { LogoMarquee } from '@/components/visuals/logo-marquee'
-import { OperatingLoop } from '@/components/visuals/operating-loop'
+import { Bento } from '@/components/visuals/bento'
+import { CaptureVisual, CloseVisual, ContactVisual, FollowVisual, ReplyVisual } from '@/components/visuals/story-visuals'
+import { StoryScroller } from '@/components/story-scroller'
+import { CountUp } from '@/components/count-up'
 import { Faq, InstallBand } from '@/components/content'
 import { ProductTour } from '@/components/product-tour'
 import { integrations } from '@/lib/integrations'
@@ -26,7 +30,7 @@ const homeFaq = [
   },
   {
     q: 'Is Outbound OS free?',
-    a: 'Yes. The software is free and open source under the AGPL-3.0 license, with no per-seat or per-contact fees. You pay for your own server and for what channel providers charge — Meta bills WhatsApp template messages to your WhatsApp Business account directly.',
+    a: 'Yes. The software is free and open source under the AGPL-3.0 license, with no per-seat or per-contact fees. You pay for your own server and for what channel providers charge — Meta bills WhatsApp messages to your own WhatsApp Business account directly.',
   },
   {
     q: 'Do I need the WhatsApp Business API?',
@@ -51,66 +55,86 @@ const INTEGRATION_COUNT = integrations.length + 2 // + website forms and MCP
 export default function HomePage() {
   return (
     <>
-      <section className="section section--lead home-hero-section hero-ground">
-        <div className="page split home-hero">
-          <div className="hero">
-            <a href={site.releasesUrl} className="hero__badge">
-              <span className="hero__badge-tag">v{site.version}</span>
-              Open source under {site.license}
-              <ArrowRight size={13} aria-hidden="true" />
-            </a>
-            <h1>
-              Answer every lead <span className="text-brand">in seconds</span>. Follow up until they reply.
-            </h1>
-            <p className="lede">
-              Outbound OS is the open-source WhatsApp CRM. It captures leads
-              from your website, ads and marketplaces, messages each one on
-              WhatsApp, email, Telegram or iMessage the moment it arrives, and
-              keeps following up until they answer — on your own server.
-            </p>
+      <section className="stage-wrap">
+        <div className="stage">
+          <div className="stage__aurora" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </div>
+          <div className="stage__grid" aria-hidden="true" />
 
-            <div className="hero__actions">
-              <Link href="/docs/install" className="btn btn--primary btn--lg">
-                Install in five minutes
-              </Link>
-              <a href={site.githubUrl} className="cta-link">
-                Star it on GitHub
-                <ArrowRight size={15} aria-hidden="true" />
+          <div className="page stage__inner">
+            <div className="stage__copy">
+              <a href={site.releasesUrl} className="stage__badge">
+                <b>v{site.version}</b>
+                Free and open source · {site.license}
+                <ArrowRight size={13} aria-hidden="true" />
               </a>
+              <h1>
+                Answer every lead <span className="glow">in seconds.</span> Follow up until they reply.
+              </h1>
+              <p className="stage__lede">
+                Outbound OS is the open-source WhatsApp CRM. Leads from your
+                website, ads and marketplaces get a WhatsApp message and an
+                email the moment they arrive — and a follow-up every morning
+                until they answer. On your own server.
+              </p>
+              <div className="stage__actions">
+                <Link href="/docs/install" className="btn btn--brand btn--lg">
+                  Install in five minutes
+                </Link>
+                <a href={site.githubUrl} className="btn btn--glass btn--lg">
+                  <Logo brand="github" size={17} className="stage__gh" />
+                  Star on GitHub
+                </a>
+              </div>
+              <div className="stage__works">
+                <span>Works with</span>
+                <ul>
+                  {(['whatsapp', 'gmail', 'telegram', 'imessage', 'indiamart', 'zapier', 'claude'] as const).map((brand) => (
+                    <li key={brand}>
+                      <LogoTile brand={brand} size={30} label />
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
 
-            <ul className="hero__facts" aria-label="At a glance">
-              <li>Free forever</li>
-              <li>One Docker command</li>
-              <li>Meta&rsquo;s official WhatsApp API</li>
-            </ul>
+            <HeroScene />
           </div>
-
-          <FirstTouch />
         </div>
       </section>
 
-      <section className="section section--tight" aria-label="At a glance">
+      <section className="section section--tight home-glance" aria-label="At a glance">
         <div className="page">
-          <div className="stats">
+          <div className="stats" data-reveal>
             <div>
               <span className="stats__value stats__value--brand">Seconds</span>
               <span className="stats__label">from new lead to first WhatsApp</span>
             </div>
             <div>
-              <span className="stats__value">4</span>
+              <span className="stats__value">
+                <CountUp value={4} />
+              </span>
               <span className="stats__label">channels on one lead</span>
             </div>
             <div>
-              <span className="stats__value">{INTEGRATION_COUNT}</span>
+              <span className="stats__value">
+                <CountUp value={INTEGRATION_COUNT} />
+              </span>
               <span className="stats__label">integrations built in</span>
             </div>
             <div>
-              <span className="stats__value">{mcpToolCount}</span>
+              <span className="stats__value">
+                <CountUp value={mcpToolCount} />
+              </span>
               <span className="stats__label">tools for AI agents</span>
             </div>
             <div>
-              <span className="stats__value">$0</span>
+              <span className="stats__value">
+                <CountUp value={0} prefix="$" />
+              </span>
               <span className="stats__label">license, seats or per-contact fees</span>
             </div>
           </div>
@@ -120,125 +144,148 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* The real dashboard, one screen at a time. */}
+      <section className="section section--ruled home-story" aria-labelledby="story-heading">
+        <div className="page">
+          <div className="section-head" data-reveal>
+            <p className="eyebrow">How it works</p>
+            <h2 id="story-heading">From enquiry to order, without anyone watching the queue.</h2>
+            <p>
+              The slow part of selling is rarely the first message. It is the
+              second, third and fourth — so the software owns them.
+            </p>
+          </div>
+          <StoryScroller
+            steps={[
+              {
+                eyebrow: 'Capture',
+                title: 'Every lead lands in one place',
+                body: (
+                  <p>
+                    Website forms, <Link href="/integrations/facebook-lead-ads">Facebook Lead Ads</Link>,{' '}
+                    <Link href="/integrations/indiamart">IndiaMART</Link>, Zapier or a CSV. Each source is a
+                    signed webhook, and a lead that already exists is merged, not duplicated.
+                  </p>
+                ),
+                visual: <CaptureVisual />,
+                inline: <CaptureVisual />,
+              },
+              {
+                eyebrow: 'Contact',
+                title: 'First message in seconds',
+                body: (
+                  <p>
+                    The moment a lead arrives it gets your approved WhatsApp template and an email from your own
+                    mailbox — not when someone next opens the dashboard.
+                  </p>
+                ),
+                visual: <ContactVisual />,
+                inline: <ContactVisual />,
+              },
+              {
+                eyebrow: 'Follow up',
+                title: 'Follow-ups on their morning',
+                body: (
+                  <p>
+                    Sequences are timed for the lead&rsquo;s morning in their own country, so a buyer in Lagos
+                    hears from you at 09:30 Lagos time.
+                  </p>
+                ),
+                visual: <FollowVisual />,
+                inline: <FollowVisual />,
+              },
+              {
+                eyebrow: 'Reply',
+                title: 'A reply stops the chase',
+                body: (
+                  <p>
+                    The moment they answer on any channel, every scheduled follow-up is cancelled and the
+                    conversation moves to your team.
+                  </p>
+                ),
+                visual: <ReplyVisual />,
+                inline: <ReplyVisual />,
+              },
+              {
+                eyebrow: 'Close',
+                title: 'Orders on the same record',
+                body: (
+                  <p>
+                    Orders, invoices and shipment updates live on the lead the conversation started on, so a
+                    repeat order starts with the whole history.
+                  </p>
+                ),
+                visual: <CloseVisual />,
+                inline: <CloseVisual />,
+              },
+            ]}
+          />
+        </div>
+      </section>
+
+      <section className="section section--ruled section--raised" aria-labelledby="bento-heading">
+        <div className="page">
+          <div className="section-head" data-reveal>
+            <p className="eyebrow">What&rsquo;s in the box</p>
+            <h2 id="bento-heading">Everything a sales desk needs. Nothing to pay for.</h2>
+            <p>All of it ships in the open-source release — no paid tier, no add-ons.</p>
+          </div>
+          <div data-reveal>
+            <Bento />
+          </div>
+        </div>
+      </section>
+
       <section className="section section--ruled" aria-labelledby="shot-heading">
         <div className="page">
-          <div className="section-head">
+          <div className="section-head" data-reveal>
             <p className="eyebrow">The product</p>
-            <h2 id="shot-heading">One screen for the whole pipeline.</h2>
-            <p>
-              Real screens from the open-source release. Click through the
-              parts you would use every day.
-            </p>
+            <h2 id="shot-heading">See the real thing.</h2>
+            <p>Screens from the open-source release. It plays through on its own — or click any tab.</p>
           </div>
           <ProductTour />
         </div>
       </section>
 
-      <section className="section section--ruled">
+      <section className="section section--ruled" aria-labelledby="connects-heading">
         <div className="page">
-          <div className="section-head">
-            <p className="eyebrow">How it works</p>
-            <h2>From enquiry to reply without anyone watching the queue.</h2>
-            <p>
-              The slow part of selling is rarely the first message. It is the
-              second, third and fourth — so the system owns them.
-            </p>
+          <div className="section-head" data-reveal>
+            <p className="eyebrow">Integrations</p>
+            <h2 id="connects-heading">Connects to where your leads already are.</h2>
+            <p>Every integration below ships in the open-source release.</p>
           </div>
-
-          <OperatingLoop className="home-loop" />
-
-          <ol className="steps">
-            <li>
-              <span className="steps__n tabular">01</span>
-              <div>
-                <h3>Capture from anywhere</h3>
-                <p>
-                  Website forms, <Link href="/integrations/facebook-lead-ads">Facebook Lead Ads</Link>,{' '}
-                  <Link href="/integrations/indiamart">IndiaMART</Link>, Zapier, CSV. Every
-                  source is a webhook with a field map, and duplicates merge
-                  into the lead that already exists.
-                </p>
-              </div>
-            </li>
-            <li>
-              <span className="steps__n tabular">02</span>
-              <div>
-                <h3>First contact in seconds</h3>
-                <p>
-                  The moment a lead arrives, it gets your approved WhatsApp
-                  template and an email — not when someone next opens the
-                  dashboard.
-                </p>
-              </div>
-            </li>
-            <li>
-              <span className="steps__n tabular">03</span>
-              <div>
-                <h3>Follow-ups that know when to stop</h3>
-                <p>
-                  Sequences run in the lead&rsquo;s own working hours and end on a
-                  reply, an opt-out or a closed deal. A live conversation never
-                  gets another scheduled chase.
-                </p>
-              </div>
-            </li>
-            <li>
-              <span className="steps__n tabular">04</span>
-              <div>
-                <h3>One inbox for every channel</h3>
-                <p>
-                  WhatsApp, email, Telegram and iMessage threads sit side by
-                  side on the lead they belong to, with owner, status, notes
-                  and tasks.
-                </p>
-              </div>
-            </li>
-            <li>
-              <span className="steps__n tabular">05</span>
-              <div>
-                <h3>Close, and keep the customer</h3>
-                <p>
-                  Pipeline, orders and shipment updates live on the same record
-                  as the conversation, so a repeat order starts with the whole
-                  history.
-                </p>
-              </div>
-            </li>
-          </ol>
+          <div data-reveal>
+            <IntegrationHub />
+          </div>
+          <p className="home-why__more">
+            <Link href="/integrations" className="cta-link">
+              All integrations
+              <ArrowRight size={15} aria-hidden="true" />
+            </Link>
+          </p>
         </div>
       </section>
 
       <section className="section section--ruled section--raised">
         <div className="page">
-          <div className="section-head">
+          <div className="section-head" data-reveal>
             <p className="eyebrow">Why self-hosted</p>
             <h2>Your leads, your server, your WhatsApp account.</h2>
           </div>
-          <div className="grid grid--3 home-why">
+          <div className="grid grid--3 home-why" data-reveal>
             <article>
               <span className="icon-chip" aria-hidden="true"><Database size={18} /></span>
               <h3>Your data stays in your database</h3>
-              <p>
-                Contacts, conversations and credentials live on a server you
-                control. Export everything to CSV whenever you like.
-              </p>
+              <p>Contacts, conversations and credentials live on a server you control. Export everything to CSV whenever you like.</p>
             </article>
             <article>
               <span className="icon-chip" aria-hidden="true"><Wallet size={18} /></span>
               <h3>No per-seat or per-contact fees</h3>
-              <p>
-                Add your whole team and every lead you have. The software costs
-                nothing; Meta bills template messages to your own account.
-              </p>
+              <p>Add your whole team and every lead you have. The software costs nothing; Meta bills WhatsApp messages to your own account.</p>
             </article>
             <article>
               <span className="icon-chip" aria-hidden="true"><GitFork size={18} /></span>
               <h3>Change anything</h3>
-              <p>
-                The code is on GitHub under {site.license}. Add a lead source,
-                a channel or a report, and send it upstream if others need it.
-              </p>
+              <p>The code is on GitHub under {site.license}. Add a lead source, a channel or a report, and send it upstream if others need it.</p>
             </article>
           </div>
           <p className="home-why__more">
@@ -250,89 +297,26 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="section section--ruled" aria-labelledby="connects-heading">
-        <div className="page">
-          <div className="section-head">
-            <p className="eyebrow">Integrations</p>
-            <h2 id="connects-heading">Connects to where your leads already are.</h2>
-            <p>Every integration below ships in the open-source release. Nothing is a paid add-on.</p>
-          </div>
-          <IntegrationHub />
-          <p className="home-why__more">
-            <Link href="/integrations" className="cta-link">
-              All integrations
-              <ArrowRight size={15} aria-hidden="true" />
-            </Link>
-          </p>
-        </div>
-      </section>
-
-      <section className="section section--night">
-        <div className="page split split--reverse home-mcp">
-          <div className="mcp-example panel">
-            <div className="mcp-example__line">
-              <span className="mcp-example__speaker">You</span>
-              <p>Which leads from last week&rsquo;s trade show haven&rsquo;t replied?</p>
-            </div>
-            <div className="mcp-example__line">
-              <span className="mcp-example__speaker">Agent</span>
-              <p>
-                Reads the live CRM, lists the leads with no reply, and offers to
-                draft a follow-up campaign for your approval.
-              </p>
-            </div>
-            <div className="mcp-example__tools mono">list_leads → lead_timeline → create_campaign</div>
-          </div>
-
-          <div className="section-head">
-            <p className="eyebrow">MCP for AI agents</p>
-            <h2>Let Claude work your CRM, not a spreadsheet export.</h2>
-            <p>
-              Outbound OS ships an MCP server. Claude and other MCP clients can
-              search leads, read timelines, import lists, build campaigns and
-              pull analytics from your live data.
-            </p>
-            <p>
-              Sending and deleting are real actions, so they stay behind the
-              same approvals you would give a person.
-            </p>
-            <Link href="/mcp" className="cta-link">
-              What agents can do
-              <ArrowRight size={15} aria-hidden="true" />
-            </Link>
-          </div>
-        </div>
-      </section>
-
       <section className="section section--ruled">
         <div className="page split split--reverse">
-          <div className="stack home-limits">
+          <div className="stack home-limits" data-reveal>
             <article>
               <h3>It does not bypass WhatsApp&rsquo;s rules</h3>
               <p>
-                Messages go through Meta&rsquo;s official Cloud API or a Meta
-                partner. Template approval, opt-in and the 24-hour window all
-                apply. Anything that promises otherwise is asking you to lose
-                your number.
+                Messages go through Meta&rsquo;s official Cloud API or a Meta partner. Template approval, opt-in
+                and the 24-hour window all apply. Anything that promises otherwise is asking you to lose your number.
               </p>
             </article>
             <article>
               <h3>It does not blast</h3>
-              <p>
-                Daily limits and warm-up are built in per number and per
-                mailbox. The design assumes you want replies, not volume.
-              </p>
+              <p>Hourly and daily limits and a warm-up ramp are built in. The design assumes you want replies, not volume.</p>
             </article>
             <article>
               <h3>It does not decide for you</h3>
-              <p>
-                Price, terms and whether a lead is worth pursuing stay with the
-                person who owns the deal. Automation handles the chasing.
-              </p>
+              <p>Price, terms and whether a lead is worth pursuing stay with the person who owns the deal. Automation handles the chasing.</p>
             </article>
           </div>
-
-          <div className="section-head">
+          <div className="section-head" data-reveal>
             <p className="eyebrow">Where the line is</p>
             <h2>What it deliberately doesn&rsquo;t do.</h2>
             <p>Worth knowing before you install it, not after.</p>

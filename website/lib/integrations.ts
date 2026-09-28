@@ -78,7 +78,7 @@ export const integrations: Integration[] = [
     faq: [
       {
         q: 'Is the WhatsApp Cloud API free?',
-        a: 'Meta hosts the Cloud API at no cost, and Outbound OS is free. Meta charges for template messages by category and by the recipient’s country; replies inside the 24-hour customer-service window are free. Check Meta’s current rate card before budgeting.',
+        a: 'Meta hosts the Cloud API at no cost, and Outbound OS is free. Meta charges per message: templates by category and the recipient’s country, and — from 1 October 2026 — replies inside the 24-hour customer-service window as well. Check Meta’s current rate card before budgeting.',
       },
       {
         q: 'Do I need a WhatsApp Business Solution Provider (BSP)?',

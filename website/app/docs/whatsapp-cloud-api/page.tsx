@@ -131,9 +131,12 @@ export default function WhatsAppCloudApiDoc() {
         </table>
       </div>
       <p>
-        Meta charges for template messages by category and the
-        recipient&rsquo;s country; replies inside the window are free. Check
-        Meta&rsquo;s current pricing before large campaigns.
+        Meta charges per message, by category and the recipient&rsquo;s
+        country. Templates have always been charged; from 1 October 2026,
+        replies inside the 24-hour window are charged per message too, and
+        Meta needs a payment method on your WhatsApp Business account. Check{' '}
+        <a href="https://developers.facebook.com/docs/whatsapp/pricing">Meta&rsquo;s current pricing</a>{' '}
+        before large campaigns.
       </p>
 
       <h2 id="troubleshooting">Troubleshooting</h2>

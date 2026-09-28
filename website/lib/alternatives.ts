@@ -63,7 +63,7 @@ export const alternatives: Alternative[] = [
     faq: [
       {
         q: 'Is there a free alternative to Wati?',
-        a: 'Outbound OS is free and open source. You host it yourself and connect your number through Meta’s WhatsApp Cloud API, paying Meta directly for template messages. It does not include a chatbot builder, so it suits outbound follow-up more than automated support.',
+        a: 'Outbound OS is free and open source. You host it yourself and connect your number through Meta’s WhatsApp Cloud API, paying Meta directly for messages. It does not include a chatbot builder, so it suits outbound follow-up more than automated support.',
       },
       {
         q: 'Can I move my WhatsApp number from Wati to Outbound OS?',
@@ -152,7 +152,7 @@ export const alternatives: Alternative[] = [
     faq: [
       {
         q: 'Is Outbound OS free?',
-        a: 'Yes, under the AGPL-3.0 license. You pay for your own server and for WhatsApp template messages, which Meta bills to your WhatsApp Business account.',
+        a: 'Yes, under the AGPL-3.0 license. You pay for your own server and for WhatsApp messages, which Meta bills to your own WhatsApp Business account.',
       },
       {
         q: 'Does Outbound OS support Instagram?',

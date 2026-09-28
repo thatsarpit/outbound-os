@@ -1,21 +1,25 @@
 import { ImageResponse } from 'next/og'
 import { site } from '@/lib/site-content'
-import { brands, type BrandName } from './brand-logo'
+import { brandForImage, type BrandName } from './brand-logo'
 
 const MARK =
   'M11 3H21A8 8 0 0 1 29 11V21A8 8 0 0 1 21 29H11A8 8 0 0 1 3 21V11A8 8 0 0 1 11 3ZM13 9.5H22.5V19H19.5V14.6L12.1 22L10 19.9L17.4 12.5H13V9.5Z'
 
-/** A logo tile Satori can draw: brand colour ground, white mark. */
+/** A logo tile Satori can draw: full-colour marks on white as an SVG data
+    image, app icons and lettered marks on their own colour. */
 function Tile({ brand, size }: { brand: BrandName; size: number }) {
-  const b = brands[brand]
-  const glyph = Math.round(size * 0.54)
+  const b = brandForImage(brand)
+  const inner = Math.round(size * 0.58)
+  const solid = b.kind === 'app' || b.kind === 'mono' || b.kind === 'icon' || b.kind === 'self'
+  const ground = b.kind === 'app' || b.kind === 'mono' || b.kind === 'icon' ? b.hex : b.kind === 'self' ? '#0b0d10' : '#ffffff'
   return (
     <div
       style={{
         width: size,
         height: size,
-        borderRadius: Math.round(size * 0.28),
-        background: b.hex,
+        borderRadius: Math.round(size * 0.26),
+        background: ground,
+        border: solid ? 'none' : '1px solid rgb(228 228 234)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -24,13 +28,24 @@ function Tile({ brand, size }: { brand: BrandName; size: number }) {
         fontWeight: 700,
       }}
     >
-      {b.kind === 'si' && (
-        <svg viewBox="0 0 24 24" width={glyph} height={glyph}>
-          <path d={b.path} fill="#fff" />
+      {b.kind === 'color' && (
+        <img
+          width={inner}
+          height={inner}
+          alt=""
+          style={{ objectFit: 'contain' }}
+          src={`data:image/svg+xml;utf8,${encodeURIComponent(
+            `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${b.w} ${b.h}">${b.body}</svg>`,
+          )}`}
+        />
+      )}
+      {(b.kind === 'glyph' || b.kind === 'app') && (
+        <svg viewBox="0 0 24 24" width={inner} height={inner}>
+          <path d={b.path} fill={b.kind === 'glyph' ? b.hex : '#fff'} />
         </svg>
       )}
       {b.kind === 'self' && (
-        <svg viewBox="0 0 32 32" width={glyph} height={glyph}>
+        <svg viewBox="0 0 32 32" width={inner} height={inner}>
           <path fillRule="evenodd" clipRule="evenodd" fill="#fff" d={MARK} />
         </svg>
       )}
