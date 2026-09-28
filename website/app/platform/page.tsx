@@ -17,7 +17,7 @@ export const metadata = buildMetadata(
 export default function PlatformPage() {
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page split platform-lead">
           <div className="section-head">
             <Breadcrumbs trail={[{ name: 'Platform', path: '/platform' }]} />

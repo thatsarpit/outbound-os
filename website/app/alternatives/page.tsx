@@ -12,7 +12,7 @@ export const metadata = buildMetadata(
 export default function AlternativesIndex() {
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page landing-hero">
           <Breadcrumbs trail={[{ name: 'Alternatives', path: '/alternatives' }]} />
           <p className="eyebrow">Comparisons</p>

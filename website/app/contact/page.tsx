@@ -57,7 +57,7 @@ export default function ContactPage() {
 
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page">
           <div className="contact-hero">
             <Breadcrumbs trail={[{ name: 'Contact', path: '/contact' }]} />

@@ -11,6 +11,7 @@
 @import './styles/components/form.css';
 @import './styles/components/ui-preview.css';
 @import './styles/components/content.css';
+@import './styles/components/visuals.css';
 
 /* Pages */
 @import './styles/pages/home.css';

@@ -35,7 +35,7 @@ const faq = [
 export default function PricingPage() {
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page landing-hero">
           <Breadcrumbs trail={[{ name: 'Pricing', path: '/pricing' }]} />
           <p className="eyebrow">Pricing</p>

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { Breadcrumbs, InstallBand } from '@/components/content'
 import { JsonLd } from '@/components/json-ld'
+import { LogoTile, integrationBrand } from '@/components/brand-logo'
 import { buildMetadata } from '@/lib/metadata'
 import { directoryExtras, integrations, type IntegrationKind } from '@/lib/integrations'
 import { siteUrl } from '@/lib/site-content'
@@ -38,7 +39,7 @@ const all = [
 export default function IntegrationsPage() {
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page integrations-hero">
           <Breadcrumbs trail={[{ name: 'Integrations', path: '/integrations' }]} />
           <p className="eyebrow">Integrations</p>
@@ -63,7 +64,10 @@ export default function IntegrationsPage() {
                   .filter((item) => item.kind === group.kind)
                   .map((item) => (
                     <Link key={item.slug} href={item.href} className="dir-card">
-                      <h3>{item.name}</h3>
+                      <span className="dir-card__top">
+                        <LogoTile brand={integrationBrand[item.slug] ?? 'webhooks'} size={36} />
+                        <h3>{item.name}</h3>
+                      </span>
                       <p>{item.summary}</p>
                     </Link>
                   ))}

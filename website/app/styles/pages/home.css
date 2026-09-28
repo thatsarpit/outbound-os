@@ -10,7 +10,7 @@
 .home-hero-section .shot { min-height: 300px; }
 .hero { max-width: 46rem; }
 .hero .eyebrow { display: block; margin-bottom: 20px; }
-.hero h1 { max-width: 15ch; }
+.hero h1 { max-width: 16ch; }
 .hero .lede { margin-top: 22px; }
 
 .hero__actions {
@@ -180,3 +180,10 @@
 }
 .home-connects a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .steps p a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+
+/* ── Design pass ── */
+.hero__badge { margin-bottom: 22px; }
+.home-marquee { margin-top: 28px; }
+.home-hero { align-items: center; }
+@media (min-width: 900px) { .home-hero { grid-template-columns: 5fr 7fr; } }
+.home-hero-section { padding-bottom: 48px; }

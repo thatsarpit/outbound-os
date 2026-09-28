@@ -24,7 +24,7 @@ export const metadata = buildMetadata(
  */
 export default function ManagedHostingPage() {
   return (
-    <section className="section section--lead">
+    <section className="section section--lead hero-ground">
       <div className="page">
         <div className="section-head">
           <Breadcrumbs trail={[{ name: 'Managed hosting', path: '/managed-hosting' }]} />

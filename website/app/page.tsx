@@ -1,9 +1,13 @@
 import Link from 'next/link'
-import { ArrowRight } from 'lucide-react'
-import { InboxPreview } from '@/components/visuals/inbox-preview'
+import { ArrowRight, Database, GitFork, Wallet } from 'lucide-react'
+import { FirstTouch } from '@/components/visuals/first-touch'
+import { IntegrationHub } from '@/components/visuals/integration-hub'
+import { LogoMarquee } from '@/components/visuals/logo-marquee'
 import { OperatingLoop } from '@/components/visuals/operating-loop'
-import { Faq, InstallBand, Screenshot } from '@/components/content'
-import { directoryExtras, integrations } from '@/lib/integrations'
+import { Faq, InstallBand } from '@/components/content'
+import { ProductTour } from '@/components/product-tour'
+import { integrations } from '@/lib/integrations'
+import { mcpToolCount } from '@/lib/mcp-tools'
 import { site } from '@/lib/site-content'
 
 /**
@@ -42,34 +46,27 @@ const homeFaq = [
   },
 ]
 
-const channels = integrations.filter((i) => i.kind === 'Channel')
-const sources = [
-  ...integrations.filter((i) => i.kind === 'Lead source'),
-  ...directoryExtras.filter((e) => e.kind === 'Lead source'),
-]
-const outputs = [
-  ...integrations.filter((i) => i.kind === 'Data out'),
-  ...directoryExtras.filter((e) => e.kind === 'Data out'),
-]
-
-function hrefFor(item: { slug: string; href?: string }) {
-  return item.href ?? `/integrations/${item.slug}`
-}
+const INTEGRATION_COUNT = integrations.length + 2 // + website forms and MCP
 
 export default function HomePage() {
   return (
     <>
-      <section className="section section--lead home-hero-section">
+      <section className="section section--lead home-hero-section hero-ground">
         <div className="page split home-hero">
           <div className="hero">
-            <p className="eyebrow">Open-source WhatsApp CRM</p>
-            <h1>Answer every lead in seconds. Follow up until they reply.</h1>
+            <a href={site.releasesUrl} className="hero__badge">
+              <span className="hero__badge-tag">v{site.version}</span>
+              Open source under {site.license}
+              <ArrowRight size={13} aria-hidden="true" />
+            </a>
+            <h1>
+              Answer every lead <span className="text-brand">in seconds</span>. Follow up until they reply.
+            </h1>
             <p className="lede">
-              Outbound OS captures leads from your website, ads and
-              marketplaces, contacts each one on WhatsApp, email, Telegram or
-              iMessage the moment it arrives, and keeps following up until they
-              answer. It runs on your own server, so your leads never leave
-              your database.
+              Outbound OS is the open-source WhatsApp CRM. It captures leads
+              from your website, ads and marketplaces, messages each one on
+              WhatsApp, email, Telegram or iMessage the moment it arrives, and
+              keeps following up until they answer — on your own server.
             </p>
 
             <div className="hero__actions">
@@ -77,40 +74,64 @@ export default function HomePage() {
                 Install in five minutes
               </Link>
               <a href={site.githubUrl} className="cta-link">
-                View the code on GitHub
+                Star it on GitHub
                 <ArrowRight size={15} aria-hidden="true" />
               </a>
             </div>
 
             <ul className="hero__facts" aria-label="At a glance">
-              <li>Free, {site.license}</li>
+              <li>Free forever</li>
               <li>One Docker command</li>
-              <li>Meta&rsquo;s official WhatsApp Cloud API</li>
+              <li>Meta&rsquo;s official WhatsApp API</li>
             </ul>
           </div>
 
-          <InboxPreview />
+          <FirstTouch />
         </div>
       </section>
 
-      {/* The real dashboard, not a drawing of it. */}
+      <section className="section section--tight" aria-label="At a glance">
+        <div className="page">
+          <div className="stats">
+            <div>
+              <span className="stats__value stats__value--brand">Seconds</span>
+              <span className="stats__label">from new lead to first WhatsApp</span>
+            </div>
+            <div>
+              <span className="stats__value">4</span>
+              <span className="stats__label">channels on one lead</span>
+            </div>
+            <div>
+              <span className="stats__value">{INTEGRATION_COUNT}</span>
+              <span className="stats__label">integrations built in</span>
+            </div>
+            <div>
+              <span className="stats__value">{mcpToolCount}</span>
+              <span className="stats__label">tools for AI agents</span>
+            </div>
+            <div>
+              <span className="stats__value">$0</span>
+              <span className="stats__label">license, seats or per-contact fees</span>
+            </div>
+          </div>
+          <div className="home-marquee">
+            <LogoMarquee />
+          </div>
+        </div>
+      </section>
+
+      {/* The real dashboard, one screen at a time. */}
       <section className="section section--ruled" aria-labelledby="shot-heading">
         <div className="page">
           <div className="section-head">
             <p className="eyebrow">The product</p>
             <h2 id="shot-heading">One screen for the whole pipeline.</h2>
             <p>
-              New leads, messages sent, reply rate and the pipeline — and the
-              short list of leads that need a person today.
+              Real screens from the open-source release. Click through the
+              parts you would use every day.
             </p>
           </div>
-          <div className="home-shot">
-            <Screenshot
-              name="overview"
-              alt="Outbound OS overview dashboard: new leads, messages sent, reply rate, pipeline by stage and leads needing attention"
-              caption="The overview screen. Screenshots use made-up sample data."
-            />
-          </div>
+          <ProductTour />
         </div>
       </section>
 
@@ -196,6 +217,7 @@ export default function HomePage() {
           </div>
           <div className="grid grid--3 home-why">
             <article>
+              <span className="icon-chip" aria-hidden="true"><Database size={18} /></span>
               <h3>Your data stays in your database</h3>
               <p>
                 Contacts, conversations and credentials live on a server you
@@ -203,6 +225,7 @@ export default function HomePage() {
               </p>
             </article>
             <article>
+              <span className="icon-chip" aria-hidden="true"><Wallet size={18} /></span>
               <h3>No per-seat or per-contact fees</h3>
               <p>
                 Add your whole team and every lead you have. The software costs
@@ -210,6 +233,7 @@ export default function HomePage() {
               </p>
             </article>
             <article>
+              <span className="icon-chip" aria-hidden="true"><GitFork size={18} /></span>
               <h3>Change anything</h3>
               <p>
                 The code is on GitHub under {site.license}. Add a lead source,
@@ -231,26 +255,9 @@ export default function HomePage() {
           <div className="section-head">
             <p className="eyebrow">Integrations</p>
             <h2 id="connects-heading">Connects to where your leads already are.</h2>
-            <p>Every integration below ships in the open-source release.</p>
+            <p>Every integration below ships in the open-source release. Nothing is a paid add-on.</p>
           </div>
-          <div className="home-connects">
-            {[
-              { heading: 'Reach out on', items: channels },
-              { heading: 'Bring leads in from', items: sources },
-              { heading: 'Send data to', items: outputs },
-            ].map((col) => (
-              <div key={col.heading}>
-                <h3>{col.heading}</h3>
-                <ul>
-                  {col.items.map((item) => (
-                    <li key={item.slug}>
-                      <Link href={hrefFor(item)}>{item.name}</Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
+          <IntegrationHub />
           <p className="home-why__more">
             <Link href="/integrations" className="cta-link">
               All integrations
@@ -260,7 +267,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="section section--ruled section--raised">
+      <section className="section section--night">
         <div className="page split split--reverse home-mcp">
           <div className="mcp-example panel">
             <div className="mcp-example__line">

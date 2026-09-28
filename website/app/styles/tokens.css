@@ -5,12 +5,17 @@
    they changed companies. Values here are copied from the dashboard, not
    re-invented: same ink, same paper, same hairlines.
 
-   Principles carried over:
-     1. Ink first, colour last. Hierarchy comes from size, weight and space.
-     2. Every colour has one job. Green means WhatsApp. Blue means a link.
-     3. Flat and calm. No glass, no glow, no gradients. Elevation is a hairline.
-     4. Tight geometry. 4 / 7 / 10px. Big radii read as toy.
-     5. Tabular numerals wherever digits stack.
+   Principles:
+     1. Ink first. Hierarchy comes from size, weight and space.
+     2. Green is the brand: WhatsApp, a lead answered, something that worked.
+        It is the one colour allowed to glow. Blue means a link.
+     3. Other brands appear in their own colours, as logos — never as
+        decoration of our own.
+     4. Motion explains a sequence (a lead arriving, a reply stopping the
+        chase). Nothing moves for its own sake, and nothing moves at all
+        under prefers-reduced-motion.
+     5. Tight geometry. 4 / 7 / 10px, plus 14px for app-icon logo tiles.
+     6. Tabular numerals wherever digits stack.
 
    Hex literals belong in this file and nowhere else.
 ════════════════════════════════════════════════════════════════════════════ */
@@ -48,6 +53,27 @@
   --danger: #dc2626;
   --danger-muted: #fdecec;
 
+  /* ── Brand. Deep green for text on paper (5:1), bright green for fills
+        and light, never for body text. ── */
+  --brand: #047857;
+  --brand-bright: #22c55e;
+  --brand-soft: #e7f8ee;
+  --brand-glow: rgba(34, 197, 94, 0.22);
+  --sky-glow: rgba(44, 63, 224, 0.12);
+
+  /* ── The dark showcase surface: one section per page at most. ── */
+  --night: #0b0d10;
+  --night-raised: #14171c;
+  --night-border: #262a31;
+  --night-text: #f3f4f6;
+  --night-muted: #9ca3af;
+
+  /* ── Chat. The WhatsApp conversation colours, for the hero illustration. ── */
+  --chat-bg: #efeae2;
+  --chat-out: #d9fdd3;
+  --chat-in: #ffffff;
+  --chat-tick: #53bdeb;
+
   /* ── Channel identity. Matches the app's channel colours exactly. ── */
   --whatsapp: #047857;
   --email: #7c3aed;
@@ -57,10 +83,12 @@
   --r-sm: 4px;
   --r-md: 7px;
   --r-lg: 10px;
+  --r-tile: 14px;
 
   /* ── Elevation. A hairline first, a whisper of shadow second. ── */
   --shadow-sm: 0 1px 2px rgba(20, 20, 30, 0.04);
   --shadow-md: 0 4px 12px rgba(20, 20, 30, 0.08);
+  --shadow-lg: 0 24px 60px -18px rgba(20, 20, 30, 0.25), 0 8px 20px -10px rgba(20, 20, 30, 0.12);
 
   /* ── Editorial measure. Prose stops being readable past ~72ch. ── */
   --measure: 68ch;

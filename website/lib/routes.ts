@@ -6,6 +6,7 @@
    sitemap entry and a share card, and a removed page cannot linger in either.
 ════════════════════════════════════════════════════════════════════════════ */
 
+import { integrationBrand, type BrandName } from '../components/brand-logo'
 import { alternatives } from './alternatives'
 import { docs } from './docs'
 import { integrations } from './integrations'
@@ -17,6 +18,8 @@ export type Route = {
   headline: string
   priority: number
   changeFrequency: 'weekly' | 'monthly' | 'yearly'
+  /** Logos on the share card; defaults to the main channels. */
+  logos?: BrandName[]
 }
 
 const staticRoutes: Route[] = [
@@ -50,6 +53,7 @@ export const routes: Route[] = [
     headline: i.h1,
     priority: 0.7,
     changeFrequency: 'monthly' as const,
+    logos: ['outboundos', integrationBrand[i.slug] ?? 'webhooks'] as BrandName[],
   })),
   ...alternatives.map((a) => ({
     path: `/alternatives/${a.slug}`,

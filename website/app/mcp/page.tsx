@@ -3,6 +3,8 @@ import { ArrowRight } from 'lucide-react'
 import { AgentExchange } from '@/components/visuals/agent-exchange'
 import { Breadcrumbs, Code, Faq, InstallBand, Related } from '@/components/content'
 import { buildMetadata } from '@/lib/metadata'
+import { LogoPair } from '@/components/logo-pair'
+import { mcpToolCount, mcpToolGroups } from '@/lib/mcp-tools'
 
 export const metadata = buildMetadata(
   'CRM MCP server — connect Claude to your leads',
@@ -10,15 +12,8 @@ export const metadata = buildMetadata(
   '/mcp',
 )
 
-const toolGroups = [
-  { name: 'Leads', tools: ['list_leads', 'get_lead', 'create_lead', 'update_lead', 'delete_lead', 'import_leads', 'list_tags', 'lead_timeline', 'lead_assign', 'lead_set_status', 'lead_toggle_pause', 'bulk_lead_action'] },
-  { name: 'Campaigns', tools: ['list_campaigns', 'get_campaign', 'create_campaign', 'update_campaign', 'delete_campaign', 'start_campaign', 'pause_campaign', 'campaign_preview_leads', 'campaign_ab_results'] },
-  { name: 'Messages', tools: ['list_messages', 'send_whatsapp', 'send_email'] },
-  { name: 'Analytics', tools: ['stats_overview', 'analytics_funnel', 'analytics_campaign_roi', 'analytics_email_performance'] },
-  { name: 'System', tools: ['system_status', 'system_pause_resume', 'whatsapp_accounts', 'list_users'] },
-]
-
-const toolCount = toolGroups.reduce((sum, group) => sum + group.tools.length, 0)
+const toolGroups = mcpToolGroups
+const toolCount = mcpToolCount
 
 const faq = [
   {
@@ -47,12 +42,13 @@ const faq = [
 export default function McpPage() {
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page">
           <Breadcrumbs trail={[{ name: 'MCP server', path: '/mcp' }]} />
         </div>
         <div className="page split mcp-hero">
           <div className="section-head">
+            <LogoPair brands={['outboundos', 'mcp', 'claude']} />
             <p className="eyebrow">MCP server for AI agents</p>
             <h1>Let Claude work your CRM, with a tool for every job.</h1>
             <p className="lede">

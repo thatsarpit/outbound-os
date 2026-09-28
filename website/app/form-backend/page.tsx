@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 import { Breadcrumbs, Code, Faq, InstallBand, Related } from '@/components/content'
 import { buildMetadata } from '@/lib/metadata'
+import { LogoPair } from '@/components/logo-pair'
 
 export const metadata = buildMetadata(
   'Open-source form backend that replies on WhatsApp',
@@ -50,9 +51,10 @@ const faq = [
 export default function FormBackendPage() {
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page landing-hero">
           <Breadcrumbs trail={[{ name: 'Form backend', path: '/form-backend' }]} />
+          <LogoPair brands={['forms', 'outboundos', 'whatsapp']} />
           <p className="eyebrow">Form backend</p>
           <h1>A form backend that answers the lead for you.</h1>
           <p className="lede">

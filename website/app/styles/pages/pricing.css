@@ -7,3 +7,9 @@
 .price-options__lede { margin-top: 10px; color: var(--text-secondary); }
 .price-options .checks { margin-top: 24px; flex: 1; }
 .price-options__cta { margin-top: 32px; }
+.price-options > article:first-child {
+  background:
+    radial-gradient(80% 50% at 0% 0%, var(--brand-soft), transparent 70%),
+    var(--surface);
+}
+.price-options > article:first-child h2 { color: var(--brand); }

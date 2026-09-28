@@ -15,7 +15,7 @@ export const metadata = buildMetadata(
 export default function UseCasesPage() {
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page">
           <div className="section-head use-cases-lead">
             <Breadcrumbs trail={[{ name: 'Use cases', path: '/use-cases' }]} />

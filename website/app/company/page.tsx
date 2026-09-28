@@ -14,7 +14,7 @@ export const metadata = buildMetadata(
 export default function CompanyPage() {
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page company-hero">
           <div>
             <Breadcrumbs trail={[{ name: 'About', path: '/company' }]} />

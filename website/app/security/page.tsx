@@ -21,7 +21,7 @@ const advisoryUrl = `${site.githubUrl}/security/advisories/new`
 export default function SecurityPage() {
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page">
           <div className="security-hero">
             <Breadcrumbs trail={[{ name: 'Security', path: '/security' }]} />

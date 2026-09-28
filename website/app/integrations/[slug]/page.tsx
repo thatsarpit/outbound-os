@@ -3,6 +3,8 @@ import { notFound } from 'next/navigation'
 import { ArrowRight } from 'lucide-react'
 import { Breadcrumbs, Code, Faq, InstallBand, Related } from '@/components/content'
 import { JsonLd } from '@/components/json-ld'
+import { LogoPair } from '@/components/logo-pair'
+import { integrationBrand } from '@/components/brand-logo'
 import { buildMetadata } from '@/lib/metadata'
 import { integrationHref, integrationName, integrationSummary, integrations } from '@/lib/integrations'
 import { contentUpdated, site } from '@/lib/site-content'
@@ -41,7 +43,7 @@ export default async function IntegrationPage({ params }: { params: Promise<Para
 
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page integration-hero">
           <Breadcrumbs
             trail={[
@@ -49,6 +51,7 @@ export default async function IntegrationPage({ params }: { params: Promise<Para
               { name: item.name, path },
             ]}
           />
+          <LogoPair brands={['outboundos', integrationBrand[item.slug] ?? 'webhooks']} />
           <p className="eyebrow">
             {item.kind} · {item.name}
           </p>

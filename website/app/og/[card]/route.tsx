@@ -17,5 +17,5 @@ export async function GET(_request: Request, { params }: { params: Promise<{ car
   const { card } = await params
   const route = routes.find((r) => `${cardKey(r.path)}.png` === card)
   if (!route) return new Response('Not found', { status: 404 })
-  return createSocialCard({ eyebrow: route.eyebrow, headline: route.headline })
+  return createSocialCard({ eyebrow: route.eyebrow, headline: route.headline, logos: route.logos })
 }

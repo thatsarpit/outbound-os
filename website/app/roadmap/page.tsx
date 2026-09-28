@@ -16,7 +16,7 @@ export const metadata = buildMetadata(
 export default function RoadmapPage() {
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page">
           <div className="roadmap-hero section-head">
             <Breadcrumbs trail={[{ name: 'Roadmap', path: '/roadmap' }]} />

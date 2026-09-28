@@ -1,5 +1,46 @@
 import { ImageResponse } from 'next/og'
 import { site } from '@/lib/site-content'
+import { brands, type BrandName } from './brand-logo'
+
+const MARK =
+  'M11 3H21A8 8 0 0 1 29 11V21A8 8 0 0 1 21 29H11A8 8 0 0 1 3 21V11A8 8 0 0 1 11 3ZM13 9.5H22.5V19H19.5V14.6L12.1 22L10 19.9L17.4 12.5H13V9.5Z'
+
+/** A logo tile Satori can draw: brand colour ground, white mark. */
+function Tile({ brand, size }: { brand: BrandName; size: number }) {
+  const b = brands[brand]
+  const glyph = Math.round(size * 0.54)
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: Math.round(size * 0.28),
+        background: b.hex,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#fff',
+        fontSize: Math.round(size * 0.36),
+        fontWeight: 700,
+      }}
+    >
+      {b.kind === 'si' && (
+        <svg viewBox="0 0 24 24" width={glyph} height={glyph}>
+          <path d={b.path} fill="#fff" />
+        </svg>
+      )}
+      {b.kind === 'self' && (
+        <svg viewBox="0 0 32 32" width={glyph} height={glyph}>
+          <path fillRule="evenodd" clipRule="evenodd" fill="#fff" d={MARK} />
+        </svg>
+      )}
+      {b.kind === 'mono' && b.letters}
+      {b.kind === 'icon' && b.title.slice(0, 1)}
+    </div>
+  )
+}
+
+const DEFAULT_LOGOS: BrandName[] = ['whatsapp', 'gmail', 'telegram', 'imessage', 'indiamart', 'claude']
 
 export const socialImageSize = { width: 1200, height: 630 }
 
@@ -8,7 +49,8 @@ export const socialImageSize = { width: 1200, height: 630 }
 export async function createSocialCard({
   eyebrow = 'Open-source WhatsApp CRM',
   headline = 'Answer every lead in seconds. Follow up until they reply.',
-}: { eyebrow?: string; headline?: string } = {}) {
+  logos = DEFAULT_LOGOS,
+}: { eyebrow?: string; headline?: string; logos?: BrandName[] } = {}) {
   const size = headline.length > 60 ? 58 : headline.length > 34 ? 66 : 78
   return new ImageResponse(
     (
@@ -20,7 +62,8 @@ export async function createSocialCard({
           flexDirection: 'column',
           justifyContent: 'space-between',
           padding: '72px 78px',
-          background: 'rgb(250 250 251)',
+          background:
+            'radial-gradient(circle at 88% 12%, rgba(34,197,94,0.22), rgba(250,250,251,0) 45%), radial-gradient(circle at 8% 100%, rgba(44,63,224,0.10), rgba(250,250,251,0) 40%), rgb(250 250 251)',
           color: 'rgb(23 23 28)',
           fontFamily: 'Inter, Arial, sans-serif',
           border: '1px solid rgb(228 228 234)',
@@ -88,8 +131,12 @@ export async function createSocialCard({
             color: 'rgb(133 133 143)',
           }}
         >
-          <span>outboundos.space</span>
-          <span>Free · Open source · Self-hosted</span>
+          <span>outboundos.space · Free · Open source</span>
+          <div style={{ display: 'flex', gap: 12 }}>
+            {logos.map((brand) => (
+              <Tile key={brand} brand={brand} size={logos.length > 3 ? 46 : 58} />
+            ))}
+          </div>
         </div>
       </div>
     ),

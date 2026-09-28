@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight, CircleCheck } from 'lucide-react'
+import { CopyButton } from './copy-button'
 import { JsonLd } from './json-ld'
 import { breadcrumbLd, faqLd, graph } from '@/lib/structured-data'
 import { installCommands, site } from '@/lib/site-content'
@@ -75,7 +76,10 @@ export function Faq({
 export function Code({ children, label }: { children: string; label?: string }) {
   return (
     <figure className="code">
-      {label && <figcaption className="code__label">{label}</figcaption>}
+      <div className="code__head">
+        {label ? <figcaption className="code__label">{label}</figcaption> : <span />}
+        <CopyButton text={children} className="copy-btn--quiet" />
+      </div>
       <pre>
         <code>{children}</code>
       </pre>
@@ -111,9 +115,33 @@ export function InstallBand({
               </a>
             </div>
           </div>
-          <pre className="install-band__code" aria-label="Install commands">
-            <code>{installCommands.map((line) => `$ ${line}`).join('\n')}</code>
-          </pre>
+          <div className="terminal">
+            <div className="terminal__bar">
+              <span className="ui__dots" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+              <span className="terminal__title">Terminal</span>
+              <CopyButton text={installCommands.join('\n')} className="copy-btn--night" />
+            </div>
+            <pre aria-label="Install commands">
+              <code>
+                {installCommands.map((line) => (
+                  <span className="terminal__line" key={line}>
+                    <span className="terminal__prompt" aria-hidden="true">
+                      $
+                    </span>
+                    {line}
+                  </span>
+                ))}
+              </code>
+            </pre>
+            <p className="terminal__done">
+              <CircleCheck size={15} aria-hidden="true" />
+              Open http://localhost:3001 and sign in
+            </p>
+          </div>
         </div>
       </div>
     </section>

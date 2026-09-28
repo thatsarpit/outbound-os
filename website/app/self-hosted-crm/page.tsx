@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 import { Breadcrumbs, Code, Faq, InstallBand, Related, Screenshot } from '@/components/content'
 import { buildMetadata } from '@/lib/metadata'
+import { LogoPair } from '@/components/logo-pair'
 import { installCommands, site } from '@/lib/site-content'
 
 export const metadata = buildMetadata(
@@ -40,9 +41,10 @@ const faq = [
 export default function SelfHostedCrmPage() {
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page landing-hero">
           <Breadcrumbs trail={[{ name: 'Self-hosted CRM', path: '/self-hosted-crm' }]} />
+          <LogoPair brands={['outboundos', 'docker']} />
           <p className="eyebrow">Self-hosted CRM</p>
           <h1>A CRM that runs on your server, not someone else&rsquo;s.</h1>
           <p className="lede">

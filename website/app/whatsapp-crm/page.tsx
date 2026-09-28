@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 import { Breadcrumbs, Faq, InstallBand, Related, Screenshot } from '@/components/content'
 import { buildMetadata } from '@/lib/metadata'
+import { LogoPair } from '@/components/logo-pair'
 import { site } from '@/lib/site-content'
 
 export const metadata = buildMetadata(
@@ -44,9 +45,10 @@ const faq = [
 export default function WhatsAppCrmPage() {
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page landing-hero">
           <Breadcrumbs trail={[{ name: 'WhatsApp CRM', path: '/whatsapp-crm' }]} />
+          <LogoPair brands={['outboundos', 'whatsapp', 'meta']} />
           <p className="eyebrow">WhatsApp CRM</p>
           <h1>The open-source WhatsApp CRM that does the chasing.</h1>
           <p className="lede">

@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
 import { Breadcrumbs, Code, Faq, InstallBand, Related } from '@/components/content'
 import { buildMetadata } from '@/lib/metadata'
+import { LogoPair } from '@/components/logo-pair'
 import { site } from '@/lib/site-content'
 
 export const metadata = buildMetadata(
@@ -32,9 +33,10 @@ const faq = [
 export default function OpenSourcePage() {
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page landing-hero">
           <Breadcrumbs trail={[{ name: 'Open source', path: '/open-source' }]} />
+          <LogoPair brands={['outboundos', 'github']} />
           <p className="eyebrow">Open source · {site.license}</p>
           <h1>Free to run, free to read, free to change.</h1>
           <p className="lede">

@@ -45,7 +45,7 @@ export default async function AlternativePage({ params }: { params: Promise<Para
 
   return (
     <>
-      <section className="section section--lead">
+      <section className="section section--lead hero-ground">
         <div className="page landing-hero">
           <Breadcrumbs
             trail={[
