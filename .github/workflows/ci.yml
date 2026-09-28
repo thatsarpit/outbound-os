@@ -61,6 +61,8 @@ jobs:
           cache: npm
           cache-dependency-path: website/package-lock.json
       - run: npm ci
+      - name: The MCP tool list on the site matches the server
+        run: node scripts/check-mcp-tools.mjs
       - run: npm run build
       - name: Every page is in the sitemap and has a share image
         run: |

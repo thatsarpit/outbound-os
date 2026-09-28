@@ -8,11 +8,24 @@ export function registerAnalyticsTools(server) {
   // ── stats_overview ──
   server.tool(
     'stats_overview',
-    'Dashboard overview stats — total leads, today\'s new, contacted, replied, engaged, closed, pending messages, score distribution, polling health, LLM usage',
+    'Dashboard overview stats — total leads, today\'s new, contacted, replied, engaged, closed, pending messages and score distribution. "Today" is the workspace\'s own time zone.',
     {},
     async () => {
       try {
-        const { data } = await get('/api/stats/overview', { tzOffset: '-330' });
+        const { data } = await get('/api/stats/overview');
+        return ok(data);
+      } catch (e) { return err(e.message); }
+    },
+  );
+
+  // ── whatsapp_costs ──
+  server.tool(
+    'whatsapp_costs',
+    'This month\'s WhatsApp messages as Meta bills them: counts per pricing category (marketing, utility, authentication, service), billable vs free, from Meta\'s delivery updates. Meta reports categories, not amounts — multiply by Meta\'s rate card for the recipients\' countries. From 1 October 2026 service replies are billed too.',
+    {},
+    async () => {
+      try {
+        const { data } = await get('/api/analytics/whatsapp-pricing');
         return ok(data);
       } catch (e) { return err(e.message); }
     },

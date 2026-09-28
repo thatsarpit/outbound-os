@@ -2,6 +2,7 @@ import Link from 'next/link'
 import type { CSSProperties, ReactNode } from 'react'
 import { ArrowUpRight, Lock, ShieldCheck } from 'lucide-react'
 import { Logo, LogoTile, type BrandName } from '../brand-logo'
+import { mcpToolCount } from '@/lib/mcp-tools'
 
 /**
  * The feature grid. Each tile is a working miniature of the product part it
@@ -145,7 +146,7 @@ export function Bento() {
       <Tile
         className="bento__tile--wide bento__tile--night"
         title="An AI agent can run the desk"
-        body="The MCP server gives Claude and other agents 32 tools on your live CRM — with your approval on anything that sends."
+        body={`The MCP server gives Claude and other agents ${mcpToolCount} tools on your live CRM — with your approval on anything that sends.`}
         href="/mcp"
       >
         <div className="b-term">
