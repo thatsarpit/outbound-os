@@ -28,7 +28,7 @@ export function SetupChecklist() {
   })
 
   useEffect(() => {
-    if (!status || status.dismissed || status.steps.profile) return
+    if (!status?.steps || status.dismissed || status.steps.profile) return
     let prompted = false
     try {
       prompted = sessionStorage.getItem(FIRST_RUN_KEY) === '1'
@@ -44,7 +44,9 @@ export function SetupChecklist() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['onboarding-status'] }),
   })
 
-  if (!isAdmin || !status || status.dismissed) return null
+  // Missing steps means an older server or an unexpected reply: show nothing
+  // rather than take the whole overview down with it.
+  if (!isAdmin || !status?.steps || status.dismissed) return null
 
   const items = [
     { done: status.steps.profile, label: 'Add your business details', to: '/setup?step=business' },

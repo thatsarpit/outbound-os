@@ -1,3 +1,4 @@
+import { ROLE_PAGE_CAPABILITIES } from '@/lib/role-shell'
 import { AppShell } from '@/components/layout/app-shell'
 import { useAuthStore } from '@/stores/auth-store'
 import { notificationActions, useNotificationStore } from '@/stores/notification-store'
@@ -1483,6 +1484,22 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
     },
   ],
   [/\/stats\/activity/, []],
+  [
+    /\/onboarding\/status/,
+    {
+      dismissed: true,
+      complete: true,
+      steps: { profile: true, channel: true, leadSource: true, team: true },
+      channels: { whatsapp: true, email: true, telegram: false, imessage: false },
+      counts: { leadSources: 2, leads: 5, users: 3, outgoingWebhooks: 1 },
+      integrations: { googleSheets: true, outgoingWebhooks: true, mcp: true },
+      profile: { BUSINESS_NAME: 'Acme Supplies', BUSINESS_TIMEZONE: 'Europe/London' },
+    },
+  ],
+  [
+    /\/config\/brand/,
+    { brandName: 'Outbound OS', businessName: 'Acme Supplies', currency: 'USD', timezone: 'Europe/London' },
+  ],
 ]
 
 function installFixtureFetch() {
@@ -1530,7 +1547,7 @@ function seedStores() {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     },
-    capabilities: {},
+    capabilities: Object.fromEntries(ROLE_PAGE_CAPABILITIES.admin.map((c) => [c, true])),
     isAuthenticated: true,
     isLoading: false,
   })

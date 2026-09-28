@@ -144,7 +144,7 @@ export default function IntegrationCatalogue() {
   })
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 pt-2">
       {GROUPS.map((group) => (
         <section key={group.title} aria-labelledby={`group-${group.title}`}>
           <h2 id={`group-${group.title}`} className="text-sm font-semibold tracking-tight text-text-primary">

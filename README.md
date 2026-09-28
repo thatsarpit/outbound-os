@@ -11,6 +11,32 @@ database.
 [![CI](https://github.com/thatsarpit/outbound-os/actions/workflows/ci.yml/badge.svg)](https://github.com/thatsarpit/outbound-os/actions/workflows/ci.yml)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.png">
+  <img alt="Outbound OS overview: leads, messages sent, reply rate, pipeline and items needing attention" src="docs/screenshots/overview.png">
+</picture>
+
+<table>
+  <tr>
+    <td><img alt="One inbox across WhatsApp, email, iMessage and Telegram" src="docs/screenshots/inbox.png"></td>
+    <td><img alt="Integrations catalogue with connection status" src="docs/screenshots/integrations.png"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>One inbox for every channel</sub></td>
+    <td align="center"><sub>Everything it connects to</sub></td>
+  </tr>
+  <tr>
+    <td><img alt="Setup wizard: choosing lead sources" src="docs/screenshots/setup.png"></td>
+    <td><img alt="WhatsApp settings: Meta Cloud API or AiSensy per number" src="docs/screenshots/whatsapp-settings.png"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Guided setup on first sign-in</sub></td>
+    <td align="center"><sub>Meta Cloud API or AiSensy, per number</sub></td>
+  </tr>
+</table>
+
+<sub>Screenshots use made-up sample data.</sub>
+
 ---
 
 ## What it does
