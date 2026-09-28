@@ -51,12 +51,13 @@ export function normalizeInboundMobile(mobile) {
 // generic spellings — so every Engyne lead was rejected with "Payload must
 // contain mobile or email" and never reached the CRM at all.
 const ALIASES = {
-  name: ['name', 'buyerName', 'contact_name', 'contact_person', 'sender_name'],
-  mobile: ['mobile', 'buyerMobile', 'phone', 'contact_mobile', 'phone_number', 'whatsapp'],
-  email: ['email', 'buyerEmail', 'contact_email', 'email_address'],
-  company: ['company', 'buyerCompany', 'company_name', 'org_name'],
-  product: ['product', 'title', 'subject', 'enquiry', 'requirement'],
-  country: ['country'],
+  // Upper-case names are IndiaMART's Lead Manager Push API (RESPONSE.*).
+  name: ['name', 'buyerName', 'contact_name', 'contact_person', 'sender_name', 'full_name', 'SENDER_NAME'],
+  mobile: ['mobile', 'buyerMobile', 'phone', 'contact_mobile', 'phone_number', 'whatsapp', 'SENDER_MOBILE', 'SENDER_MOBILE_ALT'],
+  email: ['email', 'buyerEmail', 'contact_email', 'email_address', 'SENDER_EMAIL', 'SENDER_EMAIL_ALT'],
+  company: ['company', 'buyerCompany', 'company_name', 'org_name', 'SENDER_COMPANY'],
+  product: ['product', 'title', 'subject', 'enquiry', 'requirement', 'message', 'QUERY_PRODUCT_NAME', 'SUBJECT', 'QUERY_MESSAGE'],
+  country: ['country', 'SENDER_COUNTRY_ISO'],
   quantity: ['quantity', 'quantityRaw', 'quantity_text'],
   // A "yes, email me" checkbox on the sender's form. Only an explicit yes
   // counts — see consentGiven().
@@ -84,6 +85,7 @@ const ENVELOPE_ROOTS = [
   ['lead'],
   ['data'],
   ['payload'],
+  ['RESPONSE'],          // IndiaMART Push API: {CODE, STATUS, RESPONSE: {...}}
 ];
 
 /**

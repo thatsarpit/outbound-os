@@ -220,3 +220,42 @@ describe('Inbound lead mapping — email consent', () => {
   });
 });
 
+describe('Inbound lead mapping — IndiaMART Lead Manager Push API', () => {
+  // The body IndiaMART documents for its Push API, with contact details replaced.
+  const push = {
+    CODE: 200,
+    STATUS: 'SUCCESS',
+    RESPONSE: {
+      UNIQUE_QUERY_ID: '621654886',
+      QUERY_TYPE: 'B',
+      QUERY_TIME: '2024-04-10 11:17:14',
+      SENDER_NAME: 'Prabhat',
+      SENDER_MOBILE: '+91-9876543210',
+      SENDER_EMAIL: 'buyer@example.test',
+      SUBJECT: 'Requirement for Empty Mineral Water Bottle',
+      SENDER_COMPANY: 'ABC Pvt Ltd.',
+      SENDER_COUNTRY_ISO: 'IN',
+      SENDER_MOBILE_ALT: '+91-9876500000',
+      QUERY_PRODUCT_NAME: 'Mineral Water Bottle',
+      QUERY_MESSAGE: 'I want to purchase...',
+    },
+  };
+
+  test('reads the lead from RESPONSE with no field map', () => {
+    const m = mapInboundLead(push, {});
+    assert.equal(m.name, 'Prabhat');
+    assert.equal(m.mobile, '919876543210');
+    assert.equal(m.email, 'buyer@example.test');
+    assert.equal(m.company, 'ABC Pvt Ltd.');
+    assert.equal(m.product, 'Mineral Water Bottle');
+    assert.equal(m.country, 'IN');
+  });
+
+  test('works with the preset field map and with an old flat one', () => {
+    const preset = { name: 'RESPONSE.SENDER_NAME', mobile: 'RESPONSE.SENDER_MOBILE' };
+    assert.equal(mapInboundLead(push, preset).mobile, '919876543210');
+    const legacyFlat = { name: 'SENDER_NAME', mobile: 'SENDER_MOBILE' };
+    assert.equal(mapInboundLead(push, legacyFlat).mobile, '919876543210', 'falls back to aliases');
+  });
+});
+
