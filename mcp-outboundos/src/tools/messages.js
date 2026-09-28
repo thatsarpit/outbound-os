@@ -71,17 +71,4 @@ export function registerMessageTools(server) {
       } catch (e) { return err(e.message); }
     },
   );
-
-  // ── ai_reply_suggestion ──
-  server.tool(
-    'ai_reply_suggestion',
-    'Get an AI-generated reply suggestion for a lead based on conversation history',
-    { lead_id: LeadId },
-    async ({ lead_id }) => {
-      try {
-        const { data } = await post(`/api/leads/${lead_id}/ai-reply`);
-        return ok({ suggestion: data.suggestion });
-      } catch (e) { return err(e.message); }
-    },
-  );
 }
