@@ -25,7 +25,7 @@ export const site = {
   discussionsUrl: 'https://github.com/thatsarpit/outbound-os/discussions',
   license: 'AGPL-3.0',
   licenseUrl: 'https://github.com/thatsarpit/outbound-os/blob/main/LICENSE',
-  version: '0.1.0',
+  version: '0.2.0',
   /** The hosted instance the Outbound OS team runs for managed customers. */
   appUrl: 'https://app.outboundos.space',
   /**

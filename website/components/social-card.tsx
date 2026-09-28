@@ -1,3 +1,5 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { ImageResponse } from 'next/og'
 import { site } from '@/lib/site-content'
 import { brandForImage, type BrandName } from './brand-logo'
@@ -49,10 +51,19 @@ function Tile({ brand, size }: { brand: BrandName; size: number }) {
           <path fillRule="evenodd" clipRule="evenodd" fill="#fff" d={MARK} />
         </svg>
       )}
+      {b.kind === 'image' && (
+        <img width={Math.round(size * 0.7)} height={Math.round(size * 0.7)} alt="" src={publicDataUri(b.src)} />
+      )}
       {b.kind === 'mono' && b.letters}
       {b.kind === 'icon' && b.title.slice(0, 1)}
     </div>
   )
+}
+
+/** Share cards render at build time, so an image logo is read from public/. */
+function publicDataUri(src: string) {
+  const file = fs.readFileSync(path.join(process.cwd(), 'public', src))
+  return `data:image/png;base64,${file.toString('base64')}`
 }
 
 const DEFAULT_LOGOS: BrandName[] = ['whatsapp', 'gmail', 'telegram', 'imessage', 'indiamart', 'claude']

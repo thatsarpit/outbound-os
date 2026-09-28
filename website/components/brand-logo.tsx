@@ -10,11 +10,11 @@ import { BrandMark } from './brand-mark'
  * Full-colour marks come from Gil Barbara's "logos" set (CC0). Brands that set
  * does not carry use their official glyph from Simple Icons (CC0) in their own
  * colour — Google Sheets, Make, Brevo, Webflow — or, for iMessage, the app
- * icon's own green square. Marketplaces whose logos are in neither set get a
- * lettered tile in their brand colour until their official artwork is added,
- * never a hand-drawn imitation. Generic ideas (email, webhooks, CSV) get an
- * icon. Trademarks belong to their owners and are used only to say what
- * connects to what.
+ * icon's own green square. IndiaMART, AiSensy and TradeIndia use the site
+ * icons they publish themselves (public/logos/). A brand with no square mark
+ * of its own gets a lettered tile, never a hand-drawn imitation. Generic
+ * ideas (email, webhooks, CSV) get an icon. Trademarks belong to their owners
+ * and are used only to say what connects to what.
  */
 
 type LogoSetIcon = { body: string; width?: number; height?: number }
@@ -27,6 +27,7 @@ type Brand =
   | { kind: 'mono'; title: string; hex: string; letters: string }
   | { kind: 'icon'; title: string; hex: string; Icon: LucideIcon }
   | { kind: 'self'; title: string }
+  | { kind: 'image'; title: string; src: string }
 
 function color(name: string, title: string): Brand {
   const icon = set.icons[name]
@@ -54,9 +55,9 @@ export const brands = {
   brevo: glyph(siBrevo),
   webflow: glyph(siWebflow),
   imessage: { kind: 'app', title: 'iMessage', hex: '#34DA50', path: siImessage.path },
-  indiamart: { kind: 'mono', title: 'IndiaMART', hex: '#b45309', letters: 'IM' },
-  aisensy: { kind: 'mono', title: 'AiSensy', hex: '#0f766e', letters: 'Ai' },
-  tradeindia: { kind: 'mono', title: 'TradeIndia', hex: '#1d4ed8', letters: 'TI' },
+  indiamart: { kind: 'image', title: 'IndiaMART', src: '/logos/indiamart.png' },
+  aisensy: { kind: 'image', title: 'AiSensy', src: '/logos/aisensy.png' },
+  tradeindia: { kind: 'image', title: 'TradeIndia', src: '/logos/tradeindia.png' },
   justdial: { kind: 'mono', title: 'JustDial', hex: '#c2410c', letters: 'JD' },
   engyne: { kind: 'mono', title: 'Engyne Cloud', hex: '#4338ca', letters: 'En' },
   email: { kind: 'icon', title: 'Email', hex: '#7c3aed', Icon: Mail },
@@ -121,6 +122,9 @@ export function Logo({ brand, size = 24, className }: { brand: BrandName; size?:
     )
   }
   if (b.kind === 'icon') return <b.Icon className={className} size={size} strokeWidth={2} color={b.hex} aria-hidden="true" />
+  if (b.kind === 'image') {
+    return <img className={className} src={b.src} width={size} height={size} alt="" decoding="async" loading="lazy" />
+  }
   if (b.kind === 'self') return <BrandMark className={className} />
   return (
     <span className={className} style={{ fontSize: Math.round(size * 0.7), fontWeight: 700, color: '#fff' }} aria-hidden="true">
@@ -150,7 +154,7 @@ export function LogoTile({
   const ground = b.kind === 'app' || b.kind === 'mono' ? b.hex : b.kind === 'self' ? '#0b0d10' : '#ffffff'
   const style = { '--tile': ground, width: size, height: size } as CSSProperties
   const a11y = label ? { role: 'img', 'aria-label': b.title } : { 'aria-hidden': true as const }
-  const inner = Math.round(size * (b.kind === 'color' ? 0.58 : b.kind === 'self' ? 0.6 : 0.54))
+  const inner = Math.round(size * (b.kind === 'color' ? 0.58 : b.kind === 'image' ? 0.7 : b.kind === 'self' ? 0.6 : 0.54))
 
   return (
     <span
