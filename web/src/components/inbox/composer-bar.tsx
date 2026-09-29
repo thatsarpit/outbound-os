@@ -215,7 +215,7 @@ export function ComposerBar({
           </div>
         )}
 
-        {isEmail && onAddAttachment && onRemoveAttachment && (
+        {(isEmail || channel === 'whatsapp') && onAddAttachment && onRemoveAttachment && (
           <AttachmentPicker
             attachments={attachments}
             onAdd={onAddAttachment}

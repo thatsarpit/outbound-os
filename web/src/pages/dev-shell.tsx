@@ -260,8 +260,8 @@ const FIXTURE_MESSAGES = [
     content: 'Can you share the price list for the M8 bolts? We need 20,000 units.',
     subject: null,
     status: 'received',
-    createdAt: ago(4),
-    sentAt: ago(4),
+    createdAt: ago(6),
+    sentAt: ago(6),
     senderAccountId: null,
     senderDisplay: null,
     emailAccountId: null,
@@ -273,7 +273,64 @@ const FIXTURE_MESSAGES = [
     mediaType: null,
     mediaCaption: null,
   },
+  {
+    id: 13,
+    leadId: 1,
+    channel: 'whatsapp',
+    direction: 'inbound',
+    content: 'This is the drawing we work to.',
+    subject: null,
+    status: 'received',
+    createdAt: ago(5),
+    sentAt: ago(5),
+    senderAccountId: null,
+    senderDisplay: null,
+    emailAccountId: null,
+    emailMessageId: null,
+    emailInReplyTo: null,
+    waAccount: 1,
+    replyToMessageId: null,
+    mediaUrl: 'data/media/sample-drawing.png',
+    mediaType: 'image',
+    mediaCaption: 'This is the drawing we work to.',
+    mediaFilename: 'bolt-drawing.png',
+  },
+  {
+    id: 14,
+    leadId: 1,
+    channel: 'whatsapp',
+    direction: 'outbound',
+    content: 'Here is our price list.',
+    subject: null,
+    status: 'read',
+    createdAt: ago(4),
+    sentAt: ago(4),
+    senderAccountId: 1,
+    senderDisplay: 'Acme Sales',
+    emailAccountId: null,
+    emailMessageId: null,
+    emailInReplyTo: null,
+    waAccount: 1,
+    replyToMessageId: null,
+    mediaUrl: 'data/media/sample-price-list.pdf',
+    mediaType: 'pdf',
+    mediaCaption: 'Here is our price list.',
+    mediaFilename: 'Acme-price-list-2026.pdf',
+  },
 ]
+
+/* A sample file for the message-media endpoint: a simple technical drawing. */
+const FIXTURE_DRAWING = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height="300" viewBox="0 0 480 300">
+<rect width="480" height="300" fill="#f8fafc"/>
+<g fill="none" stroke="#334155" stroke-width="2">
+<rect x="60" y="120" width="260" height="60"/><polygon points="320,110 380,110 395,150 380,190 320,190"/>
+<path d="M60 120 L60 180" stroke-dasharray="6 4"/>
+<path d="M60 220 L320 220 M60 214 L60 226 M320 214 L320 226"/>
+</g>
+<text x="190" y="242" font-family="sans-serif" font-size="14" fill="#334155" text-anchor="middle">40 mm</text>
+<text x="30" y="40" font-family="sans-serif" font-size="16" font-weight="600" fill="#0f172a">M8 hex bolt · A4 stainless</text>
+<text x="30" y="62" font-family="sans-serif" font-size="12" fill="#64748b">Drawing HB-08-40 · rev C</text>
+</svg>`
 
 /* ── Notification fixtures ──
  * Shaped as `ActivityLog` rows, because that is what the notification hook
@@ -1522,6 +1579,13 @@ function installFixtureFetch() {
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     if (!url.includes('/api/')) return original(input, init)
+    if (/\/api\/messages\/\d+\/media/.test(url)) {
+      const pdf = url.includes('/messages/14/')
+      return new Response(pdf ? '%PDF-1.4 sample' : FIXTURE_DRAWING, {
+        status: 200,
+        headers: { 'Content-Type': pdf ? 'application/pdf' : 'image/svg+xml' },
+      })
+    }
 
     const match = FIXTURE_RESPONSES.find(([pattern]) => pattern.test(url))
     const raw = match ? match[1] : {}

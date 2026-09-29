@@ -334,6 +334,16 @@ function InboxInner() {
     mutationFn: async () => {
       if (!selectedLeadId) throw new Error('No lead selected')
       const messageBody = replyText.trim()
+
+      // WhatsApp files: the text, if any, is the first file's caption.
+      if (composerChannel === 'whatsapp' && attachments.length > 0) {
+        return inboxApi.send({
+          leadId: selectedLeadId,
+          channel: 'whatsapp',
+          text: messageBody,
+          attachmentIds: attachments.map((a) => a.id),
+        })
+      }
       if (!messageBody) throw new Error('Reply cannot be empty')
 
       if (composerChannel === 'email') {

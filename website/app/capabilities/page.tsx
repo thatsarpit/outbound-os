@@ -65,6 +65,7 @@ export default function CapabilitiesPage() {
         <div className="page split split--reverse">
           <div className="stack capability-list">
             <article><h3>WhatsApp Business conversations</h3><p>Send and receive through Meta&rsquo;s WhatsApp Cloud API or AiSensy, chosen per number, with sent, delivered and read receipts. Template and provider rules remain in force.</p></article>
+            <article><h3>Photos, PDFs and voice notes</h3><p>Files leads send on WhatsApp are saved on your server and open in the inbox; send price lists and catalogues back the same way.</p></article>
             <article><h3>Telegram and iMessage</h3><p>Message leads from your own Telegram account, or on iMessage through a Mac running BlueBubbles, in the same inbox.</p></article>
             <article><h3>Customer-owned email</h3><p>Send through SMTP and receive through IMAP using the business&rsquo;s own mailboxes, including replies within an existing thread.</p></article>
             <article><h3>Shared working context</h3><p>Keep channel history, lead status, assignment and follow-up state available to the people responsible for the customer.</p></article>

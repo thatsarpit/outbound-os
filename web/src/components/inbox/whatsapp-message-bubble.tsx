@@ -1,8 +1,8 @@
 import type { InboxChannel, InboxMessage } from '@/api/types'
-import { Paperclip } from 'lucide-react'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { getChannel } from '@/lib/channels'
 import { ChannelBadge } from './channel-badge'
+import { MessageMedia } from './message-media'
 
 /**
  * A single message in a conversation.
@@ -48,18 +48,12 @@ export function MessageBubble({
               : cn('rounded-tr-sm text-text-primary', meta.bg, meta.border),
           )}
         >
-          <p className="whitespace-pre-wrap">{message.content}</p>
+          {!(message.mediaUrl && /^\[(Photo|Video|Audio|Voice message|Sticker|Image|Document|Pdf)\]/.test(message.content || '')) && (
+            <p className="whitespace-pre-wrap">{message.content}</p>
+          )}
 
           {message.mediaUrl && (
-            <a
-              href={message.mediaUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-sm border border-border bg-surface px-2 py-1 text-[11px] text-text-secondary transition-colors hover:text-text-primary"
-            >
-              <Paperclip className="h-3 w-3 shrink-0" />
-              <span className="truncate">{message.mediaFilename || 'Open attachment'}</span>
-            </a>
+            <MessageMedia messageId={message.id} mediaType={message.mediaType} filename={message.mediaFilename} />
           )}
         </div>
 

@@ -40,6 +40,7 @@ import recoveryCoordinator from './services/recoveryCoordinator.js';
 import resourceMonitor from './utils/resourceMonitor.js';
 import webhookDispatcher from './services/webhookDispatcher.js';
 import { workspaceTimezone, zonedParts, zonedTimeToUtc } from './utils/workspaceTime.js';
+import { downloadInboundMedia, metaInboundMedia, sendMediaFile, MEDIA_DIR as WHATSAPP_MEDIA_DIR } from './services/whatsappMedia.js';
 import { whatsappAddress } from './utils/whatsappAddress.js';
 import { mapInboundLead, isSendableMobile } from './utils/inboundLead.js';
 import { secretsMatch } from './utils/secretsMatch.js';
@@ -94,10 +95,16 @@ const mediaUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 30 * 1024 * 1024 }, // 30MB
   fileFilter: (req, file, cb) => {
+    // What WhatsApp can deliver as an image, video, audio or document.
     const allowed = ['image/jpeg','image/png','image/webp','image/gif',
                      'application/pdf','video/mp4','video/3gpp',
-                     'audio/mpeg','audio/ogg','application/msword',
-                     'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+                     'audio/mpeg','audio/ogg','audio/aac','audio/mp4','application/msword',
+                     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                     'application/vnd.ms-excel',
+                     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                     'application/vnd.ms-powerpoint',
+                     'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                     'text/csv','text/plain'];
     if (allowed.includes(file.mimetype)) { cb(null, true); }
     else { cb(new Error(`File type ${file.mimetype} not allowed`)); }
   },
@@ -379,6 +386,84 @@ async function sendManualWhatsAppMessage({ leadId, text }) {
   activityLog.add('reply', `Sent manual reply to ${lead.name}`, { leadId: lead.id });
 
   return { lead, accountId, message };
+}
+
+/**
+ * Send files from the media library to a lead on WhatsApp — photos, PDFs,
+ * documents, audio, video — with an optional caption on the first one.
+ *
+ * Meta's Cloud API numbers only: the file is uploaded to Meta and sent by
+ * media id (services/whatsappMedia.js). Like any free-form message it is
+ * only delivered within 24 hours of the lead's last message.
+ */
+async function sendWhatsAppFiles({ leadId, mediaFileIds, caption = '', accountId: requestedAccountId = null }) {
+  const fail = (message, statusCode = 400, reason) => {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    if (reason) error.reason = reason;
+    return error;
+  };
+
+  const lead = await prisma.lead.findUnique({ where: { id: leadId } });
+  if (!lead) throw fail('Lead not found', 404);
+  const address = whatsappAddress(lead);
+  if (!address) throw fail('This lead has no WhatsApp number or WhatsApp user id.');
+  const accountId = requestedAccountId || lead.assignedAccount || (await whatsappManager.getNextAccount());
+  if (!accountId) throw fail('No WhatsApp account is connected. Please connect an account first.', 503);
+
+  const ids = [...new Set(mediaFileIds.map((id) => parseInt(id)).filter(Number.isInteger))].slice(0, 10);
+  const files = await prisma.mediaFile.findMany({ where: { id: { in: ids } } });
+  if (files.length === 0) throw fail('No files to send.');
+
+  const sent = [];
+  for (const [index, file] of files.entries()) {
+    const absolute = path.resolve(__dirname, '..', file.path);
+    if (!absolute.startsWith(path.resolve(WHATSAPP_MEDIA_DIR) + path.sep) || !existsSync(absolute)) {
+      throw fail(`File ${file.originalName} is missing from storage.`, 404);
+    }
+    const fileCaption = index === 0 ? String(caption || '').trim() : '';
+    let result;
+    try {
+      result = await sendMediaFile({
+        address,
+        filePath: absolute,
+        mimeType: file.mimeType,
+        filename: file.originalName,
+        caption: fileCaption,
+        accountId,
+      });
+    } catch (error) {
+      if (error.code === 'provider_unsupported') {
+        throw fail('Sending files needs a number connected through Meta\'s Cloud API. On AiSensy numbers, send the file as a link.', 400, 'provider_unsupported');
+      }
+      throw fail(`Could not send ${file.originalName}: ${error.message}`, 502, error.code);
+    }
+    if (!result.success) {
+      throw fail(result.reason === 're_engagement_required'
+        ? 'WhatsApp only delivers files within 24 hours of the lead\'s last message. Send an approved template first.'
+        : `WhatsApp send failed: ${result.reason || 'unknown error'}`, 502, result.reason);
+    }
+    sent.push(await prisma.message.create({
+      data: {
+        leadId: lead.id,
+        direction: 'outbound',
+        channel: 'whatsapp',
+        content: fileCaption || `[${result.kind === 'pdf' ? 'Document' : result.kind[0].toUpperCase() + result.kind.slice(1)}] ${file.originalName}`,
+        waAccount: accountId,
+        waMessageId: result.messageId || null,
+        mediaUrl: file.path,
+        mediaType: result.kind,
+        mediaCaption: fileCaption || null,
+        mediaFilename: file.originalName,
+        status: 'sent',
+        sentAt: new Date(),
+      },
+    }));
+  }
+
+  await prisma.lead.update({ where: { id: lead.id }, data: { lastMessageAt: new Date() } });
+  activityLog.add('reply', `Sent ${sent.length} file${sent.length === 1 ? '' : 's'} on WhatsApp to ${lead.name}`, { leadId: lead.id });
+  return { lead, accountId, messages: sent };
 }
 
 /** SSE clients for real-time activity feed */
@@ -3567,6 +3652,20 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
 
     if (channel === 'whatsapp') {
       const text = String(req.body?.text || req.body?.body || '').trim();
+      const attachmentIds = Array.isArray(req.body?.attachmentIds) ? req.body.attachmentIds : [];
+
+      // Files, with the typed text as the first file's caption.
+      if (attachmentIds.length > 0) {
+        const sent = await sendWhatsAppFiles({ leadId, mediaFileIds: attachmentIds, caption: text });
+        broadcastEvent('manual_reply', {
+          leadId: sent.lead.id,
+          accountId: sent.accountId,
+          channel: 'whatsapp',
+          threadKey: `whatsapp:${sent.lead.id}`,
+        });
+        return res.json({ success: true, channel: 'whatsapp', message: sent.messages[0], messages: sent.messages });
+      }
+
       if (!text) return res.status(400).json({ error: 'text is required for WhatsApp sends' });
 
       const result = await sendManualWhatsAppMessage({ leadId, text });
@@ -4725,6 +4824,31 @@ app.post('/api/media/upload', requireRole('agent'), mediaUpload.single('file'), 
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/messages/:id/media — the photo, document, voice note or video on
+// a message, for signed-in users only. Files live in data/media and are never
+// served statically. They are sent with a sandbox policy and nosniff, so a
+// file a stranger sent can never run as a page on this origin.
+app.get('/api/messages/:id/media', async (req, res) => {
+  try {
+    const message = await prisma.message.findUnique({
+      where: { id: parseInt(req.params.id) },
+      select: { mediaUrl: true, mediaType: true, mediaFilename: true },
+    });
+    if (!message?.mediaUrl) return res.status(404).json({ error: 'No file on this message' });
+    const absolute = path.resolve(__dirname, '..', message.mediaUrl);
+    if (!absolute.startsWith(path.resolve(WHATSAPP_MEDIA_DIR) + path.sep) || !existsSync(absolute)) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+    const inline = ['image', 'video', 'audio', 'pdf'].includes(message.mediaType);
+    const name = String(message.mediaFilename || path.basename(absolute)).replace(/["\\\r\n]/g, '_');
+    res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'; img-src 'self'; media-src 'self'");
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${name}"`);
+    res.sendFile(absolute);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/media — list all uploaded media files
 app.get('/api/media', async (req, res) => {
   try {
@@ -4745,17 +4869,23 @@ app.delete('/api/media/:id', requireRole('agent'), async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/leads/:id/send-media — send a media file via WhatsApp
-//
-// Disabled pending the Cloud API media flow. whatsapp-web.js could stream a
-// local file straight from disk; the Cloud API instead needs either a publicly
-// reachable URL or a media ID obtained by uploading to POST /{phone_id}/media.
-// data/media is not served publicly, so neither is available yet. Returning 501
-// keeps the failure legible instead of surfacing an opaque upstream error.
+// POST /api/leads/:id/send-media — send files from the media library on
+// WhatsApp. Body: { mediaFileIds: [id…] | mediaFileId, caption?, accountId? }.
+// Uploads each file to Meta and sends it by media id (sendWhatsAppFiles).
 app.post('/api/leads/:id/send-media', requireRole('agent'), async (req, res) => {
-  res.status(501).json({
-    error: 'WhatsApp media sending is not available yet — it needs the Cloud API media upload flow. Send the file as a link in a text message for now.',
-  });
+  try {
+    const ids = Array.isArray(req.body?.mediaFileIds) ? req.body.mediaFileIds : [req.body?.mediaFileId].filter(Boolean);
+    const sent = await sendWhatsAppFiles({
+      leadId: parseInt(req.params.id),
+      mediaFileIds: ids,
+      caption: req.body?.caption,
+      accountId: parsePositiveInt(req.body?.accountId),
+    });
+    broadcastEvent('manual_reply', { leadId: sent.lead.id, accountId: sent.accountId, channel: 'whatsapp', threadKey: `whatsapp:${sent.lead.id}` });
+    res.json({ success: true, messages: sent.messages });
+  } catch (e) {
+    res.status(e.statusCode || 500).json({ error: e.message, reason: e.reason });
+  }
 });
 
 // ======================== EMAIL TEMPLATES ========================
@@ -5275,7 +5405,33 @@ function metaInboundText(msg) {
     || msg?.video?.caption
     || msg?.document?.caption
     || msg?.reaction?.emoji
-    || (msg?.type ? `[${msg.type}]` : '');
+    || (msg?.type === 'image' ? '[Photo]'
+      : msg?.type === 'video' ? '[Video]'
+        : msg?.type === 'audio' ? (msg.audio?.voice ? '[Voice message]' : '[Audio]')
+          : msg?.type === 'document' ? `[Document] ${msg.document?.filename || ''}`.trim()
+            : msg?.type === 'sticker' ? '[Sticker]'
+              : msg?.type ? `[${msg.type}]` : '');
+}
+
+/**
+ * Fetch an incoming photo, document, voice note or video from Meta and keep
+ * it in the data volume, so it can be opened from the inbox. A failure is
+ * logged and the message is still recorded, with its text placeholder.
+ */
+async function storeMetaInboundMedia(msg, accountId) {
+  const media = metaInboundMedia(msg);
+  if (!media) return null;
+  // Meta retries deliveries; a message already recorded keeps its file.
+  const seen = msg?.id
+    ? await prisma.message.findFirst({ where: { waMessageId: String(msg.id), direction: 'inbound' }, select: { id: true } })
+    : null;
+  if (seen) return null;
+  try {
+    return await downloadInboundMedia(media, accountId || null);
+  } catch (error) {
+    logger.warn(`Meta media ${media.type} ${media.id} not stored: ${error.message}`);
+    return null;
+  }
 }
 
 // Subscription handshake: Meta calls this once when the webhook is saved.
@@ -5333,8 +5489,10 @@ app.post('/webhook/meta', async (req, res) => {
           const sentAt = Number(msg.timestamp);
           const who = phone ? `*${String(phone).slice(-4)}` : `user id *${String(waUserId).slice(-4)}`;
           logger.info(`📥 Meta inbound from ${who} (type=${msg.type || 'text'})`);
+          const media = await storeMetaInboundMedia(msg, accountId);
           await replyDetector.handleReply(String(phone), text, accountId, {
             source: 'meta',
+            media: media || undefined,
             messageId: msg.id,
             timestamp: Number.isFinite(sentAt) && sentAt > 0 ? new Date(sentAt * 1000).toISOString() : undefined,
             messageType: msg.type,

@@ -101,7 +101,8 @@ export function ConversationSurface({
   const availableSenderAccounts = activeThread?.availableSenderAccounts ?? []
   const sendDisabled =
     replyPending ||
-    !replyText.trim() ||
+    // On WhatsApp, files alone are a message; the text becomes their caption.
+    (!replyText.trim() && !(composerChannel === 'whatsapp' && attachments.length > 0)) ||
     Boolean(replyDisabledReason) ||
     (composerChannel === 'email' && !composerSubject.trim())
 

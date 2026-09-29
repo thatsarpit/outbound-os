@@ -4,6 +4,24 @@ All notable changes to Outbound OS. This project follows
 [semantic versioning](https://semver.org/); until 1.0, minor versions may
 include breaking changes, and they are called out here.
 
+## [Unreleased]
+
+### Added
+
+- **WhatsApp files in both directions** (Meta Cloud API numbers). Photos,
+  PDFs, documents, voice notes and videos a lead sends are downloaded from
+  Meta, kept in the data volume and shown in the inbox; they are served only
+  to signed-in users, with a sandbox policy. The inbox can attach files to a
+  WhatsApp reply, and `POST /api/leads/:id/send-media` sends library files.
+- MCP tools `list_media_files` and `send_whatsapp_file` (35 tools).
+- More file types in the media library: spreadsheets, presentations, text,
+  AAC and M4A audio.
+
+### Changed
+
+- Incoming media placeholders read `[Photo]`, `[Voice message]` or
+  `[Document] name.pdf` instead of `[image]`.
+
 ## [0.2.0] — WhatsApp usernames, Meta pricing, published images
 
 ### Fixed

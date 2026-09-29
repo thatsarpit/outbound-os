@@ -72,7 +72,7 @@ export function AttachmentPicker({
       <input
         ref={inputRef}
         type="file"
-        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.mp4,.mp3"
+        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv,.txt,.mp4,.3gp,.mp3,.ogg,.aac,.m4a"
         onChange={handleFileSelect}
         className="hidden"
       />

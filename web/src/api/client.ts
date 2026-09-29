@@ -71,6 +71,16 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
   return data as T
 }
 
+/** A file behind authentication, as a Blob (images, voice notes, PDFs). */
+export async function apiFetchBlob(endpoint: string): Promise<Blob> {
+  const token = await getSessionToken()
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!response.ok) throw new ApiClientError(response.statusText || 'Could not load file', response.status)
+  return response.blob()
+}
+
 export const api = {
   get: <T>(endpoint: string) => apiFetch<T>(endpoint),
 

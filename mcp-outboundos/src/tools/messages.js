@@ -48,6 +48,36 @@ export function registerMessageTools(server) {
     },
   );
 
+  // ── list_media_files ──
+  server.tool(
+    'list_media_files',
+    'List files in the media library (price lists, catalogues, photos) that can be sent on WhatsApp with send_whatsapp_file. Upload files in the dashboard.',
+    {},
+    async () => {
+      try {
+        const { data } = await get('/api/media');
+        return ok((data || []).map((f) => ({ id: f.id, name: f.originalName, type: f.mimeType, size: f.size, uploaded: f.createdAt })));
+      } catch (e) { return err(e.message); }
+    },
+  );
+
+  // ── send_whatsapp_file ──
+  server.tool(
+    'send_whatsapp_file',
+    'Send a file from the media library to a lead on WhatsApp (photo, PDF, document, audio or video), with an optional caption. Needs a number on Meta\'s Cloud API, and like any free-form WhatsApp message it only delivers within 24 hours of the lead\'s last message.',
+    {
+      lead_id: LeadId,
+      media_file_id: z.number().int().positive().describe('Id from list_media_files'),
+      caption: z.string().max(1024).optional().describe('Text shown with the file (not for audio)'),
+    },
+    async ({ lead_id, media_file_id, caption }) => {
+      try {
+        const { data } = await post(`/api/leads/${lead_id}/send-media`, { mediaFileId: media_file_id, caption });
+        return ok({ success: data.success, messages: (data.messages || []).map((m) => ({ id: m.id, file: m.mediaFilename, status: m.status })) });
+      } catch (e) { return err(e.message); }
+    },
+  );
+
   // ── send_email ──
   server.tool(
     'send_email',

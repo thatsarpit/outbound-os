@@ -822,6 +822,137 @@ describe('Meta WhatsApp webhook', () => {
     assert.equal(matched?.leadId, lead.id, 'the phone-less message found the existing lead');
   });
 
+  test('stores a photo a lead sends and serves it only to signed-in users; sends a file back', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const photo = Buffer.from('\xff\xd8\xff\xe0fake-jpeg-bytes', 'binary');
+    const seen = { downloads: 0, uploads: 0, messages: [] };
+    let windowClosed = false;
+
+    // A stand-in for graph.facebook.com.
+    const graph = http.createServer((req, res) => {
+      const auth = req.headers.authorization === 'Bearer test-meta-token';
+      const chunks = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        const json = (status, body) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); };
+        if (!auth) return json(401, { error: { message: 'bad token' } });
+        if (req.method === 'GET' && req.url === '/media-photo-1') {
+          return json(200, { url: `http://127.0.0.1:${graph.address().port}/files/photo-1`, mime_type: 'image/jpeg', file_size: photo.length });
+        }
+        if (req.method === 'GET' && req.url === '/files/photo-1') {
+          seen.downloads += 1;
+          res.writeHead(200, { 'Content-Type': 'image/jpeg' });
+          return res.end(photo);
+        }
+        if (req.method === 'POST' && req.url === '/PNID-MEDIA/media') {
+          seen.uploads += 1;
+          assert.match(String(req.headers['content-type']), /multipart\/form-data/);
+          return json(200, { id: 'uploaded-media-1' });
+        }
+        if (req.method === 'POST' && req.url === '/PNID-MEDIA/messages') {
+          const body = JSON.parse(Buffer.concat(chunks).toString());
+          seen.messages.push(body);
+          if (windowClosed) return json(400, { error: { code: 131047, message: 'Re-engagement message' } });
+          return json(200, { messages: [{ id: `wamid.MEDIA-OUT-${seen.messages.length}` }], contacts: [{ wa_id: '15551230099' }] });
+        }
+        json(404, { error: { message: 'not found' } });
+      });
+    });
+    await new Promise((resolve) => graph.listen(0, '127.0.0.1', resolve));
+    const previousBase = process.env.META_GRAPH_API_BASE;
+    const previousToken = process.env.META_ACCESS_TOKEN;
+    process.env.META_GRAPH_API_BASE = `http://127.0.0.1:${graph.address().port}`;
+    process.env.META_ACCESS_TOKEN = 'test-meta-token';
+    const createdFiles = [];
+
+    try {
+      const account = await prisma.whatsAppAccount.create({
+        data: { name: 'Media number', provider: 'meta', cloudApiPhoneId: 'PNID-MEDIA', enabled: true },
+      });
+      const lead = await prisma.lead.create({
+        data: { name: 'Photo Buyer', mobile: '15551230099', source: 'manual', assignedAccount: account.id },
+      });
+
+      // 1. The lead sends a photo.
+      const payload = {
+        object: 'whatsapp_business_account',
+        entry: [{ id: 'WABA-1', changes: [{ field: 'messages', value: {
+          messaging_product: 'whatsapp',
+          metadata: { display_phone_number: '15550000000', phone_number_id: 'PNID-MEDIA' },
+          contacts: [{ profile: { name: 'Photo Buyer' }, wa_id: '15551230099', user_id: 'US.55512300990001' }],
+          messages: [{
+            from: '15551230099', from_user_id: 'US.55512300990001', id: 'wamid.PHOTO-IN-1', timestamp: '1790000500',
+            type: 'image', image: { id: 'media-photo-1', mime_type: 'image/jpeg' },
+          }],
+        } }] }],
+      };
+      await deliver(payload);
+      const inbound = await prisma.message.findFirst({ where: { waMessageId: 'wamid.PHOTO-IN-1', direction: 'inbound' } });
+      assert.ok(inbound, 'the photo message was recorded');
+      assert.equal(inbound.leadId, lead.id);
+      assert.equal(inbound.mediaType, 'image');
+      assert.match(inbound.mediaUrl, /^data\/media\/.+\.jpg$/);
+      assert.equal(inbound.content, '[Photo]');
+      createdFiles.push(path.join(__dirname, '..', inbound.mediaUrl));
+
+      // A retry of the same delivery does not store the file again.
+      await deliver(payload);
+      assert.equal(seen.downloads, 1);
+
+      // 2. Only signed-in users can open it, and it cannot run as a page.
+      const anonymous = await request('GET', `/api/messages/${inbound.id}/media`);
+      assert.equal(anonymous.status, 401);
+      const file = await new Promise((resolve, reject) => {
+        http.get(new URL(`/api/messages/${inbound.id}/media`, baseUrl), { headers: authHeader() }, (res) => {
+          const parts = [];
+          res.on('data', (c) => parts.push(c));
+          res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(parts) }));
+        }).on('error', reject);
+      });
+      assert.equal(file.status, 200);
+      assert.ok(file.body.equals(photo), 'the stored bytes are served');
+      assert.match(String(file.headers['content-security-policy']), /sandbox/);
+      assert.equal(file.headers['x-content-type-options'], 'nosniff');
+
+      // 3. The team sends a file back with a caption.
+      const storedName = `test-${process.pid}.pdf`;
+      const storedPath = path.join(__dirname, '..', 'data', 'media', storedName);
+      fs.mkdirSync(path.dirname(storedPath), { recursive: true });
+      fs.writeFileSync(storedPath, '%PDF-1.4 test');
+      createdFiles.push(storedPath);
+      const library = await prisma.mediaFile.create({
+        data: { filename: storedName, originalName: 'price-list.pdf', mimeType: 'application/pdf', size: 13, path: `data/media/${storedName}` },
+      });
+      const sent = await request('POST', `/api/leads/${lead.id}/send-media`, {
+        body: { mediaFileId: library.id, caption: 'Our price list' },
+        headers: authHeader(),
+      });
+      assert.equal(sent.status, 200, JSON.stringify(sent.body));
+      assert.equal(seen.uploads, 1);
+      const outBody = seen.messages.at(-1);
+      assert.equal(outBody.type, 'document');
+      assert.deepEqual(outBody.document, { id: 'uploaded-media-1', caption: 'Our price list', filename: 'price-list.pdf' });
+      assert.equal(outBody.to, '15551230099');
+      const outbound = await prisma.message.findFirst({ where: { leadId: lead.id, direction: 'outbound', mediaFilename: 'price-list.pdf' } });
+      assert.equal(outbound.waMessageId, 'wamid.MEDIA-OUT-1');
+      assert.equal(outbound.mediaType, 'pdf');
+
+      // 4. Outside the 24-hour window the error says what to do.
+      windowClosed = true;
+      const late = await request('POST', `/api/leads/${lead.id}/send-media`, {
+        body: { mediaFileId: library.id },
+        headers: authHeader(),
+      });
+      assert.equal(late.status, 502);
+      assert.match(late.body.error, /24 hours/);
+    } finally {
+      await new Promise((resolve) => graph.close(resolve));
+      if (previousBase === undefined) delete process.env.META_GRAPH_API_BASE; else process.env.META_GRAPH_API_BASE = previousBase;
+      if (previousToken === undefined) delete process.env.META_ACCESS_TOKEN; else process.env.META_ACCESS_TOKEN = previousToken;
+      for (const f of createdFiles) fs.rmSync(f, { force: true });
+    }
+  });
+
   test('records Meta\'s pricing from a status update', async () => {
     const { default: prisma } = await import('../src/utils/prismaClient.js');
     const lead = await prisma.lead.create({ data: { name: 'Priced Buyer', mobile: '15551230088', source: 'manual' } });

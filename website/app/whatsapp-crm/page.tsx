@@ -135,6 +135,14 @@ export default function WhatsAppCrmPage() {
               </p>
             </div>
             <div>
+              <h3>Photos, PDFs and voice notes</h3>
+              <p>
+                Buyers&rsquo; drawings, purchase orders and voice notes are
+                saved on your server and open in the inbox. Send your price
+                list or catalogue back from the same place.
+              </p>
+            </div>
+            <div>
               <h3>Read receipts and reply rates</h3>
               <p>
                 Sent, delivered and read on every message, and reply rates per

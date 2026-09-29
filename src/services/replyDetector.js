@@ -436,6 +436,13 @@ class ReplyDetector {
           waMessageId: channel === 'whatsapp' ? (meta.messageId || null) : null,
           imessageAccountId: channel === 'imessage' ? (accountId || null) : null,
           imessageMessageId: channel === 'imessage' ? (meta.messageId || null) : null,
+          // A photo, document, voice note or video the lead sent, already
+          // stored in the data volume (services/whatsappMedia.js).
+          ...(meta.media?.mediaUrl ? {
+            mediaUrl: meta.media.mediaUrl,
+            mediaType: meta.media.mediaType,
+            mediaFilename: meta.media.mediaFilename,
+          } : {}),
           providerCreatedAt: providerEventAt,
           status: 'delivered',
           sentAt: eventAt,

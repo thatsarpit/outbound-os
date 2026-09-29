@@ -37,7 +37,9 @@ import { createDecipheriv, createCipheriv, randomBytes, createHash } from 'crypt
 
 import { WHATSAPP_PROVIDERS, credentialState, providerOf } from './whatsappProviders.js';
 
-const META_GRAPH_BASE = process.env.META_GRAPH_API_BASE || 'https://graph.facebook.com/v21.0';
+// Read per call so tests (and self-hosters pinning an API version) can set it
+// after this module has loaded.
+const graphBase = () => process.env.META_GRAPH_API_BASE || 'https://graph.facebook.com/v21.0';
 const AISENSY_API_BASE = process.env.AISENSY_API_BASE || 'https://apis.aisensy.com/project-apis/v1';
 const AISENSY_CAMPAIGN_API_URL = process.env.AISENSY_CAMPAIGN_API_URL || 'https://backend.aisensy.com/campaign/t1/api/v2';
 const REQUEST_TIMEOUT_MS = parseInt(process.env.AISENSY_TIMEOUT_MS, 10) || 20000;
@@ -153,7 +155,7 @@ class WhatsAppCloudApiService {
         account,
         phoneNumberId,
         token,
-        url: `${META_GRAPH_BASE}/${phoneNumberId}/messages`,
+        url: `${graphBase()}/${phoneNumberId}/messages`,
         headers: { Authorization: `Bearer ${token}` },
       };
     }
@@ -438,6 +440,34 @@ class WhatsAppCloudApiService {
   }
 
   /**
+   * Send media already uploaded to Meta (POST /{phone-number-id}/media),
+   * addressed by its media id. See services/whatsappMedia.js.
+   *
+   * @param {string} phone — number or business-scoped user id
+   * @param {string} mediaId
+   * @param {'image'|'document'|'audio'|'video'} mediaType
+   * @param {{caption?: string, filename?: string}} options
+   * @param {number|null} accountId
+   */
+  async sendMediaById(phone, mediaId, mediaType = 'document', { caption = '', filename = '' } = {}, accountId = null) {
+    const addressee = cloudApiAddressee(phone, (value) => this.normalizePhone(value));
+    if (!addressee) return { success: false, reason: 'invalid_phone', rawError: 'Empty phone number' };
+    const to = addressee.to || addressee.recipient;
+
+    const mediaPayload = { id: String(mediaId) };
+    if (caption && mediaType !== 'audio') mediaPayload.caption = String(caption).slice(0, 1024);
+    if (filename && mediaType === 'document') mediaPayload.filename = String(filename).slice(0, 240);
+
+    return this._postMessage({
+      messaging_product: 'whatsapp',
+      recipient_type: 'individual',
+      ...addressee,
+      type: mediaType,
+      [mediaType]: mediaPayload,
+    }, accountId, `${mediaType} (uploaded) → *${to.slice(-4)}`);
+  }
+
+  /**
    * Send a media message by publicly reachable URL.
    *
    * The API fetches the URL itself, so it must be reachable from the public
@@ -571,7 +601,7 @@ class WhatsAppCloudApiService {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
-      const url = `${META_GRAPH_BASE}/${transport.phoneNumberId}?fields=display_phone_number,verified_name,quality_rating`;
+      const url = `${graphBase()}/${transport.phoneNumberId}?fields=display_phone_number,verified_name,quality_rating`;
       const response = await fetch(url, { headers: transport.headers, signal: controller.signal });
       const text = await response.text();
       let data = {};

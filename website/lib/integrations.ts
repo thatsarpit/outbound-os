@@ -44,6 +44,7 @@ export const integrations: Integration[] = [
     capabilities: [
       'First contact with an approved template, filled with the lead’s first name and country',
       'Free-text replies from the inbox inside the 24-hour window',
+      'Photos, PDFs, voice notes and videos both ways — kept on your server, shown in the inbox',
       'Sent, delivered and read receipts on every message',
       'Replies stop the lead’s follow-up sequence automatically',
       'A connection test that reads your number’s verified name and quality rating',
