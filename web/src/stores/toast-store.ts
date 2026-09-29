@@ -27,8 +27,13 @@ export const useToastStore = create<ToastState>((set) => ({
     const now = Date.now()
     const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
     set((s) => {
+      // One failure often reaches two handlers — the global one with the
+      // server's message, and the page's own with "Could not save: " in front
+      // of it. A toast that repeats one shown a moment ago adds nothing.
       const recentDuplicate = s.toasts.find(
-        (toast) => toast.type === type && toast.message === message && now - toast.createdAt < 2000,
+        (toast) =>
+          now - toast.createdAt < 2000 &&
+          (toast.message.includes(message) || message.includes(toast.message)),
       )
 
       if (recentDuplicate) return s

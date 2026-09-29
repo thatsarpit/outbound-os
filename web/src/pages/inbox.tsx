@@ -91,7 +91,6 @@ function InboxInner() {
   const [senderAccountId, setSenderAccountId] = useState<number | null>(null)
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null)
   const [showCompose, setShowCompose] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
   const routedLeadId = parseLeadId(searchParams.get('leadId'))
   const routedTemplateId = parseLeadId(searchParams.get('templateId'))
   const routedAccountId = parseLeadId(searchParams.get('accountId'))
@@ -305,10 +304,6 @@ function InboxInner() {
     senderAccountId,
     setSearchParams,
   ])
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [activeThread?.messages, selectedLeadId])
 
   const replyDisabledReason = !activeThread
     ? threadLoading
@@ -747,7 +742,6 @@ function InboxInner() {
                 replyPending={sendMutation.isPending}
                 replyError={resolvedReplyError}
                 replyDisabledReason={replyDisabledReason}
-                messagesEndRef={messagesEndRef}
                 onResolve={() => resolveThreadMutation.mutate()}
                 onReopen={() => reopenThreadMutation.mutate()}
                 onAssignSelf={() => assignSelfMutation.mutate()}
@@ -797,7 +791,6 @@ function InboxInner() {
               replyPending={sendMutation.isPending}
               replyError={resolvedReplyError}
               replyDisabledReason={replyDisabledReason}
-              messagesEndRef={messagesEndRef}
               drawer
               onClose={() => setSelectedLeadId(null)}
               onResolve={() => resolveThreadMutation.mutate()}

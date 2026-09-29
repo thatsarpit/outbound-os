@@ -5,7 +5,7 @@
  * props and owns no cross-cutting state, which is why it could be lifted out
  * cleanly while the rest of that file could not.
  */
-import { type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef } from 'react'
 import { type EmailTemplate } from '@/api/endpoints/templates'
 import type { InboxChannel, InboxThreadDetail, MediaFile } from '@/api/types'
 import { ComposerBar } from '@/components/inbox/composer-bar'
@@ -17,6 +17,70 @@ import { SkeletonLine } from '@/components/ui'
 import { getChannel } from '@/lib/channels'
 import { cn } from '@/lib/utils'
 import { AlertCircle, Mail } from 'lucide-react'
+/**
+ * Keeps the timeline on the newest message: when a conversation opens, when a
+ * message arrives, and when a photo or file preview finishes loading and
+ * pushes the content down. Scrolling up to read history lets go; scrolling
+ * back to the bottom, or sending, holds again.
+ *
+ * Each surface owns this. It used to be one ref shared by the desktop pane and
+ * the phone drawer, and the drawer — mounted but hidden on desktop — held it,
+ * so the desktop timeline never scrolled.
+ */
+function useStickToBottom(conversationKey: unknown, sending: boolean) {
+  const timelineRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
+  const stick = useRef(true)
+
+  const toBottom = () => {
+    const el = timelineRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }
+
+  useLayoutEffect(() => {
+    stick.current = true
+    toBottom()
+  }, [conversationKey, sending])
+
+  useEffect(() => {
+    const timeline = timelineRef.current
+    const content = contentRef.current
+    if (!timeline || !content || typeof ResizeObserver === 'undefined') return
+    // The content grows as previews load; the pane itself shrinks when the
+    // composer grows. Either one moves the bottom out of view.
+    const observer = new ResizeObserver(() => {
+      if (stick.current) toBottom()
+    })
+    observer.observe(timeline)
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [])
+
+  // Only a person scrolling can let go. The browser scrolls too — it keeps
+  // the view steady while previews load above it — and those events would
+  // otherwise look like someone scrolling up.
+  const lastTouch = useRef(0)
+  const touched = () => {
+    lastTouch.current = Date.now()
+  }
+  const onTimelineScroll = () => {
+    const el = timelineRef.current
+    if (!el) return
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    if (atBottom) stick.current = true
+    else if (Date.now() - lastTouch.current < 400) stick.current = false
+  }
+  const timelineProps = {
+    onScroll: onTimelineScroll,
+    onWheel: touched,
+    onTouchMove: touched,
+    onPointerDown: touched,
+    onKeyDown: touched,
+  }
+
+  return { timelineRef, contentRef, timelineProps }
+}
+
 export interface ConversationSurfaceProps {
   activeThread?: InboxThreadDetail | null
   threadLoading: boolean
@@ -41,7 +105,6 @@ export interface ConversationSurfaceProps {
   replyPending: boolean
   replyError: Error | null
   replyDisabledReason: string | null
-  messagesEndRef: RefObject<HTMLDivElement | null>
   drawer?: boolean
   onClose?: () => void
   onResolve?: () => void
@@ -82,7 +145,6 @@ export function ConversationSurface({
   replyPending,
   replyError,
   replyDisabledReason,
-  messagesEndRef,
   drawer = false,
   onClose,
   onResolve,
@@ -98,6 +160,10 @@ export function ConversationSurface({
   onBccChange,
   onScheduleSend,
 }: ConversationSurfaceProps) {
+  const { timelineRef, contentRef, timelineProps } = useStickToBottom(
+    activeThread?.leadId,
+    replyPending,
+  )
   const availableSenderAccounts = activeThread?.availableSenderAccounts ?? []
   const sendDisabled =
     replyPending ||
@@ -134,67 +200,73 @@ export function ConversationSurface({
         />
       )}
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-5">
-        {threadLoading ? (
-          <div className="flex flex-col gap-4 py-4">
-            {Array.from({ length: 4 }).map((_, index) => (
-              <SkeletonLine
-                key={index}
-                className={cn(
-                  'h-20 w-4/5 rounded-md',
-                  index % 2 === 0 ? 'self-end bg-surface-raised' : 'self-start bg-info-muted/40',
-                )}
-              />
-            ))}
-          </div>
-        ) : threadError ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center text-text-muted">
-            <AlertCircle className="h-10 w-10 text-danger/80" />
-            <p className="mt-4 text-sm font-medium text-danger">Unable to load messages</p>
-            <p className="mt-2 max-w-sm text-sm leading-6 text-text-secondary">
-              {threadError.message || 'Refresh the conversation or try another lead.'}
-            </p>
-          </div>
-        ) : !activeThread?.messages?.length ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center text-text-muted">
-            <Mail className="h-10 w-10 opacity-40" />
-            <p className="mt-4 text-sm font-medium text-text-primary">
-              No conversation history yet
-            </p>
-            <p className="mt-2 max-w-sm text-sm leading-6 text-text-secondary">
-              Start the first outbound reply from the composer below. WhatsApp, email, iMessage, and
-              Telegram are available here.
-            </p>
-          </div>
-        ) : (
-          (activeThread.messages ?? []).map((message, index, all) => {
-            // Label the channel only where it changes, so a single-channel
-            // thread stays clean but a lead reached on two channels reads
-            // unambiguously.
-            const showChannel = index === 0 || all[index - 1].channel !== message.channel
-            return message.channel === 'email' ? (
-              <EmailMessageCard
-                key={message.id}
-                message={message}
-                className={cn(
-                  message.direction === 'outbound' ? 'ml-auto max-w-[92%]' : 'mr-auto max-w-[92%]',
-                )}
-              />
-            ) : (
-              <MessageBubble key={message.id} message={message} showChannel={showChannel} />
-            )
-          })
-        )}
+      <div
+        ref={timelineRef}
+        {...timelineProps}
+        className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5"
+      >
+        <div ref={contentRef} className="space-y-3">
+          {threadLoading ? (
+            <div className="flex flex-col gap-4 py-4">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <SkeletonLine
+                  key={index}
+                  className={cn(
+                    'h-20 w-4/5 rounded-md',
+                    index % 2 === 0 ? 'self-end bg-surface-raised' : 'self-start bg-info-muted/40',
+                  )}
+                />
+              ))}
+            </div>
+          ) : threadError ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center text-text-muted">
+              <AlertCircle className="h-10 w-10 text-danger/80" />
+              <p className="mt-4 text-sm font-medium text-danger">Unable to load messages</p>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-text-secondary">
+                {threadError.message || 'Refresh the conversation or try another lead.'}
+              </p>
+            </div>
+          ) : !activeThread?.messages?.length ? (
+            <div className="flex flex-col items-center justify-center py-16 text-center text-text-muted">
+              <Mail className="h-10 w-10 opacity-40" />
+              <p className="mt-4 text-sm font-medium text-text-primary">
+                No conversation history yet
+              </p>
+              <p className="mt-2 max-w-sm text-sm leading-6 text-text-secondary">
+                Start the first outbound reply from the composer below. WhatsApp, email, iMessage,
+                and Telegram are available here.
+              </p>
+            </div>
+          ) : (
+            (activeThread.messages ?? []).map((message, index, all) => {
+              // Label the channel only where it changes, so a single-channel
+              // thread stays clean but a lead reached on two channels reads
+              // unambiguously.
+              const showChannel = index === 0 || all[index - 1].channel !== message.channel
+              return message.channel === 'email' ? (
+                <EmailMessageCard
+                  key={message.id}
+                  message={message}
+                  className={cn(
+                    message.direction === 'outbound'
+                      ? 'ml-auto max-w-[92%]'
+                      : 'mr-auto max-w-[92%]',
+                  )}
+                />
+              ) : (
+                <MessageBubble key={message.id} message={message} showChannel={showChannel} />
+              )
+            })
+          )}
 
-        {replyPending && (
-          <div className="ml-auto flex max-w-[88%] items-center gap-1 rounded-md rounded-br-md border border-border bg-surface-raised px-4 py-3 animate-fade-in sm:max-w-[75%]">
-            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-muted [animation-delay:-0.3s]" />
-            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-muted [animation-delay:-0.15s]" />
-            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-muted" />
-          </div>
-        )}
-
-        <div ref={messagesEndRef} />
+          {replyPending && (
+            <div className="ml-auto flex max-w-[88%] items-center gap-1 rounded-md rounded-br-md border border-border bg-surface-raised px-4 py-3 animate-fade-in sm:max-w-[75%]">
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-muted [animation-delay:-0.3s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-muted [animation-delay:-0.15s]" />
+              <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-muted" />
+            </div>
+          )}
+        </div>
       </div>
 
       <ComposerBar
