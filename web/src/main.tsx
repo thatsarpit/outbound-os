@@ -101,7 +101,27 @@ class RootBoundary extends Component<{ children: ReactNode }, { error: Error | n
 const rootEl = document.getElementById('root')
 if (rootEl) {
   const root = createRoot(rootEl)
-  void loadAuthConfig().then((authConfig) => {
+  // The public demo answers every API call in the browser and needs no
+  // sign-in. The import is behind a build-time constant, so ordinary builds
+  // leave the sample data out.
+  if (import.meta.env.MODE === 'demo') {
+    void import('./demo/boot').then(({ startDemo }) => {
+      startDemo()
+      root.render(
+        <StrictMode>
+          <RootBoundary>
+            <App />
+          </RootBoundary>
+        </StrictMode>,
+      )
+    })
+  } else {
+    void startApp(root)
+  }
+}
+
+function startApp(root: ReturnType<typeof createRoot>) {
+  return loadAuthConfig().then((authConfig) => {
     useAuthStore.getState().setProvider(authConfig.provider)
     if (authConfig.provider === 'clerk') {
       if (!authConfig.clerkPublishableKey) {

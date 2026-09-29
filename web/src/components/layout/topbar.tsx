@@ -7,6 +7,7 @@ import { Menu, LogOut, MessageCircleMore, ChevronDown, Search, UserCog } from 'l
 import { NotificationCenter } from './notification-center'
 import { ThemeToggle } from './theme-toggle'
 import { SUPPORT_URL } from '@/lib/branding'
+import { DemoBadge, IS_DEMO } from '@/demo/demo-chrome'
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -22,6 +23,11 @@ const PAGE_TITLES: Array<{ route: string; title: string }> = [
   { route: '/leads', title: 'Leads' },
   { route: '/analytics', title: 'Analytics' },
   { route: '/pipeline', title: 'Pipeline' },
+  { route: '/orders', title: 'Orders' },
+  { route: '/products', title: 'Products' },
+  { route: '/customers', title: 'Customers' },
+  { route: '/revenue', title: 'Revenue' },
+  { route: '/setup', title: 'Setup' },
   { route: '/team', title: 'Team' },
   { route: '/activity', title: 'Activity' },
   { route: '/account', title: 'Account' },
@@ -113,7 +119,7 @@ export function Topbar({ onOpenSearch }: { onOpenSearch: () => void }) {
 
       <span aria-hidden="true" className="hidden h-4 w-px bg-border sm:block" />
 
-      <div className="hidden sm:block"></div>
+      {IS_DEMO ? <DemoBadge /> : <div className="hidden sm:block"></div>}
 
       <div className="ml-auto flex items-center gap-1">
         <button

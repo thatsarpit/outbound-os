@@ -9,6 +9,7 @@ import { ToastContainer } from '@/components/ui/toast'
 import { CommandPalette, useCommandPaletteHotkey } from '@/components/ui/command-palette'
 import { useUIStore } from '@/stores/ui-store'
 import { cn } from '@/lib/utils'
+import { DemoWelcome, IS_DEMO } from '@/demo/demo-chrome'
 
 /** `g` then a letter jumps between sections — the bindings the shortcuts
  *  overlay already advertises. useShortcuts only handles single keys plus
@@ -134,6 +135,7 @@ export function AppShell() {
       </div>
 
       <ToastContainer />
+      {IS_DEMO && <DemoWelcome />}
       <ShortcutsOverlay />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>

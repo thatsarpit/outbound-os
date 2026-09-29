@@ -46,6 +46,11 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
+      - name: Demo build, and sample data only in it
+        run: |
+          npm run build:demo
+          ! grep -rl "Rohan Mehta" dist/assets
+          grep -rlq "Rohan Mehta" dist-demo/assets
 
   website:
     name: Website
