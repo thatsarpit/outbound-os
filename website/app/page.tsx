@@ -84,6 +84,10 @@ export default function HomePage() {
                 <Link href="/docs/install" className="btn btn--brand btn--lg">
                   Install in five minutes
                 </Link>
+                <a href={site.demoUrl} className="btn btn--glass btn--lg">
+                  Try the live demo
+                  <ArrowRight size={16} aria-hidden="true" />
+                </a>
                 <a href={site.githubUrl} className="btn btn--glass btn--lg">
                   <Logo brand="github" size={17} className="stage__gh" />
                   Star on GitHub

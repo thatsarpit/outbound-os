@@ -16,11 +16,24 @@ include breaking changes, and they are called out here.
 - MCP tools `list_media_files` and `send_whatsapp_file` (35 tools).
 - More file types in the media library: spreadsheets, presentations, text,
   AAC and M4A audio.
+- **Live demo** at outboundos.space/demo: the dashboard on sample data, no
+  sign-up. Sending in the inbox works in the browser (delivery ticks, a reply
+  from the lead); other changes explain that nothing is saved. Built with
+  `npm run build:demo --prefix web`.
 
 ### Changed
 
 - Incoming media placeholders read `[Photo]`, `[Voice message]` or
   `[Document] name.pdf` instead of `[image]`.
+
+### Fixed
+
+- The inbox conversation on desktop now opens at the newest message and
+  follows new ones. The scroll target was shared with the hidden phone
+  drawer, so the desktop timeline never scrolled.
+- A failure reported by two handlers no longer shows two toasts.
+- Orders, Products, Customers, Revenue and Setup show their name in the top
+  bar instead of "Dashboard".
 
 ## [0.2.0] — WhatsApp usernames, Meta pricing, published images
 

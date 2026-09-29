@@ -1,3 +1,4 @@
 # Cloudflare Pages redirects. Old paths keep their links and rankings.
-/demo              /managed-hosting  301
-/demo/             /managed-hosting  301
+# The live demo, a separate Pages project. 302 so the target can move.
+/demo              https://outboundos-demo.pages.dev/  302
+/demo/             https://outboundos-demo.pages.dev/  302

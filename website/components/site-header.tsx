@@ -114,6 +114,9 @@ export function SiteHeader() {
             )
           })}
 
+          <a className="header__link" href={site.demoUrl}>
+            Live demo
+          </a>
           {directNav.map((item) => (
             <Link
               key={item.href}
@@ -168,6 +171,9 @@ export function SiteHeader() {
                 )}
               </section>
             ))}
+            <a className="header__menu-link header__menu-link--direct" href={site.demoUrl}>
+              Live demo
+            </a>
             {directNav.map((item) => (
               <Link
                 key={item.href}

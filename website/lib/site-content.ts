@@ -26,6 +26,12 @@ export const site = {
   license: 'AGPL-3.0',
   licenseUrl: 'https://github.com/thatsarpit/outbound-os/blob/main/LICENSE',
   version: '0.2.0',
+  /**
+   * The live demo: the real dashboard on sample data, no sign-in. A redirect
+   * in public/_redirects, so where the demo is hosted can change without
+   * touching a link. A plain <a>, never next/link: /demo is not a page here.
+   */
+  demoUrl: '/demo',
   /** The hosted instance the Outbound OS team runs for managed customers. */
   appUrl: 'https://app.outboundos.space',
   /**

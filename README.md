@@ -22,6 +22,7 @@
 
 <p align="center">
   <a href="https://outboundos.space">Website</a> ·
+  <a href="https://outboundos.space/demo"><b>Live demo</b></a> ·
   <a href="https://outboundos.space/docs/install">Install in 5 minutes</a> ·
   <a href="https://outboundos.space/docs">Docs</a> ·
   <a href="https://outboundos.space/mcp">MCP for AI agents</a> ·
@@ -251,6 +252,11 @@ npm test                       # unit tests
 npm run test:integration       # API tests against a throwaway database
 npm run lint --prefix web && npm run build --prefix web
 ```
+
+The live demo is the same dashboard on sample data with no server behind
+it: `npm run build:demo --prefix web` builds it into `web/dist-demo`, and
+the sample data lives in `web/src/demo/`. In development, `/dev/shell`
+shows the same data.
 
 | Path | What lives there |
 |---|---|
