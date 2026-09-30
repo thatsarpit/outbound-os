@@ -42,6 +42,7 @@ import webhookDispatcher from './services/webhookDispatcher.js';
 import { workspaceTimezone, zonedParts, zonedTimeToUtc } from './utils/workspaceTime.js';
 import { downloadInboundMedia, metaInboundMedia, sendMediaFile, MEDIA_DIR as WHATSAPP_MEDIA_DIR } from './services/whatsappMedia.js';
 import { whatsappAddress } from './utils/whatsappAddress.js';
+import { metaInboundText } from './utils/metaWebhook.js';
 import { mapInboundLead, isSendableMobile } from './utils/inboundLead.js';
 import { secretsMatch } from './utils/secretsMatch.js';
 import sheetsSync from './services/sheetsSync.js';
@@ -5385,24 +5386,6 @@ function metaSignatureValid(req) {
   if (!secret || !req.rawBody) return false;
   const expected = `sha256=${crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex')}`;
   return secretsEqual(req.get('X-Hub-Signature-256'), expected);
-}
-
-/** Readable text for any inbound message type, so a media reply still counts. */
-function metaInboundText(msg) {
-  return msg?.text?.body
-    || msg?.button?.text
-    || msg?.interactive?.button_reply?.title
-    || msg?.interactive?.list_reply?.title
-    || msg?.image?.caption
-    || msg?.video?.caption
-    || msg?.document?.caption
-    || msg?.reaction?.emoji
-    || (msg?.type === 'image' ? '[Photo]'
-      : msg?.type === 'video' ? '[Video]'
-        : msg?.type === 'audio' ? (msg.audio?.voice ? '[Voice message]' : '[Audio]')
-          : msg?.type === 'document' ? `[Document] ${msg.document?.filename || ''}`.trim()
-            : msg?.type === 'sticker' ? '[Sticker]'
-              : msg?.type ? `[${msg.type}]` : '');
 }
 
 /**
