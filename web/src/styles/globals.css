@@ -159,6 +159,18 @@
   --color-chart-8: #4d7c0f;
   --color-chart-grid: #ededf1;
   --color-chart-axis: #85858f;
+  /* Channel order is green, violet, blue, cyan; Other is neutral. */
+  --color-chart-whatsapp: #047857;
+  --color-chart-email: #9575f7;
+  --color-chart-imessage: #2c3fe0;
+  --color-chart-telegram: #0891b2;
+  --color-chart-other: #6b7280;
+  /* Five ordered indigo steps for the pipeline. These pass the ordinal checks. */
+  --color-chart-stage-1: #a0a8f1;
+  --color-chart-stage-2: #7482ec;
+  --color-chart-stage-3: #4d60e5;
+  --color-chart-stage-4: #2c3fe0;
+  --color-chart-stage-5: #172aa8;
 
   /* ── Elevation. Level 1 is a border; these are deliberately restrained. ── */
   --shadow-sm: 0 1px 2px rgba(20, 20, 30, 0.06);
@@ -250,6 +262,16 @@
     --color-chart-8: #65a30d;
     --color-chart-grid: #24242c;
     --color-chart-axis: #6e6e7a;
+    --color-chart-whatsapp: #059669;
+    --color-chart-email: #9575f7;
+    --color-chart-imessage: #3b4fe5;
+    --color-chart-telegram: #0e9bb8;
+    --color-chart-other: #9ca3af;
+    --color-chart-stage-1: #414c84;
+    --color-chart-stage-2: #5264ae;
+    --color-chart-stage-3: #6577d8;
+    --color-chart-stage-4: #8092f5;
+    --color-chart-stage-5: #a7b4ff;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
     --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.55);
@@ -324,6 +346,16 @@
   --color-chart-8: #65a30d;
   --color-chart-grid: #24242c;
   --color-chart-axis: #6e6e7a;
+  --color-chart-whatsapp: #059669;
+  --color-chart-email: #9575f7;
+  --color-chart-imessage: #3b4fe5;
+  --color-chart-telegram: #0e9bb8;
+  --color-chart-other: #9ca3af;
+  --color-chart-stage-1: #414c84;
+  --color-chart-stage-2: #5264ae;
+  --color-chart-stage-3: #6577d8;
+  --color-chart-stage-4: #8092f5;
+  --color-chart-stage-5: #a7b4ff;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.55);

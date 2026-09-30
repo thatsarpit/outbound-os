@@ -264,6 +264,32 @@ describe('POST /api/leads', () => {
 });
 
 describe("Overview reporting provenance", () => {
+  test("reports equal-length periods and channel buckets from delivered messages", async () => {
+    const { default: prisma } = await import("../src/utils/prismaClient.js");
+    const url = "/api/stats/overview?days=7&tzOffset=-330";
+    const chartUrl = "/api/stats/charts?days=7&tzOffset=-330";
+    const before = await request("GET", url, { headers: authHeader() });
+    const chartBefore = await request("GET", chartUrl, { headers: authHeader() });
+    assert.equal(before.status, 200);
+    assert.equal(chartBefore.status, 200);
+    const lead = await prisma.lead.create({ data: { name: "Period sample", mobile: "919999991041", source: "manual" } });
+    await prisma.message.createMany({ data: [
+      { leadId: lead.id, direction: "outbound", channel: "email", content: "Current", status: "sent", sentAt: new Date() },
+      { leadId: lead.id, direction: "outbound", channel: "telegram", content: "Previous", status: "sent", sentAt: new Date(Date.now() - 8 * 86400000) },
+    ] });
+    const after = await request("GET", url, { headers: authHeader() });
+    const chartAfter = await request("GET", chartUrl, { headers: authHeader() });
+    assert.equal(after.body.period.days, 7);
+    assert.equal(after.body.period.current.newLeads, before.body.period.current.newLeads + 1);
+    assert.equal(after.body.period.current.messagesSent, before.body.period.current.messagesSent + 1);
+    assert.equal(after.body.period.previous.messagesSent, before.body.period.previous.messagesSent + 1);
+    assert.equal(chartAfter.body.msgsByDay.length, 7);
+    assert.equal(chartAfter.body.msgsByDay.reduce((sum, row) => sum + row.newLeads, 0), chartBefore.body.msgsByDay.reduce((sum, row) => sum + row.newLeads, 0) + 1);
+    assert.equal(chartAfter.body.msgsByDay.reduce((sum, row) => sum + row.contactedLeads, 0), chartBefore.body.msgsByDay.reduce((sum, row) => sum + row.contactedLeads, 0) + 1);
+    assert.equal(chartAfter.body.msgsByDay.reduce((sum, row) => sum + row.email, 0), chartBefore.body.msgsByDay.reduce((sum, row) => sum + row.email, 0) + 1);
+    assert.equal(chartAfter.body.msgsByDay.reduce((sum, row) => sum + row.previousTotal, 0), chartBefore.body.msgsByDay.reduce((sum, row) => sum + row.previousTotal, 0) + 1);
+    for (const row of chartAfter.body.msgsByDay) assert.equal(row.count, row.whatsapp + row.email + row.imessage + row.telegram + row.other);
+  });
   test("does not report a historical import as a new lead today", async () => {
     const { default: prisma } = await import("../src/utils/prismaClient.js");
     const before = await request("GET", "/api/stats/overview?tzOffset=-330", {

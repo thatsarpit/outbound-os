@@ -1117,8 +1117,12 @@ const DELIVERED_MESSAGE_STATUSES = ['sent', 'delivered', 'read'];
 app.get('/api/stats/overview', async (req, res) => {
   try {
     const tzOffset = parseTimezoneOffset(req.query.tzOffset);
+    const days = Math.min(30, Math.max(1, Number.parseInt(req.query.days, 10) || 14));
     const { start: startOfDayUTC, end: endOfDayUTC } =
       getLocalDayRangeUTC(tzOffset);
+    const periodEnd = endOfDayUTC;
+    const periodStart = new Date(periodEnd.getTime() - days * 86400000);
+    const previousStart = new Date(periodStart.getTime() - days * 86400000);
     // Pool scoping: respect explicit ?poolId, otherwise restrict to whatever
     // pools the user has membership for so a partner-only user can never
     // accidentally see team-pool numbers in their dashboard overview.
@@ -1170,6 +1174,24 @@ app.get('/api/stats/overview', async (req, res) => {
         .filter((leadId) => contactedLeadIds.has(leadId)),
     );
 
+    const periodMetrics = async (start, end) => {
+      const [newLeads, outbound, inbound] = await Promise.all([
+        prisma.lead.count({ where: { ...poolFilter, ...buildNewLeadDateWhere(start, end) } }),
+        prisma.message.findMany({ where: { direction: 'outbound', status: { in: DELIVERED_MESSAGE_STATUSES }, sentAt: { gte: start, lt: end }, lead: poolFilter }, select: { leadId: true } }),
+        prisma.message.findMany({ where: { direction: 'inbound', createdAt: { gte: start, lt: end }, lead: poolFilter }, select: { leadId: true } }),
+      ]);
+      return {
+        newLeads,
+        messagesSent: outbound.length,
+        contactedLeads: new Set(outbound.map((row) => row.leadId)).size,
+        repliedLeads: new Set(inbound.filter((row) => contactedLeadIds.has(row.leadId)).map((row) => row.leadId)).size,
+      };
+    };
+    const [currentPeriod, previousPeriod] = await Promise.all([
+      periodMetrics(periodStart, periodEnd),
+      periodMetrics(previousStart, periodStart),
+    ]);
+
     res.json({
       totalLeads,
       newToday: todayLeads,
@@ -1180,6 +1202,7 @@ app.get('/api/stats/overview', async (req, res) => {
       pending: pendingMessages,
       sentToday,
       waUnavailable,
+      period: { days, current: currentPeriod, previous: previousPeriod },
       scoreDistribution: {
         hot: scoreMap.high || 0,
         warm: scoreMap.medium || 0,
@@ -1240,6 +1263,7 @@ app.get('/api/stats/charts', async (req, res) => {
     const sinceUTC = new Date(
       todayStartUTC.getTime() - (days - 1) * 24 * 60 * 60_000,
     );
+    const previousSinceUTC = new Date(sinceUTC.getTime() - days * 86400000);
     const accessiblePools = await getAccessiblePoolIds(req);
     const poolFilter = req.query.poolId
       ? { poolId: Number.parseInt(req.query.poolId, 10) }
@@ -1248,34 +1272,66 @@ app.get('/api/stats/charts', async (req, res) => {
         : { poolId: { in: accessiblePools } };
 
     // ── Messages per day: fetch raw rows and bucket in JS (DB-agnostic) ──
-    const rawMessages = await prisma.message.findMany({
+    const [rawMessages, inboundMessages, newLeads, everContacted] = await Promise.all([prisma.message.findMany({
       where: {
         direction: 'outbound',
         status: { in: DELIVERED_MESSAGE_STATUSES },
-        sentAt: { gte: sinceUTC, lt: tomorrowStartUTC },
+        sentAt: { gte: previousSinceUTC, lt: tomorrowStartUTC },
         lead: poolFilter,
       },
-      select: { sentAt: true },
-    });
+      select: { sentAt: true, channel: true, leadId: true },
+    }), prisma.message.findMany({
+      where: { direction: 'inbound', createdAt: { gte: sinceUTC, lt: tomorrowStartUTC }, lead: poolFilter },
+      select: { leadId: true, createdAt: true },
+    }), prisma.lead.findMany({
+      where: { ...poolFilter, ...buildNewLeadDateWhere(sinceUTC, tomorrowStartUTC) },
+      select: { consumedAt: true, createdAt: true },
+    }), prisma.message.findMany({
+      where: { direction: 'outbound', status: { in: DELIVERED_MESSAGE_STATUSES }, lead: poolFilter },
+      select: { leadId: true }, distinct: ['leadId'],
+    })]);
+    const contactedIds = new Set(everContacted.map((message) => message.leadId));
 
     const dayBuckets = {};
+    const previousBuckets = {};
     for (let i = 0; i < days; i++) {
       const bucketDate = new Date(sinceUTC.getTime() + i * 24 * 60 * 60_000);
       const key = localDateKey(bucketDate, tzOffsetMin);
-      dayBuckets[key] = 0;
+      dayBuckets[key] = { count: 0, whatsapp: 0, email: 0, imessage: 0, telegram: 0, other: 0,
+        newLeads: 0, contactedLeads: new Set(), repliedLeads: new Set() };
+      previousBuckets[localDateKey(new Date(previousSinceUTC.getTime() + i * 86400000), tzOffsetMin)] = 0;
     }
 
     for (const msg of rawMessages) {
       if (!msg.sentAt) continue;
       // Shift by tzOffset so the date boundary matches local time
       const key = localDateKey(msg.sentAt, tzOffsetMin);
+      if (key in previousBuckets) {
+        previousBuckets[key] += 1;
+        continue;
+      }
       if (!(key in dayBuckets)) continue;
-      dayBuckets[key] = (dayBuckets[key] || 0) + 1;
+      const channel = ['whatsapp', 'email', 'imessage', 'telegram'].includes(msg.channel) ? msg.channel : 'other';
+      dayBuckets[key].count += 1;
+      dayBuckets[key][channel] += 1;
+      dayBuckets[key].contactedLeads.add(msg.leadId);
+    }
+    for (const message of inboundMessages) {
+      const key = localDateKey(message.createdAt, tzOffsetMin);
+      if (key in dayBuckets && contactedIds.has(message.leadId)) dayBuckets[key].repliedLeads.add(message.leadId);
+    }
+    for (const lead of newLeads) {
+      const key = localDateKey(lead.consumedAt || lead.createdAt, tzOffsetMin);
+      if (key in dayBuckets) dayBuckets[key].newLeads += 1;
     }
 
     const msgsByDay = Object.entries(dayBuckets)
       .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([day, count]) => ({ day, count }));
+      .map(([day, bucket], index) => ({ day, ...bucket,
+        contactedLeads: bucket.contactedLeads.size,
+        repliedLeads: bucket.repliedLeads.size,
+        previousTotal: previousBuckets[localDateKey(new Date(previousSinceUTC.getTime() + index * 86400000), tzOffsetMin)],
+      }));
 
     // ── Prisma-native aggregations ──
     const [statusDist, countryDist, tierDist] = await Promise.all([
@@ -4303,8 +4359,9 @@ app.get('/api/analytics/campaign-roi', async (req, res) => {
 app.get('/api/analytics/email-performance', async (req, res) => {
   try {
     const { range = '30d' } = req.query;
-    const days = range === '7d' ? 7 : range === '90d' ? 90 : range === 'all' ? null : 30;
-    const since = days ? new Date(Date.now() - days * 86400000) : null;
+    const days = range === '7d' ? 7 : range === '14d' ? 14 : range === '90d' ? 90 : range === 'all' ? null : 30;
+    const { start: todayStartUTC } = getLocalDayRangeUTC(parseTimezoneOffset(req.query.tzOffset));
+    const since = days ? new Date(todayStartUTC.getTime() - (days - 1) * 86400000) : null;
 
     // Keep non-variant sends in the timeline: a later manual email must not
     // cause a reply to be credited to an earlier template variant.

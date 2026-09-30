@@ -77,7 +77,9 @@ export const analyticsApi = {
     api.get<CampaignRoiResponse>(`/analytics/campaign-roi?range=${range}`),
 
   emailPerformance: (range: AnalyticsRange = '30d') =>
-    api.get<EmailPerformanceResponse>(`/analytics/email-performance?range=${range}`),
+    api.get<EmailPerformanceResponse>(
+      `/analytics/email-performance?range=${range}&tzOffset=${getClientTimezoneOffset()}`,
+    ),
 
   recomputeWeights: () =>
     api.post<{ success: boolean; updated: number }>('/analytics/recompute-weights'),

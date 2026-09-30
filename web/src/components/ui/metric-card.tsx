@@ -1,6 +1,7 @@
 import type React from 'react'
 import { ArrowDownRight, ArrowUpRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import NumberFlow from '@number-flow/react'
 
 /**
  * The single metric component. There were three implementations of this idea —
@@ -120,8 +121,14 @@ export function MetricCard({
         <p className="truncate text-xs font-medium text-text-secondary">{label}</p>
       </div>
 
-      <div className="mt-2 flex items-end justify-between gap-3">
-        <p className="truncate text-2xl font-semibold tabular-nums tracking-tight">{value}</p>
+      <div className="mt-2 flex flex-col items-start gap-1 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
+        <p className="truncate text-2xl font-semibold tracking-tight">
+          {typeof value === 'number' ? (
+            <NumberFlow value={value} format={{ notation: 'compact', maximumFractionDigits: 1 }} />
+          ) : (
+            value
+          )}
+        </p>
         {trend && trend.length > 1 && (
           <Sparkline points={trend} tone={delta ? (improving ? 'success' : 'danger') : 'accent'} />
         )}
@@ -150,6 +157,7 @@ export function MetricCard({
               )}
             >
               <DeltaIcon aria-hidden="true" className="h-3 w-3" />
+              {delta.value > 0 ? '+' : delta.value < 0 ? '−' : ''}
               {Math.abs(delta.value).toFixed(1)}%
             </span>
           )}

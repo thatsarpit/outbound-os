@@ -29,8 +29,8 @@ export function SectionCard({
         className,
       )}
     >
-      <div className="flex flex-col gap-3 border-b border-border px-5 py-4 sm:px-6 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0">
+      <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4 sm:px-6">
+        <div className="min-w-0 flex-1">
           {eyebrow && (
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted">
               {eyebrow}

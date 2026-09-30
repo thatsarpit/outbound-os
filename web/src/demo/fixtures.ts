@@ -34,6 +34,31 @@ function daySeries(days: number, base: number, spread: number) {
   }
   return out
 }
+function overviewDays(url: string) {
+  const days = Number(new URL(url, location.origin).searchParams.get('days'))
+  return [7, 14, 30].includes(days) ? days : 14
+}
+
+function overviewMessageSeries(days: number) {
+  return daySeries(days, 96, 34).map((row, index) => {
+    const whatsapp = Math.round(row.count * 0.48)
+    const email = Math.round(row.count * 0.31)
+    const imessage = Math.round(row.count * 0.13)
+    const telegram = row.count - whatsapp - email - imessage
+    return {
+      ...row,
+      whatsapp,
+      email,
+      imessage,
+      telegram,
+      other: 0,
+      previousTotal: Math.max(0, row.count - 8 + (index % 5) * 3),
+      newLeads: Math.round(row.count * 0.08),
+      contactedLeads: Math.round(row.count * 0.06),
+      repliedLeads: Math.round(row.count * 0.023),
+    }
+  })
+}
 
 /* ── Inbox fixtures ──
  * A deliberately mixed-channel set: the point of the inbox design is that a
@@ -1437,24 +1462,45 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
   [/\/notifications/, FIXTURE_NOTIFICATIONS],
   [
     /\/stats\/overview/,
-    {
-      totalLeads: 1392,
-      newToday: 34,
-      contacted: 1105,
-      replied: 252,
-      engaged: 88,
-      closed: 41,
-      pending: 17,
-      sentToday: 126,
-      waUnavailable: 23,
-      scoreDistribution: { hot: 46, warm: 318, cold: 907, new: 121 },
-      polling: {},
+    (url: string) => {
+      const days = overviewDays(url)
+      return {
+        totalLeads: 1392,
+        newToday: 34,
+        contacted: 1105,
+        replied: 252,
+        engaged: 88,
+        closed: 41,
+        pending: 17,
+        sentToday: 126,
+        waUnavailable: 23,
+        scoreDistribution: { hot: 46, warm: 318, cold: 907, new: 121 },
+        period: {
+          days,
+          current: {
+            newLeads: Math.round(days * 8.4),
+            messagesSent: overviewMessageSeries(days).reduce((sum, row) => sum + row.count, 0),
+            contactedLeads: Math.round(days * 6.1),
+            repliedLeads: Math.round(days * 2.3),
+          },
+          previous: {
+            newLeads: Math.round(days * 7.8),
+            messagesSent: overviewMessageSeries(days).reduce(
+              (sum, row) => sum + row.previousTotal,
+              0,
+            ),
+            contactedLeads: Math.round(days * 5.7),
+            repliedLeads: Math.round(days * 2.0),
+          },
+        },
+        polling: {},
+      }
     },
   ],
   [
     /\/stats\/charts/,
-    {
-      msgsByDay: daySeries(14, 96, 34),
+    (url: string) => ({
+      msgsByDay: overviewMessageSeries(overviewDays(url)),
       statusDist: [
         { status: 'new', _count: { id: 287 } },
         { status: 'contacted', _count: { id: 613 } },
@@ -1478,20 +1524,36 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
         { leadTier: 'WARM', _count: { id: 566 } },
         { leadTier: 'COLD', _count: { id: 612 } },
       ],
-    },
+    }),
   ],
   [
     /\/analytics\/email-performance/,
-    {
-      range: '30d',
-      totals: { sent: 842, replied: 173, replyRate: 20.5 },
-      variants: [
+    (url: string) => {
+      const range = new URL(url, location.origin).searchParams.get('range') ?? '30d'
+      const factor = range === '7d' ? 0.25 : range === '14d' ? 0.48 : 1
+      const variants = [
         { variant: 'intro-value-led', sent: 246, replied: 63, replyRate: 25.6 },
         { variant: 'intro-price-led', sent: 219, replied: 47, replyRate: 21.5 },
         { variant: 'followup-short', sent: 188, replied: 34, replyRate: 18.1 },
         { variant: 'followup-case-study', sent: 121, replied: 19, replyRate: 15.7 },
         { variant: 'reactivation', sent: 68, replied: 10, replyRate: 14.7 },
-      ],
+      ].map((row) => {
+        const sent = Math.round(row.sent * factor)
+        const replied = Math.round(row.replied * factor)
+        return {
+          ...row,
+          sent,
+          replied,
+          replyRate: sent ? Math.round((replied / sent) * 1000) / 10 : 0,
+        }
+      })
+      const sent = variants.reduce((sum, row) => sum + row.sent, 0)
+      const replied = variants.reduce((sum, row) => sum + row.replied, 0)
+      return {
+        range,
+        totals: { sent, replied, replyRate: sent ? Math.round((replied / sent) * 1000) / 10 : 0 },
+        variants,
+      }
     },
   ],
   [
