@@ -45,8 +45,10 @@ export function StoryScroller({ steps }: { steps: Story[] }) {
             className="story__step"
             data-active={index === active ? 'true' : undefined}
           >
-            <span className="story__num tabular">{String(index + 1).padStart(2, '0')}</span>
-            <p className="story__eyebrow">{step.eyebrow}</p>
+            <p>
+              <span className="story__num tabular">{String(index + 1).padStart(2, '0')}</span>
+              <span className="story__eyebrow">{step.eyebrow}</span>
+            </p>
             <h3>{step.title}</h3>
             <div className="story__body">{step.body}</div>
             <div className="story__inline" aria-hidden="true">

@@ -12,133 +12,106 @@
   max-width: 1440px;
   margin: 0 auto;
   border-radius: 28px;
-  background: #05070a;
   color: var(--night-text);
 }
 @media (max-width: 720px) { .stage-wrap { padding: 6px 6px 0; } .stage { border-radius: 20px; } }
 
-/* Light: three soft fields that drift, a spotlight, and a fading grid. */
-.stage__aurora { position: absolute; inset: 0; z-index: -2; pointer-events: none; }
-.stage__aurora i {
-  position: absolute;
-  width: 60%;
-  aspect-ratio: 1;
-  border-radius: 50%;
-  opacity: 0.55;
-}
-.stage__aurora i:nth-child(1) { left: 45%; top: -25%; background: radial-gradient(closest-side, rgb(34 197 94 / 0.55), transparent); }
-.stage__aurora i:nth-child(2) { left: 70%; top: 25%; width: 45%; background: radial-gradient(closest-side, rgb(20 184 166 / 0.4), transparent); }
-.stage__aurora i:nth-child(3) { left: -15%; top: 30%; background: radial-gradient(closest-side, rgb(59 130 246 / 0.28), transparent); }
-@media (prefers-reduced-motion: no-preference) {
-  .stage__aurora i:nth-child(1) { animation: aurora-a 18s ease-in-out infinite alternate; }
-  .stage__aurora i:nth-child(2) { animation: aurora-b 22s ease-in-out infinite alternate; }
-  .stage__aurora i:nth-child(3) { animation: aurora-c 26s ease-in-out infinite alternate; }
-}
-@keyframes aurora-a { to { transform: translate(-12%, 10%) scale(1.15); } }
-@keyframes aurora-b { to { transform: translate(-18%, -12%) scale(0.9); } }
-@keyframes aurora-c { to { transform: translate(14%, -8%) scale(1.2); } }
-
-.stage__grid {
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background-image:
-    linear-gradient(rgb(255 255 255 / 0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(255 255 255 / 0.05) 1px, transparent 1px);
-  background-size: 56px 56px;
-  mask-image: radial-gradient(75% 65% at 50% 0%, #000 30%, transparent 80%);
-  -webkit-mask-image: radial-gradient(75% 65% at 50% 0%, #000 30%, transparent 80%);
-  pointer-events: none;
+/* One light source, above and to the right, where the phone is. It does not
+   move: the conversation in the phone is the only thing on the stage that
+   does, so the eye goes there. */
+.stage {
+  background:
+    radial-gradient(70% 60% at 78% 8%, rgb(34 197 94 / 0.13), transparent 70%),
+    radial-gradient(50% 40% at 10% 100%, rgb(255 255 255 / 0.03), transparent 70%),
+    #05070a;
 }
 
 .stage__inner {
   display: grid;
   gap: 40px;
   align-items: center;
-  padding-block: 72px 56px;
+  padding-block: 64px 48px;
 }
 @media (min-width: 1000px) {
-  .stage__inner { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 32px; padding-block: 88px 64px; }
+  .stage__inner { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 32px; padding-block: 72px 48px; }
 }
 
 /* ── Copy ── */
 .stage__badge {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 12px 5px 5px;
+  gap: 10px;
+  padding: 4px 12px 4px 4px;
   border-radius: 999px;
-  border: 1px solid rgb(255 255 255 / 0.12);
-  background: rgb(255 255 255 / 0.06);
-  backdrop-filter: blur(8px);
+  border: 1px solid rgb(255 255 255 / 0.1);
   font-size: 13px;
-  font-weight: 500;
-  color: rgb(255 255 255 / 0.85);
-  transition: border-color 0.2s ease, background 0.2s ease;
+  color: rgb(255 255 255 / 0.72);
+  transition: border-color 0.2s ease, color 0.2s ease;
 }
-.stage__badge:hover { border-color: rgb(255 255 255 / 0.25); background: rgb(255 255 255 / 0.1); }
+.stage__badge:hover { border-color: rgb(255 255 255 / 0.22); color: #fff; }
 .stage__badge b {
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgb(34 197 94 / 0.18);
-  color: #86efac;
-  font-size: 11px;
-  font-weight: 600;
-}
-.stage h1 {
-  margin-top: 24px;
+  background: rgb(255 255 255 / 0.08);
   color: #fff;
-  font-size: clamp(2.4rem, 1.5rem + 2.9vw, 3.9rem);
-  line-height: 1.03;
-  letter-spacing: -0.045em;
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+/* Two sentences, two weights of the same white: the promise, then the
+   mechanism. No gradient, no glow — the contrast does the work. */
+.stage h1 {
+  margin-top: 28px;
+  color: #fff;
+  font-size: clamp(2.35rem, 1.4rem + 2.7vw, 3.6rem);
+  line-height: 1.04;
+  letter-spacing: -0.04em;
   font-weight: 600;
-  max-width: 15ch;
+  max-width: 14ch;
+  text-wrap: balance;
 }
-.stage h1 .glow {
-  background: linear-gradient(95deg, #4ade80 0%, #2dd4bf 50%, #67e8f9 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
+.stage h1 span { color: rgb(255 255 255 / 0.5); }
+.stage h1.stage__h1--wide { max-width: 18ch; }
 .stage__lede {
   margin-top: 22px;
-  max-width: 46ch;
-  font-size: 1.125rem;
+  max-width: 44ch;
+  font-size: 1.0625rem;
   line-height: 1.6;
-  color: rgb(229 231 235 / 0.78);
+  color: rgb(229 231 235 / 0.72);
 }
 .stage__actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
 
 .btn--brand {
-  background: linear-gradient(180deg, #4ade80, #22c55e);
-  color: #052e16;
+  background: #22c55e;
+  color: #04210f;
   font-weight: 600;
-  box-shadow: 0 0 0 1px rgb(74 222 128 / 0.6), 0 8px 24px -8px rgb(34 197 94 / 0.8);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.15s ease;
 }
-.btn--brand:hover { transform: translateY(-1px); box-shadow: 0 0 0 1px rgb(134 239 172), 0 12px 30px -8px rgb(34 197 94 / 0.9); }
+.btn--brand:hover { background: #4ade80; }
 .btn--glass {
-  background: rgb(255 255 255 / 0.06);
+  background: transparent;
   color: #fff;
-  border: 1px solid rgb(255 255 255 / 0.16);
-  backdrop-filter: blur(8px);
+  border: 1px solid rgb(255 255 255 / 0.18);
   transition: background 0.15s ease, border-color 0.15s ease;
 }
-.btn--glass:hover { background: rgb(255 255 255 / 0.12); border-color: rgb(255 255 255 / 0.3); }
+.btn--glass:hover { background: rgb(255 255 255 / 0.06); border-color: rgb(255 255 255 / 0.32); }
 
-.stage__works {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px 14px;
-  margin-top: 40px;
-  padding-top: 22px;
-  border-top: 1px solid rgb(255 255 255 / 0.08);
-  font-size: 12.5px;
+.stage__meta {
+  margin-top: 20px;
+  font-size: 13.5px;
   color: rgb(229 231 235 / 0.55);
 }
-.stage__works ul { display: flex; gap: 8px; list-style: none; margin: 0; padding: 0; }
-
+.stage__meta a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  color: rgb(255 255 255 / 0.85);
+  text-decoration: underline;
+  text-decoration-color: rgb(255 255 255 / 0.25);
+  text-underline-offset: 3px;
+}
+.stage__meta a:hover { color: #fff; text-decoration-color: rgb(255 255 255 / 0.6); }
 /* ── Scene ── */
 .scene {
   position: relative;

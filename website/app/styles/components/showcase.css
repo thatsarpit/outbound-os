@@ -5,34 +5,37 @@
 ════════════════════════════════════════════════════════════════════════════ */
 
 /* ── Scroll reveal ── */
+/* Short and small: a section should be readable a moment after it scrolls
+   in, even when someone flicks straight past it. */
 [data-reveal] {
   transition:
-    opacity 0.7s ease,
-    transform 0.8s cubic-bezier(0.2, 0.7, 0.2, 1);
-  transition-delay: calc(var(--rd, 0) * 90ms);
+    opacity 0.4s ease,
+    transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1);
+  transition-delay: calc(var(--rd, 0) * 60ms);
 }
-.reveal-ready [data-reveal]:not(.is-in) { opacity: 0; transform: translateY(28px); }
+.reveal-ready [data-reveal]:not(.is-in) { opacity: 0; transform: translateY(12px); }
 
 /* ── Story (how it works) ── */
 .story { display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; margin-top: 48px; }
 .story__step, .story__inline, .sv, .sv > * { min-width: 0; }
 .story__steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 36px; }
 .story__step { position: relative; }
+/* "01  Capture": the step's number and name on one quiet line. The heading
+   under it carries the weight. */
 .story__num {
-  display: inline-grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: var(--surface-raised);
-  border: var(--rule);
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-muted);
-  transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+  transition: color 0.3s ease;
 }
-.story__eyebrow { margin-top: 14px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--brand); }
-.story__step h3 { margin-top: 6px; font-size: clamp(1.35rem, 1.1rem + 0.8vw, 1.75rem); letter-spacing: -0.025em; }
+.story__eyebrow {
+  display: inline;
+  margin-left: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.story__step h3 { margin-top: 10px; font-size: clamp(1.35rem, 1.1rem + 0.8vw, 1.75rem); letter-spacing: -0.025em; }
 .story__body { margin-top: 10px; }
 .story__body p { font-size: 1.0625rem; }
 .story__inline { margin-top: 20px; }
@@ -42,7 +45,7 @@
   .story { grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: 72px; }
   .story__steps { gap: 0; }
   .story__step {
-    min-height: 62vh;
+    min-height: 40vh;
     display: flex;
     flex-direction: column;
     justify-content: center;
@@ -51,20 +54,16 @@
     transition: opacity 0.4s ease;
   }
   .story__step[data-active] { opacity: 1; }
-  .story__step[data-active] .story__num { background: var(--brand-soft); color: var(--brand); border-color: rgb(4 120 87 / 0.25); }
+  .story__step[data-active] .story__num { color: var(--brand); }
   .story__inline { display: none; }
   .story__stage { display: block; position: relative; }
   .story__frame {
     position: sticky;
     top: calc(50vh - 240px);
     height: 480px;
-    border-radius: 22px;
-    background:
-      radial-gradient(60% 50% at 80% 0%, rgb(34 197 94 / 0.14), transparent 70%),
-      radial-gradient(50% 50% at 0% 100%, rgb(44 63 224 / 0.08), transparent 70%),
-      var(--surface);
+    border-radius: 16px;
+    background: var(--surface-raised);
     border: var(--rule);
-    box-shadow: var(--shadow-lg);
     overflow: hidden;
   }
   .story__visual {
@@ -218,12 +217,16 @@
   place-items: center;
   min-height: 210px;
   padding: 24px;
-  background:
-    radial-gradient(70% 60% at 50% 0%, rgb(34 197 94 / 0.08), transparent 70%),
-    linear-gradient(180deg, var(--surface-raised), var(--surface));
+  background: var(--surface-raised);
   border-bottom: var(--rule-subtle);
 }
 .bento__copy { padding: 20px 22px 22px; }
+/* On a phone nine tiles stack; shorter pictures keep the section a scan,
+   not a scroll marathon. */
+@media (max-width: 759px) {
+  .bento__art { min-height: 150px; padding: 18px; }
+  .bento__copy { padding: 16px 18px 18px; }
+}
 .bento__copy h3 { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 1.0625rem; }
 .bento__copy h3 svg { color: var(--text-muted); transition: transform 0.2s ease, color 0.2s ease; }
 .bento__tile:hover .bento__copy h3 svg { transform: translate(2px, -2px); color: var(--brand); }
@@ -256,7 +259,18 @@
 .b-kanban { position: relative; width: 100%; max-width: 330px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .b-kanban__col { display: grid; gap: 6px; padding: 8px; border-radius: 10px; background: var(--surface); border: var(--rule); align-content: start; min-height: 130px; }
 .b-kanban__col span { font-size: 10.5px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
-.b-kanban__col i { display: block; height: 20px; border-radius: 6px; background: var(--surface-raised); }
+.b-kanban__col i {
+  display: block;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--surface-raised);
+  font-style: normal;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .b-kanban__card {
   position: absolute; top: 88px; left: calc(66.66% + 5px); width: calc(33.33% - 10px);
   display: flex; align-items: center; gap: 5px; padding: 5px 7px; border-radius: 7px;

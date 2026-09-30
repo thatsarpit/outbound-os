@@ -84,58 +84,31 @@
 }
 
 /* ── Stats strip ── */
-.stats {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  border-top: var(--rule);
-  border-bottom: var(--rule);
+/* ── Logo row ── */
+.logo-row { display: grid; justify-items: center; gap: 18px; text-align: center; }
+.logo-row__caption { font-size: 13.5px; color: var(--text-muted); }
+.logo-row__list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 14px 30px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
-@media (min-width: 760px) { .stats { grid-template-columns: repeat(5, 1fr); } }
-.stats > div { padding: 22px 18px; border-right: var(--rule-subtle); }
-.stats > div:last-child { border-right: 0; }
-.stats__value {
-  display: block;
-  font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2.2rem);
-  font-weight: 650;
-  letter-spacing: -0.035em;
-  line-height: 1.1;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-.stats__value--brand { color: var(--brand); }
-.stats__label { display: block; margin-top: 4px; font-size: 13px; color: var(--text-muted); }
-
-/* ── Logo marquee ── */
-.marquee {
-  overflow: hidden;
-  mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
-}
-.marquee__track { display: flex; width: max-content; }
-.marquee__list { display: flex; gap: 12px; margin: 0; padding: 0 12px 0 0; list-style: none; }
-.marquee__item {
+.logo-row__list li {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  padding: 7px 14px 7px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
+  gap: 8px;
   font-size: 14px;
   font-weight: 500;
-  color: var(--text);
-  white-space: nowrap;
+  color: var(--text-secondary);
 }
-@media (prefers-reduced-motion: no-preference) {
-  .marquee__track { animation: marquee 48s linear infinite; }
-  .marquee:hover .marquee__track { animation-play-state: paused; }
+.logo-row__list img, .logo-row__list svg { flex: none; }
+@media (max-width: 720px) {
+  .logo-row__list { gap: 12px 20px; }
+  .logo-row__list li { font-size: 13px; }
 }
-@media (prefers-reduced-motion: reduce) {
-  .marquee { mask-image: none; -webkit-mask-image: none; }
-  .marquee__list { flex-wrap: wrap; }
-  .marquee__list + .marquee__list { display: none; }
-}
-@keyframes marquee { to { transform: translateX(-50%); } }
 
 /* ── Integration hub ── */
 .hub {

@@ -1,13 +1,12 @@
 import Link from 'next/link'
-import { ArrowRight, Database, GitFork, Wallet } from 'lucide-react'
+import { ArrowRight } from 'lucide-react'
 import { HeroScene } from '@/components/visuals/hero-scene'
 import { Logo, LogoTile } from '@/components/brand-logo'
 import { IntegrationHub } from '@/components/visuals/integration-hub'
-import { LogoMarquee } from '@/components/visuals/logo-marquee'
+import { LogoRow } from '@/components/visuals/logo-row'
 import { Bento } from '@/components/visuals/bento'
 import { CaptureVisual, CloseVisual, ContactVisual, FollowVisual, ReplyVisual } from '@/components/visuals/story-visuals'
 import { StoryScroller } from '@/components/story-scroller'
-import { CountUp } from '@/components/count-up'
 import { Faq, InstallBand } from '@/components/content'
 import { ProductTour } from '@/components/product-tour'
 import { integrations } from '@/lib/integrations'
@@ -57,28 +56,22 @@ export default function HomePage() {
     <>
       <section className="stage-wrap">
         <div className="stage">
-          <div className="stage__aurora" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </div>
-          <div className="stage__grid" aria-hidden="true" />
-
           <div className="page stage__inner">
             <div className="stage__copy">
-              <a href={site.releasesUrl} className="stage__badge">
-                <b>v{site.version}</b>
-                Free and open source · {site.license}
+              {/* On main, not yet in a numbered release: say "New", link the
+                  changelog, and don't pin it to a version it isn't in. */}
+              <a href={`${site.githubUrl}/blob/main/CHANGELOG.md`} className="stage__badge">
+                <b>New</b>
+                Photos and files on WhatsApp
                 <ArrowRight size={13} aria-hidden="true" />
               </a>
               <h1>
-                Answer every lead <span className="glow">in seconds.</span> Follow up until they reply.
+                Answer every lead in seconds. <span>Follow up until they reply.</span>
               </h1>
               <p className="stage__lede">
-                Outbound OS is the open-source WhatsApp CRM. Leads from your
-                website, ads and marketplaces get a WhatsApp message and an
-                email the moment they arrive — and a follow-up every morning
-                until they answer. On your own server.
+                The open-source WhatsApp CRM. Leads from your website, ads and
+                marketplaces get a WhatsApp message and an email the moment they
+                arrive, and a follow-up every morning until they answer.
               </p>
               <div className="stage__actions">
                 <Link href="/docs/install" className="btn btn--brand btn--lg">
@@ -88,21 +81,14 @@ export default function HomePage() {
                   Try the live demo
                   <ArrowRight size={16} aria-hidden="true" />
                 </a>
-                <a href={site.githubUrl} className="btn btn--glass btn--lg">
-                  <Logo brand="github" size={17} className="stage__gh" />
+              </div>
+              <p className="stage__meta">
+                Free under {site.license}. Runs on your own server.{' '}
+                <a href={site.githubUrl}>
+                  <Logo brand="github" size={14} className="stage__gh" />
                   Star on GitHub
                 </a>
-              </div>
-              <div className="stage__works">
-                <span>Works with</span>
-                <ul>
-                  {(['whatsapp', 'gmail', 'telegram', 'imessage', 'indiamart', 'zapier', 'claude'] as const).map((brand) => (
-                    <li key={brand}>
-                      <LogoTile brand={brand} size={30} label />
-                    </li>
-                  ))}
-                </ul>
-              </div>
+              </p>
             </div>
 
             <HeroScene />
@@ -110,48 +96,15 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="section section--tight home-glance" aria-label="At a glance">
+      <section className="home-glance" aria-label="Works with">
         <div className="page">
-          <div className="stats" data-reveal>
-            <div>
-              <span className="stats__value stats__value--brand">Seconds</span>
-              <span className="stats__label">from new lead to first WhatsApp</span>
-            </div>
-            <div>
-              <span className="stats__value">
-                <CountUp value={4} />
-              </span>
-              <span className="stats__label">channels on one lead</span>
-            </div>
-            <div>
-              <span className="stats__value">
-                <CountUp value={INTEGRATION_COUNT} />
-              </span>
-              <span className="stats__label">integrations built in</span>
-            </div>
-            <div>
-              <span className="stats__value">
-                <CountUp value={mcpToolCount} />
-              </span>
-              <span className="stats__label">tools for AI agents</span>
-            </div>
-            <div>
-              <span className="stats__value">
-                <CountUp value={0} prefix="$" />
-              </span>
-              <span className="stats__label">license, seats or per-contact fees</span>
-            </div>
-          </div>
-          <div className="home-marquee">
-            <LogoMarquee />
-          </div>
+          <LogoRow caption="Leads come in and messages go out through the tools you already use" />
         </div>
       </section>
 
       <section className="section section--ruled home-story" aria-labelledby="story-heading">
         <div className="page">
           <div className="section-head" data-reveal>
-            <p className="eyebrow">How it works</p>
             <h2 id="story-heading">From enquiry to order, without anyone watching the queue.</h2>
             <p>
               The slow part of selling is rarely the first message. It is the
@@ -229,7 +182,6 @@ export default function HomePage() {
       <section className="section section--ruled section--raised" aria-labelledby="bento-heading">
         <div className="page">
           <div className="section-head" data-reveal>
-            <p className="eyebrow">What&rsquo;s in the box</p>
             <h2 id="bento-heading">Everything a sales desk needs. Nothing to pay for.</h2>
             <p>All of it ships in the open-source release — no paid tier, no add-ons.</p>
           </div>
@@ -242,7 +194,6 @@ export default function HomePage() {
       <section className="section section--ruled" aria-labelledby="shot-heading">
         <div className="page">
           <div className="section-head" data-reveal>
-            <p className="eyebrow">The product</p>
             <h2 id="shot-heading">See the real thing.</h2>
             <p>Screens from the open-source release. It plays through on its own — or click any tab.</p>
           </div>
@@ -253,7 +204,6 @@ export default function HomePage() {
       <section className="section section--ruled" aria-labelledby="connects-heading">
         <div className="page">
           <div className="section-head" data-reveal>
-            <p className="eyebrow">Integrations</p>
             <h2 id="connects-heading">Connects to where your leads already are.</h2>
             <p>Every integration below ships in the open-source release.</p>
           </div>
@@ -272,26 +222,31 @@ export default function HomePage() {
       <section className="section section--ruled section--raised">
         <div className="page">
           <div className="section-head" data-reveal>
-            <p className="eyebrow">Why self-hosted</p>
             <h2>Your leads, your server, your WhatsApp account.</h2>
           </div>
-          <div className="grid grid--3 home-why" data-reveal>
-            <article>
-              <span className="icon-chip" aria-hidden="true"><Database size={18} /></span>
-              <h3>Your data stays in your database</h3>
-              <p>Contacts, conversations and credentials live on a server you control. Export everything to CSV whenever you like.</p>
-            </article>
-            <article>
-              <span className="icon-chip" aria-hidden="true"><Wallet size={18} /></span>
-              <h3>No per-seat or per-contact fees</h3>
-              <p>Add your whole team and every lead you have. The software costs nothing; Meta bills WhatsApp messages to your own account.</p>
-            </article>
-            <article>
-              <span className="icon-chip" aria-hidden="true"><GitFork size={18} /></span>
-              <h3>Change anything</h3>
-              <p>The code is on GitHub under {site.license}. Add a lead source, a channel or a report, and send it upstream if others need it.</p>
-            </article>
-          </div>
+          <dl className="facts" data-reveal>
+            <div>
+              <dt>$0</dt>
+              <dd>
+                <strong>per seat, per contact, per month.</strong> Add the whole team and every lead.
+                Meta bills WhatsApp messages to your own account, with no markup.
+              </dd>
+            </div>
+            <div>
+              <dt>1 server</dt>
+              <dd>
+                <strong>Docker Compose and SQLite.</strong> A small 1–2 GB cloud server runs a team.
+                Contacts, conversations and credentials stay in your database.
+              </dd>
+            </div>
+            <div>
+              <dt>{site.license}</dt>
+              <dd>
+                <strong>Read it, change it, keep it.</strong> Add a lead source, a channel or a
+                report, and send it upstream if others need it too.
+              </dd>
+            </div>
+          </dl>
           <p className="home-why__more">
             <Link href="/self-hosted-crm" className="cta-link">
               Why teams self-host their CRM
@@ -302,7 +257,11 @@ export default function HomePage() {
       </section>
 
       <section className="section section--ruled">
-        <div className="page split split--reverse">
+        <div className="page split">
+          <div className="section-head" data-reveal>
+            <h2>What it deliberately doesn&rsquo;t do.</h2>
+            <p>Worth knowing before you install it, not after.</p>
+          </div>
           <div className="stack home-limits" data-reveal>
             <article>
               <h3>It does not bypass WhatsApp&rsquo;s rules</h3>
@@ -319,11 +278,6 @@ export default function HomePage() {
               <h3>It does not decide for you</h3>
               <p>Price, terms and whether a lead is worth pursuing stay with the person who owns the deal. Automation handles the chasing.</p>
             </article>
-          </div>
-          <div className="section-head" data-reveal>
-            <p className="eyebrow">Where the line is</p>
-            <h2>What it deliberately doesn&rsquo;t do.</h2>
-            <p>Worth knowing before you install it, not after.</p>
           </div>
         </div>
       </section>

@@ -47,12 +47,6 @@ export default function WhatsAppCrmPage() {
     <>
       <section className="stage-wrap">
         <div className="stage">
-          <div className="stage__aurora" aria-hidden="true">
-            <i />
-            <i />
-            <i />
-          </div>
-          <div className="stage__grid" aria-hidden="true" />
           <div className="page stage__inner">
             <div className="stage__copy">
               <Breadcrumbs trail={[{ name: 'WhatsApp CRM', path: '/whatsapp-crm' }]} />
@@ -60,8 +54,8 @@ export default function WhatsAppCrmPage() {
                 <b>WhatsApp CRM</b>
                 Official Cloud API · free and open source
               </span>
-              <h1>
-                The open-source WhatsApp CRM that <span className="glow">does the chasing.</span>
+              <h1 className="stage__h1--wide">
+                The open-source WhatsApp CRM <span>that does the chasing.</span>
               </h1>
               <p className="stage__lede">
                 Outbound OS connects your WhatsApp Business number through

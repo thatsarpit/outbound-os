@@ -98,11 +98,16 @@ export function Bento() {
 
       <Tile title="A pipeline that moves itself" body="Leads move from new to contacted to replied as the conversation does." href="/capabilities#qualification">
         <div className="b-kanban">
-          {['New', 'Contacted', 'Replied'].map((col) => (
+          {[
+            { col: 'New', leads: ['Amara D.', 'Lucas F.'] },
+            { col: 'Contacted', leads: ['Mei Lin T.', 'Arjun K.'] },
+            { col: 'Replied', leads: ['Kwame M.', 'Sofia R.'] },
+          ].map(({ col, leads }) => (
             <div key={col} className="b-kanban__col">
               <span>{col}</span>
-              <i />
-              <i />
+              {leads.map((lead) => (
+                <i key={lead}>{lead}</i>
+              ))}
             </div>
           ))}
           <div className="b-kanban__card">

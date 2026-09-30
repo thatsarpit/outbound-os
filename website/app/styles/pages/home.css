@@ -33,12 +33,27 @@
 .home-limits h3 + p { margin-top: 7px; }
 .steps p a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 
-.home-glance { padding-top: 40px; }
-.home-marquee { margin-top: 28px; }
+.home-glance { padding-block: 44px 52px; }
 
-.home-why h3 { font-size: 1rem; }
-.home-why p { margin-top: 8px; color: var(--text-secondary); font-size: 14px; }
-.home-why__more { margin-top: 24px; }
+/* Three facts, set as figures: the number is the headline, the sentence
+   under it is the proof. Hairline above each, no boxes, no icons. */
+.facts {
+  display: grid;
+  gap: 32px;
+  margin-inline: 0;
+  margin-bottom: 0;
+}
+@media (min-width: 760px) { .facts { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; } }
+.facts > div { padding-top: 20px; border-top: 1px solid var(--border-strong); }
+.facts dt {
+  font-size: clamp(2rem, 1.4rem + 1.6vw, 2.75rem);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1;
+}
+.facts dd { margin: 16px 0 0; max-width: 34ch; font-size: 15px; line-height: 1.6; color: var(--text-secondary); }
+.facts dd strong { color: var(--text); font-weight: 500; }
+.home-why__more { margin-top: 32px; }
 
 .story__body a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
 
