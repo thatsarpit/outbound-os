@@ -433,7 +433,7 @@ class IMessageService {
       if (claimed.count === 0) continue;
       try {
         const lead = await prisma.lead.findUnique({ where: { id: message.leadId } });
-        if (!lead || leadStateService.shouldBlockAutomation(lead.status)) {
+        if (!lead || leadStateService.shouldBlockAutomation(lead.status, { channel: 'imessage' })) {
           await prisma.message.update({ where: { id: message.id }, data: { status: 'cancelled' } });
           continue;
         }

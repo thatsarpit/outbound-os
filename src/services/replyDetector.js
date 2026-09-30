@@ -410,8 +410,13 @@ class ReplyDetector {
       }
 
       // ── Webhook dedup — same lead + same content within 60 seconds = duplicate fire ──
+      // Only for deliveries without a provider message id; those with one were
+      // checked exactly above. Matching on text alone dropped real messages:
+      // three photos sent together all read "[Photo]", and two of them were
+      // discarded, as was a second "ok".
       const dedupWindow = new Date(Date.now() - 60_000);
-      const duplicate = await prisma.message.findFirst({
+      const checkedById = Boolean(meta.messageId) && (channel === 'whatsapp' || channel === 'imessage');
+      const duplicate = checkedById ? null : await prisma.message.findFirst({
         where: {
           leadId: lead.id,
           direction: 'inbound',
@@ -448,6 +453,24 @@ class ReplyDetector {
           sentAt: eventAt,
         },
       });
+
+      // ── Cancel pending follow-ups ──
+      // First, and whatever the status check below decides: a lead who has
+      // just written to us must never get another automated message. This
+      // used to run after that check, so a reply the state machine refused
+      // (from a lead still 'new' or 'wa_unavailable') left the queue running.
+      const cancelled = await prisma.message.updateMany({
+        where: {
+          leadId: lead.id,
+          status: 'queued',
+          direction: 'outbound',
+        },
+        data: { status: 'cancelled' },
+      });
+
+      if (cancelled.count > 0) {
+        logger.info(`🛑 Cancelled ${cancelled.count} pending follow-up(s) for ${lead.name}`);
+      }
 
       // ── Determine new status ──
       // First reply → 'replied'
@@ -506,20 +529,6 @@ class ReplyDetector {
             },
           }),
         ]);
-      }
-
-      // ── Cancel pending follow-ups ──
-      const cancelled = await prisma.message.updateMany({
-        where: {
-          leadId: lead.id,
-          status: 'queued',
-          direction: 'outbound',
-        },
-        data: { status: 'cancelled' },
-      });
-
-      if (cancelled.count > 0) {
-        logger.info(`🛑 Cancelled ${cancelled.count} pending follow-up(s) for ${lead.name}`);
       }
 
       // ── Recalculate lead score ──

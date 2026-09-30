@@ -9,9 +9,8 @@
  *
  * JWT payload: { sub: userId, email, name, role, iat, exp }
  *
- * Usage in route handlers:
- *   app.get('/api/...', requireRole('viewer'), handler)
- *   app.post('/api/...', requireRole('manager'), handler)
+ * Password hashing, session tokens and the first-admin seed. The role guards
+ * themselves are in auth/index.js.
  */
 
 import '../bootstrapEnv.js';
@@ -30,8 +29,6 @@ const JWT_EXPIRY = '7d';
 const LEGACY_KEYLEN = 64;
 const MODERN_SCRYPT_MIN_MAXMEM = 64 * 1024 * 1024;
 
-// Role hierarchy — higher index = more permissions
-const ROLE_LEVELS = { viewer: 0, agent: 1, manager: 2, admin: 3 };
 
 // ── Password helpers (scrypt, no external deps) ──────────────────────────────
 
@@ -99,69 +96,10 @@ export function verifyToken(token) {
   return jwt.verify(token, JWT_SECRET);
 }
 
-// ── Middleware: requireRole(minRole) ─────────────────────────────────────────
-//
-// Accepts:
-//   1. Authorization: Bearer <jwt>
-//
-// Returns 401 if unauthenticated, 403 if insufficient role.
-
-export function requireRole(minRole = 'viewer') {
-  return async (req, res, next) => {
-    if (req.method === 'OPTIONS') return next();
-
-    // Skip auth endpoints
-    const OPEN = ['/api/auth/login', '/api/auth/register-first', '/api/auth/verify', '/api/auth/refresh', '/api/auth/accept-invite'];
-    if (OPEN.some(p => req.path === p || req.path.startsWith(p))) return next();
-
-    const bearer = req.headers.authorization?.startsWith('Bearer ')
-      ? req.headers.authorization.slice(7) : null;
-    const isSseRequest = req.path === '/events' || req.originalUrl?.startsWith('/api/events');
-    const sseToken = isSseRequest && typeof req.query?.token === 'string'
-      ? req.query.token
-      : null;
-    const token = bearer || sseToken || req.cookies?.token || null;
-
-    if (token) {
-      try {
-        const payload = verifyToken(token);
-        req.user = payload;
-
-        // Check role level
-        const userLevel = ROLE_LEVELS[payload.role] ?? -1;
-        const requiredLevel = ROLE_LEVELS[minRole] ?? 0;
-        if (userLevel < requiredLevel) {
-          return res.status(403).json({
-            error: `Insufficient permissions. Required: ${minRole}, your role: ${payload.role}`,
-          });
-        }
-
-        // Update lastLoginAt lazily (non-blocking)
-        prisma.user.update({
-          where: { id: payload.sub },
-          data: { lastLoginAt: new Date() },
-        }).catch(() => {});
-
-        return next();
-      } catch {
-        return res.status(401).json({ error: 'Token expired or invalid. Please log in again.' });
-      }
-    }
-
-    // Legacy x-dashboard-pass — treat as admin (DEPRECATED, will be removed)
-    const expectedPass = process.env.DASHBOARD_PASSWORD;
-    const providedPass = req.headers['x-dashboard-pass'] || req.query.pass;
-    if (expectedPass && providedPass === expectedPass) {
-      logger.warn(`⚠️ DEPRECATED: x-dashboard-pass used from ${req.ip} — migrate to JWT auth`);
-      req.user = { sub: 0, email: 'legacy', name: 'Admin', role: 'admin' };
-      return next();
-    }
-
-    return res.status(401).json({
-      error: 'Unauthorized. Please log in to get a valid session.',
-    });
-  };
-}
+// Route guards live in auth/index.js (built-in sign-in or Clerk). The
+// requireRole that used to be here was no longer mounted anywhere, and it
+// still accepted a shared admin password in a header or ?pass= query string;
+// it was removed so it cannot be wired back in by mistake.
 
 // ── Pool-scoped authorization ─────────────────────────────────────────────────
 //

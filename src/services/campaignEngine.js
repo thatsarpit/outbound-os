@@ -226,7 +226,12 @@ class CampaignEngine {
         break;
       }
 
-      if (leadStateService.shouldBlockAutomation(cl.lead.status)) {
+      // Pass the channel: "WhatsApp can't reach this number" must not keep an
+      // email or iMessage campaign from the leads it exists to reach.
+      const stopChannel = campaign.channel === 'email' || campaign.channel === 'imessage'
+        ? campaign.channel
+        : 'whatsapp';
+      if (leadStateService.shouldBlockAutomation(cl.lead.status, { channel: stopChannel })) {
         await prisma.campaignLead.update({
           where: { id: cl.id },
           data: { status: 'failed' },

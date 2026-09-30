@@ -28,6 +28,24 @@ include breaking changes, and they are called out here.
 
 ### Fixed
 
+- **A reply always stops automation.** A lead whose status was still "new"
+  (everyone who writes to you first) or "no WhatsApp" could not move to
+  "replied": the reply was stored, but queued follow-ups kept going and the
+  lead never showed as replied. Follow-ups are now cancelled before any status
+  check, and those transitions are allowed.
+- **Several photos sent together are all kept.** Inbound messages with a
+  provider id were also de-duplicated by text, so three uncaptioned photos
+  (all "[Photo]") became one, and a second "ok" vanished.
+- **Email and iMessage reach leads WhatsApp cannot.** Email campaigns and
+  iMessage sends skipped every lead marked "no WhatsApp", the people those
+  channels exist for.
+- **One lead per person from lead webhooks.** A lead that arrived by email
+  only, then again with a phone number, became two leads and got the
+  first-contact messages twice. The number now fills in the first lead.
+- The Google Sheets settings page reports a failed save instead of looking
+  saved.
+- Removed an unused sign-in check that still accepted a shared admin password
+  in a header or `?pass=` query string.
 - The inbox conversation on desktop now opens at the newest message and
   follows new ones. The scroll target was shared with the hidden phone
   drawer, so the desktop timeline never scrolled.

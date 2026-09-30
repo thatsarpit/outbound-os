@@ -22,8 +22,8 @@ const STOP_AUTOMATION = new Set([
 
 /**
  * These two say WhatsApp cannot reach the number. That is a fact about one
- * channel, not about the lead, so it must not stop us emailing them — email is
- * the only channel that reaches these people at all.
+ * channel, not about the lead, so it must not stop email or iMessage — for
+ * these people those are the only channels that reach them at all.
  */
 const WHATSAPP_ONLY_STOPS = new Set([
   LEAD_STATUS.WA_UNAVAILABLE,
@@ -31,7 +31,13 @@ const WHATSAPP_ONLY_STOPS = new Set([
 ]);
 
 const TRANSITIONS = {
+  // A reply is a reply whatever came before it. Someone who writes first
+  // (their lead is created by that message, as 'new') or who answers on email
+  // or iMessage after WhatsApp could not reach them has replied, and must stop
+  // receiving automated follow-ups.
   [LEAD_STATUS.NEW]: new Set([
+    LEAD_STATUS.REPLIED,
+    LEAD_STATUS.ENGAGED,
     LEAD_STATUS.CONTACTED,
     LEAD_STATUS.PAUSED,
     LEAD_STATUS.WA_UNAVAILABLE,
@@ -65,6 +71,8 @@ const TRANSITIONS = {
     LEAD_STATUS.ENGAGED,
   ]),
   [LEAD_STATUS.WA_UNAVAILABLE]: new Set([
+    LEAD_STATUS.REPLIED,
+    LEAD_STATUS.ENGAGED,
     LEAD_STATUS.PAUSED,
     LEAD_STATUS.CLOSED,
   ]),
@@ -83,13 +91,13 @@ function normalize(status) {
 class LeadStateService {
   /**
    * @param {string} status
-   * @param {{channel?: string}} [options]  channel defaults to WhatsApp, so
-   *   every existing caller keeps its current behaviour.
+   * @param {{channel?: string}} [options]  the channel about to be used:
+   *   whatsapp (the default), email or imessage.
    */
   shouldBlockAutomation(status, { channel = 'whatsapp' } = {}) {
     const normalized = normalize(status);
     if (!STOP_AUTOMATION.has(normalized)) return false;
-    if (channel === 'email' && WHATSAPP_ONLY_STOPS.has(normalized)) return false;
+    if (channel !== 'whatsapp' && WHATSAPP_ONLY_STOPS.has(normalized)) return false;
     return true;
   }
 

@@ -718,11 +718,22 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
     }
     // Match on whichever identifier arrived. Looking up by mobile alone meant an
     // email-only lead was created afresh on every delivery.
-    const existingLead = cleanMobile
+    //
+    // With both, the number decides; failing that, an earlier email-only lead
+    // for the same address (its mobile still a no-phone: placeholder) is the
+    // same person, now with a number. Matching only by number created a second
+    // lead for them, and a second round of first-contact messages.
+    let existingLead = cleanMobile
       ? await prisma.lead.findFirst({ where: { mobile: cleanMobile } })
-      : email
-        ? await prisma.lead.findFirst({ where: { email } })
-        : null;
+      : null;
+    if (!existingLead && email) {
+      existingLead = await prisma.lead.findFirst({
+        where: cleanMobile
+          ? { email, mobile: { startsWith: 'no-phone:' } }
+          : { email },
+        orderBy: { id: 'asc' },
+      });
+    }
 
     // Lead.mobile is required, so an email-only lead still needs a value. It used
     // to get String(Date.now()), which reads as a 13-digit phone number: it landed
@@ -1967,29 +1978,10 @@ app.post('/api/leads/:id/send', requireRole('agent'), async (req, res) => {
   }
 });
 
-app.post('/api/leads/:id/ai-reply', requireRole('agent'), async (req, res) => {
-  try {
-    const lead = await prisma.lead.findUnique({
-      where: { id: parseInt(req.params.id) },
-      include: { messages: { orderBy: { createdAt: 'asc' } } },
-    });
-    if (!lead) return res.status(404).json({ error: 'Lead not found' });
-
-    const inboundMessages = lead.messages.filter(
-      (m) => m.direction === 'inbound');
-    const lastReply = inboundMessages[inboundMessages.length - 1]?.content || '';
-
-    // Inject per-account persona if the lead has an assigned account
-    const accountProfile = lead.assignedAccount
-      ? await whatsappManager.getAccountProfile(lead.assignedAccount).catch(() => null)
-      : null;
-
-    return res.status(410).json({
-      error: 'Reply suggestions were removed along with the AI layer. Compose the reply manually, or send an approved WhatsApp template.',
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+app.post('/api/leads/:id/ai-reply', requireRole('agent'), (_req, res) => {
+  res.status(410).json({
+    error: 'Reply suggestions were removed along with the AI layer. Compose the reply manually, or send an approved WhatsApp template.',
+  });
 });
 
 // POST /api/leads/:id/ai-outreach/draft
@@ -2035,8 +2027,8 @@ app.post('/api/leads/:id/ai-outreach/draft', requireRole('agent'), async (req, r
 });
 
 // POST /api/leads/:id/ai-outreach/draft-email
-// Draft an AI outreach EMAIL (subject + HTML body) via OpenRouter, using the
-// persona of the lead's verified sender account. Does NOT send — the operator
+// Draft an outreach EMAIL (subject + HTML body) from the message templates,
+// using the persona of the lead's verified sender account. Does NOT send — the operator
 // previews, then POSTs { subject, body, htmlBody, accountId } to
 // /api/leads/:id/email/send. Pairs with the WhatsApp draft above so one lead
 // can be reached on both channels in a single action.

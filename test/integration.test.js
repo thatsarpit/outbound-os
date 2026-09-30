@@ -1306,3 +1306,96 @@ describe('Settlement in the home currency', () => {
   });
 });
 
+
+describe('Replies always stop automation, and nothing a lead sends is dropped', () => {
+  const sign = (payload) => `sha256=${crypto.createHmac('sha256', 'test-meta-app-secret')
+    .update(JSON.stringify(payload)).digest('hex')}`;
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 400));
+  const deliver = async (messages) => {
+    const payload = {
+      object: 'whatsapp_business_account',
+      entry: [{
+        id: 'WABA-2',
+        changes: [{
+          field: 'messages',
+          value: {
+            messaging_product: 'whatsapp',
+            metadata: { display_phone_number: '15550000000', phone_number_id: 'PNID-REPLY-FIX' },
+            messages,
+          },
+        }],
+      }],
+    };
+    const res = await request('POST', '/webhook/meta', { body: payload, headers: { 'X-Hub-Signature-256': sign(payload) } });
+    assert.equal(res.status, 200);
+    await settle();
+  };
+
+  test('someone who writes first is marked as replied', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    await deliver([{ from: '15551239901', id: 'wamid.FIRST-1', timestamp: '1790000500', type: 'text', text: { body: 'Hi, do you stock M8 bolts?' } }]);
+
+    const lead = await prisma.lead.findFirst({ where: { mobile: { contains: '15551239901' } } });
+    assert.ok(lead, 'a lead was created for the new number');
+    assert.equal(lead.status, 'replied');
+    assert.ok(lead.repliedAt, 'the reply time was recorded');
+  });
+
+  test('a reply from a lead WhatsApp could not reach cancels its queued follow-ups', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const lead = await prisma.lead.create({
+      data: { name: 'Unreachable Buyer', mobile: '15551239902', email: 'unreachable@example.test', source: 'manual', status: 'wa_unavailable' },
+    });
+    const followUp = await prisma.message.create({
+      data: {
+        leadId: lead.id, direction: 'outbound', channel: 'email', content: 'Following up',
+        status: 'queued', scheduledAt: new Date(Date.now() + 3600_000),
+      },
+    });
+
+    await deliver([{ from: '15551239902', id: 'wamid.UNREACHABLE-1', timestamp: '1790000600', type: 'text', text: { body: 'Please send the catalogue' } }]);
+
+    assert.equal((await prisma.message.findUnique({ where: { id: followUp.id } })).status, 'cancelled');
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'replied');
+  });
+
+  test('several photos sent together are all kept', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const lead = await prisma.lead.create({
+      data: { name: 'Photo Buyer', mobile: '15551239903', source: 'manual', status: 'contacted' },
+    });
+    await deliver(['A', 'B', 'C'].map((id, i) => ({
+      from: '15551239903', id: `wamid.PHOTO-${id}`, timestamp: String(1790000700 + i),
+      type: 'image', image: { id: `MEDIA-${id}`, mime_type: 'image/jpeg' },
+    })));
+
+    const photos = await prisma.message.findMany({ where: { leadId: lead.id, direction: 'inbound' } });
+    assert.equal(photos.length, 3);
+  });
+});
+
+describe('Lead webhook matches an email-only lead once a number arrives', () => {
+  test('the same person stays one lead and gains the number', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const source = await request('POST', '/api/webhooks/sources/from-preset', {
+      headers: authHeader(),
+      body: { presetId: 'website', name: 'Quote form' },
+    });
+    assert.equal(source.status, 200);
+    const { webhookUrl, apiKey } = source.body;
+    const post = (body) => request('POST', webhookUrl, { headers: { 'x-api-key': apiKey }, body });
+
+    const first = await post({ name: 'Email First', email: 'emailfirst@example.test' });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.created, true);
+
+    const second = await post({ name: 'Email First', email: 'emailfirst@example.test', phone: '+44 7700 900456' });
+    assert.equal(second.status, 200);
+    assert.equal(second.body.created, false);
+    assert.equal(second.body.leadId, first.body.leadId);
+
+    const leads = await prisma.lead.findMany({ where: { email: 'emailfirst@example.test' } });
+    assert.equal(leads.length, 1);
+    assert.ok(!leads[0].mobile.startsWith('no-phone:'), 'the placeholder was replaced by the real number');
+  });
+});

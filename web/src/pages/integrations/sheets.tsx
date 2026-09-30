@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { Button, Input } from '@/components/ui'
 import { cn } from '@/lib/utils'
+import { toast } from '@/stores/toast-store'
 import { Loader2, Sheet, Check, CheckCircle2, AlertCircle, TestTube, Play } from 'lucide-react'
 
 interface SheetsConfig {
@@ -67,6 +68,11 @@ export default function GoogleSheetsSection() {
       await api.post('/settings/sheets-webhook', { url: webhookUrl.trim(), enabled, events })
       queryClient.invalidateQueries({ queryKey: ['sheets-config'] })
       setTestResult(null)
+      toast.success('Google Sheets settings saved')
+    } catch (e: unknown) {
+      // This used to have no catch: a refused save looked exactly like a
+      // successful one.
+      toast.error(`Could not save: ${errorMessage(e, 'the server refused the change')}`)
     } finally {
       setSaving(false)
     }
