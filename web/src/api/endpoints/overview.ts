@@ -18,6 +18,13 @@ export interface OverviewStatsResponse {
   sentToday: number
   waUnavailable: number
   scoreDistribution: { hot: number; warm: number; cold: number; new: number }
+  period?: { days: number; current: PeriodStats; previous: PeriodStats }
+}
+export interface PeriodStats {
+  newLeads: number
+  messagesSent: number
+  contactedLeads: number
+  repliedLeads: number
 }
 
 /**
@@ -28,14 +35,29 @@ export interface OverviewStatsResponse {
 export type { EmailPerformanceResponse } from './analytics'
 
 export const overviewApi = {
-  getStats: () => {
-    const params = new URLSearchParams({ tzOffset: String(getClientTimezoneOffset()) })
+  getStats: (days = 14) => {
+    const params = new URLSearchParams({
+      tzOffset: String(getClientTimezoneOffset()),
+      days: String(days),
+    })
     return api.get<OverviewStatsResponse>(`/stats/overview?${params}`)
   },
 
   getCharts: (days = 14) =>
     api.get<{
-      msgsByDay: { day: string; count: number }[]
+      msgsByDay: {
+        day: string
+        count: number
+        previousTotal: number
+        whatsapp: number
+        email: number
+        imessage: number
+        telegram: number
+        other: number
+        newLeads: number
+        contactedLeads: number
+        repliedLeads: number
+      }[]
       statusDist: { status: string; _count: { id: number } }[]
       countryDist: { country: string; _count: { id: number } }[]
       tierDist: { leadTier: string; _count: { id: number } }[]

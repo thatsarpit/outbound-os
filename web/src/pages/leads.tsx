@@ -137,10 +137,11 @@ function leadStatusDot(status: string): string {
 
 export default function LeadsPage() {
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [filters, setFilters] = useState<LeadFilters>({
     page: 1,
     limit: 25,
-    status: '',
+    status: searchParams.get('status') ?? '',
     tags: '',
     search: '',
     sortBy: 'createdAt',
@@ -185,7 +186,16 @@ export default function LeadsPage() {
      the inbox's lead-context panel both link here, and the target is often not
      in the current filtered page — so it is fetched by id rather than looked up
      in the loaded rows. */
-  const [searchParams, setSearchParams] = useSearchParams()
+  // Follow ?status= (the Overview pipeline links here) — but only when that
+  // value changes. Opening a lead adds ?leadId=, and reacting to every
+  // search-param change reset a status picked in the filter bar.
+  const routedStatus = searchParams.get('status')
+  useEffect(() => {
+    if (routedStatus === null) return
+    setFilters((current) =>
+      current.status === routedStatus ? current : { ...current, status: routedStatus, page: 1 },
+    )
+  }, [routedStatus])
   const routedLeadId = Number(searchParams.get('leadId')) || null
 
   const { data: routedLead } = useQuery({

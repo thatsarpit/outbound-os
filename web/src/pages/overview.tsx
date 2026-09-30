@@ -1,13 +1,17 @@
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
-  overviewApi,
-  type OverviewStatsResponse,
-  type EmailPerformanceResponse,
-} from '@/api/endpoints/overview'
-import { useChartTheme } from '@/hooks/use-chart-theme'
-import { cn, formatCount } from '@/lib/utils'
-import { formatDate } from '@/lib/format-date'
+  Area,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  XAxis,
+  YAxis,
+  BarChart,
+  Bar,
+  ReferenceLine,
+} from 'recharts'
 import {
   Users,
   Send,
@@ -18,20 +22,37 @@ import {
   Clock,
   Inbox,
 } from 'lucide-react'
-import { SkeletonCard } from '@/components/ui/skeleton'
+import { overviewApi } from '@/api/endpoints/overview'
+import { useChartTheme } from '@/hooks/use-chart-theme'
+import { useChartFormatters } from '@/hooks/use-chart-formatters'
+import { cn, formatCount } from '@/lib/utils'
+import { formatDate } from '@/lib/format-date'
+import { CHANNELS as CHANNEL_META, CHANNEL_ORDER } from '@/lib/channels'
 import { MetricCard } from '@/components/ui/metric-card'
 import { StageDistribution } from '@/components/ui/stage-distribution'
-import { BarList } from '@/components/ui/bar-list'
 import { SectionCard } from '@/components/ui/section-card'
+import { WidgetCard } from '@/components/ui/widget-card'
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  ChartLegend,
+  ChartLegendContent,
+  type ChartConfig,
+} from '@/components/ui/chart'
 import { PageHeader } from '@/components/ui/page-header'
 import { SetupChecklist } from '@/components/onboarding/setup-checklist'
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip } from 'recharts'
-import { ChartFrame } from '@/components/ui/chart-frame'
+import { ErrorState } from '@/components/ui/error-state'
+import { LoadingState } from '@/components/ui/loading-state'
 
-/* ── Needs-attention queue ──
- * The old Overview was five vanity counters and a pie chart: it said how the
- * business was doing but never what to do next. These rows are the actionable
- * half, and each one links to the filtered view that resolves it. */
+const CHANNEL_KEYS = [...CHANNEL_ORDER, 'other'] as const
+const STAGES = ['new', 'contacted', 'replied', 'engaged', 'closed']
+function labelFor(status: string) {
+  return status.replace(/_/g, ' ').replace(/^./, (s) => s.toUpperCase())
+}
+function change(current: number, previous: number) {
+  return previous === 0 ? undefined : ((current - previous) / previous) * 100
+}
 
 function AttentionRow({
   icon: Icon,
@@ -43,342 +64,458 @@ function AttentionRow({
   icon: React.ElementType
   label: string
   count: number
-  tone: 'warning' | 'danger' | 'info'
+  tone: 'warning' | 'info'
   to: string
 }) {
-  const TONES = {
-    warning: 'text-warning',
-    danger: 'text-danger',
-    info: 'text-info',
-  } as const
-
   return (
     <Link
       to={to}
-      className="flex items-center gap-3 rounded-md px-2 py-2 transition-colors hover:bg-surface-raised"
+      className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-focus"
     >
-      <Icon aria-hidden="true" className={cn('h-4 w-4 shrink-0', TONES[tone])} />
-      <span className="min-w-0 flex-1 truncate text-[13px] text-text-secondary">{label}</span>
-      <span className="shrink-0 text-sm font-semibold tabular-nums text-text-primary">
-        {formatCount(count)}
-      </span>
-      <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 shrink-0 text-text-muted" />
+      <Icon
+        aria-hidden="true"
+        className={cn('h-4 w-4 shrink-0', tone === 'warning' ? 'text-warning' : 'text-info')}
+      />
+      <span className="min-w-0 flex-1 text-[13px] text-text-secondary">{label}</span>
+      <span className="text-sm font-semibold tabular-nums">{formatCount(count)}</span>
+      <ChevronRight aria-hidden="true" className="h-3.5 w-3.5 text-text-muted" />
     </Link>
   )
 }
 
-/** Stage keys are snake_case identifiers; people read sentence case. */
-function humanizeStage(status: string): string {
-  const s = status.replace(/_/g, ' ')
-  return s.charAt(0).toUpperCase() + s.slice(1)
-}
-
 export default function OverviewPage() {
-  const chartTheme = useChartTheme()
-
-  const { data: stats, isLoading: statsLoading } = useQuery<OverviewStatsResponse>({
-    queryKey: ['overview-stats'],
-    queryFn: async () => {
-      const res = await overviewApi.getStats()
-      if (!res) throw new Error('Empty response')
-      return res
-    },
+  const [days, setDays] = useState<7 | 14 | 30>(14)
+  const theme = useChartTheme()
+  const chartNumbers = useChartFormatters()
+  const statsQuery = useQuery({
+    queryKey: ['overview-stats', days],
+    queryFn: () => overviewApi.getStats(days),
+    placeholderData: (previous) => previous,
     refetchInterval: 30_000,
   })
-
-  const { data: charts, isLoading: chartsLoading } = useQuery({
-    queryKey: ['overview-charts'],
-    queryFn: async () => {
-      const res = await overviewApi.getCharts(14)
-      if (!res) throw new Error('Empty response')
-      return res
-    },
+  const chartsQuery = useQuery({
+    queryKey: ['overview-charts', days],
+    queryFn: () => overviewApi.getCharts(days),
+    placeholderData: (previous) => previous,
     refetchInterval: 60_000,
   })
-
-  const { data: emailPerf } = useQuery<EmailPerformanceResponse>({
-    queryKey: ['email-performance', '30d'],
-    queryFn: async () => {
-      const res = await overviewApi.getEmailPerformance('30d')
-      if (!res) throw new Error('Empty response')
-      return res
-    },
+  const emailQuery = useQuery({
+    queryKey: ['email-performance', days],
+    queryFn: () => overviewApi.getEmailPerformance(`${days}d`),
+    placeholderData: (previous) => previous,
     refetchInterval: 120_000,
   })
-
-  if (statsLoading) {
-    return (
-      <div className="animate-fade-in space-y-6">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <SkeletonCard key={i} lines={0} />
-          ))}
-        </div>
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <SkeletonCard key={i} lines={6} />
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  const msgsByDay = charts?.msgsByDay || []
-  const statusDist = charts?.statusDist || []
-  const pending = stats?.pending || 0
-  const waUnavailable = stats?.waUnavailable || 0
-  const contacted = stats?.contacted || 0
-  const replied = stats?.replied || 0
-  const replyRate = contacted > 0 ? (replied / contacted) * 100 : 0
-  const attentionTotal = pending + waUnavailable
-  const trend = msgsByDay.map((d) => d.count)
-
-  // Pipeline stages have an inherent order, so they are rendered in funnel
-  // order with a sequential ramp rather than sorted by size with categorical
-  // colours. Anything off the progression falls to the axis grey.
-  const STAGE_ORDER = ['new', 'contacted', 'replied', 'engaged', 'closed']
-  const orderedStages = [...statusDist].sort((a, b) => {
-    const ai = STAGE_ORDER.indexOf(a.status)
-    const bi = STAGE_ORDER.indexOf(b.status)
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi)
-  })
-  const stageRamp = chartTheme.sequential(orderedStages.length)
-  const variantRamp = chartTheme.sequential(1)
-
+  const stats = statsQuery.data
+  const charts = chartsQuery.data
+  const email = emailQuery.data
+  const hasOtherMessages = (charts?.msgsByDay ?? []).some((day) => day.other > 0)
+  const visibleChannels = hasOtherMessages ? CHANNEL_KEYS : CHANNEL_ORDER
+  const seriesOrder = [...visibleChannels, 'count', 'previousTotal']
+  const current = stats?.period?.current
+  const previous = stats?.period?.previous
+  const messageRows = (charts?.msgsByDay ?? []).map((day) => ({
+    day: day.day,
+    WhatsApp: day.whatsapp,
+    Email: day.email,
+    iMessage: day.imessage,
+    Telegram: day.telegram,
+    ...(hasOtherMessages ? { Other: day.other } : {}),
+    total: day.count,
+    previousTotal: day.previousTotal,
+  }))
+  const stageRows = [...(charts?.statusDist ?? [])].sort(
+    (a, b) => STAGES.indexOf(a.status) - STAGES.indexOf(b.status),
+  )
+  const stageColors = theme.ordinalStages
+  const stages = stageRows.map((stage) => ({
+    label: labelFor(stage.status),
+    value: stage._count.id,
+    href: `/leads?status=${encodeURIComponent(stage.status)}`,
+    color: STAGES.includes(stage.status) ? stageColors[STAGES.indexOf(stage.status)] : theme.axis,
+    offProgression: !STAGES.includes(stage.status),
+  }))
+  const emailRows = (email?.variants ?? []).slice(0, 5).map((variant) => ({
+    variant: variant.variant,
+    rate: variant.sent ? Math.round((variant.replied / variant.sent) * 1000) / 10 : 0,
+    replied: variant.replied,
+    sent: variant.sent,
+  }))
+  const average = email?.totals.sent ? (email.totals.replied / email.totals.sent) * 100 : 0
+  const emailScale = Math.min(
+    100,
+    Math.max(
+      10,
+      Math.ceil((Math.max(average, ...emailRows.map((row) => row.rate)) * 1.25) / 10) * 10,
+    ),
+  )
+  const tickStep = emailScale <= 20 ? 10 : 20
+  const emailTicks = Array.from(
+    { length: Math.floor(emailScale / tickStep) + 1 },
+    (_, index) => index * tickStep,
+  )
+  if (emailTicks[emailTicks.length - 1] !== emailScale) emailTicks.push(emailScale)
+  const channelConfig = Object.fromEntries(
+    visibleChannels.map((channel) => [
+      channel,
+      {
+        label: channel === 'other' ? 'Other' : CHANNEL_META[channel].label,
+        color: theme.channel[channel],
+      },
+    ]),
+  ) as ChartConfig
+  channelConfig.previousTotal = { label: 'Previous period', color: theme.axis }
+  channelConfig.count = { label: 'Total', color: theme.axis }
+  const attentionTotal = (stats?.pending ?? 0) + (stats?.waUnavailable ?? 0)
+  const deltaLabel = `vs previous ${days} days`
+  const metric = (now?: number, then?: number) =>
+    now === undefined || then === undefined ? undefined : change(now, then)
+  const metricItems = [
+    {
+      icon: Users,
+      label: 'New leads',
+      now: current?.newLeads,
+      before: previous?.newLeads,
+      trend: (charts?.msgsByDay ?? []).map((day) => day.newLeads),
+    },
+    {
+      icon: Send,
+      label: 'Messages sent',
+      now: current?.messagesSent,
+      before: previous?.messagesSent,
+      trend: (charts?.msgsByDay ?? []).map((day) => day.count),
+    },
+    {
+      icon: MessageSquare,
+      label: 'Leads contacted',
+      now: current?.contactedLeads,
+      before: previous?.contactedLeads,
+      trend: (charts?.msgsByDay ?? []).map((day) => day.contactedLeads),
+    },
+    {
+      icon: TrendingUp,
+      label: 'Leads replied',
+      now: current?.repliedLeads,
+      before: previous?.repliedLeads,
+      trend: (charts?.msgsByDay ?? []).map((day) => day.repliedLeads),
+    },
+  ]
   return (
     <div className="animate-fade-in space-y-6">
       <PageHeader
         title="Overview"
         description="Live pipeline health across every connected channel."
       />
-
       <SetupChecklist />
-
-      {/* Headline metrics */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
-          icon={Users}
-          label="Total leads"
-          value={formatCount(stats?.totalLeads || 0)}
-          hint={`${formatCount(stats?.newToday || 0)} new today`}
-          trend={trend}
-        />
-        <MetricCard
-          icon={Send}
-          label="Messages sent today"
-          value={formatCount(stats?.sentToday || 0)}
-          trend={trend}
-        />
-        <MetricCard
-          icon={MessageSquare}
-          label="Leads replied"
-          value={formatCount(replied)}
-          meter={contacted > 0 ? replied / contacted : 0}
-          hint={`of ${formatCount(contacted)} contacted`}
-        />
-        <MetricCard
-          icon={TrendingUp}
-          label="Reply rate"
-          value={`${replyRate.toFixed(1)}%`}
-          meter={replyRate / 100}
-          hint="Across all channels"
-        />
+      <div className="flex flex-wrap items-center gap-2" aria-label="Reporting period">
+        <span className="mr-1 text-sm text-text-secondary">Last</span>
+        {([7, 14, 30] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setDays(value)}
+            aria-pressed={days === value}
+            className={cn(
+              'rounded-md border px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-focus',
+              days === value
+                ? 'border-accent bg-accent text-accent-fg'
+                : 'border-border bg-surface text-text-secondary hover:bg-surface-raised',
+            )}
+          >
+            {value} days
+          </button>
+        ))}
       </div>
-
+      {statsQuery.isError ? (
+        <ErrorState title="Could not load overview" onRetry={() => statsQuery.refetch()} />
+      ) : statsQuery.isLoading ? (
+        <LoadingState variant="page" />
+      ) : (
+        <div
+          className={cn(
+            'grid grid-cols-2 gap-3 xl:grid-cols-4',
+            statsQuery.isFetching && 'opacity-70',
+          )}
+        >
+          {metricItems.map((item) => {
+            const delta = metric(item.now, item.before)
+            return (
+              <MetricCard
+                key={item.label}
+                icon={item.icon}
+                label={item.label}
+                value={item.now ?? 0}
+                delta={delta === undefined ? undefined : { value: delta, label: deltaLabel }}
+                hint={item.before === 0 ? 'No activity in previous period' : undefined}
+                trend={item.trend}
+              />
+            )
+          })}
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        {/* Activity */}
-        <SectionCard
+        <WidgetCard
           className="lg:col-span-2"
           title="Messages sent"
-          description="Last 14 days, in your local time."
+          description={`Daily by channel, with the previous ${days} days aligned by day.`}
+          rows={messageRows}
+          loading={chartsQuery.isLoading}
+          error={chartsQuery.isError}
+          onRetry={() => chartsQuery.refetch()}
         >
-          {chartsLoading ? (
-            <div className="h-56 animate-pulse rounded-md bg-surface-raised" />
-          ) : msgsByDay.length === 0 ? (
-            <div className="flex h-56 items-center justify-center text-sm text-text-muted">
-              No messages sent in this window yet.
-            </div>
-          ) : (
-            <ChartFrame
-              className="h-56"
-              fallback={<div className="h-full rounded-md bg-surface-raised" />}
+          <ChartContainer
+            config={channelConfig}
+            className="h-72 w-full"
+            role="img"
+            aria-label="Messages sent by channel each day"
+          >
+            <ComposedChart
+              data={charts?.msgsByDay ?? []}
+              margin={{ top: 8, right: 8, bottom: 4, left: 8 }}
+              accessibilityLayer
             >
-              {({ width, height }) => (
-                <AreaChart
-                  width={width}
-                  height={height}
-                  data={msgsByDay}
-                  margin={{ top: 4, right: 4, bottom: 0, left: -18 }}
-                >
-                  <defs>
-                    <linearGradient id="msgGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={chartTheme.palette[0]} stopOpacity={0.18} />
-                      <stop offset="100%" stopColor={chartTheme.palette[0]} stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid stroke={chartTheme.grid} vertical={false} />
-                  <XAxis
-                    dataKey="day"
-                    stroke={chartTheme.axis}
-                    tickLine={false}
-                    axisLine={false}
-                    tick={{ fontSize: 11 }}
-                    tickFormatter={(val: string) => formatDate(val, 'short')}
+              <CartesianGrid stroke={theme.grid} vertical={false} />
+              <XAxis
+                dataKey="day"
+                tickFormatter={(value: string) => formatDate(value, 'short')}
+                tickLine={false}
+                axisLine={false}
+                minTickGap={24}
+              />
+              <YAxis
+                allowDecimals={false}
+                tickLine={false}
+                axisLine={false}
+                width={48}
+                tickMargin={6}
+              />
+              <ChartTooltip
+                cursor={{ stroke: theme.axis, strokeWidth: 1 }}
+                itemSorter={(item) => seriesOrder.indexOf(String(item.dataKey))}
+                content={
+                  <ChartTooltipContent
+                    indicator="line"
+                    labelFormatter={(value) => formatDate(String(value), 'short')}
                   />
-                  <YAxis
-                    stroke={chartTheme.axis}
-                    tickLine={false}
-                    axisLine={false}
-                    width={44}
-                    tick={{ fontSize: 11 }}
-                    allowDecimals={false}
-                  />
-                  <Tooltip
-                    contentStyle={chartTheme.tooltip}
-                    cursor={{ stroke: chartTheme.axis, strokeWidth: 1 }}
-                    labelFormatter={(val) => formatDate(String(val), 'short')}
-                    formatter={(value) => [formatCount(Number(value)), 'Sent'] as [string, string]}
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="count"
-                    stroke={chartTheme.palette[0]}
-                    strokeWidth={2}
-                    fill="url(#msgGradient)"
-                    activeDot={{ r: 4, strokeWidth: 2, stroke: chartTheme.tooltipSurface }}
-                  />
-                </AreaChart>
-              )}
-            </ChartFrame>
-          )}
-        </SectionCard>
-
-        {/* What needs doing */}
+                }
+              />
+              <ChartLegend
+                itemSorter={(item) => seriesOrder.indexOf(String(item.dataKey))}
+                content={<ChartLegendContent />}
+              />
+              {visibleChannels.map((channel) => (
+                <Area
+                  key={channel}
+                  name={channel === 'other' ? 'Other' : CHANNEL_META[channel].label}
+                  type="monotone"
+                  dataKey={channel}
+                  stackId="sent"
+                  fill={theme.channel[channel]}
+                  fillOpacity={0.1}
+                  stroke={theme.channel[channel]}
+                  strokeWidth={2}
+                  activeDot={{ r: 4, stroke: theme.tooltipSurface, strokeWidth: 2 }}
+                />
+              ))}
+              <Line
+                dataKey="count"
+                name="Total"
+                stroke="transparent"
+                dot={false}
+                activeDot={false}
+                legendType="none"
+              />
+              <Line
+                name="Previous period"
+                type="monotone"
+                dataKey="previousTotal"
+                stroke={theme.axis}
+                strokeWidth={1.5}
+                strokeDasharray="4 4"
+                dot={false}
+                activeDot={{ r: 4, stroke: theme.tooltipSurface, strokeWidth: 2 }}
+              />
+            </ComposedChart>
+          </ChartContainer>
+        </WidgetCard>
         <SectionCard
           title="Needs attention"
           description={
-            attentionTotal === 0 ? 'Nothing is waiting on you.' : 'Items waiting on a decision.'
+            attentionTotal ? 'Items waiting on a decision.' : 'Nothing is waiting on you.'
           }
         >
           {attentionTotal === 0 ? (
-            <div className="flex h-40 flex-col items-center justify-center gap-2 text-center">
-              <Inbox aria-hidden="true" className="h-6 w-6 text-text-muted" />
+            <div className="flex h-32 flex-col items-center justify-center gap-2 text-center">
+              <Inbox className="h-6 w-6 text-text-muted" />
               <p className="text-sm text-text-secondary">The queue is clear.</p>
             </div>
           ) : (
             <div className="-mx-2 space-y-0.5">
-              {pending > 0 && (
+              {(stats?.pending ?? 0) > 0 && (
                 <AttentionRow
                   icon={Clock}
                   label="Queued to send"
-                  count={pending}
+                  count={stats!.pending}
                   tone="info"
                   to="/leads?status=contacted"
                 />
               )}
-              {waUnavailable > 0 && (
+              {(stats?.waUnavailable ?? 0) > 0 && (
                 <AttentionRow
                   icon={PhoneOff}
                   label="No WhatsApp number"
-                  count={waUnavailable}
+                  count={stats!.waUnavailable}
                   tone="warning"
-                  to="/leads?filter=wa_unavailable"
+                  to="/leads?status=wa_unavailable"
                 />
               )}
             </div>
           )}
-
-          {stats && (
+          {stats ? (
             <div className="mt-5 border-t border-border pt-4">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted">
-                Lead tiers
-              </p>
+              <p className="text-xs font-semibold text-text-muted">Lead tiers</p>
               <div className="mt-3 grid grid-cols-3 gap-2">
-                {(
-                  [
-                    ['Hot', stats.scoreDistribution?.hot || 0, 'text-hot'],
-                    ['Warm', stats.scoreDistribution?.warm || 0, 'text-warm'],
-                    ['Cold', stats.scoreDistribution?.cold || 0, 'text-cold'],
-                  ] as const
-                ).map(([label, value, tone]) => (
-                  <div key={label} className="rounded-md border border-border px-2.5 py-2">
-                    <p className={cn('text-base font-semibold tabular-nums', tone)}>
-                      {formatCount(value)}
+                {(['hot', 'warm', 'cold'] as const).map((tier) => (
+                  <div key={tier} className="rounded-md border border-border px-2 py-2">
+                    <p className="text-base font-semibold">
+                      {formatCount(stats.scoreDistribution[tier] ?? 0)}
                     </p>
-                    <p className="mt-0.5 text-[11px] text-text-muted">{label}</p>
+                    <p className="text-xs capitalize text-text-muted">{tier}</p>
                   </div>
                 ))}
               </div>
             </div>
-          )}
+          ) : null}
         </SectionCard>
       </div>
-
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* Pipeline */}
-        <SectionCard title="Pipeline" description="Where every lead currently sits.">
-          {statusDist.length === 0 ? (
-            <p className="text-sm text-text-muted">No leads yet.</p>
-          ) : (
-            <StageDistribution
-              formatValue={formatCount}
-              stages={orderedStages.map((s, i) => ({
-                label: humanizeStage(s.status),
-                value: s._count.id,
-                color:
-                  s.status === 'paused' || s.status === 'wa_unavailable'
-                    ? chartTheme.axis
-                    : stageRamp[i],
-                // Paused leads are not a step on the path; counting them in the
-                // drop-off between stages would make the arithmetic lie.
-                offProgression: s.status === 'paused' || s.status === 'wa_unavailable',
-              }))}
-            />
-          )}
-        </SectionCard>
-
-        {/* Email performance */}
-        <SectionCard
-          title="Email performance"
-          description="Reply rate by template variant, last 30 days."
-          action={
-            emailPerf && emailPerf.totals.sent > 0 ? (
-              <span className="text-xs tabular-nums text-text-muted">
-                {formatCount(emailPerf.totals.replied)} / {formatCount(emailPerf.totals.sent)}{' '}
-                replied
-              </span>
-            ) : undefined
-          }
+        <WidgetCard
+          title="Pipeline"
+          description="Current lead share by stage. Select a stage to see its leads."
+          rows={stageRows.map((s) => ({ stage: labelFor(s.status), leads: s._count.id }))}
+          loading={chartsQuery.isLoading}
+          error={chartsQuery.isError}
+          onRetry={() => chartsQuery.refetch()}
         >
-          {!emailPerf || emailPerf.variants.length === 0 ? (
-            <p className="text-sm text-text-muted">No emails sent in this window yet.</p>
-          ) : (
-            (() => {
-              const rates = emailPerf.variants.slice(0, 5).map((v) => ({
-                v,
-                rate: v.sent > 0 ? v.replied / v.sent : 0,
-              }))
-              const best = Math.max(...rates.map((r) => r.rate), 0) || 1
-              return (
-                <BarList
-                  items={rates.map(({ v, rate }) => ({
-                    label: v.variant,
-                    value: v.replied,
-                    // Bars rank by reply RATE, matching the number beside them.
-                    // They used to be sized by reply COUNT while the label read
-                    // a percentage, so the longest bar was not the best
-                    // variant. Scaled against the best rate rather than 100%,
-                    // because these cluster in a narrow band and at absolute
-                    // scale every bar looked identical.
-                    share: rate / best,
-                    display: `${(rate * 100).toFixed(0)}%  ·  ${formatCount(v.replied)}/${formatCount(v.sent)}`,
-                    color: variantRamp[0],
-                  }))}
+          <StageDistribution stages={stages} formatValue={formatCount} />
+        </WidgetCard>
+        <WidgetCard
+          title="Email template reply rates"
+          description={`Recipients who replied out of recipients sent each template, last ${days} days.`}
+          rows={emailRows}
+          loading={emailQuery.isLoading}
+          error={emailQuery.isError}
+          onRetry={() => emailQuery.refetch()}
+        >
+          <div className="grid min-w-0 grid-cols-[minmax(0,94px)_minmax(0,1fr)_110px] gap-1 sm:grid-cols-[minmax(0,136px)_minmax(0,1fr)_120px]">
+            <div className="flex h-64 flex-col pb-[34px] pt-[26px]">
+              {emailRows.map((row) => (
+                <div key={row.variant} className="flex min-h-0 flex-1 items-center">
+                  <span
+                    className="block w-full truncate text-[11px] text-text-secondary"
+                    title={row.variant}
+                  >
+                    {row.variant}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <ChartContainer
+              config={{ rate: { label: 'Reply rate', color: theme.channel.email } }}
+              className="h-64 min-w-0 w-full"
+              role="img"
+              aria-label={`Email reply rates by template on a zero to ${emailScale} percent scale`}
+            >
+              <BarChart
+                data={emailRows}
+                layout="vertical"
+                // Room on the right for the last tick label ("40%"), which
+                // is centred on the plot edge and was clipped at 8px.
+                margin={{ top: 26, right: 18, bottom: 4, left: 14 }}
+                accessibilityLayer
+              >
+                <CartesianGrid stroke={theme.grid} horizontal={false} />
+                <XAxis
+                  type="number"
+                  domain={[0, emailScale]}
+                  ticks={emailTicks}
+                  interval={0}
+                  tickFormatter={(v: number) => `${v}%`}
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fontSize: 10 }}
                 />
-              )
-            })()
-          )}
-        </SectionCard>
+                <YAxis type="category" dataKey="variant" hide width={0} />
+                <ReferenceLine
+                  x={average}
+                  stroke={theme.axis}
+                  strokeDasharray="3 3"
+                  label={{
+                    value: `Avg ${chartNumbers.percent(average)}`,
+                    position: 'top',
+                    fill: theme.axis,
+                    fontSize: 10,
+                  }}
+                />
+                <ChartTooltip
+                  cursor={false}
+                  content={
+                    <ChartTooltipContent
+                      labelFormatter={(_, payload) =>
+                        String(payload?.[0]?.payload?.variant ?? '')
+                      }
+                    />
+                  }
+                />
+                <Bar
+                  dataKey="rate"
+                  name="Reply rate"
+                  fill={theme.channel.email}
+                  barSize={20}
+                  shape={(raw: unknown) => {
+                    const mark = raw as {
+                      x: number
+                      y: number
+                      width: number
+                      height: number
+                      fill: string
+                    }
+                    const middle = mark.y + mark.height / 2
+                    return (
+                      <g>
+                        <line
+                          x1={mark.x}
+                          x2={mark.x + mark.width}
+                          y1={middle}
+                          y2={middle}
+                          stroke={mark.fill}
+                          strokeWidth={2}
+                        />
+                        <circle
+                          cx={mark.x + mark.width}
+                          cy={middle}
+                          r={5}
+                          fill={mark.fill}
+                          stroke={theme.tooltipSurface}
+                          strokeWidth={2}
+                        />
+                      </g>
+                    )
+                  }}
+                />
+              </BarChart>
+            </ChartContainer>
+            <div className="flex h-64 flex-col pb-[34px] pt-[26px]">
+              {emailRows.map((row) => (
+                <div
+                  key={row.variant}
+                  className="flex min-h-0 flex-1 items-center justify-end whitespace-nowrap text-right text-[11px] tabular-nums text-text-secondary"
+                >
+                  {chartNumbers.percent(row.rate)} · {row.replied}/{row.sent}
+                </div>
+              ))}
+            </div>
+          </div>
+        </WidgetCard>
       </div>
     </div>
   )
