@@ -42,7 +42,9 @@ npm run lint --prefix web && npm run typecheck --prefix web && npm run build --p
 ```
 
 The dashboard has a preview mode with sample data and no backend:
-`/dev/shell` (fixtures live in `web/src/pages/dev-shell.tsx`).
+`/dev/shell` in development, and the public demo (`npm run build:demo --prefix web`).
+Both use the fixtures in `web/src/demo/`; add sample data there for any new
+field or page so the demo never shows an empty or broken screen.
 
 Run the unit and integration suites before calling a change done. CI runs
 them, lints and builds the dashboard and site, and boots the Docker image
