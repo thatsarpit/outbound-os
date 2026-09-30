@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
 import { Inbox, LayoutDashboard, Plug, Sparkles, MessageCircle } from 'lucide-react'
+import { site } from '@/lib/site-content'
 
 /**
  * The real dashboard, one screen at a time, in a browser frame.
@@ -148,8 +149,8 @@ export function ProductTour() {
             className="tour__panel"
           >
             <img
-              src={`/screenshots/${shot.path}.webp`}
-              srcSet={`/screenshots/${shot.path}-800.webp 800w, /screenshots/${shot.path}.webp 1600w`}
+              src={`/screenshots/${shot.path}.webp?v=${site.screenshotVersion}`}
+              srcSet={`/screenshots/${shot.path}-800.webp?v=${site.screenshotVersion} 800w, /screenshots/${shot.path}.webp?v=${site.screenshotVersion} 1600w`}
               sizes="(min-width: 1200px) 1130px, 100vw"
               alt={shot.alt}
               width={1600}

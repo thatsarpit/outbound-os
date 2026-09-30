@@ -32,6 +32,11 @@ export const site = {
    * touching a link. A plain <a>, never next/link: /demo is not a page here.
    */
   demoUrl: '/demo',
+  /**
+   * Bump when the files in public/screenshots change. They are cached for a
+   * week (public/_headers), so an unchanged URL keeps serving the old image.
+   */
+  screenshotVersion: '2026-10-01',
   /** The hosted instance the Outbound OS team runs for managed customers. */
   appUrl: 'https://app.outboundos.space',
   /**

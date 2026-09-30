@@ -55,7 +55,7 @@ export function softwareLd(): Json {
     offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
     downloadUrl: site.releasesUrl,
     installUrl: `${siteUrl}/docs/install`,
-    screenshot: `${siteUrl}/screenshots/overview.png`,
+    screenshot: `${siteUrl}/screenshots/overview.png?v=${site.screenshotVersion}`,
     featureList: [
       'WhatsApp Cloud API and AiSensy',
       'Email over SMTP/IMAP and Brevo',

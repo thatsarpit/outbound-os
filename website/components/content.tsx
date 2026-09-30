@@ -168,8 +168,8 @@ export function Screenshot({
   return (
     <figure className="screenshot">
       <img
-        src={`/screenshots/${name}.webp`}
-        srcSet={`/screenshots/${name}-800.webp 800w, /screenshots/${name}.webp 1600w`}
+        src={`/screenshots/${name}.webp?v=${site.screenshotVersion}`}
+        srcSet={`/screenshots/${name}-800.webp?v=${site.screenshotVersion} 800w, /screenshots/${name}.webp?v=${site.screenshotVersion} 1600w`}
         sizes="(min-width: 1200px) 1120px, 100vw"
         alt={alt}
         width={1600}
