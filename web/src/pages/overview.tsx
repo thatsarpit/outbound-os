@@ -1,3 +1,4 @@
+import { DashboardLayout } from '@/components/ui/dashboard-layout'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
@@ -199,6 +200,273 @@ export default function OverviewPage() {
       trend: (charts?.msgsByDay ?? []).map((day) => day.repliedLeads),
     },
   ]
+  const widgets = {
+    messages: (
+      <WidgetCard
+        title="Messages sent"
+        description={`Daily by channel, with the previous ${days} days aligned by day.`}
+        rows={messageRows}
+        loading={chartsQuery.isLoading}
+        error={chartsQuery.isError}
+        onRetry={() => chartsQuery.refetch()}
+      >
+        <ChartContainer
+          config={channelConfig}
+          className="h-72 w-full"
+          role="img"
+          aria-label="Messages sent by channel each day"
+        >
+          <ComposedChart
+            data={charts?.msgsByDay ?? []}
+            margin={{ top: 8, right: 8, bottom: 4, left: 8 }}
+            accessibilityLayer
+          >
+            <CartesianGrid stroke={theme.grid} vertical={false} />
+            <XAxis
+              dataKey="day"
+              tickFormatter={(value: string) => formatDate(value, 'short')}
+              tickLine={false}
+              axisLine={false}
+              minTickGap={24}
+            />
+            <YAxis
+              allowDecimals={false}
+              tickLine={false}
+              axisLine={false}
+              width={48}
+              tickMargin={6}
+            />
+            <ChartTooltip
+              cursor={{ stroke: theme.axis, strokeWidth: 1 }}
+              itemSorter={(item) => seriesOrder.indexOf(String(item.dataKey))}
+              content={
+                <ChartTooltipContent
+                  indicator="line"
+                  labelFormatter={(value) => formatDate(String(value), 'short')}
+                />
+              }
+            />
+            <ChartLegend
+              itemSorter={(item) => seriesOrder.indexOf(String(item.dataKey))}
+              content={<ChartLegendContent />}
+            />
+            {visibleChannels.map((channel) => (
+              <Area
+                key={channel}
+                name={channel === 'other' ? 'Other' : CHANNEL_META[channel].label}
+                type="monotone"
+                dataKey={channel}
+                stackId="sent"
+                fill={theme.channel[channel]}
+                fillOpacity={0.1}
+                stroke={theme.channel[channel]}
+                strokeWidth={2}
+                activeDot={{ r: 4, stroke: theme.tooltipSurface, strokeWidth: 2 }}
+              />
+            ))}
+            <Line
+              dataKey="count"
+              name="Total"
+              stroke="transparent"
+              dot={false}
+              activeDot={false}
+              legendType="none"
+            />
+            <Line
+              name="Previous period"
+              type="monotone"
+              dataKey="previousTotal"
+              stroke={theme.axis}
+              strokeWidth={1.5}
+              strokeDasharray="4 4"
+              dot={false}
+              activeDot={{ r: 4, stroke: theme.tooltipSurface, strokeWidth: 2 }}
+            />
+          </ComposedChart>
+        </ChartContainer>
+      </WidgetCard>
+    ),
+    attention: (
+      <SectionCard
+        title="Needs attention"
+        description={attentionTotal ? 'Items waiting on a decision.' : 'Nothing is waiting on you.'}
+      >
+        {attentionTotal === 0 ? (
+          <div className="flex h-32 flex-col items-center justify-center gap-2 text-center">
+            <Inbox className="h-6 w-6 text-text-muted" />
+            <p className="text-sm text-text-secondary">The queue is clear.</p>
+          </div>
+        ) : (
+          <div className="-mx-2 space-y-0.5">
+            {(stats?.pending ?? 0) > 0 && (
+              <AttentionRow
+                icon={Clock}
+                label="Queued to send"
+                count={stats!.pending}
+                tone="info"
+                to="/leads?status=contacted"
+              />
+            )}
+            {(stats?.waUnavailable ?? 0) > 0 && (
+              <AttentionRow
+                icon={PhoneOff}
+                label="No WhatsApp number"
+                count={stats!.waUnavailable}
+                tone="warning"
+                to="/leads?status=wa_unavailable"
+              />
+            )}
+          </div>
+        )}
+        {stats ? (
+          <div className="mt-5 border-t border-border pt-4">
+            <p className="text-xs font-semibold text-text-muted">Lead tiers</p>
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              {(['hot', 'warm', 'cold'] as const).map((tier) => (
+                <div key={tier} className="rounded-md border border-border px-2 py-2">
+                  <p className="text-base font-semibold">
+                    {formatCount(stats.scoreDistribution[tier] ?? 0)}
+                  </p>
+                  <p className="text-xs capitalize text-text-muted">{tier}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </SectionCard>
+    ),
+    pipeline: (
+      <WidgetCard
+        title="Pipeline"
+        description="Current lead share by stage. Select a stage to see its leads."
+        rows={stageRows.map((s) => ({ stage: labelFor(s.status), leads: s._count.id }))}
+        loading={chartsQuery.isLoading}
+        error={chartsQuery.isError}
+        onRetry={() => chartsQuery.refetch()}
+      >
+        <StageDistribution stages={stages} formatValue={formatCount} />
+      </WidgetCard>
+    ),
+    email: (
+      <WidgetCard
+        title="Email template reply rates"
+        description={`Recipients who replied out of recipients sent each template, last ${days} days.`}
+        rows={emailRows}
+        loading={emailQuery.isLoading}
+        error={emailQuery.isError}
+        onRetry={() => emailQuery.refetch()}
+      >
+        <div className="grid min-w-0 grid-cols-[minmax(0,94px)_minmax(0,1fr)_110px] gap-1 sm:grid-cols-[minmax(0,136px)_minmax(0,1fr)_120px]">
+          <div className="flex h-64 flex-col pb-[34px] pt-[26px]">
+            {emailRows.map((row) => (
+              <div key={row.variant} className="flex min-h-0 flex-1 items-center">
+                <span
+                  className="block w-full truncate text-[11px] text-text-secondary"
+                  title={row.variant}
+                >
+                  {row.variant}
+                </span>
+              </div>
+            ))}
+          </div>
+          <ChartContainer
+            config={{ rate: { label: 'Reply rate', color: theme.channel.email } }}
+            className="h-64 min-w-0 w-full"
+            role="img"
+            aria-label={`Email reply rates by template on a zero to ${emailScale} percent scale`}
+          >
+            <BarChart
+              data={emailRows}
+              layout="vertical"
+              // Room on the right for the last tick label ("40%"), which
+              // is centred on the plot edge and was clipped at 8px.
+              margin={{ top: 26, right: 18, bottom: 4, left: 14 }}
+              accessibilityLayer
+            >
+              <CartesianGrid stroke={theme.grid} horizontal={false} />
+              <XAxis
+                type="number"
+                domain={[0, emailScale]}
+                ticks={emailTicks}
+                interval={0}
+                tickFormatter={(v: number) => `${v}%`}
+                tickLine={false}
+                axisLine={false}
+                tick={{ fontSize: 10 }}
+              />
+              <YAxis type="category" dataKey="variant" hide width={0} />
+              <ReferenceLine
+                x={average}
+                stroke={theme.axis}
+                strokeDasharray="3 3"
+                label={{
+                  value: `Avg ${chartNumbers.percent(average)}`,
+                  position: 'top',
+                  fill: theme.axis,
+                  fontSize: 10,
+                }}
+              />
+              <ChartTooltip
+                cursor={false}
+                content={
+                  <ChartTooltipContent
+                    labelFormatter={(_, payload) => String(payload?.[0]?.payload?.variant ?? '')}
+                  />
+                }
+              />
+              <Bar
+                dataKey="rate"
+                name="Reply rate"
+                fill={theme.channel.email}
+                barSize={20}
+                shape={(raw: unknown) => {
+                  const mark = raw as {
+                    x: number
+                    y: number
+                    width: number
+                    height: number
+                    fill: string
+                  }
+                  const middle = mark.y + mark.height / 2
+                  return (
+                    <g>
+                      <line
+                        x1={mark.x}
+                        x2={mark.x + mark.width}
+                        y1={middle}
+                        y2={middle}
+                        stroke={mark.fill}
+                        strokeWidth={2}
+                      />
+                      <circle
+                        cx={mark.x + mark.width}
+                        cy={middle}
+                        r={5}
+                        fill={mark.fill}
+                        stroke={theme.tooltipSurface}
+                        strokeWidth={2}
+                      />
+                    </g>
+                  )
+                }}
+              />
+            </BarChart>
+          </ChartContainer>
+          <div className="flex h-64 flex-col pb-[34px] pt-[26px]">
+            {emailRows.map((row) => (
+              <div
+                key={row.variant}
+                className="flex min-h-0 flex-1 items-center justify-end whitespace-nowrap text-right text-[11px] tabular-nums text-text-secondary"
+              >
+                {chartNumbers.percent(row.rate)} · {row.replied}/{row.sent}
+              </div>
+            ))}
+          </div>
+        </div>
+      </WidgetCard>
+    ),
+  }
+
   return (
     <div className="animate-fade-in space-y-6">
       <PageHeader
@@ -252,271 +520,7 @@ export default function OverviewPage() {
           })}
         </div>
       )}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <WidgetCard
-          className="lg:col-span-2"
-          title="Messages sent"
-          description={`Daily by channel, with the previous ${days} days aligned by day.`}
-          rows={messageRows}
-          loading={chartsQuery.isLoading}
-          error={chartsQuery.isError}
-          onRetry={() => chartsQuery.refetch()}
-        >
-          <ChartContainer
-            config={channelConfig}
-            className="h-72 w-full"
-            role="img"
-            aria-label="Messages sent by channel each day"
-          >
-            <ComposedChart
-              data={charts?.msgsByDay ?? []}
-              margin={{ top: 8, right: 8, bottom: 4, left: 8 }}
-              accessibilityLayer
-            >
-              <CartesianGrid stroke={theme.grid} vertical={false} />
-              <XAxis
-                dataKey="day"
-                tickFormatter={(value: string) => formatDate(value, 'short')}
-                tickLine={false}
-                axisLine={false}
-                minTickGap={24}
-              />
-              <YAxis
-                allowDecimals={false}
-                tickLine={false}
-                axisLine={false}
-                width={48}
-                tickMargin={6}
-              />
-              <ChartTooltip
-                cursor={{ stroke: theme.axis, strokeWidth: 1 }}
-                itemSorter={(item) => seriesOrder.indexOf(String(item.dataKey))}
-                content={
-                  <ChartTooltipContent
-                    indicator="line"
-                    labelFormatter={(value) => formatDate(String(value), 'short')}
-                  />
-                }
-              />
-              <ChartLegend
-                itemSorter={(item) => seriesOrder.indexOf(String(item.dataKey))}
-                content={<ChartLegendContent />}
-              />
-              {visibleChannels.map((channel) => (
-                <Area
-                  key={channel}
-                  name={channel === 'other' ? 'Other' : CHANNEL_META[channel].label}
-                  type="monotone"
-                  dataKey={channel}
-                  stackId="sent"
-                  fill={theme.channel[channel]}
-                  fillOpacity={0.1}
-                  stroke={theme.channel[channel]}
-                  strokeWidth={2}
-                  activeDot={{ r: 4, stroke: theme.tooltipSurface, strokeWidth: 2 }}
-                />
-              ))}
-              <Line
-                dataKey="count"
-                name="Total"
-                stroke="transparent"
-                dot={false}
-                activeDot={false}
-                legendType="none"
-              />
-              <Line
-                name="Previous period"
-                type="monotone"
-                dataKey="previousTotal"
-                stroke={theme.axis}
-                strokeWidth={1.5}
-                strokeDasharray="4 4"
-                dot={false}
-                activeDot={{ r: 4, stroke: theme.tooltipSurface, strokeWidth: 2 }}
-              />
-            </ComposedChart>
-          </ChartContainer>
-        </WidgetCard>
-        <SectionCard
-          title="Needs attention"
-          description={
-            attentionTotal ? 'Items waiting on a decision.' : 'Nothing is waiting on you.'
-          }
-        >
-          {attentionTotal === 0 ? (
-            <div className="flex h-32 flex-col items-center justify-center gap-2 text-center">
-              <Inbox className="h-6 w-6 text-text-muted" />
-              <p className="text-sm text-text-secondary">The queue is clear.</p>
-            </div>
-          ) : (
-            <div className="-mx-2 space-y-0.5">
-              {(stats?.pending ?? 0) > 0 && (
-                <AttentionRow
-                  icon={Clock}
-                  label="Queued to send"
-                  count={stats!.pending}
-                  tone="info"
-                  to="/leads?status=contacted"
-                />
-              )}
-              {(stats?.waUnavailable ?? 0) > 0 && (
-                <AttentionRow
-                  icon={PhoneOff}
-                  label="No WhatsApp number"
-                  count={stats!.waUnavailable}
-                  tone="warning"
-                  to="/leads?status=wa_unavailable"
-                />
-              )}
-            </div>
-          )}
-          {stats ? (
-            <div className="mt-5 border-t border-border pt-4">
-              <p className="text-xs font-semibold text-text-muted">Lead tiers</p>
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                {(['hot', 'warm', 'cold'] as const).map((tier) => (
-                  <div key={tier} className="rounded-md border border-border px-2 py-2">
-                    <p className="text-base font-semibold">
-                      {formatCount(stats.scoreDistribution[tier] ?? 0)}
-                    </p>
-                    <p className="text-xs capitalize text-text-muted">{tier}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </SectionCard>
-      </div>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <WidgetCard
-          title="Pipeline"
-          description="Current lead share by stage. Select a stage to see its leads."
-          rows={stageRows.map((s) => ({ stage: labelFor(s.status), leads: s._count.id }))}
-          loading={chartsQuery.isLoading}
-          error={chartsQuery.isError}
-          onRetry={() => chartsQuery.refetch()}
-        >
-          <StageDistribution stages={stages} formatValue={formatCount} />
-        </WidgetCard>
-        <WidgetCard
-          title="Email template reply rates"
-          description={`Recipients who replied out of recipients sent each template, last ${days} days.`}
-          rows={emailRows}
-          loading={emailQuery.isLoading}
-          error={emailQuery.isError}
-          onRetry={() => emailQuery.refetch()}
-        >
-          <div className="grid min-w-0 grid-cols-[minmax(0,94px)_minmax(0,1fr)_110px] gap-1 sm:grid-cols-[minmax(0,136px)_minmax(0,1fr)_120px]">
-            <div className="flex h-64 flex-col pb-[34px] pt-[26px]">
-              {emailRows.map((row) => (
-                <div key={row.variant} className="flex min-h-0 flex-1 items-center">
-                  <span
-                    className="block w-full truncate text-[11px] text-text-secondary"
-                    title={row.variant}
-                  >
-                    {row.variant}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <ChartContainer
-              config={{ rate: { label: 'Reply rate', color: theme.channel.email } }}
-              className="h-64 min-w-0 w-full"
-              role="img"
-              aria-label={`Email reply rates by template on a zero to ${emailScale} percent scale`}
-            >
-              <BarChart
-                data={emailRows}
-                layout="vertical"
-                // Room on the right for the last tick label ("40%"), which
-                // is centred on the plot edge and was clipped at 8px.
-                margin={{ top: 26, right: 18, bottom: 4, left: 14 }}
-                accessibilityLayer
-              >
-                <CartesianGrid stroke={theme.grid} horizontal={false} />
-                <XAxis
-                  type="number"
-                  domain={[0, emailScale]}
-                  ticks={emailTicks}
-                  interval={0}
-                  tickFormatter={(v: number) => `${v}%`}
-                  tickLine={false}
-                  axisLine={false}
-                  tick={{ fontSize: 10 }}
-                />
-                <YAxis type="category" dataKey="variant" hide width={0} />
-                <ReferenceLine
-                  x={average}
-                  stroke={theme.axis}
-                  strokeDasharray="3 3"
-                  label={{
-                    value: `Avg ${chartNumbers.percent(average)}`,
-                    position: 'top',
-                    fill: theme.axis,
-                    fontSize: 10,
-                  }}
-                />
-                <ChartTooltip
-                  cursor={false}
-                  content={
-                    <ChartTooltipContent
-                      labelFormatter={(_, payload) =>
-                        String(payload?.[0]?.payload?.variant ?? '')
-                      }
-                    />
-                  }
-                />
-                <Bar
-                  dataKey="rate"
-                  name="Reply rate"
-                  fill={theme.channel.email}
-                  barSize={20}
-                  shape={(raw: unknown) => {
-                    const mark = raw as {
-                      x: number
-                      y: number
-                      width: number
-                      height: number
-                      fill: string
-                    }
-                    const middle = mark.y + mark.height / 2
-                    return (
-                      <g>
-                        <line
-                          x1={mark.x}
-                          x2={mark.x + mark.width}
-                          y1={middle}
-                          y2={middle}
-                          stroke={mark.fill}
-                          strokeWidth={2}
-                        />
-                        <circle
-                          cx={mark.x + mark.width}
-                          cy={middle}
-                          r={5}
-                          fill={mark.fill}
-                          stroke={theme.tooltipSurface}
-                          strokeWidth={2}
-                        />
-                      </g>
-                    )
-                  }}
-                />
-              </BarChart>
-            </ChartContainer>
-            <div className="flex h-64 flex-col pb-[34px] pt-[26px]">
-              {emailRows.map((row) => (
-                <div
-                  key={row.variant}
-                  className="flex min-h-0 flex-1 items-center justify-end whitespace-nowrap text-right text-[11px] tabular-nums text-text-secondary"
-                >
-                  {chartNumbers.percent(row.rate)} · {row.replied}/{row.sent}
-                </div>
-              ))}
-            </div>
-          </div>
-        </WidgetCard>
-      </div>
+      <DashboardLayout page="overview" widgets={widgets} />
     </div>
   )
 }

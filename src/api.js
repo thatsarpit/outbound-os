@@ -13,6 +13,9 @@ import { randomUUID, randomBytes } from 'crypto';
 
 import prisma from './utils/prismaClient.js';
 import salesRoutes from './routes/sales.js';
+import analyticsViewRoutes from './routes/analyticsViews.js';
+import { analyticsWindow } from './utils/analyticsWindow.js';
+import dashboardPreferenceRoutes from './routes/dashboardPreferences.js';
 import providerWebhookRoutes from './routes/webhooks.js';
 import whatsappTemplateRoutes from './routes/whatsappTemplates.js';
 import customerRoutes from './routes/customers.js';
@@ -852,6 +855,7 @@ app.use(providerWebhookRoutes);
 
 app.use('/api', requireRole('viewer'));
 app.use('/api/whatsapp', whatsappTemplateRoutes);
+app.use('/api', dashboardPreferenceRoutes);
 
 // Self-service profile/password used to be hand-rolled here; Clerk's own
 // <UserProfile/> replaces it — see web/src/pages/account.tsx.
@@ -868,6 +872,7 @@ app.use('/api', telegramRoutes);
 // Pool scoping runs after auth — platform admins bypass, every other user is
 // 403'd if they reference a poolId they don't have a UserPool row for.
 app.use('/api', requirePoolAccess());
+app.use('/api', analyticsViewRoutes);
 // Per-lead authorization: every /api/leads/<numeric>/... request resolves
 // the lead's poolId once and 403s if the user can't access it. This covers
 // detail / patch / delete / send / notes / tasks / etc. without each handler
@@ -4135,11 +4140,8 @@ app.get('/api/analytics/whatsapp-pricing', async (_req, res) => {
 app.get('/api/analytics/funnel', async (req, res) => {
   try {
     const { range = '30d', source, country, tier } = req.query;
-    const days = range === '7d' ? 7 : range === '90d' ? 90 : range === 'all' ? null : 30;
-
-    const now = new Date();
-    const dateFilter = days ? buildNewLeadDateWhere(new Date(now.getTime() - days * 86400000), now)
-      : {};
+    const { start, end: now } = analyticsWindow(req.query);
+    const dateFilter = start ? buildNewLeadDateWhere(start, now) : {};
     const baseWhere = {
       ...dateFilter,
       ...(source ? { source } : {}),
@@ -4282,8 +4284,8 @@ app.post('/api/analytics/recompute-weights', requireRole('manager'), async (req,
 app.get('/api/analytics/campaign-roi', async (req, res) => {
   try {
     const { range = '30d' } = req.query;
-    const days = range === '7d' ? 7 : range === '90d' ? 90 : range === 'all' ? null : 30;
-    const dateFilter = days ? { createdAt: { gte: new Date(Date.now() - days * 86400000) } } : {};
+    const { start, end } = analyticsWindow(req.query);
+    const dateFilter = start ? { createdAt: { gte: start, lt: end } } : {};
 
     const campaigns = await prisma.campaign.findMany({
       where: dateFilter,
@@ -4470,44 +4472,6 @@ app.get('/api/analytics/email-performance', async (req, res) => {
       },
       variants,
     });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// GET /api/analytics/team — per-agent performance stats
-app.get('/api/analytics/team', requireRole('manager'), async (req, res) => {
-  try {
-    const users = await prisma.user.findMany({
-      where: { role: { not: 'viewer' } },
-      select: { id: true, name: true, email: true, role: true, lastLoginAt: true },
-      orderBy: { name: 'asc' },
-    });
-
-    const stats = await Promise.all(users.map(async (u) => {
-      const [assigned, replied, engaged, closed, scoreAgg] = await Promise.all([
-        prisma.lead.count({ where: { assignedToId: u.id } }),
-        prisma.lead.count({ where: { assignedToId: u.id, status: 'replied' } }),
-        prisma.lead.count({ where: { assignedToId: u.id, status: 'engaged' } }),
-        prisma.lead.count({ where: { assignedToId: u.id, status: 'closed' } }),
-        prisma.lead.aggregate({
-          where: { assignedToId: u.id, score: { gt: 0 } },
-          _avg: { score: true },
-        }),
-      ]);
-      return {
-        id: u.id,
-        name: u.name,
-        email: u.email,
-        role: u.role,
-        lastLoginAt: u.lastLoginAt,
-        leadsAssigned: assigned,
-        replied: replied + engaged, // engaged is a deeper form of replied
-        closed,
-        avgScore: Math.round(scoreAgg._avg.score || 0),
-        conversionRate: assigned > 0 ? Math.round((closed / assigned) * 100) : 0,
-      };
-    }));
-
-    res.json(stats);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

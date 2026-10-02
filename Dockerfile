@@ -12,6 +12,7 @@ RUN npm ci
 ARG CACHE_BUST=local
 RUN echo "Web build cache bust: $CACHE_BUST"
 COPY web/ ./
+COPY shared/ /shared/
 RUN npm run build
 
 # ── Stage 2: Production runtime ──────────────────────────────────────────────────
@@ -50,6 +51,7 @@ RUN npx prisma generate
 
 # Copy source
 COPY src ./src
+COPY shared ./shared
 COPY scripts ./scripts
 
 # Copy the pre-built React dashboard from the builder stage

@@ -1565,3 +1565,88 @@ test('Inbox thread exposes Meta pricing without inventing an amount', async () =
   assert.equal(message.pricingType, 'regular');
   assert.equal(message.billable, true);
 });
+
+describe('Account dashboard layouts', () => {
+  const layoutRequest = (method, url, options = {}) => request(method, url, { ...options, headers: { ...options.headers, 'X-Forwarded-For': '192.0.2.10' } });
+  test('requires authentication and keeps pages and accounts isolated', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const { signToken } = await import('../src/auth/rbac.js');
+    const { defaultDashboardLayout } = await import('../shared/dashboardLayout.js');
+    const users = await Promise.all(['a', 'b'].map((suffix) => prisma.user.create({ data: { name: `Layout ${suffix}`, email: `layout-${suffix}@example.test`, passwordHash: 'not-a-password', role: 'viewer' } })));
+    const headers = users.map((user) => ({ Authorization: `Bearer ${signToken(user)}` }));
+    try {
+      assert.equal((await layoutRequest('GET', '/api/dashboard/preferences/analytics')).status, 401);
+      const initial = await layoutRequest('GET', '/api/dashboard/preferences/analytics', { headers: headers[0] });
+      assert.equal(initial.status, 200);
+      assert.equal(initial.body.revision, 0);
+      const layout = defaultDashboardLayout('analytics');
+      layout.widgets.reverse();
+      layout.widgets[0].width = 1;
+      layout.widgets[0].visible = false;
+      const save = await layoutRequest('PUT', '/api/dashboard/preferences/analytics', { headers: headers[0], body: { layout, revision: 0, ownerKey: 'forged-user' } });
+      assert.equal(save.status, 200);
+      assert.equal(save.body.revision, 1);
+      assert.deepEqual((await layoutRequest('GET', '/api/dashboard/preferences/analytics', { headers: headers[0] })).body.layout, layout);
+      assert.equal((await layoutRequest('GET', '/api/dashboard/preferences/analytics', { headers: headers[1] })).body.revision, 0);
+      assert.equal((await layoutRequest('GET', '/api/dashboard/preferences/overview', { headers: headers[0] })).body.revision, 0);
+      assert.equal((await layoutRequest('PUT', '/api/dashboard/preferences/analytics', { headers: headers[0], body: { layout, revision: 0 } })).status, 409);
+      assert.equal((await layoutRequest('PUT', '/api/dashboard/preferences/analytics', { headers: headers[0], body: { layout, revision: 99 } })).status, 409);
+      assert.equal((await layoutRequest('PUT', '/api/dashboard/preferences/analytics', { headers: headers[0], body: { layout: { version: 1, widgets: [] }, revision: 1 } })).status, 400);
+      assert.equal((await layoutRequest('GET', '/api/dashboard/preferences/unknown', { headers: headers[0] })).status, 404);
+      const reset = await layoutRequest('PUT', '/api/dashboard/preferences/analytics', { headers: headers[0], body: { layout: defaultDashboardLayout('analytics'), revision: 1 } });
+      assert.equal(reset.body.revision, 2);
+      assert.deepEqual(reset.body.layout, initial.body.layout);
+      const concurrent = await Promise.all([1, 2].map((width) => {
+        const next = defaultDashboardLayout('analytics');
+        next.widgets[0].width = width;
+        return layoutRequest('PUT', '/api/dashboard/preferences/analytics', { headers: headers[0], body: { layout: next, revision: 2 } });
+      }));
+      assert.deepEqual(concurrent.map((response) => response.status).sort(), [200, 409]);
+
+    } finally {
+      await prisma.dashboardPreference.deleteMany({});
+      await prisma.user.deleteMany({ where: { id: { in: users.map((user) => user.id) } } });
+    }
+  });
+});
+
+describe('Analytics selected periods', () => {
+  const periodRequest = (method, url, options = {}) => request(method, url, { ...options, headers: { ...options.headers, 'X-Forwarded-For': '192.0.2.11' } });
+  test('filters distributions, team cohorts, funnel and campaigns by the selected calendar period', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const user = await prisma.user.create({ data: { name: 'Period tester', email: 'period-tester@example.test', passwordHash: 'not-a-password', role: 'agent' } });
+    const now = new Date();
+    const leadIds = [];
+    const campaignIds = [];
+    try {
+      for (const [index, age] of [3, 20, -2].entries()) {
+        const date = new Date(now.getTime() - age * 86400000);
+        const lead = await prisma.lead.create({ data: { name: `Period ${index}`, mobile: `no-phone:period-${index}`, source: 'manual', country: 'Test Period Country', assignedToId: user.id, consumedAt: date, createdAt: date, status: 'closed', score: 80, leadTier: 'HOT' } });
+        leadIds.push(lead.id);
+        const campaign = await prisma.campaign.create({ data: { name: `Period campaign ${index}`, channel: 'email', messageTemplate: 'Test message', createdAt: date } });
+        campaignIds.push(campaign.id);
+      }
+      const distribution = await periodRequest('GET', '/api/analytics/distributions?days=14&tzOffset=0', { headers: authHeader() });
+      assert.equal(distribution.status, 200);
+      assert.equal(distribution.body.countryDist.find((row) => row.country === 'Test Period Country')._count.id, 1);
+      const thirty = await periodRequest('GET', '/api/analytics/distributions?days=30&tzOffset=0', { headers: authHeader() });
+      assert.equal(thirty.body.countryDist.find((row) => row.country === 'Test Period Country')._count.id, 2);
+      const team = await periodRequest('GET', '/api/analytics/team?days=14&tzOffset=0', { headers: authHeader() });
+      assert.equal(team.body.find((row) => row.id === user.id).leadsAssigned, 1);
+      const allTeam = await periodRequest('GET', '/api/analytics/team', { headers: authHeader() });
+      assert.equal(allTeam.body.find((row) => row.id === user.id).leadsAssigned, 3);
+      const funnel = await periodRequest('GET', '/api/analytics/funnel?range=14d&country=Test%20Period%20Country&tzOffset=0', { headers: authHeader() });
+      assert.equal(funnel.status, 200);
+      assert.equal(funnel.body.total, 1);
+      const roi = await periodRequest('GET', '/api/analytics/campaign-roi?range=14d&tzOffset=0', { headers: authHeader() });
+      assert.equal(roi.status, 200);
+      assert.deepEqual(roi.body.campaigns.filter((row) => campaignIds.includes(row.id)).map((row) => row.id), [campaignIds[0]]);
+      const { signToken } = await import('../src/auth/rbac.js');
+      assert.equal((await periodRequest('GET', '/api/analytics/team?days=14', { headers: { Authorization: `Bearer ${signToken(user)}` } })).status, 403);
+    } finally {
+      await prisma.campaign.deleteMany({ where: { id: { in: campaignIds } } });
+      await prisma.lead.deleteMany({ where: { id: { in: leadIds } } });
+      await prisma.user.delete({ where: { id: user.id } });
+    }
+  });
+});

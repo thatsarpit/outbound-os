@@ -80,6 +80,7 @@ type LocalSessionUser = { id: number | string; name: string; email: string; role
 interface AuthState {
   /** Which sign-in system the server uses. Set once at boot. */
   provider: AuthProvider
+  dashboardScope: string
   user: User | null
   capabilities: Record<string, boolean>
   isAuthenticated: boolean
@@ -109,6 +110,7 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   provider: 'local',
+  dashboardScope: 'signed-out',
   user: null,
   capabilities: {},
   isAuthenticated: false,
@@ -126,7 +128,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   getHomeRoute: () => getHomeRouteForRole(get().user?.role),
   logout: () => {
     get()._signOut?.()
-    set({ user: null, capabilities: {}, isAuthenticated: false, _getToken: null, _signOut: null })
+    set({
+      user: null,
+      dashboardScope: 'signed-out',
+      capabilities: {},
+      isAuthenticated: false,
+      _getToken: null,
+      _signOut: null,
+    })
   },
   checkAuth: async () => {},
 
@@ -137,6 +146,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       writeLocalSession(null)
       set({
         user: null,
+        dashboardScope: 'signed-out',
         capabilities: {},
         isAuthenticated: false,
         isLoading: false,
@@ -161,6 +171,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     const token = session.token
     set({
       user,
+      dashboardScope: `local:${session.user.id}`,
       capabilities: resolveCapabilities(role),
       isAuthenticated: true,
       isLoading: false,
@@ -178,6 +189,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     if (payload.status === 'signed-out') {
       set({
         user: null,
+        dashboardScope: 'signed-out',
         capabilities: {},
         isAuthenticated: false,
         isLoading: false,
@@ -196,6 +208,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       // confusing for someone who genuinely did sign in successfully.
       set({
         user: null,
+        dashboardScope: 'signed-out',
         capabilities: {},
         isAuthenticated: false,
         isLoading: false,
@@ -218,6 +231,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
     set({
       user,
+      dashboardScope: `clerk:${payload.orgId}:${payload.clerkUserId}`,
       capabilities: resolveCapabilities(role),
       isAuthenticated: true,
       isLoading: false,
