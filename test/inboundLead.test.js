@@ -9,7 +9,10 @@ import {
   normalizeInboundMobile,
   isSendableMobile,
   digPath,
+  formSubmissionMetadata,
 } from '../src/utils/inboundLead.js';
+import { FORM_PAYLOADS } from './fixtures/formSubmissions.js';
+import { FORM_SOURCE_PRESETS } from '../src/utils/formSourcePresets.js';
 
 // These cases are Indian numbers, so the workspace's home code is India.
 // test/phoneDefaults.test.js covers the blank (no-guessing) default.
@@ -259,3 +262,45 @@ describe('Inbound lead mapping — IndiaMART Lead Manager Push API', () => {
   });
 });
 
+
+describe('Form source presets', () => {
+  for (const preset of FORM_SOURCE_PRESETS) {
+    test(`${preset.id} maps contact details and explicit consent`, () => {
+      const lead = mapInboundLead(FORM_PAYLOADS[preset.id], preset.fieldMap);
+      assert.equal(lead.name, `${preset.name} Buyer`);
+      assert.equal(lead.email, `${preset.id}@example.test`);
+      assert.match(lead.mobile, /^1555000001[123]$/);
+      assert.equal(lead.product, 'Need 500 units');
+      assert.equal(lead.emailConsent, preset.id === 'typeform');
+      const metadata = formSubmissionMetadata(FORM_PAYLOADS[preset.id]);
+      assert.ok(metadata.externalId.startsWith(`${preset.id}:`));
+      assert.equal(metadata.consumedAt.toISOString(), '2026-10-01T09:30:00.000Z');
+    });
+  }
+  test('Tally field keys and Typeform refs work without relying on answer order', () => {
+    assert.equal(digPath(FORM_PAYLOADS.tally, 'data.fields.question_phone.value'), '+1 555 000 0012');
+    assert.equal(digPath(FORM_PAYLOADS.typeform, 'form_response.answers.random-name-ref.text'), 'Typeform Buyer');
+    const reordered = structuredClone(FORM_PAYLOADS.typeform);
+    reordered.form_response.answers.reverse();
+    const preset = FORM_SOURCE_PRESETS.find((p) => p.id === 'typeform');
+    assert.equal(mapInboundLead(reordered, preset.fieldMap).name, 'Typeform Buyer');
+  });
+  test('malformed definitions and provider metadata do not break ingestion', () => {
+    const malformed = structuredClone(FORM_PAYLOADS.typeform);
+    malformed.form_response.definition.fields = {};
+    assert.equal(digPath(malformed, 'form_response.answers.random-name-ref.text'), 'Typeform Buyer');
+    malformed.form_response.token = {};
+    malformed.form_response.submitted_at = 'invalid-date';
+    assert.deepEqual(formSubmissionMetadata(malformed), { externalId: null, consumedAt: null });
+    malformed.form_response.definition.fields = [{ title: 'Name' }];
+    malformed.form_response.answers = [{ type: 'text', text: 'Wrong answer', field: {} }];
+    assert.equal(digPath(malformed, 'form_response.answers.name.text'), undefined);
+  });
+  test('named Typeform contact beats an earlier secondary contact of the same type', () => {
+    const payload = structuredClone(FORM_PAYLOADS.typeform);
+    payload.form_response.definition.fields.unshift({ id: 'billing-field', title: 'Billing email', type: 'email' });
+    payload.form_response.answers.unshift({ type: 'email', email: 'billing@example.test', field: { id: 'billing-field', type: 'email' } });
+    const preset = FORM_SOURCE_PRESETS.find((p) => p.id === 'typeform');
+    assert.equal(mapInboundLead(payload, preset.fieldMap).email, 'typeform@example.test');
+  });
+});

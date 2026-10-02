@@ -33,6 +33,7 @@ import prisma from '../utils/prismaClient.js';
 import config from '../config.js';
 import logger from '../utils/logger.js';
 import { cloudApiAddressee } from '../utils/whatsappAddress.js';
+import { summarizeWhatsAppTemplate } from '../utils/whatsappTemplates.js';
 import { createDecipheriv, createCipheriv, randomBytes, createHash } from 'crypto';
 
 import { WHATSAPP_PROVIDERS, credentialState, providerOf } from './whatsappProviders.js';
@@ -122,6 +123,53 @@ function classifyError(httpStatus, errCode, message = '') {
 }
 
 class WhatsAppCloudApiService {
+
+  async listApprovedTemplates(accountId) {
+    const account = await prisma.whatsAppAccount.findUnique({ where: { id: accountId } });
+    const fail = (status, reason, message) => ({ ok: false, status, reason, message });
+    if (!account) return fail(404, 'account_not_found', 'WhatsApp account not found.');
+    if (providerOf(account) !== WHATSAPP_PROVIDERS.META) {
+      return fail(422, 'unsupported_provider', 'This number uses AiSensy. Find its approved API campaign names in the AiSensy dashboard.');
+    }
+    if (!account.metaWabaId) {
+      return fail(422, 'missing_waba_id', 'Add the WhatsApp Business Account ID in Settings → WhatsApp for this number.');
+    }
+    const token = account.cloudApiToken ? decrypt(account.cloudApiToken) : process.env.META_ACCESS_TOKEN;
+    if (!token) return fail(422, 'no_credentials', 'Add a valid Meta access token in Settings → WhatsApp.');
+    const templates = [];
+    const seenCursors = new Set();
+    let after;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      // Rebuild each page URL ourselves: never forward the bearer token to an
+      // arbitrary URL from an upstream pagination response.
+      for (let page = 0; page < 100; page += 1) {
+        const url = new URL(`${graphBase()}/${encodeURIComponent(account.metaWabaId)}/message_templates`);
+        url.searchParams.set('fields', 'name,language,category,status,components');
+        url.searchParams.set('status', 'APPROVED');
+        url.searchParams.set('limit', '100');
+        if (after) url.searchParams.set('after', after);
+        const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
+        const data = await response.json();
+        if (!response.ok || data.error) {
+          return fail(502, 'upstream_error', 'Meta could not list templates. Check the access token and whatsapp_business_management permission.');
+        }
+        if (!Array.isArray(data.data)) return fail(502, 'invalid_response', 'Meta returned an invalid template list. Try again.');
+        templates.push(...data.data.filter((template) => template.status === 'APPROVED').map(summarizeWhatsAppTemplate));
+        if (!data.paging?.next) return { ok: true, templates };
+        after = data.paging?.cursors?.after;
+        if (!after || seenCursors.has(after)) break;
+        seenCursors.add(after);
+      }
+      return fail(502, 'incomplete_response', 'Meta pagination did not complete. Try loading templates again.');
+    } catch (error) {
+      return fail(502, error.name === 'AbortError' ? 'timeout' : 'connection_failed',
+        error.name === 'AbortError' ? 'Meta did not answer in time. Try again.' : 'Could not reach Meta or read its template response. Try again.');
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   /**
    * The account a send goes out from. Callers that do not name one — sign-in

@@ -10,11 +10,53 @@
 
 import { withDefaultCountryCode } from './phoneDefaults.js';
 
-/** Resolve "a.b.c" as well as "a" against a payload. */
+/** Resolve dot paths, including form answer arrays by stable ref/key or label. */
 export function digPath(obj, path) {
   return String(path)
     .split('.')
-    .reduce((acc, part) => (acc == null ? undefined : acc[part]), obj);
+    .reduce((acc, part) => {
+      if (acc == null) return undefined;
+      if (!Array.isArray(acc) || /^\d+$/.test(part)) return acc[part];
+      const same = (value) => typeof value === 'string' && value.toLowerCase() === part.toLowerCase();
+      // Typeform supplies question titles separately from answers. Match a
+      // title through the field ID, so reordering questions does not move a
+      // buyer's phone into their name. Tally includes labels in each field.
+      const named = acc.find((item) => {
+        if (!item || typeof item !== 'object') return false;
+        const definitions = obj?.form_response?.definition?.fields;
+        const definition = Array.isArray(definitions) ? definitions.find((field) => field && (
+          (field.id && field.id === item.field?.id) || (field.ref && field.ref === item.field?.ref)
+        )) : undefined;
+        return [item.key, item.label, item.field?.ref, definition?.title].some(same);
+      });
+      // A named/ref-matched contact field wins over an earlier billing or
+      // secondary contact of the same type. Fall back to type only when the
+      // form has no matching name (builders often generate random refs).
+      return named ?? (['email', 'phone_number'].includes(part.toLowerCase())
+        ? acc.find((item) => same(item?.field?.type)) : undefined);
+    }, obj);
+}
+
+/** Preserve provider identity and submission time without accepting invalid dates. */
+export function formSubmissionMetadata(payload) {
+  let provider, id, submittedAt;
+  if (payload?.form_response) {
+    provider = 'typeform';
+    id = payload.form_response.token;
+    submittedAt = payload.form_response.submitted_at;
+  } else if (payload?.eventType === 'FORM_RESPONSE' && payload?.data) {
+    provider = 'tally';
+    id = payload.data.submissionId;
+    submittedAt = payload.data.createdAt;
+  } else if (typeof payload?.externalId === 'string' && typeof payload?.submittedAt === 'string') {
+    provider = 'googleforms';
+    id = payload.externalId;
+    submittedAt = payload.submittedAt;
+  }
+  const externalId = typeof id === 'string' && id.trim() && id.length <= 180
+    ? `${provider}:${id.trim()}` : null;
+  const date = typeof submittedAt === 'string' ? new Date(submittedAt) : null;
+  return { externalId, consumedAt: date && Number.isFinite(date.getTime()) ? date : null };
 }
 
 /**

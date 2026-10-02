@@ -5,7 +5,7 @@ export const mcpToolGroups = [
   { name: 'Campaigns', tools: ['list_campaigns', 'get_campaign', 'create_campaign', 'update_campaign', 'delete_campaign', 'start_campaign', 'pause_campaign', 'campaign_preview_leads', 'campaign_ab_results'] },
   { name: 'Messages', tools: ['list_messages', 'send_whatsapp', 'send_whatsapp_file', 'list_media_files', 'send_email'] },
   { name: 'Analytics', tools: ['stats_overview', 'analytics_funnel', 'analytics_campaign_roi', 'analytics_email_performance', 'whatsapp_costs'] },
-  { name: 'System', tools: ['system_status', 'system_pause_resume', 'whatsapp_accounts', 'list_users'] },
+  { name: 'System', tools: ['system_status', 'system_pause_resume', 'whatsapp_accounts', 'whatsapp_templates', 'list_users'] },
 ] as const
 
 export const mcpToolCount = mcpToolGroups.reduce((sum, group) => sum + group.tools.length, 0)

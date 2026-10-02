@@ -1,0 +1,40 @@
+{
+  "testedAt": "2026-10-03",
+  "environment": {
+    "wordpress": "7.1.2",
+    "php": "8.3",
+    "contactForm7": "6.1.7",
+    "cf7ToWebhook": "5.1.0",
+    "deployment": "isolated local Docker containers"
+  },
+  "request": {
+    "method": "POST",
+    "headers": {
+      "Content-Type": "application/json; charset=UTF-8",
+      "x-api-key": "<redacted>"
+    },
+    "body": {
+      "name": "WordPress Test Buyer",
+      "email": "wordpress@example.test",
+      "phone": "+1 555 000 0024",
+      "message": "Need 500 units from the live form"
+    }
+  },
+  "responses": [
+    {
+      "status": 200,
+      "leadId": 1,
+      "created": true
+    },
+    {
+      "status": 200,
+      "leadId": 1,
+      "created": false
+    }
+  ],
+  "notes": [
+    "Submitted twice through a real browser form.",
+    "All contact data are fake.",
+    "Only the test CRM host and port were allowlisted for private-network delivery; no production WordPress configuration was changed."
+  ]
+}

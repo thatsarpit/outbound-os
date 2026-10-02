@@ -19,6 +19,8 @@ export interface Lead {
   name: string
   company: string | null
   mobile: string
+  waUsername?: string | null
+  waUserId?: string | null
   email: string | null
   country: string | null
   product: string | null
@@ -125,6 +127,9 @@ export interface Message {
   waAccount: number
   emailAccountId: number | null
   status: string
+  pricingCategory?: string | null
+  pricingType?: string | null
+  billable?: boolean | null
   retryCount: number
   maxRetries: number
   campaignId: number | null
@@ -536,6 +541,9 @@ export interface InboxMessage {
   content: string
   subject: string | null
   status: InboxMessageStatus
+  pricingCategory?: string | null
+  pricingType?: string | null
+  billable?: boolean | null
   createdAt: string
   sentAt: string | null
   senderAccountId: number | null

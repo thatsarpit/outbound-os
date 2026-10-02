@@ -22,7 +22,7 @@
     "db:migration": "npx prisma migrate dev --create-only",
     "db:studio": "npx prisma studio",
     "preflight": "node scripts/preflight.mjs",
-    "test": "node --test test/unit.test.js test/reportingTime.test.js test/telegram.test.js test/inboundLead.test.js test/secretsMatch.test.js test/sheetsSync.test.js test/businessHours.test.js test/workspaceTime.test.js test/whatsappProviders.test.js test/phoneDefaults.test.js test/whatsappAddress.test.js test/replyClassifier.test.js test/whatsappMedia.test.js test/metaWebhook.test.js",
+    "test": "node --test test/unit.test.js test/csvExporter.test.js test/reportingTime.test.js test/telegram.test.js test/inboundLead.test.js test/secretsMatch.test.js test/sheetsSync.test.js test/businessHours.test.js test/workspaceTime.test.js test/whatsappProviders.test.js test/phoneDefaults.test.js test/whatsappAddress.test.js test/replyClassifier.test.js test/whatsappMedia.test.js test/metaWebhook.test.js",
     "test:integration": "bash scripts/test-integration.sh",
     "test:all": "npm test && npm run test:integration",
     "backup": "bash scripts/backup.sh",

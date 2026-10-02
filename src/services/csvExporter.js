@@ -1,5 +1,6 @@
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
+import { leadsToCsv } from '../utils/leadCsv.js';
 
 /**
  * CSV Export Engine
@@ -33,47 +34,13 @@ class CSVExporter {
       orderBy: { score: 'desc' },
     });
 
-    // CSV headers
-    const headers = [
-      'ID', 'Name', 'Company', 'Mobile', 'Email', 'Country',
-      'Product', 'Quantity', 'Source', 'Status', 'Score',
-      'Engagement Level', 'Reply Speed', 'Follow-ups Sent',
-      'Tags', 'Notes', 'Last Activity', 'Created At',
-    ];
-
-    const rows = leads.map(lead => [
-      lead.id,
-      this._escapeCSV(lead.name),
-      this._escapeCSV(lead.company || ''),
-      lead.mobile,
-      lead.email || '',
-      lead.country || '',
-      this._escapeCSV(lead.product || ''),
-      lead.quantity || '',
-      lead.source,
-      lead.status,
-      lead.score,
-      lead.engagementLevel,
-      lead.replySpeed || 'none',
-      lead.followupCount,
-      lead.tags || '',
-      this._escapeCSV(lead.notes || ''),
-      lead.lastMessageAt ? lead.lastMessageAt.toISOString() : '',
-      lead.createdAt.toISOString(),
-    ]);
-
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const csv = leadsToCsv(leads);
 
     logger.info(`📤 Exported ${leads.length} leads to CSV`);
     return csv;
   }
 
-  _escapeCSV(value) {
-    if (value.includes(',') || value.includes('"') || value.includes('\n')) {
-      return `"${value.replace(/"/g, '""')}"`;
-    }
-    return value;
-  }
+
 }
 
 const csvExporter = new CSVExporter();

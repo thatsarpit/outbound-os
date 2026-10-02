@@ -308,8 +308,21 @@ export function LeadDetailDrawer({
                 <div className="space-y-3 border-b border-border px-4 py-4 sm:px-6">
                   <div className="flex items-center gap-3 text-sm">
                     <Phone className="w-4 h-4 text-text-muted" />
-                    <span className="text-text-secondary">{lead.mobile}</span>
+                    <div className="min-w-0">
+                      <span className="text-text-secondary">
+                        {lead.mobile && !lead.mobile.startsWith('no-phone:') ? lead.mobile : 'No phone number'}
+                      </span>
+                      {lead.mobile.startsWith('no-phone:') && (lead.waUsername || lead.waUserId) && (
+                        <p className="text-xs text-text-muted">WhatsApp replies use their WhatsApp identity.</p>
+                      )}
+                    </div>
                   </div>
+                  {lead.waUsername && (
+                    <div className="flex items-center gap-3 text-sm">
+                      <span className="w-4 text-center text-text-muted" aria-hidden="true">@</span>
+                      <span className="text-text-secondary">@{lead.waUsername.replace(/^@/, '')}</span>
+                    </div>
+                  )}
                   {lead.email && (
                     <div className="flex items-center gap-3 text-sm">
                       <Mail className="w-4 h-4 text-text-muted" />
