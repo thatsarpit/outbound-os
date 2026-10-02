@@ -9,6 +9,35 @@ import { classifyReply } from '../src/services/replyClassifier.js';
 
 const stops = (text) => classifyReply(null, text)?.nextAction === 'stop_contact';
 
+describe('Additional language opt-outs', () => {
+  const cases = [
+    ['Bengali', 'আমাকে আর মেসেজ পাঠাবেন না', 'আমাকে পণ্যের দাম পাঠাবেন'],
+    ['Marathi', 'मला संदेश पाठवू नका', 'मला किंमत आणि नमुना पाठवा'],
+    ['Tamil', 'எனக்கு செய்தி அனுப்ப வேண்டாம்', 'எனக்கு விலை பட்டியல் அனுப்புங்கள்'],
+    ['Telugu', 'నాకు సందేశాలు పంపవద్దు', 'నాకు ధరల జాబితా పంపండి'],
+    ['Urdu', 'مجھے پیغامات مت بھیجیں', 'مجھے قیمت بتائیں'],
+    ['Vietnamese', 'Đừng gửi tin nhắn cho tôi', 'Gửi cho tôi bảng giá'],
+    ['Swahili', 'Usinitumie ujumbe', 'Nitumie bei ya bidhaa'],
+    ['Dutch', 'Stuur mij geen berichten meer', 'Stuur mij de prijslijst'],
+    ['Polish', 'Nie wysyłaj mi wiadomości', 'Wyślij mi cennik'],
+    ['Thai', 'กรุณาหยุดส่งข้อความ', 'กรุณาส่งราคา'],
+  ];
+  for (const [language, refusal, ordinary] of cases) {
+    test(`${language}: explicit opt-out stops contact, buying reply does not`, () => {
+      assert.equal(stops(refusal), true);
+      assert.equal(stops(ordinary), false);
+      assert.equal(stops(refusal.normalize('NFD')), true);
+    });
+  }
+  test('ambiguous single words and soft refusals stay scoped', () => {
+    assert.equal(stops('AFMELDEN!'), true);
+    assert.equal(stops('Kun je het oude account afmelden en de nieuwe offerte sturen?'), false);
+    assert.equal(stops('Wypisz mnie.'), true);
+    assert.equal(classifyReply(null, 'Geen interesse')?.confidence, 'medium');
+    assert.equal(classifyReply(null, 'Nie jestem zainteresowana')?.confidence, 'medium');
+  });
+});
+
 describe('Opt-outs', () => {
   test('English', () => {
     for (const text of ['STOP', 'Please stop', 'Unsubscribe me', 'remove me from your list', "Don't contact me again"]) {

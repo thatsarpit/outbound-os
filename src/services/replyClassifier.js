@@ -45,6 +45,17 @@ const OPT_OUT = [
   'отписаться', 'не пишите', 'больше не пишите',
   // Arabic
   'إلغاء الاشتراك', 'الغاء الاشتراك', 'لا تراسلني', 'توقف عن',
+  // Bengali, Marathi, Tamil, Telugu and Urdu: explicit messaging refusals.
+  'আমাকে আর মেসেজ পাঠাবেন না', 'আমাকে আর বার্তা পাঠাবেন না',
+  'मला संदेश पाठवू नका', 'मला मेसेज पाठवू नका',
+  'எனக்கு செய்தி அனுப்ப வேண்டாம்',
+  'నాకు సందేశాలు పంపవద్దు',
+  'مجھے پیغامات مت بھیجیں',
+  // Vietnamese, Swahili, Dutch and Polish.
+  'đừng gửi tin nhắn cho tôi', 'không liên hệ với tôi nữa',
+  'usinitumie ujumbe', 'acha kunitumia ujumbe',
+  'stuur mij geen berichten meer', 'stuur me geen berichten meer',
+  'nie wysyłaj mi wiadomości', 'nie wysyłajcie mi wiadomości',
 ];
 
 // Single words that are an opt-out only when they are the whole reply, the
@@ -54,6 +65,10 @@ const OPT_OUT_WORDS = new Set([
   'stop', 'stopp', 'unsubscribe', 'parar', 'pare', 'sair', 'baja', 'cancelar',
   'arrêt', 'arrêter', 'arret', 'arreter', 'basta', 'berhenti', 'iptal', 'dur',
   'стоп', 'хватит', 'توقف', 'إلغاء', 'الغاء', 'बंद', 'रोको',
+  'uitschrijven', 'afmelden', 'wypisz mnie',
+  // Thai does not consistently separate words with spaces. Keep this explicit
+  // request as a whole-reply match instead of matching fragments of a sentence.
+  'กรุณาหยุดส่งข้อความ',
 ]);
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -95,6 +110,7 @@ const QUESTION = ['?', 'what', 'when', 'where', 'which', 'can you', 'could you',
 const NEGATIVE_SOFT = [
   'not interested', 'no thanks', 'no thank you', 'not now', 'already have',
   'nahi chahiye', 'नहीं चाहिए', 'no me interesa', 'não tenho interesse', 'pas intéressé', 'kein interesse',
+  'geen interesse', 'nie jestem zainteresowany', 'nie jestem zainteresowana',
 ];
 
 const has = (text, list) => list.some((k) => text.includes(k));

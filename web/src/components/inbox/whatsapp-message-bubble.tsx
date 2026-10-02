@@ -28,6 +28,11 @@ export function MessageBubble({
 }) {
   const isInbound = message.direction === 'inbound'
   const meta = getChannel(message.channel)
+  const showPricing = !isInbound && message.channel === 'whatsapp'
+    && (Boolean(message.pricingCategory) || typeof message.billable === 'boolean')
+  const pricingCategory = message.pricingCategory
+    ? message.pricingCategory.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase())
+    : 'WhatsApp'
 
   return (
     <div className={cn('flex w-full', isInbound ? 'justify-start' : 'justify-end')}>
@@ -66,6 +71,15 @@ export function MessageBubble({
           {formatRelativeTime(message.sentAt || message.createdAt)}
           {!isInbound && message.status ? ` · ${message.status}` : ''}
         </span>
+        {showPricing && (
+          <span
+            className="self-end px-0.5 text-[10px] text-text-muted"
+            title={message.pricingType ? `Meta pricing model: ${message.pricingType}` : undefined}
+          >
+            {pricingCategory}
+            {typeof message.billable === 'boolean' ? ` · ${message.billable ? 'billable' : 'free'}` : ''}
+          </span>
+        )}
       </div>
     </div>
   )

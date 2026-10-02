@@ -177,13 +177,16 @@ const DRAWING_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height=
 const files = new Map<number, Blob>()
 
 const MESSAGES: InboxMessage[] = [
-  message(1, 'outbound', 95, 'Hi Rohan, thanks for your enquiry on our website about M8 hex bolts. We stock them in A2 and A4 stainless. How many do you need each month?'),
+  message(1, 'outbound', 95, 'Hi Rohan, thanks for your enquiry on our website about M8 hex bolts. We stock them in A2 and A4 stainless. How many do you need each month?', {
+    pricingCategory: 'marketing', pricingType: 'regular', billable: true,
+  }),
   message(1, 'inbound', 61, 'Hi, around 20,000 units a month. Can you share prices?'),
   message(1, 'outbound', 58, 'Here is our price list. M8 x 40 in A2 is on page 2.', {
     mediaType: 'pdf',
     mediaUrl: 'demo',
     mediaCaption: 'Here is our price list. M8 x 40 in A2 is on page 2.',
     mediaFilename: 'Acme-price-list-2026.pdf',
+    pricingCategory: 'service', pricingType: 'free_customer_service', billable: false,
   }),
   message(1, 'inbound', 5, 'This is the drawing we work to. Can you do A4 at the A2 price if we commit for a year?', {
     mediaType: 'image',
