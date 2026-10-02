@@ -21,17 +21,19 @@ export function digPath(obj, path) {
       // Typeform supplies question titles separately from answers. Match a
       // title through the field ID, so reordering questions does not move a
       // buyer's phone into their name. Tally includes labels in each field.
-      return acc.find((item) => {
+      const named = acc.find((item) => {
         if (!item || typeof item !== 'object') return false;
         const definitions = obj?.form_response?.definition?.fields;
         const definition = Array.isArray(definitions) ? definitions.find((field) => field && (
           (field.id && field.id === item.field?.id) || (field.ref && field.ref === item.field?.ref)
         )) : undefined;
-        return [item.key, item.label, item.field?.ref, definition?.title,
-          // Contact answer types are useful when builders generate random refs.
-          ...(['email', 'phone_number'].includes(item.field?.type) ? [item.field.type] : []),
-        ].some(same);
+        return [item.key, item.label, item.field?.ref, definition?.title].some(same);
       });
+      // A named/ref-matched contact field wins over an earlier billing or
+      // secondary contact of the same type. Fall back to type only when the
+      // form has no matching name (builders often generate random refs).
+      return named ?? (['email', 'phone_number'].includes(part.toLowerCase())
+        ? acc.find((item) => same(item?.field?.type)) : undefined);
     }, obj);
 }
 

@@ -296,4 +296,11 @@ describe('Form source presets', () => {
     malformed.form_response.answers = [{ type: 'text', text: 'Wrong answer', field: {} }];
     assert.equal(digPath(malformed, 'form_response.answers.name.text'), undefined);
   });
+  test('named Typeform contact beats an earlier secondary contact of the same type', () => {
+    const payload = structuredClone(FORM_PAYLOADS.typeform);
+    payload.form_response.definition.fields.unshift({ id: 'billing-field', title: 'Billing email', type: 'email' });
+    payload.form_response.answers.unshift({ type: 'email', email: 'billing@example.test', field: { id: 'billing-field', type: 'email' } });
+    const preset = FORM_SOURCE_PRESETS.find((p) => p.id === 'typeform');
+    assert.equal(mapInboundLead(payload, preset.fieldMap).email, 'typeform@example.test');
+  });
 });

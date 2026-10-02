@@ -1535,10 +1535,18 @@ describe('Form provider presets through the lead webhook', () => {
         edited.email = 'edited@example.test';
         edited.phone = '+1 555 000 0093';
       }
+      // A replay must not overwrite a saved contact or fail because an edited
+      // answer points at somebody else's existing number.
+      const { default: prisma } = await import('../src/utils/prismaClient.js');
+      await prisma.lead.create({ data: {
+        name: 'Other form contact', source: 'manual',
+        mobile: `1555000009${presetId === 'typeform' ? '1' : presetId === 'tally' ? '2' : '3'}`,
+      } });
       const replay = await request('POST', webhookUrl, { headers: { 'x-api-key': apiKey }, body: edited });
       assert.equal(replay.status, 200);
       assert.equal(replay.body.leadId, first.body.leadId);
       assert.equal(replay.body.created, false);
+      assert.equal((await prisma.lead.findUnique({ where: { id: first.body.leadId } })).mobile, detail.body.mobile);
     });
   }
 });

@@ -131,11 +131,37 @@ export default function WebsiteFormsDoc() {
         A plain form cannot set an <code>x-api-key</code> header; use the query parameter here.
       </p>
 
-      <h2 id="wordpress">WordPress: WPForms webhook addon</h2>
+      <h2 id="wordpress">WordPress: Contact Form 7 and CF7 to Webhook</h2>
+      <p>
+        This free route uses <a href="https://wordpress.org/plugins/contact-form-7/">Contact Form 7</a>
+        {' '}and <a href="https://wordpress.org/plugins/cf7-to-zapier/">CF7 to Webhook</a>.
+        The add-on sends JSON from WordPress to your public HTTPS webhook endpoint.
+      </p>
+      <ol>
+        <li>Create a <strong>Website Contact Form</strong> source in Outbound OS and copy its URL and key.</li>
+        <li>In WordPress, open <strong>Plugins → Add Plugin</strong>, then install and activate Contact Form 7 and CF7 to Webhook.</li>
+        <li>Open <strong>Contact → Contact Forms</strong> and edit or create a form. In its <strong>Form</strong> tab, use the tags below. The <code>webhook:</code> option maps your CF7 field names to the names Outbound OS expects.</li>
+        <li>Open the form&rsquo;s <strong>Webhook</strong> tab. Check <strong>Send to Webhook</strong> and paste the source URL into <strong>Webhook URL</strong>. Under <strong>Method</strong>, keep POST.</li>
+        <li>Expand <strong>Headers</strong> and enter <code>x-api-key: &lt;your-source-key&gt;</code>, with a colon separating the name and value. Leave the custom <strong>Body</strong> empty to send the mapped fields as JSON.</li>
+        <li>Choose whether <strong>Send Mail</strong> should also send CF7&rsquo;s normal email notification. Leave it unchecked for a webhook-only form, then save.</li>
+        <li>Copy the generated shortcode into a page and publish it. Submit, check the lead&rsquo;s contact details and message in Outbound OS, and submit again to confirm the same lead is updated.</li>
+      </ol>
+      <Code label="Contact Form 7 → Form">{`<label>Name [text* your-name webhook:name]</label>
+<label>Email [email* your-email webhook:email]</label>
+<label>Phone [tel your-phone webhook:phone]</label>
+<label>Message [textarea your-message webhook:message]</label>
+[submit "Send enquiry"]`}</Code>
+      <p>
+        Email is required in this example; phone is optional. The add-on blocks private and
+        loopback destinations by default, so use your public HTTPS URL. For a controlled
+        private deployment, follow the add-on&rsquo;s explicit host allowlist instructions;
+        keep its default protection for other destinations.
+      </p>
+
+      <h2 id="wordpress-wpforms">WordPress alternative: WPForms webhook addon</h2>
       <p>
         This route needs WPForms&rsquo; <a href="https://wpforms.com/docs/how-to-install-and-use-the-webhooks-addon-with-wpforms/">Webhooks addon</a>,
-        currently included in its Elite license. Contact Form 7 users can use a webhook addon
-        that sends the same fields and source key; check that addon&rsquo;s authentication settings.
+        currently included in its Elite license.
       </p>
       <ol>
         <li>Create a <strong>Website Contact Form</strong> source in Outbound OS.</li>

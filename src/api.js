@@ -776,7 +776,7 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
             // Fill in what the first delivery was missing. A lead captured
             // without a number, then re-sent once Engyne resolved one, kept the
             // placeholder forever and could never be called or messaged.
-            ...(cleanMobile && existingLead.mobile !== cleanMobile ? { mobile: cleanMobile } : {}),
+            ...(cleanMobile && !isSendableMobile(existingLead.mobile) ? { mobile: cleanMobile } : {}),
             ...(email && !existingLead.email ? { email } : {}),
             ...(company && !existingLead.company ? { company } : {}),
             ...(product && !existingLead.product ? { product } : {}),
