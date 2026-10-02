@@ -12,6 +12,6 @@ export function registerAllTools(server) {
   registerLeadTools(server);       // 12 tools
   registerMessageTools(server);    //  4 tools
   registerCampaignTools(server);   //  9 tools
-  registerSystemTools(server);     //  4 tools
+  registerSystemTools(server);     //  5 tools
   registerAnalyticsTools(server);  //  4 tools
 }

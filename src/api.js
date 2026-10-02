@@ -14,6 +14,7 @@ import { randomUUID, randomBytes } from 'crypto';
 import prisma from './utils/prismaClient.js';
 import salesRoutes from './routes/sales.js';
 import providerWebhookRoutes from './routes/webhooks.js';
+import whatsappTemplateRoutes from './routes/whatsappTemplates.js';
 import customerRoutes from './routes/customers.js';
 import settlementRoutes from './routes/settlement.js';
 import productRoutes from './routes/products.js';
@@ -43,7 +44,8 @@ import webhookDispatcher from './services/webhookDispatcher.js';
 import { workspaceTimezone, zonedParts, zonedTimeToUtc } from './utils/workspaceTime.js';
 import { sendMediaFile, MEDIA_DIR as WHATSAPP_MEDIA_DIR } from './services/whatsappMedia.js';
 import { whatsappAddress } from './utils/whatsappAddress.js';
-import { mapInboundLead, isSendableMobile } from './utils/inboundLead.js';
+import { mapInboundLead, isSendableMobile, formSubmissionMetadata } from './utils/inboundLead.js';
+import { FORM_SOURCE_PRESETS } from './utils/formSourcePresets.js';
 import { secretsMatch } from './utils/secretsMatch.js';
 import sheetsSync from './services/sheetsSync.js';
 import whatsappCloudApi from './services/whatsappCloudApi.js';
@@ -707,6 +709,7 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
     }
 
     const cleanMobile = mapped.mobile;
+    const submission = formSubmissionMetadata(payload);
 
     const now = new Date();
     // Pool ownership: prefer the WebhookSource's configured pool. If the
@@ -724,9 +727,12 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
     // for the same address (its mobile still a no-phone: placeholder) is the
     // same person, now with a number. Matching only by number created a second
     // lead for them, and a second round of first-contact messages.
-    let existingLead = cleanMobile
-      ? await prisma.lead.findFirst({ where: { mobile: cleanMobile } })
+    let existingLead = submission.externalId
+      ? await prisma.lead.findFirst({ where: { externalId: submission.externalId, source: ws.source } })
       : null;
+    if (!existingLead && cleanMobile) {
+      existingLead = await prisma.lead.findFirst({ where: { mobile: cleanMobile } });
+    }
     if (!existingLead && email) {
       existingLead = await prisma.lead.findFirst({
         where: cleanMobile
@@ -776,6 +782,7 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
             ...(product && !existingLead.product ? { product } : {}),
             ...(country && !existingLead.country ? { country } : {}),
             ...(quantity && !existingLead.quantity ? { quantity } : {}),
+            ...(submission.externalId && !existingLead.externalId ? { externalId: submission.externalId } : {}),
             ...(consent.emailMarketingConsent && !existingLead.emailMarketingConsent ? consent : {}),
           },
         })
@@ -784,7 +791,8 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
         name, mobile: mobileValue, email, company, product, country, quantity,
         ...consent,
         source: req.params.source, status: 'new',
-        consumedAt: now, leadTier: 'HOT',
+        externalId: submission.externalId,
+        consumedAt: submission.consumedAt || now, leadTier: 'HOT',
         poolId: webhookPoolId,
       },
     });
@@ -843,6 +851,7 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
 app.use(providerWebhookRoutes);
 
 app.use('/api', requireRole('viewer'));
+app.use('/api/whatsapp', whatsappTemplateRoutes);
 
 // Self-service profile/password used to be hand-rolled here; Clerk's own
 // <UserProfile/> replaces it — see web/src/pages/account.tsx.
@@ -5445,6 +5454,7 @@ app.get('/api/webhooks/sources', requireRole('manager'), async (req, res) => {
 // GET /api/webhooks/sources/presets — built-in field maps for popular platforms
 app.get('/api/webhooks/sources/presets', requireRole('admin'), (req, res) => {
   res.json([
+    ...FORM_SOURCE_PRESETS,
     {
       id: 'justdial',
       name: 'JustDial',
@@ -5535,6 +5545,7 @@ app.post('/api/webhooks/sources/from-preset', requireRole('admin'), async (req, 
     if (!presetId) return res.status(400).json({ error: 'presetId required' });
 
     const PRESETS = {
+      ...Object.fromEntries(FORM_SOURCE_PRESETS.map((preset) => [preset.id, preset])),
       justdial:   { name: 'JustDial', fieldMap: { name:'sender_name', mobile:'sender_mobile', email:'sender_email', company:'company_name', product:'cat', country:'sender_country' } },
       tradeindia: { name: 'TradeIndia', fieldMap: { name:'Name', mobile:'Mobile', email:'Email', company:'CompanyName', product:'Subject', country:'Country', quantity:'Quantity' } },
       indiamart:  { name: 'IndiaMART (Webhook)', fieldMap: { name:'RESPONSE.SENDER_NAME', mobile:'RESPONSE.SENDER_MOBILE', email:'RESPONSE.SENDER_EMAIL', company:'RESPONSE.SENDER_COMPANY', product:'RESPONSE.QUERY_PRODUCT_NAME', country:'RESPONSE.SENDER_COUNTRY_ISO' } },

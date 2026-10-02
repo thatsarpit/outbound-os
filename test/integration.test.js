@@ -1425,3 +1425,135 @@ describe('Lead webhook matches an email-only lead once a number arrives', () => 
     assert.ok(!leads[0].mobile.startsWith('no-phone:'), 'the placeholder was replaced by the real number');
   });
 });
+
+
+describe('Approved WhatsApp template discovery', () => {
+  test('uses account credentials, follows safe pagination and returns only approved templates', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const { default: cloudApi } = await import('../src/services/whatsappCloudApi.js');
+    const calls = [];
+    let rejectToken = false;
+    const graph = http.createServer((req, res) => {
+      calls.push({ url: req.url, authorization: req.headers.authorization });
+      res.setHeader('Content-Type', 'application/json');
+      if (rejectToken) { res.statusCode = 401; return res.end(JSON.stringify({ error: { code: 190 } })); }
+      const after = new URL(req.url, 'http://localhost').searchParams.get('after');
+      res.end(JSON.stringify(after ? { data: [
+        { name: 'named_offer', language: 'en', category: 'MARKETING', status: 'APPROVED', components: [{ type: 'BODY', text: 'Hi {{customer_name}}' }] },
+      ] } : { data: [
+        { name: 'welcome', language: 'en_US', category: 'UTILITY', status: 'APPROVED', components: [{ type: 'BODY', text: 'Hi {{1}}, your country is {{2}}. Hello {{1}} again.' }] },
+        { name: 'pending', language: 'en', category: 'MARKETING', status: 'PENDING', components: [] },
+      ], paging: { next: 'https://untrusted.example.test/do-not-forward-token', cursors: { after: 'next-page' } } }));
+    });
+    await new Promise((resolve) => graph.listen(0, '127.0.0.1', resolve));
+    const previousBase = process.env.META_GRAPH_API_BASE;
+    process.env.META_GRAPH_API_BASE = `http://127.0.0.1:${graph.address().port}`;
+    const account = await prisma.whatsAppAccount.create({ data: {
+      name: 'Template test', provider: 'meta', metaWabaId: 'TEST-WABA',
+      cloudApiToken: cloudApi.encryptToken('test-template-account-token'),
+    } });
+    try {
+      const endpoint = `/api/whatsapp/accounts/${account.id}/templates`;
+      assert.equal((await request('GET', endpoint)).status, 401);
+      const response = await request('GET', endpoint, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.60' } });
+      assert.equal(response.status, 200);
+      assert.equal(response.body.accountId, account.id);
+      assert.deepEqual(response.body.templates.map((t) => t.name), ['welcome', 'named_offer']);
+      assert.deepEqual(response.body.templates[0].bodyVariables, ['1', '2']);
+      assert.deepEqual(response.body.templates[1].bodyVariables, ['customer_name']);
+      assert.equal(response.body.templates[0].category, 'UTILITY');
+      assert.equal(response.body.templates[0].language, 'en_US');
+      assert.equal(response.body.templates[0].status, 'APPROVED');
+      assert.equal(calls.length, 2);
+      assert.ok(calls.every((c) => c.authorization === 'Bearer test-template-account-token'));
+      assert.ok(calls.every((c) => c.url.startsWith('/TEST-WABA/message_templates?')));
+      assert.match(calls[1].url, /after=next-page/);
+      assert.ok(!JSON.stringify(response.body).includes('test-template-account-token'));
+      rejectToken = true;
+      assert.equal((await request('GET', endpoint, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.60' } })).status, 502);
+    } finally {
+      if (previousBase === undefined) delete process.env.META_GRAPH_API_BASE; else process.env.META_GRAPH_API_BASE = previousBase;
+      await new Promise((resolve) => graph.close(resolve));
+      await prisma.whatsAppAccount.delete({ where: { id: account.id } });
+    }
+  });
+
+  test('reports invalid IDs, unknown accounts, AiSensy and missing WABA clearly', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const aisensy = await prisma.whatsAppAccount.create({ data: { name: 'AiSensy template test', provider: 'aisensy' } });
+    const meta = await prisma.whatsAppAccount.create({ data: { name: 'Missing WABA template test', provider: 'meta' } });
+    try {
+      const get = (id) => request('GET', `/api/whatsapp/accounts/${id}/templates`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.60' } });
+      assert.equal((await get('1abc')).status, 400);
+      assert.equal((await get(999999999)).status, 404);
+      const unsupported = await get(aisensy.id);
+      assert.equal(unsupported.status, 422);
+      assert.match(unsupported.body.error, /AiSensy/);
+      const missing = await get(meta.id);
+      assert.equal(missing.status, 422);
+      assert.match(missing.body.error, /Business Account ID/);
+    } finally {
+      await prisma.whatsAppAccount.deleteMany({ where: { id: { in: [aisensy.id, meta.id] } } });
+    }
+  });
+});
+
+import { FORM_PAYLOADS } from './fixtures/formSubmissions.js';
+
+describe('Form provider presets through the lead webhook', () => {
+  for (const presetId of ['typeform', 'tally', 'googleforms']) {
+    test(`${presetId}: authenticated submission, field mapping and replay deduplication`, async () => {
+      const presets = await request('GET', '/api/webhooks/sources/presets', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.60' } });
+      assert.ok(presets.body.some((p) => p.id === presetId));
+      const source = await request('POST', '/api/webhooks/sources/from-preset', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.60' }, body: { presetId } });
+      assert.equal(source.status, 200);
+      const { webhookUrl, apiKey } = source.body;
+      assert.equal((await request('POST', webhookUrl, { body: FORM_PAYLOADS[presetId] })).status, 401);
+      const submit = () => request('POST', webhookUrl, { headers: { 'x-api-key': apiKey }, body: FORM_PAYLOADS[presetId] });
+      const first = await submit();
+      const second = await submit();
+      assert.equal(first.status, 200);
+      assert.equal(first.body.created, true);
+      assert.equal(second.status, 200);
+      assert.equal(second.body.created, false);
+      assert.equal(second.body.leadId, first.body.leadId);
+      const detail = await request('GET', `/api/leads/${first.body.leadId}`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.60' } });
+      assert.equal(detail.body.email, `${presetId}@example.test`);
+      assert.equal(detail.body.product, 'Need 500 units');
+      assert.ok(!detail.body.mobile.startsWith('no-phone:'));
+      assert.ok(detail.body.externalId.startsWith(`${presetId}:`));
+      assert.equal(detail.body.consumedAt, '2026-10-01T09:30:00.000Z');
+      // A replay remains the same submission even if contact answers change.
+      const edited = structuredClone(FORM_PAYLOADS[presetId]);
+      if (presetId === 'typeform') {
+        edited.form_response.answers.find((a) => a.type === 'email').email = 'edited@example.test';
+        edited.form_response.answers.find((a) => a.type === 'phone_number').phone_number = '+1 555 000 0091';
+      } else if (presetId === 'tally') {
+        edited.data.fields.find((f) => f.label === 'Email').value = 'edited@example.test';
+        edited.data.fields.find((f) => f.label === 'Phone').value = '+1 555 000 0092';
+      } else {
+        edited.email = 'edited@example.test';
+        edited.phone = '+1 555 000 0093';
+      }
+      const replay = await request('POST', webhookUrl, { headers: { 'x-api-key': apiKey }, body: edited });
+      assert.equal(replay.status, 200);
+      assert.equal(replay.body.leadId, first.body.leadId);
+      assert.equal(replay.body.created, false);
+    });
+  }
+});
+
+test('Inbox thread exposes Meta pricing without inventing an amount', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const lead = await prisma.lead.create({ data: { name: 'Pricing Buyer', mobile: '15550000021', source: 'manual' } });
+  await prisma.message.create({ data: {
+    leadId: lead.id, direction: 'outbound', channel: 'whatsapp', content: 'Test pricing', status: 'sent',
+    pricingCategory: 'marketing', pricingType: 'regular', billable: true,
+  } });
+  const response = await request('GET', `/api/inbox/threads/${lead.id}`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.60' } });
+  assert.equal(response.status, 200);
+  const message = response.body.messages.find((m) => m.content === 'Test pricing');
+  assert.equal(message.pricingCategory, 'marketing');
+  assert.equal(message.pricingType, 'regular');
+  assert.equal(message.billable, true);
+});
