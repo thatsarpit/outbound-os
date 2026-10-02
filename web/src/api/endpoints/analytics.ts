@@ -71,10 +71,14 @@ export const analyticsApi = {
     ),
 
   funnel: (range: AnalyticsRange = '30d') =>
-    api.get<FunnelResponse>(`/analytics/funnel?range=${range}`),
+    api.get<FunnelResponse>(
+      `/analytics/funnel?range=${range}&tzOffset=${getClientTimezoneOffset()}`,
+    ),
 
   campaignRoi: (range: AnalyticsRange = '30d') =>
-    api.get<CampaignRoiResponse>(`/analytics/campaign-roi?range=${range}`),
+    api.get<CampaignRoiResponse>(
+      `/analytics/campaign-roi?range=${range}&tzOffset=${getClientTimezoneOffset()}`,
+    ),
 
   emailPerformance: (range: AnalyticsRange = '30d') =>
     api.get<EmailPerformanceResponse>(

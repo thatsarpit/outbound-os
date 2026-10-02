@@ -85,6 +85,9 @@ is open source, so any team can run their own.
   with approved WhatsApp templates for anyone outside the 24-hour window.
 - **A pipeline, not just messages.** Status, owner, score, notes, tasks,
   orders and shipment updates live on the same record as the conversation.
+- **Dashboard layouts for each account.** Reorder, resize and hide Overview
+  and Analytics widgets, then save the layout across devices.
+  [Dashboard guide](docs/dashboard.md).
 - **Built for AI agents.** An MCP server lets Claude or any MCP client search
   leads, import lists, launch campaigns and read replies on your live data.
 

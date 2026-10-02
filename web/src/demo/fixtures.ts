@@ -1,3 +1,8 @@
+import {
+  defaultDashboardLayout,
+  validateDashboardLayout,
+  type DashboardPage,
+} from '../../../shared/dashboardLayout'
 import { ROLE_PAGE_CAPABILITIES } from '@/lib/role-shell'
 import { useAuthStore } from '@/stores/auth-store'
 import { notificationActions, useNotificationStore } from '@/stores/notification-store'
@@ -1500,7 +1505,7 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
     },
   ],
   [
-    /\/stats\/charts/,
+    /\/(?:stats\/charts|analytics\/distributions)/,
     (url: string) => ({
       msgsByDay: overviewMessageSeries(overviewDays(url)),
       statusDist: [
@@ -1570,12 +1575,23 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
   ],
   [
     /\/analytics\/daily/,
-    daySeries(14, 90, 30).map((d, i) => ({
-      label: d.day.slice(5),
-      leadsCreated: Math.max(0, 12 + ((i * 5) % 9) - 3),
-      msgsSent: d.count,
-      replies: Math.max(0, Math.round(d.count * 0.2)),
-    })),
+    (url: string) =>
+      daySeries(
+        Math.min(
+          30,
+          Math.max(
+            1,
+            Number(new URL(url, 'https://demo.example.test').searchParams.get('days')) || 30,
+          ),
+        ),
+        90,
+        30,
+      ).map((d, i) => ({
+        label: d.day.slice(5),
+        leadsCreated: Math.max(0, 12 + ((i * 5) % 9) - 3),
+        msgsSent: d.count,
+        replies: Math.max(0, Math.round(d.count * 0.2)),
+      })),
   ],
   [
     /\/analytics\/funnel/,
@@ -2049,11 +2065,90 @@ const QUIET_WRITES = [
   /\/preferences/,
 ]
 
+function samplePeriodData(url: string, value: unknown): unknown {
+  const path = new URL(url, location.origin)
+  if (!/analytics\/(distributions|funnel|campaign-roi|team)$/.test(path.pathname)) return value
+  const range = path.searchParams.get('range')
+  const days = Number(path.searchParams.get('days') ?? range?.replace('d', '')) || 30
+  const scale = Math.min(30, Math.max(1, days)) / 30
+  const counts = new Set([
+    'total',
+    'paused',
+    'waUnavailable',
+    'count',
+    'cumulative',
+    'sent',
+    'replied',
+    'converted',
+    'revenue',
+    'totalDealValue',
+    'convertedLeads',
+    'totalLeads',
+    'leadsAssigned',
+    'closed',
+  ])
+  function visit(item: unknown, parentKey = ''): unknown {
+    if (Array.isArray(item)) return item.map((row) => visit(row))
+    if (item && typeof item === 'object')
+      return Object.fromEntries(
+        Object.entries(item).map(([key, val]) => [
+          key,
+          typeof val === 'number' && (counts.has(key) || (parentKey === '_count' && key === 'id'))
+            ? Math.round(val * scale)
+            : visit(val, key),
+        ]),
+      )
+    return item
+  }
+  return visit(value)
+}
+
 export function installFixtureFetch() {
   const original = window.fetch.bind(window)
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     if (!url.includes('/api/')) return original(input, init)
+
+    const layoutPage = new URL(url, location.origin).pathname.match(
+      /^\/api\/dashboard\/preferences\/(overview|analytics)$/,
+    )?.[1] as DashboardPage | undefined
+    if (layoutPage) {
+      const key = `outboundos.demo.layout.${layoutPage}`
+      let saved = { layout: defaultDashboardLayout(layoutPage), revision: 0 }
+      try {
+        const stored = JSON.parse(localStorage.getItem(key) ?? 'null')
+        if (stored)
+          saved = {
+            layout: validateDashboardLayout(layoutPage, stored.layout),
+            revision: Number(stored.revision) || 0,
+          }
+      } catch {
+        /* Private browsers and older demo layouts use defaults. */
+      }
+      if ((init?.method || 'GET').toUpperCase() === 'PUT') {
+        const input = JSON.parse(String(init?.body))
+        if (input.revision !== saved.revision)
+          return new Response(
+            JSON.stringify({
+              error: 'Your demo layout changed in another session. Reload it before saving.',
+            }),
+            { status: 409, headers: { 'Content-Type': 'application/json' } },
+          )
+        saved = {
+          layout: validateDashboardLayout(layoutPage, input.layout),
+          revision: saved.revision + 1,
+        }
+        try {
+          localStorage.setItem(key, JSON.stringify(saved))
+        } catch {
+          /* The current preview still works without storage. */
+        }
+      }
+      return new Response(JSON.stringify(saved), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
 
     const inbox = await handleInboxRequest(url, init)
     if (inbox) return inbox
@@ -2075,7 +2170,8 @@ export function installFixtureFetch() {
     // the call with no sample data behind it.
     if (!match) console.debug('[demo] no sample data for', url)
     const raw = match ? match[1] : {}
-    const body = typeof raw === 'function' ? (raw as (u: string) => unknown)(url) : raw
+    const fixtureBody = typeof raw === 'function' ? (raw as (u: string) => unknown)(url) : raw
+    const body = samplePeriodData(url, fixtureBody)
     return new Response(JSON.stringify(body), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -2102,6 +2198,7 @@ export function seedNotifications() {
 
 export function seedStores() {
   useAuthStore.setState({
+    dashboardScope: 'demo',
     user: {
       id: 1,
       name: 'Maya Collins',

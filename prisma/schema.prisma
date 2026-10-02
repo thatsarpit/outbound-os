@@ -1222,3 +1222,16 @@ model Product {
   @@index([supplierId])
   @@index([name])
 }
+
+// Identity includes auth provider and organization, so Clerk identities do not
+// need a local User row and layouts never cross accounts or organizations.
+model DashboardPreference {
+  id        Int      @id @default(autoincrement())
+  ownerKey  String
+  page      String
+  layout    String
+  revision  Int      @default(1)
+  updatedAt DateTime @updatedAt
+
+  @@unique([ownerKey, page])
+}
