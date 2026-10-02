@@ -166,6 +166,19 @@ Then connect channels in **Settings → WhatsApp**, **Settings → Email** and
 Put it behind HTTPS (Caddy, Nginx, Cloudflare Tunnel) before connecting
 WhatsApp: Meta only delivers webhooks to a public HTTPS address.
 
+### Deploy on Render
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fthatsarpit%2Foutbound-os)
+
+The included `render.yaml` pulls the published image and mounts a persistent
+disk at `/app/data`. This requires a **paid service and disk**. Enter
+`ADMIN_EMAIL` when Render prompts, then open the service's HTTPS URL. In
+Render's **Logs**, search for `First admin created` to find the generated
+password; change it after signing in. Keep the disk attached when redeploying:
+both the SQLite database and generated credential keys live there. Pin a
+released image tag in your fork's Blueprint when you want controlled upgrades.
+The [install guide](https://outboundos.space/docs/install#render) has the steps.
+
 ### Your data
 
 Everything is in the `outboundos-data` Docker volume: the SQLite database and

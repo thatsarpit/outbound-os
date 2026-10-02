@@ -1,0 +1,26 @@
+# A paid disk-backed service is required: SQLite and generated keys must survive
+# redeploys together. The image's CMD applies migrations before starting the app.
+services:
+  - type: web
+    name: outbound-os
+    runtime: image
+    image:
+      url: ghcr.io/thatsarpit/outbound-os:latest
+    plan: 1c-2g
+    numInstances: 1
+    healthCheckPath: /healthz
+    disk:
+      name: outbound-os-data
+      mountPath: /app/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "3001"
+      - key: DATABASE_URL
+        value: file:/app/data/outboundos.db
+      - key: AUTH_PROVIDER
+        value: local
+      - key: ADMIN_EMAIL
+        sync: false
