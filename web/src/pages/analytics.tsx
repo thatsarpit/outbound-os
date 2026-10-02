@@ -1,3 +1,13 @@
+import { useState, type ReactNode } from 'react'
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from '@/components/ui/dropdown-menu'
 import { useHomeCurrency } from '@/hooks/use-home-currency'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
@@ -8,7 +18,7 @@ import { Users, Send, MessageSquare, TrendingUp } from 'lucide-react'
 import { SkeletonCard } from '@/components/ui/skeleton'
 import { ChartFrame } from '@/components/ui/chart-frame'
 import { MetricCard } from '@/components/ui/metric-card'
-import { SectionCard } from '@/components/ui/section-card'
+import { WidgetCard, type WidgetRow } from '@/components/ui/widget-card'
 import { BarList } from '@/components/ui/bar-list'
 import { CategoryBar } from '@/components/ui/category-bar'
 import { PageHeader } from '@/components/ui/page-header'
@@ -102,11 +112,54 @@ function SectionMessage({ children }: { children: React.ReactNode }) {
   return <p className="py-6 text-center text-sm text-text-muted">{children}</p>
 }
 
+const SECTIONS = {
+  outreach: 'Outreach volume',
+  flow: 'Lead flow',
+  country: 'Leads by country',
+  tier: 'Leads by tier',
+  funnel: 'Conversion funnel',
+  campaigns: 'Campaign ROI',
+  team: 'Team performance',
+} as const
+type SectionId = keyof typeof SECTIONS
+const PREFERENCES_KEY = 'outboundos.analytics.sections.v1'
+function readHiddenSections(): SectionId[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(PREFERENCES_KEY) ?? '[]')
+    return Array.isArray(value)
+      ? value.filter(
+          (id): id is SectionId =>
+            typeof id === 'string' && Object.prototype.hasOwnProperty.call(SECTIONS, id),
+        )
+      : []
+  } catch {
+    return []
+  }
+}
+function AnalyticsSection({
+  visible,
+  children,
+  ...props
+}: React.ComponentProps<typeof WidgetCard> & { visible: boolean; children: ReactNode }) {
+  return visible ? <WidgetCard {...props}>{children}</WidgetCard> : null
+}
+
 export default function AnalyticsPage() {
+  const [hiddenSections, setHiddenSections] = useState(readHiddenSections)
+  function saveHiddenSections(next: SectionId[]) {
+    setHiddenSections(next)
+    try {
+      localStorage.setItem(PREFERENCES_KEY, JSON.stringify(next))
+    } catch {
+      /* Storage may be disabled; keep the current view usable. */
+    }
+  }
+  const visible = (id: SectionId) => !hiddenSections.includes(id)
   const home = useHomeCurrency()
   const chartTheme = useChartTheme()
   const timezoneOffset = typeof window === 'undefined' ? 0 : new Date().getTimezoneOffset()
-  const range: AnalyticsRange = '30d'
+  const [days, setDays] = useState<7 | 14 | 30>(30)
+  const range: AnalyticsRange = `${days}d`
 
   // ── Daily breakdown ──
   const {
@@ -115,9 +168,9 @@ export default function AnalyticsPage() {
     error: dailyError,
     refetch: refetchDaily,
   } = useQuery<DailyRow[]>({
-    queryKey: ['analytics-daily'],
+    queryKey: ['analytics-daily', days],
     queryFn: async () =>
-      asArray<Record<string, unknown>>(await analyticsApi.daily(14)).map((row) => ({
+      asArray<Record<string, unknown>>(await analyticsApi.daily(days)).map((row) => ({
         label: str(row?.label),
         leadsCreated: num(row?.leadsCreated),
         msgsSent: num(row?.msgsSent),
@@ -133,11 +186,11 @@ export default function AnalyticsPage() {
     error: chartsError,
     refetch: refetchCharts,
   } = useQuery({
-    queryKey: ['analytics-charts', timezoneOffset],
+    queryKey: ['analytics-charts', days, timezoneOffset],
     queryFn: async () => {
-      const res = (await api.get<unknown>(`/stats/charts?days=30&tzOffset=${timezoneOffset}`)) as
-        | Record<string, unknown>
-        | undefined
+      const res = (await api.get<unknown>(
+        `/stats/charts?days=${days}&tzOffset=${timezoneOffset}`,
+      )) as Record<string, unknown> | undefined
       return {
         countryDist: toDist(res?.countryDist, 'country', 'Unknown'),
         tierDist: toDist(res?.tierDist, 'leadTier', 'Unscored'),
@@ -255,21 +308,80 @@ export default function AnalyticsPage() {
   return (
     <div className="animate-fade-in space-y-6">
       <PageHeader
+        actions={
+          <>
+            <label className="flex items-center gap-2 text-sm text-text-secondary">
+              Period
+              <select
+                aria-label="Analytics period"
+                value={days}
+                onChange={(event) => setDays(Number(event.target.value) as 7 | 14 | 30)}
+                className="rounded-md border border-border bg-surface px-3 py-2 text-text-primary"
+              >
+                {[7, 14, 30].map((period) => (
+                  <option key={period} value={period}>
+                    Last {period} days
+                  </option>
+                ))}
+              </select>
+            </label>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="rounded-md border border-border bg-surface px-3 py-2 text-sm text-text-primary"
+                >
+                  Customize
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Sections · saved in this browser</DropdownMenuLabel>
+                {Object.entries(SECTIONS).map(([id, label]) => (
+                  <DropdownMenuCheckboxItem
+                    key={id}
+                    checked={visible(id as SectionId)}
+                    onSelect={(event) => event.preventDefault()}
+                    onCheckedChange={(checked) =>
+                      saveHiddenSections(
+                        checked
+                          ? hiddenSections.filter((item) => item !== id)
+                          : [...hiddenSections, id as SectionId],
+                      )
+                    }
+                  >
+                    {label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => saveHiddenSections([])}>
+                  Restore all sections
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        }
         title="Analytics"
         description={
           funnel ? (
             <>
               <span className="tabular-nums">{formatCount(funnel.total)}</span>{' '}
-              {funnel.total === 1 ? 'active lead' : 'active leads'} over the last 30 days
+              {funnel.total === 1 ? 'active lead' : 'active leads'} over the last {days} days
             </>
           ) : (
-            'Outreach and conversion performance over the last 30 days.'
+            `Outreach and conversion performance over the last ${days} days.`
           )
         }
       />
 
-      {/* Headline metrics — 14-day activity */}
-      {dailyLoading ? (
+      {/* Headline metrics follow the selected activity window. */}
+      {dailyError ? (
+        <ErrorState
+          compact
+          title="Couldn't load activity totals"
+          description={(dailyError as Error).message}
+          onRetry={() => refetchDaily()}
+        />
+      ) : dailyLoading ? (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <SkeletonCard key={i} lines={0} />
@@ -281,21 +393,21 @@ export default function AnalyticsPage() {
             icon={Users}
             label="Leads created"
             value={formatCount(leadsCreated)}
-            hint="Last 14 days"
+            hint={`Last ${days} days`}
             trend={daily.map((d) => d.leadsCreated)}
           />
           <MetricCard
             icon={Send}
             label="Messages sent"
             value={formatCount(msgsSent)}
-            hint="Last 14 days"
+            hint={`Last ${days} days`}
             trend={daily.map((d) => d.msgsSent)}
           />
           <MetricCard
             icon={MessageSquare}
             label="Replies received"
             value={formatCount(replies)}
-            hint="Last 14 days"
+            hint={`Last ${days} days`}
             trend={daily.map((d) => d.replies)}
           />
           <MetricCard
@@ -308,7 +420,14 @@ export default function AnalyticsPage() {
       )}
 
       {/* Daily activity */}
-      <SectionCard title="Outreach volume" description="Messages sent per day, last 14 days.">
+      <AnalyticsSection
+        visible={visible('outreach')}
+        rows={
+          daily.map(({ label, msgsSent }) => ({ day: label, sent: msgsSent })) satisfies WidgetRow[]
+        }
+        title="Outreach volume"
+        description={`Messages sent per day, last ${days} days.`}
+      >
         {dailyError ? (
           <ErrorState
             compact
@@ -376,11 +495,22 @@ export default function AnalyticsPage() {
             )}
           </ChartFrame>
         )}
-      </SectionCard>
+      </AnalyticsSection>
 
       {/* Leads and replies share a scale with each other but not with sends,
           so they are readable together here and were not above. */}
-      <SectionCard title="Lead flow" description="New leads and replies received, last 14 days.">
+      <AnalyticsSection
+        visible={visible('flow')}
+        rows={
+          daily.map(({ label, leadsCreated, replies }) => ({
+            day: label,
+            leadsCreated,
+            replies,
+          })) satisfies WidgetRow[]
+        }
+        title="Lead flow"
+        description={`New leads and replies received, last ${days} days.`}
+      >
         {dailyError ? (
           <ErrorState
             compact
@@ -460,13 +590,26 @@ export default function AnalyticsPage() {
             )}
           </ChartFrame>
         )}
-      </SectionCard>
+      </AnalyticsSection>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div
+        className={
+          visible('country') || visible('tier')
+            ? `grid grid-cols-1 gap-4 ${visible('country') && visible('tier') ? 'lg:grid-cols-2' : ''}`
+            : 'hidden'
+        }
+      >
         {/* Country distribution */}
-        <SectionCard
+        <AnalyticsSection
+          visible={visible('country')}
+          rows={
+            countryData.map(({ name, value }) => ({
+              country: name,
+              leads: value,
+            })) satisfies WidgetRow[]
+          }
           title="Leads by country"
-          description="Top eight countries by lead volume, last 30 days."
+          description="Top eight countries by all-time lead volume. Shares are within these countries."
         >
           {chartsError ? (
             <ErrorState
@@ -478,7 +621,7 @@ export default function AnalyticsPage() {
           ) : chartsLoading ? (
             <div className="h-40 animate-pulse rounded-md bg-surface-raised" />
           ) : countryData.length === 0 ? (
-            <SectionMessage>No country recorded on leads in this window.</SectionMessage>
+            <SectionMessage>No country recorded on leads yet.</SectionMessage>
           ) : (
             /* A ranked list IS the right form here — this is top-N by volume.
                It is the only panel on the page that stays one, now that the
@@ -493,10 +636,17 @@ export default function AnalyticsPage() {
               }))}
             />
           )}
-        </SectionCard>
+        </AnalyticsSection>
 
         {/* Tier distribution */}
-        <SectionCard title="Leads by tier" description="Score band across the same window.">
+        <AnalyticsSection
+          visible={visible('tier')}
+          rows={
+            tierData.map(({ name, value }) => ({ tier: name, leads: value })) satisfies WidgetRow[]
+          }
+          title="Leads by tier"
+          description="Score bands across all-time leads."
+        >
           {chartsError ? (
             <ErrorState
               compact
@@ -507,7 +657,7 @@ export default function AnalyticsPage() {
           ) : chartsLoading ? (
             <div className="h-40 animate-pulse rounded-md bg-surface-raised" />
           ) : tierData.length === 0 ? (
-            <SectionMessage>No leads have been scored in this window.</SectionMessage>
+            <SectionMessage>No leads have been scored yet.</SectionMessage>
           ) : (
             /* HOT/WARM/COLD are shares of one population, so they belong in
                one segmented bar. As three separate bars the fact that they sum
@@ -521,13 +671,23 @@ export default function AnalyticsPage() {
               }))}
             />
           )}
-        </SectionCard>
+        </AnalyticsSection>
       </div>
 
       {/* Conversion funnel */}
-      <SectionCard
+      <AnalyticsSection
+        visible={visible('funnel')}
+        rows={
+          (funnel?.stages ?? []).map(({ label, count, cumulative, conversionRate, dropoff }) => ({
+            stage: label,
+            count,
+            cumulative,
+            conversionRate,
+            dropoff,
+          })) satisfies WidgetRow[]
+        }
         title="Conversion funnel"
-        description="Current-status progression across active leads, last 30 days."
+        description={`Current-status progression across active leads, last ${days} days.`}
       >
         {funnelError ? (
           <ErrorState
@@ -589,12 +749,14 @@ export default function AnalyticsPage() {
             </div>
           </>
         )}
-      </SectionCard>
+      </AnalyticsSection>
 
       {/* Campaign ROI */}
-      <SectionCard
+      <AnalyticsSection
+        visible={visible('campaigns')}
+        rows={(campaignRoi?.campaigns ?? []).map((row) => ({ ...row })) satisfies WidgetRow[]}
         title="Campaign ROI"
-        description="Campaign-attributed closed revenue and conversion, last 30 days."
+        description={`Campaign-attributed closed revenue and conversion, last ${days} days.`}
       >
         {roiError ? (
           <ErrorState
@@ -610,9 +772,15 @@ export default function AnalyticsPage() {
         ) : (
           <>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              <Figure label="Revenue" value={formatCurrency(campaignRoi.pipeline.totalDealValue, home)} />
+              <Figure
+                label="Revenue"
+                value={formatCurrency(campaignRoi.pipeline.totalDealValue, home)}
+              />
               <Figure label="Converted" value={formatCount(campaignRoi.pipeline.convertedLeads)} />
-              <Figure label="Avg deal" value={formatCurrency(campaignRoi.pipeline.avgDealValue, home)} />
+              <Figure
+                label="Avg deal"
+                value={formatCurrency(campaignRoi.pipeline.avgDealValue, home)}
+              />
             </div>
 
             {/* Mobile */}
@@ -679,12 +847,14 @@ export default function AnalyticsPage() {
             </div>
           </>
         )}
-      </SectionCard>
+      </AnalyticsSection>
 
       {/* Team performance */}
-      <SectionCard
+      <AnalyticsSection
+        visible={visible('team')}
+        rows={teamStats.map((row) => ({ ...row })) satisfies WidgetRow[]}
         title="Team performance"
-        description="Leads assigned, replied and closed per agent."
+        description="All-time leads assigned, replied and closed per agent."
       >
         {teamError ? (
           <ErrorState
@@ -769,7 +939,7 @@ export default function AnalyticsPage() {
             </div>
           </>
         )}
-      </SectionCard>
+      </AnalyticsSection>
     </div>
   )
 }

@@ -1570,12 +1570,23 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
   ],
   [
     /\/analytics\/daily/,
-    daySeries(14, 90, 30).map((d, i) => ({
-      label: d.day.slice(5),
-      leadsCreated: Math.max(0, 12 + ((i * 5) % 9) - 3),
-      msgsSent: d.count,
-      replies: Math.max(0, Math.round(d.count * 0.2)),
-    })),
+    (url: string) =>
+      daySeries(
+        Math.min(
+          30,
+          Math.max(
+            1,
+            Number(new URL(url, 'https://demo.example.test').searchParams.get('days')) || 30,
+          ),
+        ),
+        90,
+        30,
+      ).map((d, i) => ({
+        label: d.day.slice(5),
+        leadsCreated: Math.max(0, 12 + ((i * 5) % 9) - 3),
+        msgsSent: d.count,
+        replies: Math.max(0, Math.round(d.count * 0.2)),
+      })),
   ],
   [
     /\/analytics\/funnel/,
