@@ -1,3 +1,4 @@
+import Script from "next/script"
 import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
 import localFont from 'next/font/local'
@@ -53,6 +54,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <JsonLd data={graph(organizationLd(), websiteLd(), softwareLd(), sourceCodeLd())} />
         <MarketingLayout>{children}</MarketingLayout>
         <RevealRoot />
+        <Script src="/site-analytics.js" data-ga-id="G-GS1BKVLCM0"
+          data-ga-hosts="outboundos.space,www.outboundos.space"
+          data-ga-name="Outbound OS" strategy="afterInteractive" />
       </body>
     </html>
   )
