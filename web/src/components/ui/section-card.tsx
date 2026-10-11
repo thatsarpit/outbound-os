@@ -29,8 +29,8 @@ export function SectionCard({
         className,
       )}
     >
-      <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4 sm:px-6">
-        <div className="min-w-0 flex-1">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border px-5 py-4">
+        <div className="min-w-0 flex-[1_1_180px]">
           {eyebrow && (
             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted">
               {eyebrow}
@@ -43,9 +43,9 @@ export function SectionCard({
             </p>
           )}
         </div>
-        {action && <div className="shrink-0">{action}</div>}
+        {action && <div className="max-w-full">{action}</div>}
       </div>
-      <div className="p-5 sm:p-6">{children}</div>
+      <div className="p-5">{children}</div>
     </section>
   )
 }

@@ -1,3 +1,4 @@
+import { ErrorState } from '@/components/ui/error-state'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
@@ -35,7 +36,7 @@ export default function RevenuePage() {
   const chartTheme = useChartTheme()
   const [months, setMonths] = useState(12)
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['revenue', months],
     queryFn: () => crmApi.getRevenue(months),
   })
@@ -75,6 +76,8 @@ export default function RevenuePage() {
             <SkeletonCard key={i} lines={0} />
           ))}
         </div>
+      ) : isError ? (
+        <ErrorState title="Could not load revenue" onRetry={() => refetch()} />
       ) : (
         <>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -108,15 +111,20 @@ export default function RevenuePage() {
             title="Revenue by month"
             description="Confirmed orders, excluding drafts and cancellations."
           >
-            {series.length === 0 ? (
+            {!hasData || series.length === 0 ? (
               <EmptyState
+                compact
                 icon={TrendingUp}
                 title="No revenue yet"
                 description="Confirmed orders will show here once you record one."
               />
             ) : (
               <div className="h-64">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer
+                  width="100%"
+                  height="100%"
+                  initialDimension={{ width: 320, height: 256 }}
+                >
                   <BarChart data={series} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
                     <CartesianGrid
                       strokeDasharray="3 3"
@@ -157,6 +165,7 @@ export default function RevenuePage() {
             <SectionCard title="By destination" description="Where the money comes from.">
               {!hasData || !data?.byCountry.length ? (
                 <EmptyState
+                  compact
                   icon={Globe}
                   title="Nothing yet"
                   description="Confirmed orders will appear here."
@@ -167,7 +176,7 @@ export default function RevenuePage() {
                     const max = data.byCountry[0]?.total || 1
                     return (
                       <div key={c.country} className="flex items-center gap-3">
-                        <span className="w-40 shrink-0 truncate text-[13px] text-text-secondary">
+                        <span className="w-28 shrink-0 truncate xl:w-40 text-[13px] text-text-secondary">
                           {c.country}
                         </span>
                         <div className="h-2 flex-1 overflow-hidden rounded-full bg-surface-raised">
@@ -192,6 +201,7 @@ export default function RevenuePage() {
             <SectionCard title="Unpaid invoices" description="Oldest due date first.">
               {!data?.unpaidInvoices.length ? (
                 <EmptyState
+                  compact
                   icon={FileWarning}
                   title="Nothing outstanding"
                   description="Every issued invoice has been paid."

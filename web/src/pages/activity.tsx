@@ -140,7 +140,7 @@ export default function ActivityPage() {
         }
         action={
           availableTypes.length > 1 ? (
-            <div className="flex flex-wrap items-center gap-1">
+            <div className="flex max-w-full flex-wrap items-center gap-1">
               <button
                 type="button"
                 onClick={() => setTypeFilter('all')}

@@ -42,7 +42,7 @@ type Group = { title: string; blurb: string; items: Integration[] }
 const GROUPS: Group[] = [
   {
     title: 'Reach out',
-    blurb: 'Where your first message and follow-ups are sent. Replies land in one inbox.',
+    blurb: 'Messaging accounts and reply connections for your shared inbox.',
     items: [
       {
         name: 'WhatsApp',
@@ -80,7 +80,7 @@ const GROUPS: Group[] = [
   },
   {
     title: 'Bring leads in',
-    blurb: 'Every source gets its own signed web address. New leads are contacted within seconds.',
+    blurb: 'Capture leads from forms, imports and external tools.',
     items: [
       {
         name: 'Website forms',
@@ -109,7 +109,7 @@ const GROUPS: Group[] = [
       },
       {
         name: 'CSV import',
-        detail: 'Bring a list from another CRM. Duplicates are merged.',
+        detail: 'Bring a list from another CRM. Existing contacts are deduplicated.',
         icon: FileSpreadsheet,
         to: '/import',
       },
@@ -162,7 +162,7 @@ export default function IntegrationCatalogue() {
     : null
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-border bg-surface px-5 py-4">
         <div>
           <h2 className="text-sm font-semibold text-text-primary">Your connected workspace</h2>
@@ -187,7 +187,7 @@ export default function IntegrationCatalogue() {
             {group.title}
           </h2>
           <p className="mt-0.5 text-[12px] text-text-secondary">{group.blurb}</p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
             {group.items.map((item) => (
               <IntegrationCard
                 key={item.name}
@@ -241,7 +241,7 @@ function IntegrationCard({
           : 'bg-surface-raised text-text-muted'
   const external = item.to.startsWith('http')
   const className =
-    'group flex h-full flex-col rounded-lg border border-border bg-surface p-4 transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent'
+    'group flex h-full min-w-0 flex-col rounded-lg border border-border bg-surface p-4 transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent'
   const body = (
     <>
       <span className="flex items-start justify-between gap-2">
@@ -261,7 +261,7 @@ function IntegrationCard({
           {formatChannelHealthDetail(channel.detail)}
         </span>
       )}
-      <span className="mt-4 inline-flex items-center gap-1 text-xs font-medium text-accent">
+      <span className="mt-4 inline-flex items-center gap-1 text-xs font-medium text-text-primary">
         {external ? 'View documentation' : 'Manage connection'}{' '}
         <ArrowUpRight aria-hidden="true" className="h-3 w-3" />
       </span>

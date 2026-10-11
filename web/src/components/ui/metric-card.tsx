@@ -142,7 +142,7 @@ export function MetricCard({
         >
           <div
             className="h-full rounded-full bg-[var(--color-chart-1,var(--color-accent))] transition-[width] duration-500"
-            style={{ width: `${Math.max(1.5, Math.min(100, meter * 100))}%` }}
+            style={{ width: `${Math.max(0, Math.min(100, Math.max(0, meter) * 100))}%` }}
           />
         </div>
       )}

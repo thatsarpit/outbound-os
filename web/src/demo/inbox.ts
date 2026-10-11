@@ -36,7 +36,7 @@ type Thread = {
 
 const SENDERS: Record<InboxChannel, InboxSenderAccount> = {
   whatsapp: { id: 1, channel: 'whatsapp', name: 'Acme Sales', email: null, senderName: 'Acme Sales', enabled: true, status: 'connected' },
-  email: { id: 2, channel: 'email', name: 'Acme Sales', email: 'sales@acme.example', senderName: 'Maya from Acme', enabled: true, status: 'connected' },
+  email: { id: 2, channel: 'email', name: 'Acme Sales', email: 'sales@acme.example', senderName: 'Maya from Acme', enabled: true, status: 'connected', isVerified: true },
   imessage: { id: 3, channel: 'imessage', name: 'Sales Mac', email: null, senderName: 'Acme Sales', enabled: true, status: 'connected' },
   telegram: { id: 4, channel: 'telegram', name: '@acme_sales', email: null, senderName: 'Acme Sales', enabled: true, status: 'connected' },
 }

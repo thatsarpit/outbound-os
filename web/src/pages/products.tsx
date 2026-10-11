@@ -1,3 +1,5 @@
+import { SearchInput } from '@/components/ui/search-input'
+import { ErrorState } from '@/components/ui/error-state'
 import { useHomeCurrency } from '@/hooks/use-home-currency'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -44,7 +46,7 @@ export default function ProductsPage() {
     queryClient.invalidateQueries({ queryKey: ['product-suggestions'] })
   }
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['products', search],
     queryFn: () => productsApi.list({ search: search || undefined }),
   })
@@ -152,20 +154,46 @@ export default function ProductsPage() {
         title="Catalogue"
         description="Prices pre-fill a line and can be overridden on any order."
       >
-        <input
-          className={cn(inputClass, 'mb-3 h-9 max-w-xs')}
-          placeholder="Search name, strength, SKU…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <SearchInput
+            label="Search products"
+            placeholder="Name, strength or SKU…"
+            value={search}
+            onChange={setSearch}
+          />
+          {!isLoading && !isError && (
+            <span className="text-xs text-text-muted">
+              {products.length} shown · edits save when you leave a field
+            </span>
+          )}
+        </div>
 
         {isLoading ? (
           <SkeletonTable rows={5} />
+        ) : isError ? (
+          <ErrorState title="Could not load products" onRetry={() => refetch()} />
         ) : products.length === 0 ? (
           <EmptyState
             icon={Package2}
-            title="Nothing catalogued yet"
-            description="Add what you sell here and order lines stop being free text — prices pre-fill, and the system can finally add up what sells."
+            compact
+            tone={search ? 'filtered' : 'waiting'}
+            title={search ? 'No matching products' : 'Nothing catalogued yet'}
+            description={
+              search
+                ? 'Try another product name, strength or SKU.'
+                : 'Add a product below to pre-fill prices on orders.'
+            }
+            action={
+              search ? (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="text-sm text-accent hover:underline"
+                >
+                  Clear search
+                </button>
+              ) : undefined
+            }
           />
         ) : (
           <div className="overflow-x-auto rounded-lg border border-border">
@@ -188,6 +216,7 @@ export default function ProductsPage() {
                     <td className="px-2 py-2">
                       <input
                         className={inputClass}
+                        aria-label={`Product name for ${p.name}`}
                         defaultValue={p.name}
                         onBlur={(e) => {
                           if (e.target.value !== p.name)
@@ -198,6 +227,7 @@ export default function ProductsPage() {
                     <td className="px-2 py-2">
                       <input
                         className={cn(inputClass, 'w-24')}
+                        aria-label={`Strength for ${p.name}`}
                         defaultValue={p.strength ?? ''}
                         onBlur={(e) => {
                           if (e.target.value !== (p.strength ?? ''))
@@ -208,6 +238,7 @@ export default function ProductsPage() {
                     <td className="px-2 py-2">
                       <input
                         className={cn(inputClass, 'w-20')}
+                        aria-label={`Unit for ${p.name}`}
                         defaultValue={p.defaultUnit}
                         onBlur={(e) => {
                           if (e.target.value !== p.defaultUnit)
@@ -220,6 +251,7 @@ export default function ProductsPage() {
                         className={cn(inputClass, 'w-24 text-right')}
                         inputMode="decimal"
                         placeholder="—"
+                        aria-label={`Sell price for ${p.name}`}
                         defaultValue={toMajor(p.sellPrice)}
                         onBlur={(e) => {
                           const v = toMinor(e.target.value)
@@ -232,6 +264,7 @@ export default function ProductsPage() {
                         className={cn(inputClass, 'w-24 text-right')}
                         inputMode="decimal"
                         placeholder="—"
+                        aria-label={`Supplier cost for ${p.name}`}
                         defaultValue={toMajor(p.costInr)}
                         onBlur={(e) => {
                           const v = toMinor(e.target.value)
@@ -242,6 +275,7 @@ export default function ProductsPage() {
                     <td className="px-2 py-2">
                       <select
                         className={cn(inputClass, 'w-32')}
+                        aria-label={`Supplier for ${p.name}`}
                         value={p.supplierId ?? ''}
                         onChange={(e) =>
                           save.mutate({
@@ -263,6 +297,8 @@ export default function ProductsPage() {
                     <td className="px-2 py-2">
                       <button
                         type="button"
+                        aria-label={`${p.active ? 'Deactivate' : 'Activate'} ${p.name}`}
+                        className="rounded focus-visible:outline-2 focus-visible:outline-focus"
                         onClick={() => save.mutate({ id: p.id, patch: { active: !p.active } })}
                       >
                         <Badge variant={p.active ? 'success' : 'neutral'}>
@@ -275,7 +311,7 @@ export default function ProductsPage() {
                         type="button"
                         aria-label={`Remove ${p.name}`}
                         onClick={() => remove.mutate(p.id)}
-                        className="text-text-muted transition-colors hover:text-danger"
+                        className="rounded p-1.5 text-text-muted transition-colors hover:text-danger focus-visible:outline-2 focus-visible:outline-focus"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>

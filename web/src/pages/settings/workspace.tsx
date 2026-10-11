@@ -1,211 +1,127 @@
-import { Building2, Globe, Loader2, Settings2, UserRound } from 'lucide-react'
+import { Building2, Globe, Mail, UserRound } from 'lucide-react'
 import { SettingsPanel } from '@/components/settings/settings-panel'
-import { ActionButton } from '@/components/settings/settings-action-button'
-import { SettingsField, ToggleField } from '@/components/settings/settings-fields'
+import { SettingsField } from '@/components/settings/settings-fields'
+import { Button } from '@/components/ui/button'
+import { ErrorState } from '@/components/ui/error-state'
+import { LoadingState } from '@/components/ui/loading-state'
 import { useWorkspaceConfig } from '@/hooks/use-workspace-config'
+
+const GROUPS = [
+  {
+    icon: Building2,
+    title: 'Business identity',
+    description: 'Your workspace brand and the business context used in outreach.',
+    fields: [
+      ['DASHBOARD_BRAND_NAME', 'Dashboard brand'],
+      ['BUSINESS_NAME', 'Business name'],
+      ['BUSINESS_CITY', 'City'],
+      ['BUSINESS_COUNTRY', 'Country'],
+      ['BUSINESS_INDUSTRY', 'Industry'],
+      ['BUSINESS_CERTIFICATIONS', 'Certifications'],
+    ],
+  },
+  {
+    icon: Globe,
+    title: 'Regional preferences',
+    description: 'Used for schedules, phone numbers and reporting.',
+    fields: [
+      ['BUSINESS_TIMEZONE', 'Time zone', 'Europe/London'],
+      ['DEFAULT_COUNTRY_CODE', 'Country calling code', '44'],
+      ['BUSINESS_CURRENCY', 'Reporting currency', 'GBP'],
+    ],
+  },
+  {
+    icon: Mail,
+    title: 'Contact details & email signature',
+    description: 'Public links and signature details used by your outreach templates.',
+    fields: [
+      ['BUSINESS_WEBSITE', 'Website', 'https://'],
+      ['BUSINESS_CATALOGUE_URL', 'Product catalogue link', 'https://'],
+      ['BUSINESS_WHATSAPP_NUMBER', 'WhatsApp contact number', 'Include the country code'],
+      ['EMAIL_SIGNATURE_NAME', 'Email signature name'],
+      ['EMAIL_FOOTER_NOTE', 'Email footer note'],
+      ['BUSINESS_TAGLINE', 'Tagline'],
+    ],
+  },
+  {
+    icon: UserRound,
+    title: 'Default sender identity',
+    description: 'The name and role used in templates when an account has no identity of its own.',
+    fields: [
+      ['AI_PERSONA_NAME', 'Sender name'],
+      ['AI_PERSONA_GENDER', 'Persona gender'],
+      ['AI_PERSONA_TITLE', 'Job title', 'Sales representative'],
+    ],
+  },
+] as const
 
 export default function WorkspaceSettingsPage() {
   const {
-    configLoading,
-    brandLoading,
+    profile,
+    profileLoading,
+    profileError,
+    refetchProfile,
     envForm,
     setEnvForm,
-    configForm,
-    setConfigForm,
     envMutation,
-    configMutation,
   } = useWorkspaceConfig()
-
-  if (configLoading || brandLoading) {
-    return (
-      <div className="flex items-center justify-center h-[40vh]">
-        <Loader2 className="w-8 h-8 text-accent animate-spin" />
-      </div>
+  const dirty =
+    !!profile &&
+    Object.keys({ ...profile, ...envForm }).some(
+      (key) => (envForm[key] ?? '') !== (profile[key] ?? ''),
     )
-  }
+
+  if (profileLoading) return <LoadingState variant="card" />
+  if (profileError)
+    return <ErrorState title="Could not load workspace settings" onRetry={() => refetchProfile()} />
 
   return (
-    <>
-      <SettingsPanel
-        icon={Building2}
-        title="Workspace Identity"
-        description="Branding and business context used across login, navigation, and outreach templates."
-        footer={
-          <ActionButton
-            onClick={() => envMutation.mutate(envForm)}
+    <div className="space-y-4">
+      {GROUPS.map(({ icon, title, description, fields }) => (
+        <SettingsPanel key={title} icon={icon} title={title} description={description}>
+          <fieldset
+            disabled={envMutation.isPending}
+            className="grid min-w-0 gap-4 sm:grid-cols-2 2xl:grid-cols-3"
+          >
+            {fields.map(([key, label, ...rest]) => (
+              <SettingsField
+                key={key}
+                label={label}
+                value={envForm[key] ?? ''}
+                placeholder={rest[0]}
+                onChange={(value) => setEnvForm((current) => ({ ...current, [key]: value }))}
+              />
+            ))}
+          </fieldset>
+        </SettingsPanel>
+      ))}
+      <div className="sticky bottom-3 z-10 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border-strong bg-surface px-4 py-3 shadow-lg">
+        <p role="status" className="text-xs text-text-secondary">
+          {envMutation.isPending
+            ? 'Saving workspace…'
+            : dirty
+              ? 'You have unsaved changes.'
+              : 'All changes saved.'}
+        </p>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={!dirty || envMutation.isPending}
+            onClick={() => setEnvForm({ ...profile })}
+          >
+            Discard changes
+          </Button>
+          <Button
+            size="sm"
+            disabled={!dirty || !profile}
             pending={envMutation.isPending}
-            label="Save workspace"
-          />
-        }
-      >
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <SettingsField
-            label="Dashboard Brand"
-            value={envForm.DASHBOARD_BRAND_NAME || ''}
-            onChange={(v) => setEnvForm({ ...envForm, DASHBOARD_BRAND_NAME: v })}
-          />
-          <SettingsField
-            label="Business Name"
-            value={envForm.BUSINESS_NAME || ''}
-            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_NAME: v })}
-          />
-          <SettingsField
-            label="City"
-            value={envForm.BUSINESS_CITY || ''}
-            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_CITY: v })}
-          />
-          <SettingsField
-            label="Country"
-            value={envForm.BUSINESS_COUNTRY || ''}
-            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_COUNTRY: v })}
-          />
-          <SettingsField
-            label="Industry"
-            value={envForm.BUSINESS_INDUSTRY || ''}
-            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_INDUSTRY: v })}
-          />
-          <SettingsField
-            label="Certifications"
-            value={envForm.BUSINESS_CERTIFICATIONS || ''}
-            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_CERTIFICATIONS: v })}
-          />
-        </div>
-      </SettingsPanel>
-
-      <SettingsPanel
-        icon={Globe}
-        title="Location, contact and email"
-        description="When your day starts, how phone numbers are read, and what outreach emails link to and sign with."
-        footer={
-          <ActionButton
             onClick={() => envMutation.mutate(envForm)}
-            pending={envMutation.isPending}
-            label="Save"
-          />
-        }
-      >
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <SettingsField
-            label="Time zone (e.g. Europe/London)"
-            value={envForm.BUSINESS_TIMEZONE || ''}
-            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_TIMEZONE: v })}
-          />
-          <SettingsField
-            label="Home country calling code (1, 44, 91…)"
-            value={envForm.DEFAULT_COUNTRY_CODE || ''}
-            onChange={(v) => setEnvForm({ ...envForm, DEFAULT_COUNTRY_CODE: v })}
-          />
-          <SettingsField
-            label="Currency for reports (USD, EUR, INR…)"
-            value={envForm.BUSINESS_CURRENCY || ''}
-            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_CURRENCY: v })}
-          />
-          <SettingsField
-            label="Website"
-            value={envForm.BUSINESS_WEBSITE || ''}
-            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_WEBSITE: v })}
-            placeholder="https://"
-          />
-          <SettingsField
-            label="Product catalogue link"
-            value={envForm.BUSINESS_CATALOGUE_URL || ''}
-            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_CATALOGUE_URL: v })}
-            placeholder="https://"
-          />
-          <SettingsField
-            label="Your WhatsApp number (with country code)"
-            value={envForm.BUSINESS_WHATSAPP_NUMBER || ''}
-            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_WHATSAPP_NUMBER: v })}
-          />
-          <SettingsField
-            label="Sign outreach emails as"
-            value={envForm.EMAIL_SIGNATURE_NAME || ''}
-            onChange={(v) => setEnvForm({ ...envForm, EMAIL_SIGNATURE_NAME: v })}
-          />
-          <SettingsField
-            label="Email footer note (registrations, licences)"
-            value={envForm.EMAIL_FOOTER_NOTE || ''}
-            onChange={(v) => setEnvForm({ ...envForm, EMAIL_FOOTER_NOTE: v })}
-          />
-          <SettingsField
-            label="Tagline"
-            value={envForm.BUSINESS_TAGLINE || ''}
-            onChange={(v) => setEnvForm({ ...envForm, BUSINESS_TAGLINE: v })}
-          />
+          >
+            Save workspace
+          </Button>
         </div>
-      </SettingsPanel>
-
-      <SettingsPanel
-        icon={UserRound}
-        title="Default sender identity"
-        description="Who messages are signed as when a WhatsApp account does not set its own. Used by email and message templates."
-      >
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <SettingsField
-            label="Persona Name"
-            value={envForm.AI_PERSONA_NAME || ''}
-            onChange={(v) => setEnvForm({ ...envForm, AI_PERSONA_NAME: v })}
-            placeholder="Kavya"
-          />
-          <SettingsField
-            label="Gender"
-            value={envForm.AI_PERSONA_GENDER || ''}
-            onChange={(v) => setEnvForm({ ...envForm, AI_PERSONA_GENDER: v })}
-            placeholder="female"
-          />
-          <SettingsField
-            label="Title"
-            value={envForm.AI_PERSONA_TITLE || ''}
-            onChange={(v) => setEnvForm({ ...envForm, AI_PERSONA_TITLE: v })}
-            placeholder="sales representative"
-          />
-        </div>
-      </SettingsPanel>
-
-      <SettingsPanel
-        icon={Settings2}
-        title="Global WhatsApp Defaults"
-        description="Account-level settings below take precedence. Use these as safe system-wide defaults."
-        footer={
-          <ActionButton
-            onClick={() => configMutation.mutate(configForm)}
-            pending={configMutation.isPending}
-            label="Save defaults"
-            secondary
-          />
-        }
-      >
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-          <SettingsField
-            label="Daily Limit"
-            value={configForm.WA_DAILY_LIMIT || ''}
-            onChange={(v) => setConfigForm({ ...configForm, WA_DAILY_LIMIT: v })}
-            type="number"
-          />
-          <SettingsField
-            label="Min Delay (sec)"
-            value={configForm.WA_MIN_DELAY || ''}
-            onChange={(v) => setConfigForm({ ...configForm, WA_MIN_DELAY: v })}
-            type="number"
-          />
-          <SettingsField
-            label="Max Delay (sec)"
-            value={configForm.WA_MAX_DELAY || ''}
-            onChange={(v) => setConfigForm({ ...configForm, WA_MAX_DELAY: v })}
-            type="number"
-          />
-        </div>
-        <ToggleField
-          label="Warmup Mode"
-          description="Gradually ramps sending volume instead of using the full daily limit immediately."
-          checked={configForm.WARMUP_MODE === 'true'}
-          onChange={(checked) => setConfigForm({ ...configForm, WARMUP_MODE: String(checked) })}
-        />
-        <div className="rounded-md border border-dashed border-border bg-surface-raised/60 p-4 text-sm text-text-secondary">
-          These settings are shared across WhatsApp accounts unless a specific account overrides
-          them. Keep these values conservative enough for every sender profile in the workspace.
-        </div>
-      </SettingsPanel>
-    </>
+      </div>
+    </div>
   )
 }

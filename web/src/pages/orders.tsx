@@ -1,3 +1,5 @@
+import { SearchInput } from '@/components/ui/search-input'
+import { ErrorState } from '@/components/ui/error-state'
 import { useHomeCurrency } from '@/hooks/use-home-currency'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -126,7 +128,7 @@ export default function OrdersPage() {
     ? Number(searchParams.get('newFromLead'))
     : null
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['orders', statusFilter, search],
     queryFn: () =>
       salesApi.listOrders({ status: statusFilter || undefined, search: search || undefined }),
@@ -193,12 +195,12 @@ export default function OrdersPage() {
       </div>
 
       <SectionCard title="All orders" description="Newest first.">
-        <div className="mb-3 flex flex-wrap gap-2">
-          <input
-            className={cn(inputClass, 'max-w-xs')}
-            placeholder="Search order no, customer, company…"
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <SearchInput
+            label="Search orders"
+            placeholder="Order number, customer or company…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={setSearch}
           />
           <select
             className={cn(inputClass, 'max-w-[200px]')}
@@ -217,15 +219,35 @@ export default function OrdersPage() {
 
         {isLoading ? (
           <SkeletonTable rows={6} />
+        ) : isError ? (
+          <ErrorState title="Could not load orders" onRetry={() => refetch()} />
         ) : orders.length === 0 ? (
           <EmptyState
             icon={Package}
-            title="No orders yet"
-            description="When a deal closes, record it here so the invoice and shipment live alongside it."
+            tone={search || statusFilter ? 'filtered' : 'waiting'}
+            title={search || statusFilter ? 'No matching orders' : 'No orders yet'}
+            description={
+              search || statusFilter
+                ? 'Try a different search or status.'
+                : 'Record an order to track its invoice and shipment.'
+            }
             action={
-              <Button size="sm" onClick={() => setCreating(true)}>
-                Create the first order
-              </Button>
+              search || statusFilter ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    setSearch('')
+                    setStatusFilter('')
+                  }}
+                >
+                  Clear filters
+                </Button>
+              ) : (
+                <Button size="sm" onClick={() => setCreating(true)}>
+                  Create the first order
+                </Button>
+              )
             }
           />
         ) : (

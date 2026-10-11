@@ -91,9 +91,9 @@ export default function WhatsAppSection() {
 
       <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface px-5 py-5 shadow-sm md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-sm font-semibold">WhatsApp delivery surface</p>
+          <p className="text-sm font-semibold">WhatsApp accounts</p>
           <p className="mt-1 text-sm text-text-secondary">
-            Keep sender state, delivery capacity, and account health visible at a glance.
+            Manage your numbers and monitor delivery capacity.
           </p>
         </div>
         <div className="flex gap-2">
@@ -116,7 +116,7 @@ export default function WhatsAppSection() {
       </div>
 
       {/* Account Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4">
         {accounts.map((acc) => (
           <div key={acc.id} className="card-hover glass overflow-hidden rounded-lg">
             <div className="border-b border-border bg-surface/70 p-5">

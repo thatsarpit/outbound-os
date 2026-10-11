@@ -1,101 +1,63 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/page-header'
+import { Button } from '@/components/ui/button'
 import { ErrorBoundary } from '@/components/error-boundary'
-import { SETTINGS_GROUPS, SETTINGS_SECTIONS } from './settings-nav'
+import { SETTINGS_SECTIONS } from './settings-nav'
 
-/**
- * Layout for the /settings/* sub-routes: PageHeader with breadcrumbs, the
- * section NavLink rail (horizontal snap-scroll on mobile, sticky vertical rail
- * on xl), and an Outlet for the active section page.
- *
- * Each section gets its own ErrorBoundary (keyed by pathname) so a crash in
- * one section renders inline with the rail still usable — on top of the
- * app-shell route boundary.
- */
 export default function SettingsLayout() {
   const location = useLocation()
+  const canonicalPath = location.pathname.replace(/^\/dev\/shell/, '')
   const active =
-    SETTINGS_SECTIONS.find((section) => location.pathname.startsWith(section.to)) ??
+    SETTINGS_SECTIONS.find((section) => canonicalPath.startsWith(section.to)) ??
     SETTINGS_SECTIONS[0]
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="animate-fade-in space-y-5">
       <PageHeader
-        eyebrow="Settings"
-        title={active.label}
+        title={active.label === 'Workspace' ? 'Workspace settings' : active.label}
         description={active.description}
         breadcrumbs={[{ label: 'Settings', href: '/settings' }, { label: active.label }]}
+        actions={
+          <>
+            <Button asChild size="sm" variant="secondary">
+              <Link to="/integrations">Integrations</Link>
+            </Button>
+            <Button asChild size="sm" variant="secondary">
+              <Link to="/automation">Automation</Link>
+            </Button>
+          </>
+        }
       />
-
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-md border border-border bg-surface px-4 py-3 text-xs text-text-secondary">
-        <span>Looking for channel or sending controls?</span>
-        <Link to="/integrations" className="font-medium text-accent hover:underline">
-          Manage integrations →
-        </Link>
-        <Link to="/automation" className="font-medium text-accent hover:underline">
-          Outreach automation →
-        </Link>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-[200px_minmax(0,1fr)]">
-        {/* Settings navigation. This used to be a column of 260px cards, each
-            with a 40px icon tile and a description that the page header already
-            shows for the active section — a lot of furniture for what is a list
-            of links. Now a compact rail using the same active treatment as the
-            main sidebar, so navigation looks like navigation everywhere. */}
-        <nav
-          aria-label="Settings categories"
-          className="scrollbar-hide -mx-4 flex gap-1 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 xl:mx-0 xl:flex-col xl:gap-px xl:self-start xl:px-0 xl:pb-0 xl:sticky xl:top-16"
-        >
-          {SETTINGS_GROUPS.map((group) => {
-            const groupSections = SETTINGS_SECTIONS.filter((s) => group.ids.includes(s.id))
-            if (!groupSections.length) return null
-            return (
-              <div key={group.label} className="contents xl:block xl:not-first:mt-4">
-                <p className="hidden px-2 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-text-muted xl:block">
-                  {group.label}
-                </p>
-                {groupSections.map((section) => {
-                  const Icon = section.icon
-                  return (
-                    <NavLink
-                      key={section.id}
-                      to={section.to}
-                      className={({ isActive }) =>
-                        cn(
-                          'relative flex h-8 shrink-0 items-center gap-2.5 rounded-md px-2 text-[13px] transition-colors',
-                          isActive
-                            ? 'bg-surface-raised font-medium text-text-primary'
-                            : 'font-normal text-text-secondary hover:bg-surface-raised hover:text-text-primary',
-                        )
-                      }
-                    >
-                      {({ isActive }) => (
-                        <>
-                          {isActive && (
-                            <span
-                              aria-hidden="true"
-                              className="absolute bottom-1.5 left-0 top-1.5 hidden w-0.5 rounded-full bg-accent xl:block"
-                            />
-                          )}
-                          <Icon className="h-4 w-4 shrink-0" />
-                          <span className="truncate">{section.label}</span>
-                        </>
-                      )}
-                    </NavLink>
-                  )
-                })}
-              </div>
-            )
-          })}
-        </nav>
-
-        <div className="min-w-0 space-y-6">
-          <ErrorBoundary key={location.pathname}>
-            <Outlet />
-          </ErrorBoundary>
-        </div>
+      <nav
+        aria-label="Settings categories"
+        className="flex gap-5 overflow-x-auto border-b border-border"
+      >
+        {SETTINGS_SECTIONS.map((section) => {
+          const Icon = section.icon
+          return (
+            <NavLink
+              key={section.id}
+              to={section.to}
+              className={({ isActive }) =>
+                cn(
+                  'flex shrink-0 items-center gap-2 border-b-2 px-1 pb-3 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-focus',
+                  isActive
+                    ? 'border-accent font-medium text-text-primary'
+                    : 'border-transparent text-text-secondary hover:text-text-primary',
+                )
+              }
+            >
+              <Icon className="h-4 w-4" aria-hidden="true" />
+              {section.label}
+            </NavLink>
+          )
+        })}
+      </nav>
+      <div className="min-w-0">
+        <ErrorBoundary key={location.pathname}>
+          <Outlet />
+        </ErrorBoundary>
       </div>
     </div>
   )

@@ -17,20 +17,19 @@ export default function IntegrationsLayout() {
   const active = tabs.find((tab) => canonicalPath.startsWith(tab.to)) ?? tabs[0]
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-5 animate-fade-in">
       <PageHeader
-        eyebrow="Integrations"
         title={active.id === 'all' ? 'Integrations' : active.label}
         description={active.description}
         breadcrumbs={[{ label: 'Integrations', href: '/integrations' }, { label: active.label }]}
       />
 
-      <div className="grid gap-6 lg:grid-cols-[200px_minmax(0,1fr)]">
+      <div className="grid gap-5 xl:grid-cols-[184px_minmax(0,1fr)]">
         <nav
           aria-label="Integration categories"
-          className="flex gap-1 overflow-x-auto lg:sticky lg:top-16 lg:flex-col lg:self-start"
+          className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-surface p-2 xl:sticky xl:top-16 xl:flex-col xl:self-start"
         >
-          <p className="hidden px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted lg:block">
+          <p className="hidden px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted xl:block">
             Connections
           </p>
           {tabs.map((tab) => {

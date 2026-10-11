@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toast-store'
@@ -33,7 +33,12 @@ export interface BrandConfig {
  */
 export function useWorkspaceConfig() {
   const queryClient = useQueryClient()
-  const { data: config, isLoading: configLoading } = useQuery({
+  const {
+    data: config,
+    isLoading: configLoading,
+    isError: configError,
+    refetch: refetchConfig,
+  } = useQuery({
     queryKey: ['config'],
     queryFn: async () => {
       const res = await api.get<SystemConfig>('/config')
@@ -53,7 +58,12 @@ export function useWorkspaceConfig() {
 
   // Every editable workspace field, keyed by its env-var name. Saved values
   // live in the database; see src/services/workspaceProfile.js.
-  const { data: profile } = useQuery({
+  const {
+    data: profile,
+    isLoading: profileLoading,
+    isError: profileError,
+    refetch: refetchProfile,
+  } = useQuery({
     queryKey: ['workspace-profile'],
     queryFn: async () => {
       const res = await api.get<Record<string, string>>('/workspace/profile')
@@ -64,20 +74,32 @@ export function useWorkspaceConfig() {
 
   const [envForm, setEnvForm] = useState<Record<string, string>>({})
   const [configForm, setConfigForm] = useState<Record<string, string>>({})
+  const previousProfile = useRef<Record<string, string> | undefined>(undefined)
+  const previousConfig = useRef<Record<string, string> | undefined>(undefined)
 
   useEffect(() => {
-    if (profile) setEnvForm({ ...profile })
+    if (!profile) return
+    const previous = previousProfile.current
+    // Background refetches must not replace edits that have not been saved.
+    setEnvForm((current) =>
+      !previous || JSON.stringify(current) === JSON.stringify(previous) ? { ...profile } : current,
+    )
+    previousProfile.current = profile
   }, [profile])
 
   useEffect(() => {
-    if (config) {
-      setConfigForm({
-        WA_DAILY_LIMIT: String(config.waMaxMessages ?? '200'),
-        WA_MIN_DELAY: String(config.WA_MIN_DELAY ?? '30'),
-        WA_MAX_DELAY: String(config.WA_MAX_DELAY ?? '90'),
-        WARMUP_MODE: String(config.waWarmupMode ?? 'false'),
-      })
+    if (!config) return
+    const next = {
+      WA_DAILY_LIMIT: String(config.waMaxMessages ?? '200'),
+      WA_MIN_DELAY: String(config.WA_MIN_DELAY ?? '30'),
+      WA_MAX_DELAY: String(config.WA_MAX_DELAY ?? '90'),
+      WARMUP_MODE: String(config.waWarmupMode ?? 'false'),
     }
+    const previous = previousConfig.current
+    setConfigForm((current) =>
+      !previous || JSON.stringify(current) === JSON.stringify(previous) ? next : current,
+    )
+    previousConfig.current = next
   }, [config])
 
   const envMutation = useMutation({
@@ -93,7 +115,10 @@ export function useWorkspaceConfig() {
 
   const configMutation = useMutation({
     mutationFn: (data: Record<string, string>) => api.patch('/config', data),
-    onSuccess: () => toast.success('Global automation defaults saved'),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config'] })
+      toast.success('WhatsApp defaults saved')
+    },
     onError: (e: Error) => toast.error(`Failed to save defaults: ${e.message}`),
   })
 
@@ -102,6 +127,12 @@ export function useWorkspaceConfig() {
     brand,
     configLoading,
     brandLoading,
+    profile,
+    profileLoading,
+    profileError,
+    refetchProfile,
+    configError,
+    refetchConfig,
     envForm,
     setEnvForm,
     configForm,

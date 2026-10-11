@@ -2103,6 +2103,36 @@ function samplePeriodData(url: string, value: unknown): unknown {
   return visit(value)
 }
 
+function sampleListData(url: string, value: unknown): unknown {
+  const path = new URL(url, location.origin)
+  const fields: Record<string, string[]> = {
+    '/api/customers': ['name', 'company', 'email'],
+    '/api/products': ['name', 'strength', 'sku'],
+    '/api/orders': ['orderNumber', 'customerName', 'company'],
+  }
+  const keys = fields[path.pathname]
+  if (
+    !keys ||
+    !value ||
+    typeof value !== 'object' ||
+    !('data' in value) ||
+    !Array.isArray(value.data)
+  )
+    return value
+  const search = (path.searchParams.get('search') ?? '').toLowerCase()
+  const status = path.searchParams.get('status')
+  const data = value.data.filter(
+    (row) =>
+      keys.some((key) =>
+        String(row[key] ?? '')
+          .toLowerCase()
+          .includes(search),
+      ) &&
+      (!status || row.status === status),
+  )
+  return { ...value, data, total: data.length }
+}
+
 export function installFixtureFetch() {
   const original = window.fetch.bind(window)
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -2171,7 +2201,7 @@ export function installFixtureFetch() {
     if (!match) console.debug('[demo] no sample data for', url)
     const raw = match ? match[1] : {}
     const fixtureBody = typeof raw === 'function' ? (raw as (u: string) => unknown)(url) : raw
-    const body = samplePeriodData(url, fixtureBody)
+    const body = sampleListData(url, samplePeriodData(url, fixtureBody))
     return new Response(JSON.stringify(body), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
