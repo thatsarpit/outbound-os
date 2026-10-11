@@ -296,14 +296,14 @@ const CHANNEL_CARDS = [
     name: 'WhatsApp',
     icon: MessageSquare,
     detail: 'Official Meta Cloud API (free to set up) or AiSensy. Where most B2B buyers reply fastest.',
-    to: '/settings/whatsapp',
+    to: '/integrations/whatsapp/configure',
   },
   {
     id: 'email' as const,
     name: 'Email',
     icon: Mail,
     detail: 'Any mailbox over SMTP/IMAP, or Brevo. Replies come back into the inbox.',
-    to: '/settings/email',
+    to: '/integrations/email',
   },
   {
     id: 'telegram' as const,
@@ -317,7 +317,7 @@ const CHANNEL_CARDS = [
     name: 'iMessage',
     icon: MessageCircle,
     detail: 'Through a Mac running BlueBubbles. Useful for US and UK buyers.',
-    to: '/settings/imessage',
+    to: '/integrations/imessage',
   },
 ]
 

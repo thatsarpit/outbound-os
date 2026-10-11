@@ -43,7 +43,7 @@ const TRY = [
     text: 'Every lead from first message to closed, with who replied and when.',
   },
   {
-    to: '/settings/whatsapp',
+    to: '/integrations/whatsapp/configure',
     Icon: ReceiptText,
     title: 'See what WhatsApp costs',
     text: 'Paid and free messages from Meta’s own pricing data, by category.',

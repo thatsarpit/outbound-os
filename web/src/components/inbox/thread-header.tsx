@@ -1,16 +1,5 @@
-import {
-  Building2,
-  CheckCircle,
-  Loader2,
-  Mail,
-  Phone,
-  RotateCcw,
-  User,
-  UserPlus,
-  X,
-} from 'lucide-react'
+import { CheckCircle, Loader2, Mail, Phone, RotateCcw, User, UserPlus, X } from 'lucide-react'
 import type { InboxChannel, InboxThreadDetail } from '@/api/types'
-import { cn, getStatusColor } from '@/lib/utils'
 import { ChannelBadge } from './channel-badge'
 import { ThreadStatePill } from './thread-state-pill'
 
@@ -37,45 +26,41 @@ export function ThreadHeader({
   const isUnassigned = thread?.assignmentState === 'unassigned'
 
   return (
-    <div className="border-b border-border px-4 py-4 sm:px-5">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+    <div className="shrink-0 border-b border-border px-4 py-3 sm:px-5">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-accent-muted text-accent">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-accent-muted text-accent">
               <User className="h-4 w-4" />
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="truncate text-base font-semibold text-text-primary">
+                <h2 className="truncate text-sm font-semibold text-text-primary">
                   {thread?.leadName || thread?.name || 'Loading conversation'}
                 </h2>
                 <ChannelBadge channel={activeChannel} />
                 {thread?.threadState && <ThreadStatePill state={thread.threadState} compact />}
               </div>
-              <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-text-muted">
-                {thread?.leadCompany && (
-                  <span className="inline-flex items-center gap-1">
-                    <Building2 className="h-3.5 w-3.5" />
-                    {thread.leadCompany}
-                  </span>
-                )}
-                {thread?.leadMobile && (
-                  <span className="inline-flex items-center gap-1">
+              <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-text-muted">
+                {thread?.leadMobile && !thread?.leadEmail && (
+                  <span className="inline-flex min-w-0 items-center gap-1">
                     <Phone className="h-3.5 w-3.5" />
                     {thread.leadMobile}
                   </span>
                 )}
                 {thread?.leadEmail && (
-                  <span className="inline-flex items-center gap-1">
-                    <Mail className="h-3.5 w-3.5" />
-                    {thread.leadEmail}
+                  <span className="inline-flex min-w-0 items-center gap-1">
+                    <Mail className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate" title={thread.leadEmail}>
+                      {thread.leadEmail}
+                    </span>
                   </span>
                 )}
               </div>
             </div>
           </div>
           {activeChannel === 'email' && thread?.subject && (
-            <p className="mt-3 rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-text-secondary">
+            <p title={thread.subject} className="mt-2 truncate text-xs text-text-secondary">
               Subject: <span className="text-text-primary">{thread.subject}</span>
             </p>
           )}
@@ -134,24 +119,6 @@ export function ThreadHeader({
                   </button>
                 )}
               </>
-            )}
-            {thread?.status && (
-              <span
-                className={cn(
-                  'rounded-full px-2.5 py-1 text-xs font-medium',
-                  getStatusColor(thread.status),
-                )}
-              >
-                {thread.status}
-              </span>
-            )}
-            {thread?.senderAccount && (
-              <span className="rounded-full border border-border bg-surface-raised px-2.5 py-1 text-xs text-text-secondary">
-                Sender:{' '}
-                {thread.senderAccount.senderName ||
-                  thread.senderAccount.name ||
-                  thread.senderAccount.email}
-              </span>
             )}
           </div>
           {drawer && onClose && (

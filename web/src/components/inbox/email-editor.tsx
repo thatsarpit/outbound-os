@@ -47,6 +47,7 @@ function ToolbarButton({
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-label={title}
       className={cn(
         'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors',
         'hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40',
@@ -68,9 +69,12 @@ export function EmailEditor({
   className,
 }: EmailEditorProps) {
   const editor = useEditor({
+    immediatelyRender: false,
     extensions: [
       StarterKit.configure({
         heading: false,
+        link: false,
+        underline: false,
         codeBlock: false,
         code: false,
         horizontalRule: false,
@@ -86,15 +90,18 @@ export function EmailEditor({
     editable: !disabled,
     editorProps: {
       attributes: {
+        role: 'textbox',
+        'aria-label': 'Email message',
+        'aria-multiline': 'true',
         class: cn(
-          'min-h-[100px] max-h-[280px] overflow-y-auto px-4 py-3 text-sm text-text-primary',
+          'min-h-[76px] max-h-[280px] overflow-y-auto px-4 py-3 text-sm text-text-primary',
           'outline-none prose prose-invert prose-sm max-w-none',
           'prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-blockquote:my-1',
           'prose-a:text-info prose-strong:text-text-primary',
         ),
       },
       handleKeyDown: (_view, event) => {
-        if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
           // Only send if there's no active composition (autocomplete, CJK input, etc.)
           if (!event.isComposing && onSend) {
             event.preventDefault()
@@ -114,7 +121,7 @@ export function EmailEditor({
 
   // Sync external content changes (e.g., template apply, AI draft)
   useEffect(() => {
-    if (!editor) return
+    if (!editor || editor.isDestroyed) return
     const current = editor.getHTML()
     if (content !== current) {
       editor.commands.setContent(content, { emitUpdate: false })
@@ -122,7 +129,7 @@ export function EmailEditor({
   }, [content, editor])
 
   useEffect(() => {
-    if (editor) editor.setEditable(!disabled)
+    if (editor && !editor.isDestroyed) editor.setEditable(!disabled)
   }, [disabled, editor])
 
   const addLink = useCallback(() => {

@@ -286,7 +286,6 @@ export default function WhatsAppSettingsPage() {
               testMutation={testConnectionMutation}
             />
           </div>
-
         </>
       )}
 

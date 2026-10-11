@@ -175,7 +175,7 @@ export function ConversationSurface({
   return (
     <div
       className={cn(
-        'flex min-h-0 flex-1 flex-col overflow-hidden',
+        'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden',
         !drawer && 'glass rounded-lg border border-border',
       )}
     >
@@ -196,14 +196,14 @@ export function ConversationSurface({
           accounts={availableSenderAccounts}
           selectedAccountId={senderAccountId}
           assignedAccountId={activeThread?.assignedEmailAccountId}
-          className="mx-4 mt-3 sm:mx-5"
+          className="mx-4 mt-3 shrink-0 sm:mx-5"
         />
       )}
 
       <div
         ref={timelineRef}
         {...timelineProps}
-        className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5"
+        className="min-h-24 flex-1 overflow-y-auto px-4 py-4 sm:px-5"
       >
         <div ref={contentRef} className="space-y-3">
           {threadLoading ? (
@@ -302,12 +302,12 @@ export function ConversationSurface({
         onScheduleSend={onScheduleSend}
         helperLabel={
           composerChannel === 'email'
-            ? 'Reply in thread from the selected sender'
+            ? 'Ctrl / ⌘ + Enter to send'
             : `Enter to send on ${getChannel(composerChannel).label} · Shift+Enter for a new line`
         }
         placeholder={
           composerChannel === 'email'
-            ? 'Write the email reply your agent should send…'
+            ? 'Write your reply…'
             : `Type the ${getChannel(composerChannel).label} reply…`
         }
         sendDisabled={sendDisabled}

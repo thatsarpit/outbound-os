@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/page-header'
 import { ErrorBoundary } from '@/components/error-boundary'
@@ -28,13 +28,26 @@ export default function SettingsLayout() {
         breadcrumbs={[{ label: 'Settings', href: '/settings' }, { label: active.label }]}
       />
 
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-md border border-border bg-surface px-4 py-3 text-xs text-text-secondary">
+        <span>Looking for channel or sending controls?</span>
+        <Link to="/integrations" className="font-medium text-accent hover:underline">
+          Manage integrations →
+        </Link>
+        <Link to="/automation" className="font-medium text-accent hover:underline">
+          Outreach automation →
+        </Link>
+      </div>
+
       <div className="grid gap-6 xl:grid-cols-[200px_minmax(0,1fr)]">
         {/* Settings navigation. This used to be a column of 260px cards, each
             with a 40px icon tile and a description that the page header already
             shows for the active section — a lot of furniture for what is a list
             of links. Now a compact rail using the same active treatment as the
             main sidebar, so navigation looks like navigation everywhere. */}
-        <aside className="scrollbar-hide -mx-4 flex gap-1 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 xl:mx-0 xl:flex-col xl:gap-px xl:self-start xl:px-0 xl:pb-0 xl:sticky xl:top-16">
+        <nav
+          aria-label="Settings categories"
+          className="scrollbar-hide -mx-4 flex gap-1 overflow-x-auto px-4 pb-2 sm:-mx-6 sm:px-6 xl:mx-0 xl:flex-col xl:gap-px xl:self-start xl:px-0 xl:pb-0 xl:sticky xl:top-16"
+        >
           {SETTINGS_GROUPS.map((group) => {
             const groupSections = SETTINGS_SECTIONS.filter((s) => group.ids.includes(s.id))
             if (!groupSections.length) return null
@@ -76,7 +89,7 @@ export default function SettingsLayout() {
               </div>
             )
           })}
-        </aside>
+        </nav>
 
         <div className="min-w-0 space-y-6">
           <ErrorBoundary key={location.pathname}>

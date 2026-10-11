@@ -5,25 +5,16 @@ import {
   Search,
   ArrowRight,
   Command as CommandIcon,
-  LayoutDashboard,
-  MessageSquare,
-  Users,
-  BarChart3,
-  Kanban,
-  UserCog,
-  History,
-  Megaphone,
-  FileText,
-  Upload,
-  Plug,
-  Settings,
   PlusCircle,
   Loader2,
+  Megaphone,
+  Users,
 } from 'lucide-react'
 import { leadsApi } from '@/api/endpoints/leads'
 import { campaignsApi } from '@/api/endpoints/campaigns'
 import { useAuthStore } from '@/stores/auth-store'
 import { cn } from '@/lib/utils'
+import { NAVIGATION_ITEMS } from '@/lib/navigation'
 
 type PaletteItem = {
   id: string
@@ -41,21 +32,6 @@ type CommandPaletteProps = {
   onCreateLead?: () => void
   onCreateCampaign?: () => void
 }
-
-const NAV_ROUTES: { to: string; label: string; icon: React.ElementType; capability: string }[] = [
-  { to: '/overview', label: 'Overview', icon: LayoutDashboard, capability: 'page.overview' },
-  { to: '/inbox', label: 'Inbox', icon: MessageSquare, capability: 'page.inbox' },
-  { to: '/leads', label: 'Leads', icon: Users, capability: 'page.leads' },
-  { to: '/analytics', label: 'Analytics', icon: BarChart3, capability: 'page.analytics' },
-  { to: '/pipeline', label: 'Pipeline', icon: Kanban, capability: 'page.pipeline' },
-  { to: '/campaigns', label: 'Campaigns', icon: Megaphone, capability: 'page.campaigns' },
-  { to: '/templates', label: 'Templates', icon: FileText, capability: 'page.templates' },
-  { to: '/import', label: 'Import', icon: Upload, capability: 'page.import' },
-  { to: '/team', label: 'Team', icon: UserCog, capability: 'page.team' },
-  { to: '/activity', label: 'Activity', icon: History, capability: 'page.activity' },
-  { to: '/integrations', label: 'Integrations', icon: Plug, capability: 'page.integrations' },
-  { to: '/settings', label: 'Settings', icon: Settings, capability: 'page.settings' },
-]
 
 export function CommandPalette({
   open,
@@ -102,7 +78,7 @@ export function CommandPalette({
     const list: PaletteItem[] = []
 
     // Nav routes
-    NAV_ROUTES.filter((r) => hasCapability(r.capability)).forEach((r) => {
+    NAVIGATION_ITEMS.filter((r) => hasCapability(r.capability)).forEach((r) => {
       list.push({
         id: `nav:${r.to}`,
         label: `Go to ${r.label}`,

@@ -1463,7 +1463,7 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
     },
   ],
   [/\/system\/status/, { connectedAccounts: 2, enabledAccounts: 2 }],
-  [/\/system\/health/, { ok: true, services: {} }],
+  [/\/system\/health/, { health: { overall: 'ok', issues: [] }, db: 'ok' }],
   [/\/alerts\/count/, { count: 3 }],
   [/\/alerts/, []],
   [/\/notifications/, FIXTURE_NOTIFICATIONS],
