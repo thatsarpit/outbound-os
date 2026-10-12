@@ -149,8 +149,21 @@ class BrevoMarketingCampaigns {
     if (folderId != null && String(folderId).trim() !== '' && !normalized) {
       throw new Error('Brevo folder ID must be a positive integer');
     }
+    const scoped = await prisma.systemConfig.findMany({ where: { key: { startsWith: `${KEYS.folderId}.` } } });
+    if (scoped.length) throw new Error('Configure the campaign folder separately for each Brevo account');
     await writeConfig(KEYS.folderId, normalized || '');
     return this.getStatus();
+  }
+
+  async setAccountFolderId(accountId, folderId) {
+    const normalized = positiveInteger(folderId);
+    if (!normalized) throw new Error('Brevo folder ID must be a positive integer');
+    const identity = (await emailService.getBrevoAccountGroups([Number(accountId)])).get(Number(accountId));
+    if (!identity) throw new Error('Test the Brevo sender before configuring its campaign folder');
+    // Folder IDs belong to a Brevo account, not to the shared CRM workspace.
+    const folder = await emailService.brevoRequestForAccount(Number(accountId), `/contacts/folders/${normalized}`);
+    if (Number(folder?.id) !== normalized) throw new Error('Brevo folder was not found in this account');
+    await writeConfig(`${KEYS.folderId}.${identity}`, normalized);
   }
 
   async getStatus({ senderIds = [] } = {}) {
@@ -172,6 +185,13 @@ class BrevoMarketingCampaigns {
     const configuredBrevoSenders = accounts.length > 0
       && accounts.every((account) => account.provider === 'brevo' && account.enabled && account.status === 'verified');
     const folderId = positiveInteger(folderRow?.value);
+    const identities = await emailService.getBrevoAccountGroups(accounts.map(account => account.id));
+    const scopedFolders = await prisma.systemConfig.findMany({ where: { key: { startsWith: `${KEYS.folderId}.` } } });
+    const byIdentity = new Map(scopedFolders.map(row => [row.key.slice(KEYS.folderId.length + 1), positiveInteger(row.value)]));
+    const folderIdsByAccount = Object.fromEntries(accounts.map(account => [account.id,
+      scopedFolders.length ? byIdentity.get(identities.get(account.id)) || null : folderId,
+    ]));
+    const folderConfigured = accounts.length ? accounts.every(account => Boolean(folderIdsByAccount[account.id])) : Boolean(folderId);
     const webhookUrl = configuredBrevoWebhookUrl();
     const webhookConfigured = Boolean(webhookUrl && process.env.BREVO_WEBHOOK_SECRET);
     return {
@@ -179,13 +199,14 @@ class BrevoMarketingCampaigns {
       globallyPaused: paused,
       configuredBrevoSenders,
       folderId,
-      folderConfigured: Boolean(folderId),
+      folderConfigured,
+      folderIdsByAccount,
       webhookConfigured,
       webhookUrl,
       consentedCount,
       optOutCount,
       accounts,
-      ready: enabled && !paused && configuredBrevoSenders && Boolean(folderId) && webhookConfigured && consentedCount > 0,
+      ready: enabled && !paused && configuredBrevoSenders && folderConfigured && webhookConfigured && consentedCount > 0,
       delivery: 'Brevo Marketing Campaigns',
     };
   }
@@ -344,40 +365,50 @@ class BrevoMarketingCampaigns {
       const automationKeys = leads.map((lead) => `daily-email:brevo:${date}:${recipientHash(lead.email)}`);
       const existing = await tx.message.findMany({
         where: { automationKey: { in: automationKeys } },
-        select: { automationKey: true },
+        select: { id: true, tenantId: true, automationKey: true },
       });
-      const existingKeys = new Set(existing.map((message) => message.automationKey));
+      const messageKey = (tenantId, automationKey) => JSON.stringify([tenantId ?? null, automationKey]);
+      const existingMessages = new Map(existing.map((message) => [messageKey(message.tenantId, message.automationKey), message.id]));
       let newlyRecorded = 0;
       for (const lead of leads) {
         const normalized = normalEmail(lead.email);
         const automationKey = `daily-email:brevo:${date}:${recipientHash(normalized)}`;
-        if (!existingKeys.has(automationKey)) newlyRecorded += 1;
-        await tx.message.upsert({
-          where: { automationKey },
-          create: {
-            leadId: lead.id,
-            emailAccountId: account.id,
-            channel: 'email',
-            direction: 'outbound',
-            status: 'sent',
-            content: email.textBody,
-            emailSubject: email.subject,
-            emailHtmlBody: email.htmlBody,
-            sentAt,
-            providerCampaignId: String(state.campaignId),
-            providerMessageId: `brevo-campaign:${state.campaignId}:${recipientHash(normalized)}`,
-            templateVariant: DAILY_EMAIL_TEMPLATE_VARIANT,
-            automationKey,
-          },
-          update: {
-            status: 'sent',
-            sentAt,
-            emailAccountId: account.id,
-            providerCampaignId: String(state.campaignId),
-            providerMessageId: `brevo-campaign:${state.campaignId}:${recipientHash(normalized)}`,
-            providerStatusReason: null,
-          },
-        });
+        const tenantId = lead.tenantId ?? null;
+        const key = messageKey(tenantId, automationKey);
+        const existingId = existingMessages.get(key);
+        // Nullable tenant keys cannot be used in a Prisma compound-unique
+        // upsert. Resolve the row inside this transaction and update by id.
+        const create = {
+          tenantId,
+          leadId: lead.id,
+          emailAccountId: account.id,
+          channel: 'email',
+          direction: 'outbound',
+          status: 'sent',
+          content: email.textBody,
+          emailSubject: email.subject,
+          emailHtmlBody: email.htmlBody,
+          sentAt,
+          providerCampaignId: String(state.campaignId),
+          providerMessageId: `brevo-campaign:${state.campaignId}:${recipientHash(normalized)}`,
+          templateVariant: DAILY_EMAIL_TEMPLATE_VARIANT,
+          automationKey,
+        };
+        const update = {
+          status: 'sent',
+          sentAt,
+          emailAccountId: account.id,
+          providerCampaignId: String(state.campaignId),
+          providerMessageId: `brevo-campaign:${state.campaignId}:${recipientHash(normalized)}`,
+          providerStatusReason: null,
+        };
+        if (existingId != null) {
+          await tx.message.update({ where: { id: existingId }, data: update });
+        } else {
+          const message = await tx.message.create({ data: create });
+          existingMessages.set(key, message.id);
+          newlyRecorded += 1;
+        }
         await tx.lead.update({
           where: { id: lead.id },
           data: { emailStatus: 'sent', assignedEmailAccountId: account.id },
@@ -413,6 +444,16 @@ class BrevoMarketingCampaigns {
     if (allocations.some(({ lead }) => !lead.emailMarketingConsent || lead.emailOptOut)) {
       return { handled: true, skipped: true, reason: 'marketing_consent_required', readiness };
     }
+    const capacity = await emailService.getBrevoDailyCapacity();
+    for (const { account } of groups.values()) {
+      const available = capacity.get(account.id);
+      const recipients = allocations.filter(item => !available || available.group === 'unverified'
+        || capacity.get(item.account.id)?.group === 'unverified'
+        || capacity.get(item.account.id)?.group === available.group).length;
+      if (!available || recipients > available.remaining) {
+        return { handled: true, skipped: true, reason: 'brevo_shared_daily_limit', readiness };
+      }
+    }
     if (dryRun) {
       return {
         handled: true,
@@ -425,7 +466,7 @@ class BrevoMarketingCampaigns {
 
     const results = [];
     for (const { account, leads } of groups.values()) {
-      const state = await this._ensureCampaign({ date, account, leads, folderId: readiness.folderId });
+      const state = await this._ensureCampaign({ date, account, leads, folderId: readiness.folderIdsByAccount[account.id] });
       const dispatched = await this._dispatchCampaign({
         date,
         account,

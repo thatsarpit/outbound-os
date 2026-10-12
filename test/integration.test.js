@@ -1789,3 +1789,63 @@ test('Gmail inbox settings use the existing admin account update without changin
     await prisma.user.delete({ where: { id: manager.id } });
   }
 });
+
+test('deployed Gmail routes validate access, save atomically and serialize shared inbox syncs', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { default: email } = await import('../src/services/emailService.js');
+  const originalClient = email._createImapClient;
+  const originalRead = email._readRepliesForAccount;
+  const accounts = await Promise.all([1, 2].map(i => prisma.emailAccount.create({ data: { name: `Gmail Route Fixture ${i}`, email: `gmail-route-${i}@example.test`, provider: 'brevo', smtpHost: 'api.brevo.com', smtpPort: 443, smtpUser: 'fake', smtpPass: 'fake-existing-key' } })));
+  const ids = accounts.map(a => a.id);
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.81' };
+  const body = { accountIds: ids, user: 'shared@example.test', appPassword: 'abcd efgh ijkl mnop' };
+  let active = 0;
+  let maximum = 0;
+  try {
+    email._createImapClient = () => ({ connect: async () => {}, getMailboxLock: async () => ({ release() {} }), logout: async () => {} });
+    assert.equal((await request('POST', `/api/email/accounts/${ids[0]}/gmail-inbox`, { body, headers: { 'X-Forwarded-For': '192.0.2.82' } })).status, 401);
+    assert.equal((await request('POST', `/api/email/accounts/${ids[0]}/gmail-inbox`, { headers, body: { ...body, accountIds: 'bad' } })).status, 400);
+    assert.equal((await request('POST', `/api/email/accounts/${ids[0]}/gmail-inbox`, { headers, body: { ...body, appPassword: 'bad' } })).status, 400);
+    const connected = await request('POST', `/api/email/accounts/${ids[0]}/gmail-inbox`, { headers, body });
+    assert.equal(connected.status, 200);
+    assert.equal(JSON.stringify(connected.body).includes('abcdefghijklmnop'), false);
+    for (const id of ids) {
+      const saved = await prisma.emailAccount.findUnique({ where: { id } });
+      assert.equal(saved.imapUser, body.user);
+      assert.match(saved.imapPass, /^enc:v1:/);
+      assert.equal(saved.smtpPass, 'fake-existing-key');
+    }
+    email._readRepliesForAccount = async () => { active++; maximum = Math.max(maximum, active); await new Promise(resolve => setTimeout(resolve, 15)); active--; return 1; };
+    const synced = await Promise.all(ids.map(id => request('POST', `/api/email/accounts/${id}/sync-inbox`, { headers })));
+    assert.ok(synced.every(r => r.status === 200 && r.body.replies === 1));
+    assert.equal(maximum, 1, 'shared mailbox operations must not race and import duplicate replies');
+    email._createImapClient = () => ({ connect: async () => { throw new Error('provider private credential failure'); }, logout: async () => {} });
+    const failed = await request('POST', `/api/email/accounts/${ids[0]}/gmail-inbox`, { headers, body: { ...body, user: 'changed@example.test' } });
+    assert.equal(failed.status, 400);
+    assert.equal(JSON.stringify(failed.body).includes('private credential'), false);
+    assert.equal((await prisma.emailAccount.findUnique({ where: { id: ids[0] } })).imapUser, body.user, 'failed validation preserves existing inbox settings');
+  } finally {
+    email._createImapClient = originalClient;
+    email._readRepliesForAccount = originalRead;
+    await prisma.emailAccount.deleteMany({ where: { id: { in: ids } } });
+  }
+});
+
+test('Brevo campaign recording handles nullable tenant keys and retries without duplicate counters', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { default: campaigns } = await import('../src/services/brevoMarketingCampaigns.js');
+  const lead = await prisma.lead.create({ data: { name: 'Campaign Retry Fixture', mobile: 'no-phone:campaign-retry', email: 'campaign-retry@example.test' } });
+  const account = await prisma.emailAccount.create({ data: { name: 'Campaign Retry Sender', email: 'campaign-sender@example.test', provider: 'brevo', smtpHost: 'api.brevo.com', smtpUser: 'fake', smtpPass: 'fake-key' } });
+  try {
+    const input = { date: '2026-10-12', account, leads: [lead], state: { campaignId: 123, sentAt: '2026-10-12T01:00:00Z' } };
+    await campaigns._recordAcceptedCampaign(input);
+    await campaigns._recordAcceptedCampaign(input);
+    assert.equal(await prisma.message.count({ where: { leadId: lead.id } }), 1);
+    assert.equal((await prisma.emailAccount.findUnique({ where: { id: account.id } })).sentToday, 1);
+  } finally {
+    await prisma.message.deleteMany({ where: { leadId: lead.id } });
+    await prisma.lead.delete({ where: { id: lead.id } });
+    await prisma.emailAccount.delete({ where: { id: account.id } });
+    await prisma.systemConfig.deleteMany({ where: { key: { startsWith: `email.daily.brevo.batch.2026-10-12.${account.id}` } } });
+  }
+});

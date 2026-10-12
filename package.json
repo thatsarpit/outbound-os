@@ -42,6 +42,7 @@
     "helmet": "^8.1.0",
     "imapflow": "^1.2.16",
     "jsonwebtoken": "^9.0.3",
+    "mailparser": "^3.9.38",
     "multer": "^2.0.2",
     "node-cron": "^4.6.0",
     "node-fetch": "^3.3.2",

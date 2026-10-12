@@ -23,6 +23,7 @@ import customerRoutes from './routes/customers.js';
 import settlementRoutes from './routes/settlement.js';
 import productRoutes from './routes/products.js';
 import telegramRoutes from './routes/telegram.js';
+import emailInboxRoutes from './routes/emailInbox.js';
 import config from './config.js';
 import logger from './utils/logger.js';
 import activityLog, { EVENT_TYPES } from './utils/activityLog.js';
@@ -871,6 +872,7 @@ app.use('/api', settlementRoutes);
 app.use('/api', productRoutes);
 // Telegram connected-account authentication and manual messaging.
 app.use('/api', telegramRoutes);
+app.use('/api', emailInboxRoutes);
 // Pool scoping runs after auth — platform admins bypass, every other user is
 // 403'd if they reference a poolId they don't have a UserPool row for.
 app.use('/api', requirePoolAccess());
@@ -3497,6 +3499,10 @@ app.post('/api/email/accounts', requireRole('admin'), async (req, res) => {
       whatsappAccountId } = req.body;
     if (!email) return res.status(400).json({ error: 'Email address is required' });
     if (!smtpPass) return res.status(400).json({ error: 'SMTP password/app password is required' });
+    if ([smtpPort, imapPort].some(port => port !== undefined && port !== ''
+      && (!Number.isInteger(Number(port)) || Number(port) < 1 || Number(port) > 65535))) {
+      return res.status(400).json({ error: 'Email ports must be whole numbers from 1 to 65535' });
+    }
 
     // Validate whatsappAccountId points at a real WA account if provided
     if (whatsappAccountId != null && whatsappAccountId !== '') {
@@ -5704,7 +5710,12 @@ app.post('/api/lead-sync/run', requireRole('manager'), async (req, res) => {
 // Body: { provider, smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure? }
 app.post('/api/email/accounts/test-config', requireRole('manager'), async (req, res) => {
   try {
-    const { smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure = false } = req.body;
+    const { provider, email, smtpHost, smtpPort, smtpUser, smtpPass, smtpSecure = false } = req.body;
+    if (provider === 'brevo') {
+      if (!email || !smtpPass) return res.status(400).json({ success: false, error: 'Email and Brevo API key are required' });
+      try { return res.json(await emailService.testBrevoConfig(email, smtpPass)); }
+      catch { return res.json({ success: false, error: 'Brevo verification failed. Check the API key, verified sender and authorized server IP.' }); }
+    }
     if (!smtpHost || !smtpPort || !smtpUser || !smtpPass) {
       return res.status(400).json({ success: false, error: 'smtpHost, smtpPort, smtpUser, smtpPass are required' });
     }

@@ -1,5 +1,6 @@
 import { createTransport } from 'nodemailer';
 import { ImapFlow } from 'imapflow';
+import { simpleParser } from 'mailparser';
 import fetch from 'node-fetch';
 import crypto from 'crypto';
 import prisma from '../utils/prismaClient.js';
@@ -128,6 +129,7 @@ class EmailService {
   constructor() {
     this._transportCache = new Map(); // accountId → nodemailer transport
     this._capacityTail = Promise.resolve();
+    this._inboxSyncs = new Map();
   }
 
   async _withCapacityLock(operation) {
@@ -153,7 +155,7 @@ class EmailService {
       if (!(await this._checkHourlyCapacity(account, { excludeMessageId }))) {
         return { ok: false, error: 'Hourly email limit reached' };
       }
-      if (account.provider === 'brevo' && !(await this._checkBrevoSharedCapacity())) {
+      if (account.provider === 'brevo' && !(await this._checkBrevoSharedCapacity(account))) {
         return { ok: false, error: 'Brevo shared daily limit reached' };
       }
       const claimed = await prisma.emailAccount.updateMany({
@@ -194,12 +196,12 @@ class EmailService {
         email,
         provider: provider || 'custom',
         smtpHost: smtpHost || preset.smtpHost || '',
-        smtpPort: smtpPort || preset.smtpPort || 587,
+        smtpPort: provider === 'brevo' ? preset.smtpPort : Number(smtpPort || preset.smtpPort || 587),
         smtpSecure: smtpSecure ?? preset.smtpSecure ?? false,
         smtpUser: smtpUser || email,
         smtpPass: encrypt(smtpPass),
         imapHost: imapHost || preset.imapHost || '',
-        imapPort: imapPort || preset.imapPort || 993,
+        imapPort: Number(imapPort || preset.imapPort || 993),
         imapSecure: imapSecure ?? preset.imapSecure ?? true,
         imapUser: imapUser || smtpUser || email,
         imapPass: encrypt(imapPass || smtpPass),
@@ -438,14 +440,65 @@ class EmailService {
     return used < account.hourlyLimit;
   }
 
-  async _checkBrevoSharedCapacity() {
+  async _rememberBrevoIdentity(account) {
+    const profile = await this._brevoRequest(account, '/account');
+    const email = String(profile?.email || '').trim().toLowerCase();
+    if (!email) throw new Error('Brevo account identity is unavailable');
+    // API keys can rotate or differ between senders in the same Brevo account.
+    // Bind the verified account identity to the credential that was tested.
+    const value = JSON.stringify({
+      identity: crypto.createHash('sha256').update(email).digest('hex'),
+      credential: crypto.createHash('sha256').update(decrypt(account.smtpPass)).digest('hex'),
+    });
+    const key = `email.brevo.identity.${account.id}`;
+    await prisma.systemConfig.upsert({ where: { key }, update: { value }, create: { key, value } });
+  }
+
+  async getBrevoAccountGroups(accountIds) {
+    const accounts = await prisma.emailAccount.findMany({
+      where: { provider: 'brevo', id: { in: accountIds.map(Number) } },
+    });
+    const rows = await prisma.systemConfig.findMany({
+      where: { key: { in: accounts.map(account => `email.brevo.identity.${account.id}`) } },
+    });
+    const config = new Map(rows.map(row => [row.key, row.value]));
+    return new Map(accounts.map(account => {
+      let identity = null;
+      try {
+        const saved = JSON.parse(config.get(`email.brevo.identity.${account.id}`));
+        const credential = crypto.createHash('sha256').update(decrypt(account.smtpPass)).digest('hex');
+        if (saved.credential === credential && /^[a-f0-9]{64}$/.test(saved.identity)) identity = saved.identity;
+      } catch { /* Unverified or changed credentials share the conservative fallback. */ }
+      return [account.id, identity];
+    }));
+  }
+
+  async getBrevoDailyCapacity() {
     const accounts = await prisma.emailAccount.findMany({ where: { provider: 'brevo' } });
-    const reset = await Promise.all(accounts.map((account) => this._resetAccountCounterIfNeeded(account)));
-    return reset.reduce((sum, account) => sum + (account.sentToday || 0), 0) < BREVO_FREE_DAILY_LIMIT;
+    const reset = await Promise.all(accounts.map(account => this._resetAccountCounterIfNeeded(account)));
+    const groups = await this.getBrevoAccountGroups(accounts.map(account => account.id));
+    return new Map(reset.map(account => {
+      const group = groups.get(account.id);
+      const used = reset.filter(other => !group || !groups.get(other.id) || groups.get(other.id) === group)
+        .reduce((sum, other) => sum + (other.sentToday || 0), 0);
+      return [account.id, { group: group || 'unverified', remaining: Math.max(0, BREVO_FREE_DAILY_LIMIT - used) }];
+    }));
+  }
+
+  async _checkBrevoSharedCapacity(account) {
+    return ((await this.getBrevoDailyCapacity()).get(account.id)?.remaining || 0) > 0;
+  }
+
+  async testBrevoConfig(email, apiKey) {
+    const data = await this._brevoRequest({ smtpPass: apiKey }, '/senders');
+    const sender = (data?.senders || []).find(item =>
+      String(item.email || '').toLowerCase() === String(email).trim().toLowerCase());
+    if (!sender || sender.active === false) throw new Error('Add and verify this sender in the Brevo account first');
+    return { success: true };
   }
 
   /**
-   * Test SMTP connection for an account.
+   * Test the sending provider for an account.
    */
   async testConnection(accountId) {
     const account = await prisma.emailAccount.findUnique({ where: { id: accountId } });
@@ -458,6 +511,7 @@ class EmailService {
           String(item.email || '').toLowerCase() === String(account.email).toLowerCase());
         if (!sender) throw new Error(`Brevo sender ${account.email} is not configured`);
         if (sender.active === false) throw new Error(`Brevo sender ${account.email} is not active`);
+        await this._rememberBrevoIdentity(account);
       } else {
         const transport = this._getTransport(account);
         await transport.verify();
@@ -769,6 +823,69 @@ class EmailService {
 
   // ── IMAP Reply Polling ──
 
+  _createImapClient(account) {
+    const client = new ImapFlow({
+      host: account.imapHost,
+      port: account.imapPort,
+      secure: account.imapSecure,
+      auth: { user: account.imapUser || account.smtpUser, pass: decrypt(account.imapPass || account.smtpPass) },
+      logger: false,
+      connectionTimeout: 15_000,
+      socketTimeout: 60_000,
+      greetingTimeout: 15_000,
+    });
+    client.on('error', () => {});
+    return client;
+  }
+
+  async connectGmailInbox(accountIds, user, password) {
+    const accounts = await prisma.emailAccount.findMany({ where: { id: { in: accountIds } } });
+    if (accounts.length !== accountIds.length) throw new Error('Email account not found');
+    const encrypted = encrypt(password);
+    const client = this._createImapClient({ imapHost: 'imap.gmail.com', imapPort: 993,
+      imapSecure: true, imapUser: user, imapPass: encrypted });
+    try {
+      await client.connect();
+      const lock = await client.getMailboxLock('INBOX', { readOnly: true });
+      lock.release();
+    } finally {
+      await client.logout().catch(() => {});
+    }
+    // Validate first, then save every selected sender atomically. Brevo sending
+    // credentials and provider settings are independent of the shared inbox.
+    await prisma.$transaction(accounts.map(account => prisma.emailAccount.update({
+      where: { id: account.id },
+      data: { imapHost: 'imap.gmail.com', imapPort: 993, imapSecure: true,
+        imapUser: user, imapPass: encrypted, lastSyncAt: null, lastError: null },
+    })));
+    return { success: true, accounts: await this.listAccounts() };
+  }
+
+  async syncInbox(id) {
+    const account = await prisma.emailAccount.findUnique({ where: { id } });
+    if (!account) throw new Error('Email account not found');
+    if (!account.enabled || !account.imapHost) throw new Error('Connect an enabled inbox first');
+    try {
+      const replies = await this._syncRepliesForAccount(account);
+      return { success: true, replies, account: await this.getAccount(id) };
+    } catch (error) {
+      await prisma.emailAccount.update({ where: { id }, data: { lastError: 'Inbox sync failed. Check the Gmail app password and try again.' } });
+      throw error;
+    }
+  }
+
+  async _syncRepliesForAccount(account) {
+    const key = `${account.imapHost}:${account.imapPort}:${account.imapUser || account.smtpUser}`.toLowerCase();
+    const previous = this._inboxSyncs.get(key) || Promise.resolve();
+    const operation = previous.catch(() => {}).then(async () => {
+      const current = await prisma.emailAccount.findUnique({ where: { id: account.id } });
+      return this._readRepliesForAccount(current);
+    });
+    this._inboxSyncs.set(key, operation);
+    try { return await operation; }
+    finally { if (this._inboxSyncs.get(key) === operation) this._inboxSyncs.delete(key); }
+  }
+
   /**
    * Poll all enabled email accounts for new replies.
    * Called on a cron schedule (every 5 minutes).
@@ -831,20 +948,8 @@ class EmailService {
   /**
    * Sync replies for a single email account via IMAP.
    */
-  async _syncRepliesForAccount(account) {
-    const client = new ImapFlow({
-      host: account.imapHost,
-      port: account.imapPort,
-      secure: account.imapSecure,
-      auth: {
-        user: account.imapUser || account.smtpUser,
-        pass: decrypt(account.imapPass || account.smtpPass),
-      },
-      logger: false,
-      // Hard caps so a hung TLS handshake or a dead server can't lock us up.
-      socketTimeout: 60_000,    // kill idle sockets after 60s
-      greetingTimeout: 15_000,  // bail fast if the server never greets
-    });
+  async _readRepliesForAccount(account) {
+    const client = this._createImapClient(account);
 
     // CRITICAL: ImapFlow extends EventEmitter and emits 'error' on socket
     // failures (ETIMEOUT, ECONNRESET, etc). An unhandled 'error' event crashes
@@ -858,49 +963,59 @@ class EmailService {
     });
 
     let newReplies = 0;
+    let failedMessages = 0;
 
     try {
       await client.connect();
 
-      const lock = await client.getMailboxLock('INBOX');
+      const lock = await client.getMailboxLock('INBOX', { readOnly: true });
       try {
         // Fetch emails since last sync (or last 24 hours)
         const since = account.lastSyncAt
           ? new Date(account.lastSyncAt.getTime() - 5 * 60 * 1000) // 5min overlap for safety
           : new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-        const messages = client.fetch(
-          { since },
-          { envelope: true, source: false, bodyStructure: true,
-            headers: ['in-reply-to', 'references', 'message-id', 'from', 'subject'] }
-        );
-
-        for await (const msg of messages) {
+        const senderAccounts = await prisma.emailAccount.findMany({ select: { id: true, email: true } });
+        const uids = await client.search({ since }, { uid: true });
+        for (let offset = 0; offset < uids.length; offset += 100) {
+          // Finish each FETCH before downloading bodies: ImapFlow queues other
+          // commands until a streaming FETCH finishes, so nesting can deadlock.
+          const messages = await client.fetchAll(uids.slice(offset, offset + 100).join(','),
+            { envelope: true, headers: ['in-reply-to', 'references', 'message-id', 'from', 'to', 'subject'] },
+            { uid: true });
+        for (const msg of messages) {
           try {
-            const inReplyTo = msg.headers?.get('in-reply-to')?.toString().trim() || '';
+            const headers = await simpleParser(msg.headers || Buffer.alloc(0));
+            const inReplyTo = headers.inReplyTo || '';
             const from = msg.envelope?.from?.[0]?.address || '';
             const subject = msg.envelope?.subject || '';
-            const messageId = msg.headers?.get('message-id')?.toString().trim() || '';
+            const messageId = headers.messageId || msg.envelope?.messageId || '';
 
             if (!from || from === account.email) continue; // skip own emails
 
             // Match reply to a lead by In-Reply-To or sender email
             let lead = null;
+            let replyAccountId = account.id;
 
             // Method 1: Match via In-Reply-To header → find our outbound message
-            if (inReplyTo) {
+            const references = [inReplyTo, ...[].concat(headers.references || []).reverse()].filter(Boolean);
+            for (const reference of references) {
               const ourMsg = await prisma.message.findFirst({
-                where: { emailMessageId: inReplyTo, direction: 'outbound', channel: 'email' },
-                select: { leadId: true },
+                where: { emailMessageId: reference, direction: 'outbound', channel: 'email' },
+                select: { leadId: true, emailAccountId: true },
               });
               if (ourMsg) {
                 lead = await prisma.lead.findUnique({ where: { id: ourMsg.leadId } });
+                replyAccountId = ourMsg.emailAccountId || account.id;
+                break;
               }
             }
 
             // Method 2: Match by sender email → find lead with that email
             // Use LOWER() for case-insensitive matching (SQLite doesn't support Prisma mode:'insensitive')
             if (!lead && from) {
+              const recipients = (msg.envelope?.to || []).map(address => String(address.address || '').toLowerCase());
+              replyAccountId = senderAccounts.find(sender => recipients.includes(sender.email.toLowerCase()))?.id || account.id;
               const matched = await prisma.$queryRawUnsafe(
                 `SELECT id FROM "Lead" WHERE LOWER(email) = LOWER(?) LIMIT 1`,
                 from
@@ -930,14 +1045,13 @@ class EmailService {
             let bodyText = null;
             let downloadOk = false;
             try {
-              const download = await client.download(msg.seq, undefined, { uid: false });
+              const download = await client.download(msg.uid, undefined, { uid: true });
               if (download?.content) {
                 const chunks = [];
                 for await (const chunk of download.content) chunks.push(chunk);
-                const raw = Buffer.concat(chunks).toString('utf8');
-                const textMatch = raw.match(/Content-Type: text\/plain[\s\S]*?\r\n\r\n([\s\S]*?)(?:\r\n--|\r\n\.\r\n|$)/i);
-                if (textMatch?.[1]) {
-                  bodyText = textMatch[1].trim().substring(0, 2000);
+                const parsed = await simpleParser(Buffer.concat(chunks), { skipTextToHtml: true });
+                if (parsed.text?.trim()) {
+                  bodyText = parsed.text.trim().substring(0, 2000);
                   downloadOk = true;
                 }
               }
@@ -970,7 +1084,7 @@ class EmailService {
                   channel: 'email',
                   content: bodyText,
                   waAccount: 0,
-                  emailAccountId: account.id,
+                  emailAccountId: replyAccountId,
                   status: downloadOk ? 'delivered' : 'partial',
                   emailSubject: subject,
                   emailMessageId: messageId,
@@ -1021,7 +1135,7 @@ class EmailService {
 
             activityLog.add(EVENT_TYPES.EMAIL_REPLY, `Email reply from ${lead.name} (${from})`, {
               leadId: lead.id,
-              accountId: account.id,
+              accountId: replyAccountId,
               channel: 'email',
               subject,
               threadKey: `email:${lead.id}`,
@@ -1029,7 +1143,7 @@ class EmailService {
             });
             await emitDashboardEvent('email_reply', {
               leadId: lead.id,
-              accountId: account.id,
+              accountId: replyAccountId,
               channel: 'email',
               subject,
               threadKey: `email:${lead.id}`,
@@ -1044,13 +1158,16 @@ class EmailService {
             newReplies++;
             logger.info(`📧 New email reply from ${from} matched to Lead ${lead.id} (${lead.name})`);
           } catch (msgErr) {
+            failedMessages++;
             logger.warn(`IMAP message processing error: ${msgErr.message}`);
           }
+        }
         }
       } finally {
         lock.release();
       }
 
+      if (failedMessages) throw new Error(`${failedMessages} inbox message(s) could not be processed; sync will retry`);
       // Update last sync timestamp
       await prisma.emailAccount.update({
         where: { id: account.id },
