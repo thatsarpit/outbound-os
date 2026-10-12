@@ -1905,3 +1905,40 @@ test('IMAP MIME replies retain the sending account, cancel follow-ups and retry 
     await prisma.emailAccount.deleteMany({ where: { id: { in: accounts.map(a => a.id) } } });
   }
 });
+
+
+test('Inbox queue stays complete above SQLite relation parameter limits', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const prefix = 'Large Inbox Fixture';
+  const total = 1205;
+  const ids = [];
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.91' };
+  try {
+    for (let start = 0; start < total; start += 100) {
+      await prisma.lead.createMany({ data: Array.from({ length: Math.min(100, total - start) }, (_, offset) => ({ name: `${prefix} ${start + offset}`, mobile: `no-phone:large-inbox-${start + offset}`, status: 'contacted' })) });
+    }
+    ids.push(...(await prisma.lead.findMany({ where: { name: { startsWith: prefix } }, select: { id: true }, orderBy: { id: 'asc' } })).map(lead => lead.id));
+    for (let start = 0; start < ids.length; start += 100) {
+      await prisma.message.createMany({ data: ids.slice(start, start + 100).map((leadId, offset) => ({ leadId, channel: 'email', direction: start + offset < 2 ? 'inbound' : 'outbound', status: 'delivered', content: 'Large inbox fixture', createdAt: new Date(start + offset < 2 ? '2020-01-01T00:00:00Z' : '2026-01-01T00:00:00Z') })) });
+    }
+    const query = '/api/inbox/threads?search=Large%20Inbox%20Fixture&channel=email';
+    const all = await request('GET', `${query}&limit=25`, { headers });
+    assert.equal(all.status, 200);
+    assert.equal(all.body.total, total);
+    assert.equal(all.body.threads.length, 25);
+    assert.equal(all.body.threads[0].leadId, ids.at(-1));
+    for (const page of [1, 2]) {
+      const replies = await request('GET', `${query}&state=needs_reply&limit=1&page=${page}`, { headers });
+      assert.equal(replies.status, 200);
+      assert.equal(replies.body.total, 2);
+      assert.equal(replies.body.needsReply, 2);
+      assert.equal(replies.body.threads[0].leadId, ids[2 - page]);
+    }
+  } finally {
+    for (let start = 0; start < ids.length; start += 100) {
+      const chunk = ids.slice(start, start + 100);
+      await prisma.message.deleteMany({ where: { leadId: { in: chunk } } });
+      await prisma.lead.deleteMany({ where: { id: { in: chunk } } });
+    }
+  }
+});
