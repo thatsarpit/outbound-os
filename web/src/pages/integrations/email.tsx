@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
+import { useAuthStore } from '@/stores/auth-store'
 import {
   Button,
   Input,
@@ -22,7 +23,7 @@ export default function EmailSection() {
   const [showAdd, setShowAdd] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<EmailAccount | null>(null)
   const [inboxAccount, setInboxAccount] = useState<EmailAccount | null>(null)
-  const [inboxResult, setInboxResult] = useState<string | null>(null)
+  const canConfigure = useAuthStore((state) => state.user?.role === 'admin')
 
   const { data: rawAccounts, isLoading } = useQuery({
     queryKey: ['email-accounts'],
@@ -45,17 +46,6 @@ export default function EmailSection() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['email-accounts'] }),
   })
 
-  const syncMutation = useMutation({
-    mutationFn: (id: number) => api.post<{ replies: number }>(`/email/accounts/${id}/sync-inbox`),
-    onSuccess: (result) => {
-      setInboxResult(
-        `Inbox checked successfully. ${result?.replies ?? 0} new lead replies imported.`,
-      )
-      queryClient.invalidateQueries({ queryKey: ['email-accounts'] })
-    },
-    onError: (error: Error) => setInboxResult(error.message),
-  })
-
   if (isLoading) {
     return (
       <div className="flex justify-center py-12">
@@ -76,6 +66,7 @@ export default function EmailSection() {
           </div>
           <Button
             size="sm"
+            disabled={!canConfigure}
             onClick={() => setShowAdd(true)}
             leftIcon={<Plus className="w-3.5 h-3.5" />}
           >
@@ -151,27 +142,19 @@ export default function EmailSection() {
                 <p className="mb-3 text-xs text-danger">{acc.lastError}</p>
               )}
               <div className="flex flex-wrap gap-2">
-                <Button variant="secondary" size="sm" onClick={() => setInboxAccount(acc)}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!canConfigure}
+                  onClick={() => setInboxAccount(acc)}
+                >
                   {acc.imapHost ? 'Inbox settings' : 'Connect Gmail inbox'}
                 </Button>
-                {acc.imapHost && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    isLoading={syncMutation.isPending && syncMutation.variables === acc.id}
-                    disabled={syncMutation.isPending}
-                    onClick={() => {
-                      setInboxResult(null)
-                      syncMutation.mutate(acc.id)
-                    }}
-                  >
-                    Sync replies now
-                  </Button>
-                )}
                 <Button
                   variant="secondary"
                   size="sm"
                   isLoading={testMutation.isPending}
+                  disabled={!canConfigure}
                   onClick={() => testMutation.mutate(acc.id)}
                   leftIcon={<TestTube className="w-3.5 h-3.5" />}
                 >
@@ -181,6 +164,7 @@ export default function EmailSection() {
                   variant="ghost"
                   size="sm"
                   className="hover:text-danger hover:bg-danger-muted"
+                  disabled={!canConfigure}
                   onClick={() => setConfirmDelete(acc)}
                   leftIcon={<Trash2 className="w-3.5 h-3.5" />}
                 >
@@ -191,12 +175,6 @@ export default function EmailSection() {
           </div>
         ))}
       </div>
-
-      {inboxResult && (
-        <p role="status" className="rounded-md border border-border p-3 text-sm">
-          {inboxResult}
-        </p>
-      )}
 
       {accounts.length === 0 && (
         <div className="rounded-md border border-dashed border-border bg-surface px-6 py-12 text-center">
@@ -210,11 +188,7 @@ export default function EmailSection() {
 
       {showAdd && <AddEmailModal onClose={() => setShowAdd(false)} />}
       {inboxAccount && (
-        <GmailInboxModal
-          account={inboxAccount}
-          accounts={accounts}
-          onClose={() => setInboxAccount(null)}
-        />
+        <GmailInboxModal account={inboxAccount} onClose={() => setInboxAccount(null)} />
       )}
 
       <ConfirmDialog
@@ -235,25 +209,18 @@ export default function EmailSection() {
   )
 }
 
-function GmailInboxModal({
-  account,
-  accounts,
-  onClose,
-}: {
-  account: EmailAccount
-  accounts: EmailAccount[]
-  onClose: () => void
-}) {
+function GmailInboxModal({ account, onClose }: { account: EmailAccount; onClose: () => void }) {
   const queryClient = useQueryClient()
   const [user, setUser] = useState(account.imapHost === 'imap.gmail.com' ? account.imapUser : '')
   const [password, setPassword] = useState('')
-  const [accountIds, setAccountIds] = useState([account.id])
   const mutation = useMutation({
     mutationFn: () =>
-      api.post(`/email/accounts/${account.id}/gmail-inbox`, {
-        user: user.trim(),
-        appPassword: password,
-        accountIds,
+      api.patch(`/email/accounts/${account.id}`, {
+        imapHost: 'imap.gmail.com',
+        imapPort: 993,
+        imapSecure: true,
+        imapUser: user.trim(),
+        imapPass: password.replace(/\s/g, ''),
       }),
     onSuccess: () => {
       setPassword('')
@@ -314,33 +281,12 @@ function GmailInboxModal({
             </a>
             .
           </p>
-          <fieldset disabled={mutation.isPending} className="space-y-2">
-            <legend className="mb-2 text-sm font-medium">
-              Senders whose replies arrive in this Gmail inbox
-            </legend>
-            {accounts.map((sender) => (
-              <label key={sender.id} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={accountIds.includes(sender.id)}
-                  disabled={sender.id === account.id}
-                  onChange={(event) =>
-                    setAccountIds((ids) =>
-                      event.target.checked
-                        ? [...ids, sender.id]
-                        : ids.filter((id) => id !== sender.id),
-                    )
-                  }
-                />
-                {sender.email}
-              </label>
-            ))}
-          </fieldset>
           <p className="text-xs text-text-secondary">
             Connecting grants Outbound OS access to this Gmail mailbox. It reads inbox messages to
             match lead replies and saves matching replies in your CRM. The app password is encrypted
-            on your server. Replies are checked every 5 minutes; the first sync checks the last 24
-            hours.
+            on your server. Enabled accounts are checked every 5 minutes. New inboxes initially
+            check the last 24 hours. Saving settings does not test the Gmail connection; check the
+            account’s sync status after the next scheduled check.
           </p>
           {mutation.error && (
             <p role="alert" className="text-sm text-danger">
@@ -356,7 +302,7 @@ function GmailInboxModal({
               isLoading={mutation.isPending}
               disabled={!user.trim() || !/^[a-zA-Z]{16}$/.test(password.replace(/\s/g, ''))}
             >
-              Test and connect inbox
+              Save inbox settings
             </Button>
           </div>
         </form>

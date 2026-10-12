@@ -1755,3 +1755,37 @@ test('inbox detail and queue agree on the latest message when timestamps tie', a
     await prisma.lead.delete({ where: { id: lead.id } });
   }
 });
+
+test('Gmail inbox settings use the existing admin account update without changing delivery or exposing passwords', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const account = await prisma.emailAccount.create({ data: { name: 'Reply Inbox Fixture', email: 'sender@example.test', provider: 'brevo', smtpHost: 'api.brevo.com', smtpPort: 443, smtpUser: 'sender@example.test', smtpPass: 'fake-existing-smtp-secret' } });
+  const manager = await prisma.user.create({ data: { name: 'Email Manager Fixture', email: 'email-manager@example.test', passwordHash: 'not-a-password', role: 'manager' } });
+  const password = 'abcdefghijklmnop';
+  const body = { imapHost: 'imap.gmail.com', imapPort: 993, imapSecure: true, imapUser: 'reply-inbox@example.test', imapPass: password };
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.76' };
+  try {
+    assert.equal((await request('PATCH', `/api/email/accounts/${account.id}`, { body, headers: { 'X-Forwarded-For': '192.0.2.77' } })).status, 401);
+    assert.equal((await request('PATCH', `/api/email/accounts/${account.id}`, { body, headers: { Authorization: `Bearer ${signToken(manager)}`, 'X-Forwarded-For': '192.0.2.78' } })).status, 403);
+    const saved = await request('PATCH', `/api/email/accounts/${account.id}`, { body, headers });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.account.imapHost, 'imap.gmail.com');
+    assert.equal(saved.body.account.imapUser, body.imapUser);
+    assert.equal(saved.body.account.hasImapPass, true);
+    assert.equal(saved.body.account.imapPass, undefined);
+    assert.equal(saved.body.account.smtpPass, undefined);
+    const stored = await prisma.emailAccount.findUnique({ where: { id: account.id } });
+    assert.match(stored.imapPass, /^enc:v1:/);
+    assert.notEqual(stored.imapPass, password);
+    assert.equal(stored.provider, 'brevo');
+    assert.equal(stored.smtpPass, account.smtpPass);
+    assert.equal(stored.smtpHost, account.smtpHost);
+    assert.equal(stored.smtpPort, account.smtpPort);
+    const listed = await request('GET', `/api/email/accounts/${account.id}`, { headers });
+    assert.equal(listed.body.imapPass, undefined);
+    assert.equal(listed.body.smtpPass, undefined);
+  } finally {
+    await prisma.emailAccount.delete({ where: { id: account.id } });
+    await prisma.user.delete({ where: { id: manager.id } });
+  }
+});
