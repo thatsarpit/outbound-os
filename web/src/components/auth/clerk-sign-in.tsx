@@ -61,13 +61,15 @@ export function ClerkSignIn() {
           footerAction: { display: 'none' },
           form: 'gap-4',
           formFieldLabel: 'text-[12px] font-medium text-text-secondary',
+          // Clerk injects its input sizing after app utilities. Explicitly
+          // retain 16px text to avoid iPhone focus zoom and a 44px touch height.
           formFieldInput:
-            'h-11 rounded-md border-border bg-surface px-3 text-base sm:text-[13px] text-text-primary shadow-none placeholder:text-text-muted focus:border-focus focus:ring-2 focus:ring-focus-muted',
+            'min-h-11! text-base! rounded-md border-border bg-surface px-3 text-text-primary shadow-none placeholder:text-text-muted focus:border-focus focus:ring-2 focus:ring-focus-muted',
           formButtonPrimary:
             'h-11 rounded-md bg-accent text-sm font-medium text-accent-fg shadow-none hover:bg-accent-hover focus:ring-2 focus:ring-focus-muted',
           identityPreview: 'rounded-md border border-border bg-surface-raised',
           otpCodeFieldInput:
-            'h-11 rounded-md border-border bg-surface text-text-primary shadow-none focus:border-focus focus:ring-2 focus:ring-focus-muted',
+            'min-h-11! text-base! rounded-md border-border bg-surface text-text-primary shadow-none focus:border-focus focus:ring-2 focus:ring-focus-muted',
           formResendCodeLink: 'text-focus hover:text-focus',
           alert: 'rounded-md border border-danger bg-danger-muted text-danger',
         },
