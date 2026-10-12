@@ -14,6 +14,7 @@ export interface LeadTaskUpdatePayload {
 }
 
 export interface TeamTaskRow extends LeadTask {
+  overdue?: boolean | null
   leadName?: string | null
   leadCompany?: string | null
   leadMobile?: string | null
@@ -32,11 +33,17 @@ export const tasksApi = {
   remove: (leadId: number, taskId: number) =>
     api.delete<{ success: boolean }>(`/leads/${leadId}/tasks/${taskId}`),
 
-  listTeamTasks: (filters: { status?: 'pending' | 'done' | 'all'; userId?: number } = {}) => {
+  listTeamTasks: (filters: { page?: number; limit?: number; done?: boolean } = {}) => {
     const params = new URLSearchParams()
-    if (filters.status) params.set('status', filters.status)
-    if (filters.userId != null) params.set('userId', String(filters.userId))
-    const query = params.toString()
-    return api.get<TeamTaskRow[]>(`/tasks${query ? `?${query}` : ''}`)
+    if (filters.page) params.set('page', String(filters.page))
+    if (filters.limit) params.set('limit', String(filters.limit))
+    if (filters.done) params.set('done', 'true')
+    return api.get<{
+      tasks: TeamTaskRow[]
+      overdueCount: number
+      total: number
+      page: number
+      pages: number
+    }>(`/tasks?${params}`)
   },
 }

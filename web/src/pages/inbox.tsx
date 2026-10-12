@@ -74,7 +74,7 @@ function parseLeadId(value: string | null) {
 function InboxInner() {
   const queryClient = useQueryClient()
   const isMobileViewport = useUIStore((state) => state.isMobileViewport)
-  const { user } = useAuthStore()
+  const { user, dashboardScope } = useAuthStore()
   const role = user?.role || 'viewer'
   const experience = ROLE_EXPERIENCE[role]
   const [searchParams, setSearchParams] = useSearchParams()
@@ -213,7 +213,7 @@ function InboxInner() {
   useEffect(() => {
     if (!activeThread || activeThread.leadId !== selectedLeadId) return
     hydratedLeadIdRef.current = activeThread.leadId
-    const draft = loadDraft(activeThread.leadId)
+    const draft = loadDraft(dashboardScope, activeThread.leadId)
     if (draft && draft.plainBody.trim()) {
       setReplyText(draft.plainBody)
       setHtmlBody(draft.htmlBody)
@@ -243,10 +243,10 @@ function InboxInner() {
     if (!selectedLeadId || hydratedLeadIdRef.current !== selectedLeadId) return
     const timer = setTimeout(() => {
       if (!replyText.trim()) {
-        clearDraft(selectedLeadId)
+        clearDraft(dashboardScope, selectedLeadId, composerChannel, senderAccountId)
         return
       }
-      saveDraft(selectedLeadId, {
+      saveDraft(dashboardScope, selectedLeadId, {
         subject: composerSubject,
         htmlBody,
         plainBody: replyText,
@@ -258,6 +258,7 @@ function InboxInner() {
     }, 1000)
     return () => clearTimeout(timer)
   }, [
+    dashboardScope,
     selectedLeadId,
     replyText,
     htmlBody,
@@ -333,7 +334,8 @@ function InboxInner() {
       })
     },
     onSuccess: () => {
-      if (selectedLeadId) clearDraft(selectedLeadId)
+      if (selectedLeadId)
+        clearDraft(dashboardScope, selectedLeadId, composerChannel, senderAccountId)
       setReplyText('')
       setHtmlBody('')
       setAttachments([])
@@ -456,10 +458,10 @@ function InboxInner() {
   const persistCurrentDraft = () => {
     if (!selectedLeadId || hydratedLeadIdRef.current !== selectedLeadId) return
     if (!replyText.trim()) {
-      clearDraft(selectedLeadId)
+      clearDraft(dashboardScope, selectedLeadId, composerChannel, senderAccountId)
       return
     }
-    saveDraft(selectedLeadId, {
+    saveDraft(dashboardScope, selectedLeadId, {
       subject: composerSubject,
       htmlBody,
       plainBody: replyText,
@@ -507,7 +509,8 @@ function InboxInner() {
       })
     },
     onSuccess: () => {
-      if (selectedLeadId) clearDraft(selectedLeadId)
+      if (selectedLeadId)
+        clearDraft(dashboardScope, selectedLeadId, composerChannel, senderAccountId)
       setReplyText('')
       setHtmlBody('')
       setAttachments([])
@@ -657,7 +660,7 @@ function InboxInner() {
                   onSelect={() => {
                     persistCurrentDraft()
                     startTransition(() => {
-                      const draft = loadDraft(thread.leadId)
+                      const draft = loadDraft(dashboardScope, thread.leadId)
                       updateRoute({
                         leadId: String(thread.leadId),
                         channel: draft?.channel ?? thread.channel,

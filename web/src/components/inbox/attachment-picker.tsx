@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { File, Loader2, Paperclip, X } from 'lucide-react'
 import type { MediaFile } from '@/api/types'
@@ -9,6 +9,7 @@ type AttachmentPickerProps = {
   attachments: MediaFile[]
   onAdd: (file: MediaFile) => void
   onRemove: (id: number) => void
+  onUploadingChange?: (uploading: boolean) => void
   disabled?: boolean
 }
 
@@ -23,6 +24,7 @@ export function AttachmentPicker({
   onAdd,
   onRemove,
   disabled,
+  onUploadingChange,
 }: AttachmentPickerProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -32,6 +34,10 @@ export function AttachmentPicker({
       if (data) onAdd(data)
     },
   })
+
+  useEffect(() => {
+    onUploadingChange?.(uploadMutation.isPending)
+  }, [uploadMutation.isPending, onUploadingChange])
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -59,8 +65,9 @@ export function AttachmentPicker({
               <button
                 type="button"
                 onClick={() => onRemove(a.id)}
+                aria-label={`Remove ${a.originalName}`}
                 disabled={disabled}
-                className="ml-0.5 rounded p-0.5 text-text-muted transition-colors hover:bg-surface-raised hover:text-danger"
+                className="ml-0.5 flex h-11 w-11 items-center justify-center rounded p-0.5 text-text-muted transition-colors hover:bg-surface-raised hover:text-danger"
               >
                 <X className="h-3 w-3" />
               </button>
@@ -69,6 +76,11 @@ export function AttachmentPicker({
         </div>
       )}
 
+      {uploadMutation.error && (
+        <p role="alert" className="text-xs text-danger">
+          Upload failed: {uploadMutation.error.message}
+        </p>
+      )}
       <input
         ref={inputRef}
         type="file"
@@ -82,7 +94,7 @@ export function AttachmentPicker({
         onClick={() => inputRef.current?.click()}
         disabled={disabled || uploadMutation.isPending}
         className={cn(
-          'inline-flex w-fit items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors',
+          'inline-flex min-h-11 w-fit items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors',
           'text-text-muted hover:bg-surface-raised hover:text-text-secondary',
           'disabled:cursor-not-allowed disabled:opacity-50',
         )}

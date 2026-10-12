@@ -1,3 +1,5 @@
+import type { EmailTemplate } from '@/api/endpoints/templates'
+import { handleMobileSalesRequest } from './mobile-sales'
 import {
   defaultDashboardLayout,
   validateDashboardLayout,
@@ -1740,13 +1742,13 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
       {
         id: 1,
         name: 'Intro — value led',
-        subject: 'Reliable supply for {{product}}',
+        subject: 'Reliable supply for {{lead.product}}',
         htmlBody:
-          '<p>Hi {{name}},</p><p>We manufacture {{product}} at scale and can hold stock against a rolling forecast.</p>',
+          '<p>Hi {{lead.name}},</p><p>We manufacture {{lead.product}} at scale and can hold stock against a rolling forecast.</p>',
         textBody:
-          'Hi {{name}}, We manufacture {{product}} at scale and can hold stock against a rolling forecast.',
+          'Hi {{lead.name}}, We manufacture {{lead.product}} at scale and can hold stock against a rolling forecast.',
         category: 'intro',
-        variables: '["name","product"]',
+        variables: '["lead.name","lead.product"]',
         createdAt: ago(20000),
         updatedAt: ago(4000),
       },
@@ -1754,21 +1756,23 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
         id: 2,
         name: 'Quotation follow-up',
         subject: 'Re: your quotation request',
-        htmlBody: '<p>Hi {{name}},</p><p>Following up on the quote we sent for {{product}}.</p>',
-        textBody: 'Hi {{name}}, Following up on the quote we sent for {{product}}.',
+        htmlBody:
+          '<p>Hi {{lead.name}},</p><p>Following up on the quote we sent for {{lead.product}}.</p>',
+        textBody: 'Hi {{lead.name}}, Following up on the quote we sent for {{lead.product}}.',
         category: 'followup',
-        variables: '["name","product"]',
+        variables: '["lead.name","lead.product"]',
         createdAt: ago(30000),
         updatedAt: ago(9000),
       },
       {
         id: 3,
         name: 'Reactivation',
-        subject: 'Still sourcing {{product}}?',
-        htmlBody: '<p>Hi {{name}},</p><p>Checking in on your {{product}} requirement.</p>',
-        textBody: 'Hi {{name}}, Checking in on your {{product}} requirement.',
+        subject: 'Still sourcing {{lead.product}}?',
+        htmlBody:
+          '<p>Hi {{lead.name}},</p><p>Checking in on your {{lead.product}} requirement.</p>',
+        textBody: 'Hi {{lead.name}}, Checking in on your {{lead.product}} requirement.',
         category: 'reactivation',
-        variables: '["name","product"]',
+        variables: '["lead.name","lead.product"]',
         createdAt: ago(40000),
         updatedAt: ago(12000),
       },
@@ -1944,9 +1948,25 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
   [
     /\/leads\?|\/leads$/,
     (url: string) => {
-      const status = new URL(url, location.origin).searchParams.get('status')
-      const leads = status ? FIXTURE_LEADS.filter((l) => l.status === status) : FIXTURE_LEADS
-      return { leads, total: leads.length, page: 1, pages: 1 }
+      const params = new URL(url, location.origin).searchParams
+      const status = params.get('status')
+      const search = (params.get('search') || '').toLowerCase()
+      const leads = FIXTURE_LEADS.filter(
+        (lead) =>
+          (!status || lead.status === status) &&
+          (!search ||
+            [lead.name, lead.email, lead.mobile, lead.company].some((value) =>
+              value?.toLowerCase().includes(search),
+            )),
+      )
+      const page = Math.max(1, Number(params.get('page')) || 1)
+      const limit = Math.max(1, Number(params.get('limit')) || 50)
+      return {
+        leads: leads.slice((page - 1) * limit, page * limit),
+        total: leads.length,
+        page,
+        pages: Math.ceil(leads.length / limit),
+      }
     },
   ],
   [
@@ -2180,6 +2200,50 @@ export function installFixtureFetch() {
       })
     }
 
+    // Rendering a sample template does not mutate server data or send mail.
+    const renderId = new URL(url, location.origin).pathname.match(
+      /^\/api\/email\/templates\/(\d+)\/render$/,
+    )?.[1]
+    if (renderId && (init?.method || 'GET').toUpperCase() === 'POST') {
+      const rows = FIXTURE_RESPONSES.find(([pattern]) =>
+        pattern.test('/api/email/templates'),
+      )?.[1] as EmailTemplate[]
+      const template = rows.find((row) => row.id === Number(renderId))
+      const input = JSON.parse(String(init?.body || '{}'))
+      const context: Record<string, unknown> = {
+        ...input.context,
+        lead: FIXTURE_LEADS.find((lead) => lead.id === Number(input.leadId)),
+      }
+      const render = (value: string) =>
+        value.replace(/\{\{(\w+(?:\.\w+)*)\}\}/g, (_, path: string) =>
+          String(
+            path
+              .split('.')
+              .reduce<unknown>(
+                (value, key) =>
+                  value && typeof value === 'object'
+                    ? (value as Record<string, unknown>)[key]
+                    : undefined,
+                context,
+              ) ?? '',
+          ),
+        )
+      return new Response(
+        JSON.stringify(
+          template
+            ? {
+                subject: render(template.subject),
+                htmlBody: render(template.htmlBody),
+                textBody: render(template.textBody),
+              }
+            : { error: 'Sample template not found' },
+        ),
+        { status: template ? 200 : 404, headers: { 'Content-Type': 'application/json' } },
+      )
+    }
+
+    const mobileSales = handleMobileSalesRequest(url, init, FIXTURE_LEADS)
+    if (mobileSales) return mobileSales
     const inbox = await handleInboxRequest(url, init)
     if (inbox) return inbox
 

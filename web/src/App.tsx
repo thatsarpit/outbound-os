@@ -3,11 +3,17 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/query-client'
 import { useAuthStore } from '@/stores/auth-store'
+import { MobileShell } from '@/components/mobile/mobile-shell'
 import { AppShell } from '@/components/layout/app-shell'
 import { Loader2 } from 'lucide-react'
 import { getFirstAccessibleRoute, resolveCapabilityForPath } from '@/lib/role-shell'
 import { ChannelWorkspace } from '@/components/integrations/channel-workspace'
 import { TooltipProvider } from '@/components/ui'
+
+const MobileInboxPage = lazy(() => import('@/pages/mobile/inbox'))
+const MobileLeadsPage = lazy(() => import('@/pages/mobile/leads'))
+const MobileTasksPage = lazy(() => import('@/pages/mobile/tasks'))
+const MobileInstallPage = lazy(() => import('@/pages/mobile/install'))
 
 /* ── Page imports ── */
 const LoginPage = lazy(() => import('@/pages/login'))
@@ -181,6 +187,21 @@ export default function App() {
                   </Route>
                 )}
 
+                <Route
+                  path="/m"
+                  element={
+                    <RequireAuth>
+                      <MobileShell />
+                    </RequireAuth>
+                  }
+                >
+                  <Route index element={<Navigate to="inbox" replace />} />
+                  <Route path="inbox" element={<MobileInboxPage />} />
+                  <Route path="tasks" element={<MobileTasksPage />} />
+                  <Route path="leads" element={<MobileLeadsPage />} />
+                  <Route path="install" element={<MobileInstallPage />} />
+                  <Route path="*" element={<NotFoundPage />} />
+                </Route>
                 {/* Protected */}
                 <Route
                   element={

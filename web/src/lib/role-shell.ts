@@ -3,6 +3,10 @@ import type { User } from '@/api/types'
 export type AppRole = User['role']
 
 export const ROUTE_CAPABILITIES = [
+  { route: '/m/inbox', capability: 'page.inbox' },
+  { route: '/m/tasks', capability: 'page.leads' },
+  { route: '/m/leads', capability: 'page.leads' },
+  { route: '/m/install', capability: 'page.account' },
   { route: '/integrations/whatsapp/configure', capability: 'page.settings' },
   { route: '/integrations/email/defaults', capability: 'page.settings' },
   { route: '/automation', capability: 'page.settings' },

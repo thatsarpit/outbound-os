@@ -3169,60 +3169,48 @@ app.get('/api/inbox/threads', async (req, res) => {
       ];
     }
 
-    const [leads, total, emailAccounts, telegramSenderAccounts] = await Promise.all([
+    // Determine queue membership before pagination. Only the newest message's
+    // metadata is needed here; full history and message bodies stay out of this
+    // workspace-wide scan. Fetch the visible page with its previews afterwards.
+    const candidates = await prisma.lead.findMany({
+      where,
+      select: {
+        id: true, status: true, assignedToId: true, lastMessageAt: true, updatedAt: true,
+        messages: { where: visibleMessageWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
+          select: { direction: true, createdAt: true } },
+      },
+    });
+    const queue = candidates.map((lead) => ({
+      ...lead,
+      threadState: normalizeInboxThreadState({ lead, lastMessage: lead.messages[0], assignedToId: lead.assignedToId }),
+      latestAt: lead.lastMessageAt || lead.messages[0]?.createdAt || lead.updatedAt,
+    })).filter((lead) => {
+      if (state === 'needs_reply') return lead.threadState === 'needs_reply';
+      if (state === 'assigned') return Boolean(lead.assignedToId);
+      if (state === 'unassigned') return !lead.assignedToId;
+      if (state === 'resolved') return lead.threadState === 'resolved';
+      if (state === 'open') return lead.threadState !== 'resolved';
+      return true;
+    }).sort((a, b) => new Date(b.latestAt) - new Date(a.latestAt) || b.id - a.id);
+    const total = queue.length;
+    const ids = queue.slice((page - 1) * limit, page * limit).map((lead) => lead.id);
+    const [leads, emailAccounts, telegramSenderAccounts] = await Promise.all([
       prisma.lead.findMany({
-        where,
-        orderBy: { updatedAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
+        where: { id: { in: ids } },
         include: {
-          messages: {
-            where: visibleMessageWhere,
-            orderBy: { createdAt: 'desc' },
-            take: 1,
-          },
-          _count: {
-            select: {
-              messages: { where: { status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES } } },
-            },
-          },
+          messages: { where: visibleMessageWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1 },
+          _count: { select: { messages: { where: { status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES } } } } },
         },
       }),
-      prisma.lead.count({ where }),
-      prisma.emailAccount.findMany({
-        where: { enabled: true },
-        orderBy: { id: 'asc' },
-      }),
-      prisma.telegramAccount.findMany({
-        where: { enabled: true },
-        select: { id: true, name: true, displayName: true },
-        orderBy: { id: 'asc' },
-      }),
+      prisma.emailAccount.findMany({ where: { enabled: true }, orderBy: { id: 'asc' } }),
+      prisma.telegramAccount.findMany({ where: { enabled: true }, select: { id: true, name: true, displayName: true }, orderBy: { id: 'asc' } }),
     ]);
-
     const emailAccountsById = Object.fromEntries(emailAccounts.map((account) => [account.id, account]));
     const telegramAccountsById = Object.fromEntries(telegramSenderAccounts.map((account) => [account.id, account]));
-    let threads = leads.map((lead) => buildInboxThreadSummary(lead, emailAccountsById, telegramAccountsById));
-
-    if (state && state !== 'all') {
-      threads = threads.filter((thread) => {
-        if (state === 'needs_reply') return thread.replyNeeded;
-        if (state === 'assigned') return thread.assignmentState === 'assigned';
-        if (state === 'unassigned') return thread.assignmentState === 'unassigned';
-        if (state === 'resolved') return thread.threadState === 'resolved';
-        if (state === 'open') return thread.threadState !== 'resolved';
-        return true;
-      });
-    }
-
-    res.json({
-      threads,
-      total: state && state !== 'all' ? threads.length : total,
-      page,
-      pages: state && state !== 'all' ? 1 : Math.ceil(total / limit),
-      unread: threads.filter((thread) => thread.unread).length,
-      needsReply: threads.filter((thread) => thread.replyNeeded).length,
-    });
+    const byId = new Map(leads.map((lead) => [lead.id, lead]));
+    const threads = ids.filter((id) => byId.has(id)).map((id) => buildInboxThreadSummary(byId.get(id), emailAccountsById, telegramAccountsById));
+    const needsReply = queue.filter((lead) => lead.threadState === 'needs_reply').length;
+    res.json({ threads, total, page, pages: Math.ceil(total / limit), unread: needsReply, needsReply });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -5595,25 +5583,25 @@ app.get('/api/leads/:id/notes', async (req, res) => {
       orderBy: { createdAt: 'desc' },
     });
     res.json(notes);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(e.code === 'P2025' ? 404 : 500).json({ error: e.code === 'P2025' ? 'Item not found for this lead' : e.message }); }
 });
 
 app.post('/api/leads/:id/notes', requireRole('agent'), async (req, res) => {
   try {
     const { content, type = 'note' } = req.body;
-    if (!content?.trim()) return res.status(400).json({ error: 'content required' });
+    if (typeof content !== 'string' || !content.trim()) return res.status(400).json({ error: 'content required' });
     const note = await prisma.leadNote.create({
       data: { leadId: parseInt(req.params.id), content: content.trim(), type },
     });
     res.json(note);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(e.code === 'P2025' ? 404 : 500).json({ error: e.code === 'P2025' ? 'Item not found for this lead' : e.message }); }
 });
 
 app.delete('/api/leads/:id/notes/:noteId', requireRole('agent'), async (req, res) => {
   try {
-    await prisma.leadNote.delete({ where: { id: parseInt(req.params.noteId) } });
+    await prisma.leadNote.delete({ where: { id: parseInt(req.params.noteId), leadId: parseInt(req.params.id) } });
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(e.code === 'P2025' ? 404 : 500).json({ error: e.code === 'P2025' ? 'Item not found for this lead' : e.message }); }
 });
 
 // ======================== TASKS ========================
@@ -5621,40 +5609,44 @@ app.get('/api/leads/:id/tasks', async (req, res) => {
   try {
     const tasks = await prisma.leadTask.findMany({
       where: { leadId: parseInt(req.params.id) },
-      orderBy: [{ done: 'asc' }, { dueAt: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ done: 'asc' }, { dueAt: { sort: 'asc', nulls: 'last' } }, { createdAt: 'asc' }],
     });
     res.json(tasks);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(e.code === 'P2025' ? 404 : 500).json({ error: e.code === 'P2025' ? 'Item not found for this lead' : e.message }); }
 });
 
 app.post('/api/leads/:id/tasks', requireRole('agent'), async (req, res) => {
   try {
     const { title, dueAt } = req.body;
-    if (!title?.trim()) return res.status(400).json({ error: 'title required' });
+    if (typeof title !== 'string' || !title.trim() || title.length > 500) return res.status(400).json({ error: 'A title of 1–500 characters is required' });
+    if (dueAt != null && (typeof dueAt !== 'string' || !dueAt.trim() || Number.isNaN(new Date(dueAt).getTime()))) return res.status(400).json({ error: 'Valid due date required' });
     const task = await prisma.leadTask.create({
       data: { leadId: parseInt(req.params.id), title: title.trim(), dueAt: dueAt ? new Date(dueAt) : null },
     });
     res.json(task);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(e.code === 'P2025' ? 404 : 500).json({ error: e.code === 'P2025' ? 'Item not found for this lead' : e.message }); }
 });
 
 app.patch('/api/leads/:id/tasks/:taskId', requireRole('agent'), async (req, res) => {
   try {
     const { done, title, dueAt } = req.body;
     const data = {};
-    if (done !== undefined) data.done = Boolean(done);
-    if (title !== undefined) data.title = title;
+    if (done !== undefined && typeof done !== 'boolean') return res.status(400).json({ error: 'done must be a boolean' });
+    if (title !== undefined && (typeof title !== 'string' || !title.trim() || title.length > 500)) return res.status(400).json({ error: 'A title of 1–500 characters is required' });
+    if (dueAt != null && (typeof dueAt !== 'string' || !dueAt.trim() || Number.isNaN(new Date(dueAt).getTime()))) return res.status(400).json({ error: 'Valid due date required' });
+    if (done !== undefined) data.done = done;
+    if (title !== undefined) data.title = title.trim();
     if (dueAt !== undefined) data.dueAt = dueAt ? new Date(dueAt) : null;
-    const task = await prisma.leadTask.update({ where: { id: parseInt(req.params.taskId) }, data });
+    const task = await prisma.leadTask.update({ where: { id: parseInt(req.params.taskId), leadId: parseInt(req.params.id) }, data });
     res.json(task);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(e.code === 'P2025' ? 404 : 500).json({ error: e.code === 'P2025' ? 'Item not found for this lead' : e.message }); }
 });
 
 app.delete('/api/leads/:id/tasks/:taskId', requireRole('agent'), async (req, res) => {
   try {
-    await prisma.leadTask.delete({ where: { id: parseInt(req.params.taskId) } });
+    await prisma.leadTask.delete({ where: { id: parseInt(req.params.taskId), leadId: parseInt(req.params.id) } });
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(e.code === 'P2025' ? 404 : 500).json({ error: e.code === 'P2025' ? 'Item not found for this lead' : e.message }); }
 });
 
 // Global task list (overdue + upcoming) for sidebar badge
@@ -5665,19 +5657,18 @@ app.get('/api/tasks', async (req, res) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
     const showDone = req.query.done === 'true';
     const where = showDone ? {} : { done: false };
-    const tasks = await prisma.leadTask.findMany({
-      where,
-      orderBy: [{ dueAt: 'asc' }, { createdAt: 'asc' }],
-      skip: (page - 1) * limit,
-      take: limit,
-    });
+    const [tasks, total, overdueCount] = await Promise.all([
+      prisma.leadTask.findMany({ where, orderBy: [{ dueAt: { sort: 'asc', nulls: 'last' } }, { createdAt: 'asc' }, { id: 'asc' }], skip: (page - 1) * limit, take: limit }),
+      prisma.leadTask.count({ where }),
+      prisma.leadTask.count({ where: { done: false, dueAt: { lt: now } } }),
+    ]);
     // Attach lead name
     const leadIds = [...new Set(tasks.map((t) => t.leadId))];
     const leads = await prisma.lead.findMany({ where: { id: { in: leadIds } }, select: { id: true, name: true } });
     const leadMap = Object.fromEntries(leads.map((l) => [l.id, l.name]));
-    const enriched = tasks.map((t) => ({ ...t, leadName: leadMap[t.leadId] || '—', overdue: t.dueAt && t.dueAt < now }));
-    res.json({ tasks: enriched, overdueCount: enriched.filter((t) => t.overdue).length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const enriched = tasks.map((t) => ({ ...t, leadName: leadMap[t.leadId] || '—', overdue: !t.done && Boolean(t.dueAt && t.dueAt < now) }));
+    res.json({ tasks: enriched, overdueCount, total, page, pages: Math.ceil(total / limit) });
+  } catch (e) { res.status(e.code === 'P2025' ? 404 : 500).json({ error: e.code === 'P2025' ? 'Item not found for this lead' : e.message }); }
 });
 
 // ======================== STUB ROUTES (NOT YET IMPLEMENTED) ========================

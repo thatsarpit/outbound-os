@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { clearSessionDrafts } from '@/lib/email-drafts'
 import type { User } from '@/api/types'
 import {
   ROLE_PAGE_CAPABILITIES,
@@ -127,6 +128,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
   getHomeRoute: () => getHomeRouteForRole(get().user?.role),
   logout: () => {
+    clearSessionDrafts(get().dashboardScope)
     get()._signOut?.()
     set({
       user: null,

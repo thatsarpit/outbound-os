@@ -35,10 +35,43 @@ type Thread = {
 }
 
 const SENDERS: Record<InboxChannel, InboxSenderAccount> = {
-  whatsapp: { id: 1, channel: 'whatsapp', name: 'Acme Sales', email: null, senderName: 'Acme Sales', enabled: true, status: 'connected' },
-  email: { id: 2, channel: 'email', name: 'Acme Sales', email: 'sales@acme.example', senderName: 'Maya from Acme', enabled: true, status: 'connected', isVerified: true },
-  imessage: { id: 3, channel: 'imessage', name: 'Sales Mac', email: null, senderName: 'Acme Sales', enabled: true, status: 'connected' },
-  telegram: { id: 4, channel: 'telegram', name: '@acme_sales', email: null, senderName: 'Acme Sales', enabled: true, status: 'connected' },
+  whatsapp: {
+    id: 1,
+    channel: 'whatsapp',
+    name: 'Acme Sales',
+    email: null,
+    senderName: 'Acme Sales',
+    enabled: true,
+    status: 'connected',
+  },
+  email: {
+    id: 2,
+    channel: 'email',
+    name: 'Acme Sales',
+    email: 'sales@acme.example',
+    senderName: 'Maya from Acme',
+    enabled: true,
+    status: 'connected',
+    isVerified: true,
+  },
+  imessage: {
+    id: 3,
+    channel: 'imessage',
+    name: 'Sales Mac',
+    email: null,
+    senderName: 'Acme Sales',
+    enabled: true,
+    status: 'connected',
+  },
+  telegram: {
+    id: 4,
+    channel: 'telegram',
+    name: '@acme_sales',
+    email: null,
+    senderName: 'Acme Sales',
+    enabled: true,
+    status: 'connected',
+  },
 }
 
 const THREADS: Thread[] = [
@@ -177,37 +210,82 @@ const DRAWING_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height=
 const files = new Map<number, Blob>()
 
 const MESSAGES: InboxMessage[] = [
-  message(1, 'outbound', 95, 'Hi Rohan, thanks for your enquiry on our website about M8 hex bolts. We stock them in A2 and A4 stainless. How many do you need each month?', {
-    pricingCategory: 'marketing', pricingType: 'regular', billable: true,
-  }),
+  message(
+    1,
+    'outbound',
+    95,
+    'Hi Rohan, thanks for your enquiry on our website about M8 hex bolts. We stock them in A2 and A4 stainless. How many do you need each month?',
+    {
+      pricingCategory: 'marketing',
+      pricingType: 'regular',
+      billable: true,
+    },
+  ),
   message(1, 'inbound', 61, 'Hi, around 20,000 units a month. Can you share prices?'),
   message(1, 'outbound', 58, 'Here is our price list. M8 x 40 in A2 is on page 2.', {
     mediaType: 'pdf',
     mediaUrl: 'demo',
     mediaCaption: 'Here is our price list. M8 x 40 in A2 is on page 2.',
     mediaFilename: 'Acme-price-list-2026.pdf',
-    pricingCategory: 'service', pricingType: 'free_customer_service', billable: false,
+    pricingCategory: 'service',
+    pricingType: 'free_customer_service',
+    billable: false,
   }),
-  message(1, 'inbound', 5, 'This is the drawing we work to. Can you do A4 at the A2 price if we commit for a year?', {
-    mediaType: 'image',
-    mediaUrl: 'demo',
-    mediaCaption: 'This is the drawing we work to. Can you do A4 at the A2 price if we commit for a year?',
-    mediaFilename: 'bolt-drawing.svg',
-  }),
+  message(
+    1,
+    'inbound',
+    5,
+    'This is the drawing we work to. Can you do A4 at the A2 price if we commit for a year?',
+    {
+      mediaType: 'image',
+      mediaUrl: 'demo',
+      mediaCaption:
+        'This is the drawing we work to. Can you do A4 at the A2 price if we commit for a year?',
+      mediaFilename: 'bolt-drawing.svg',
+    },
+  ),
 
-  message(2, 'outbound', 300, 'Hi Sarah,\n\nAs promised, here are the revised terms for the Q3 supply agreement: 5,000 boxes of 600x600 LED panels, delivered in three drops, net 45 payment.\n\nBest,\nMaya'),
-  message(2, 'inbound', 38, 'Hi Maya,\n\nThanks for the revised terms. Our procurement lead has two questions on MOQ: can the first drop be 1,000 boxes instead of 1,700, and is the price held if we reorder in Q4?\n\nSarah'),
+  message(
+    2,
+    'outbound',
+    300,
+    'Hi Sarah,\n\nAs promised, here are the revised terms for the Q3 supply agreement: 5,000 boxes of 600x600 LED panels, delivered in three drops, net 45 payment.\n\nBest,\nMaya',
+  ),
+  message(
+    2,
+    'inbound',
+    38,
+    'Hi Maya,\n\nThanks for the revised terms. Our procurement lead has two questions on MOQ: can the first drop be 1,000 boxes instead of 1,700, and is the price held if we reorder in Q4?\n\nSarah',
+  ),
 
-  message(3, 'outbound', 140, 'Shipping documents for order ACM-1038 are on their way by email: invoice, packing list and certificate of origin.'),
+  message(
+    3,
+    'outbound',
+    140,
+    'Shipping documents for order ACM-1038 are on their way by email: invoice, packing list and certificate of origin.',
+  ),
   message(3, 'inbound', 122, 'Perfect, shipping docs received. We will confirm payment on Monday.'),
 
-  message(4, 'inbound', 190, 'Enquiry: M10 hex bolts, 50,000 pieces, monthly. Galvanised is fine. Delivery to Kochi.'),
+  message(
+    4,
+    'inbound',
+    190,
+    'Enquiry: M10 hex bolts, 50,000 pieces, monthly. Galvanised is fine. Delivery to Kochi.',
+  ),
 
-  message(5, 'outbound', 1500, 'Your order ACM-1042 is packed and ships tomorrow morning. Tracking follows once it is collected.'),
+  message(
+    5,
+    'outbound',
+    1500,
+    'Your order ACM-1042 is packed and ships tomorrow morning. Tracking follows once it is collected.',
+  ),
   message(5, 'inbound', 1450, 'Order confirmed. Thanks for the quick turnaround.'),
 ]
 
-files.set(MESSAGES[2].id, new Blob(['%PDF-1.4\n% Acme Supplies price list (demo)\n'], { type: 'application/pdf' }))
+files.set(
+  MESSAGES[2].id,
+  new Blob(['%PDF-1.4\n% Acme Supplies price list (demo)\n'], { type: 'application/pdf' }),
+)
 files.set(MESSAGES[3].id, new Blob([DRAWING_SVG], { type: 'image/svg+xml' }))
 
 /* One reply per lead, the first time you write to them. */
@@ -225,11 +303,17 @@ function summary(thread: Thread) {
   const last = own[own.length - 1]
   const lastIn = [...own].reverse().find((m) => m.direction === 'inbound')
   const lastOut = [...own].reverse().find((m) => m.direction === 'outbound')
-  const preview = last?.mediaType && !last.mediaCaption ? `[${last.mediaFilename}]` : last?.content ?? ''
+  const preview =
+    last?.mediaType && !last.mediaCaption ? `[${last.mediaFilename}]` : (last?.content ?? '')
   return {
     ...thread,
     name: thread.leadName,
-    senderDisplay: thread.channel === 'email' ? SENDERS.email.email : thread.channel === 'telegram' ? 'Telegram · @acme_sales' : null,
+    senderDisplay:
+      thread.channel === 'email'
+        ? SENDERS.email.email
+        : thread.channel === 'telegram'
+          ? 'Telegram · @acme_sales'
+          : null,
     assignedEmailAccountId: thread.channel === 'email' ? 2 : null,
     lastMessage: preview,
     lastMessagePreview: preview,
@@ -240,7 +324,10 @@ function summary(thread: Thread) {
 }
 
 function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
 }
 
 function refresh(leadId: number) {
@@ -261,7 +348,12 @@ function playDelivery(sent: InboxMessage[], thread: Thread) {
   if (replied.has(thread.leadId)) return
   replied.add(thread.leadId)
   window.setTimeout(() => {
-    const reply = message(thread.leadId, 'inbound', 0, REPLIES[thread.leadId] ?? 'Thanks, received.')
+    const reply = message(
+      thread.leadId,
+      'inbound',
+      0,
+      REPLIES[thread.leadId] ?? 'Thanks, received.',
+    )
     MESSAGES.push(reply)
     thread.unread = true
     thread.replyNeeded = true
@@ -295,14 +387,19 @@ async function readBody(init?: RequestInit): Promise<Record<string, unknown>> {
  * Answers the inbox's requests from memory. Returns null for anything that is
  * not the inbox, so the caller can fall through to the static fixtures.
  */
-export async function handleInboxRequest(url: string, init?: RequestInit): Promise<Response | null> {
+export async function handleInboxRequest(
+  url: string,
+  init?: RequestInit,
+): Promise<Response | null> {
   const method = (init?.method || 'GET').toUpperCase()
   const path = new URL(url, window.location.origin)
 
   const media = path.pathname.match(/\/api\/messages\/(\d+)\/media$/)
   if (media) {
     const blob = files.get(Number(media[1]))
-    return blob ? new Response(blob, { status: 200, headers: { 'Content-Type': blob.type } }) : json({ error: 'Not found' }, 404)
+    return blob
+      ? new Response(blob, { status: 200, headers: { 'Content-Type': blob.type } })
+      : json({ error: 'Not found' }, 404)
   }
 
   if (path.pathname.endsWith('/api/media/upload') && method === 'POST') {
@@ -328,7 +425,9 @@ export async function handleInboxRequest(url: string, init?: RequestInit): Promi
     return json(Object.values(SENDERS))
   }
 
-  const detail = path.pathname.match(/\/api\/inbox\/threads\/(\d+)(\/(resolve|reopen|assign-self))?$/)
+  const detail = path.pathname.match(
+    /\/api\/inbox\/threads\/(\d+)(\/(resolve|reopen|assign-self))?$/,
+  )
   if (detail) {
     const thread = THREADS.find((t) => t.leadId === Number(detail[1]))
     if (!thread) return json({ error: 'Conversation not found' }, 404)
@@ -369,7 +468,11 @@ export async function handleInboxRequest(url: string, init?: RequestInit): Promi
         if (state === 'unassigned') return t.assignmentState === 'unassigned'
         return t.threadState === state
       })
-      .filter((t) => !search || `${t.leadName} ${t.leadCompany} ${t.lastMessage}`.toLowerCase().includes(search))
+      .filter(
+        (t) =>
+          !search ||
+          `${t.leadName} ${t.leadCompany} ${t.lastMessage}`.toLowerCase().includes(search),
+      )
       .sort((a, b) => String(b.lastMessageAt).localeCompare(String(a.lastMessageAt)))
     return json({
       threads,
@@ -386,21 +489,40 @@ export async function handleInboxRequest(url: string, init?: RequestInit): Promi
     const thread = THREADS.find((t) => t.leadId === Number(body.leadId))
     if (!thread) return json({ error: 'Conversation not found' }, 404)
     const text = String(body.text ?? body.body ?? '').trim()
+    if (text.includes('[demo-fail]'))
+      return json({
+        success: false,
+        error: 'Sample provider rejected this send. Your draft is still here.',
+      })
     const attachmentIds = Array.isArray(body.attachmentIds) ? (body.attachmentIds as number[]) : []
     const sent: InboxMessage[] = []
 
     attachmentIds.forEach((fileId, index) => {
       const file = files.get(fileId)
       if (!file) return
-      const kind = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : file.type.startsWith('audio/') ? 'audio' : file.type === 'application/pdf' ? 'pdf' : 'document'
+      const kind = file.type.startsWith('image/')
+        ? 'image'
+        : file.type.startsWith('video/')
+          ? 'video'
+          : file.type.startsWith('audio/')
+            ? 'audio'
+            : file.type === 'application/pdf'
+              ? 'pdf'
+              : 'document'
       const caption = index === 0 ? text : ''
-      const m = message(thread.leadId, 'outbound', 0, caption || `[${file instanceof File ? file.name : 'file'}]`, {
-        status: 'sent',
-        mediaType: kind,
-        mediaUrl: 'demo',
-        mediaCaption: caption || null,
-        mediaFilename: file instanceof File ? file.name : 'file',
-      })
+      const m = message(
+        thread.leadId,
+        'outbound',
+        0,
+        caption || `[${file instanceof File ? file.name : 'file'}]`,
+        {
+          status: 'sent',
+          mediaType: kind,
+          mediaUrl: 'demo',
+          mediaCaption: caption || null,
+          mediaFilename: file instanceof File ? file.name : 'file',
+        },
+      )
       files.set(m.id, file)
       sent.push(m)
     })

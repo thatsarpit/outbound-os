@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { SystemHealthBanner } from './system-health-banner'
 import { Sidebar } from './sidebar'
@@ -91,6 +91,29 @@ export function AppShell() {
     return () => media.removeEventListener('change', syncViewport)
   }, [setIsMobileViewport, setSidebarCollapsed])
 
+  // A phone entering the normal sales routes starts in the focused workspace.
+  // The explicit full-dashboard choice lasts for this browser tab.
+  const wantsDesktop = new URLSearchParams(location.search).get('view') === 'desktop'
+  useEffect(() => {
+    try {
+      if (wantsDesktop) sessionStorage.setItem('oos_full_dashboard', 'true')
+    } catch {
+      /* Use the explicit URL choice when storage is blocked. */
+    }
+  }, [wantsDesktop])
+  const salesRoute = { '/overview': '/m/inbox', '/inbox': '/m/inbox', '/leads': '/m/leads' }[
+    location.pathname
+  ]
+  let desktopChosen = wantsDesktop
+  try {
+    desktopChosen ||= sessionStorage.getItem('oos_full_dashboard') === 'true'
+  } catch {
+    /* Storage can be blocked. */
+  }
+  if (isMobileViewport && salesRoute && !desktopChosen) {
+    return <Navigate to={`${salesRoute}${location.search}`} replace />
+  }
+
   return (
     <div className="min-h-screen bg-background">
       {/* Deliberately no decorative background. Six blurred orbs, a green
@@ -121,6 +144,14 @@ export function AppShell() {
           <div className="mx-auto w-full max-w-[1600px] px-4 py-5 sm:px-6">
             {/* App-wide health banner — visible only when a subsystem is down or
                 degraded (AI/email/WhatsApp/DB). Surfaces silent failures. */}
+            {isMobileViewport && (
+              <Link
+                to="/m/inbox"
+                className="mb-4 inline-flex min-h-11 items-center rounded-lg border border-border px-3 text-sm"
+              >
+                Open mobile sales workspace
+              </Link>
+            )}
             <SystemHealthBanner />
             {/* Route-level error boundary. Keyed by pathname so a crash on one
                 page (e.g. Campaigns) renders a recoverable inline error here

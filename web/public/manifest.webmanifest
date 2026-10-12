@@ -1,0 +1,15 @@
+{
+  "id": "/m/",
+  "name": "Outbound OS",
+  "short_name": "Outbound OS",
+  "description": "Conversations, leads and follow-ups for your sales workspace.",
+  "start_url": "/m/inbox",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0b0e",
+  "theme_color": "#121216",
+  "icons": [
+    { "src": "/app-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/app-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

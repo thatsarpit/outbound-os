@@ -20,11 +20,13 @@ import { cn } from '@/lib/utils'
 
 type EmailEditorProps = {
   content: string
-  onChange: (html: string) => void
+  onChange?: (html: string) => void
+  onContentChange?: (html: string, text: string) => void
   onPlainTextChange?: (text: string) => void
   onSend?: () => void
   placeholder?: string
   disabled?: boolean
+  compact?: boolean
   className?: string
 }
 
@@ -62,11 +64,13 @@ function ToolbarButton({
 export function EmailEditor({
   content,
   onChange,
+  onContentChange,
   onPlainTextChange,
   onSend,
   placeholder = 'Write your email\u2026',
   disabled = false,
   className,
+  compact = false,
 }: EmailEditorProps) {
   const editor = useEditor({
     immediatelyRender: false,
@@ -94,7 +98,8 @@ export function EmailEditor({
         'aria-label': 'Email message',
         'aria-multiline': 'true',
         class: cn(
-          'min-h-[76px] max-h-[280px] overflow-y-auto px-4 py-3 text-sm text-text-primary',
+          'min-h-[76px] overflow-y-auto px-4 py-3 text-text-primary',
+          compact ? 'max-h-[140px] text-base' : 'max-h-[280px] text-sm',
           'outline-none prose prose-invert prose-sm max-w-none',
           'prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-blockquote:my-1',
           'prose-a:text-info prose-strong:text-text-primary',
@@ -114,7 +119,8 @@ export function EmailEditor({
     },
     onUpdate: ({ editor: e }) => {
       const html = e.getHTML()
-      onChange(html)
+      onChange?.(html)
+      onContentChange?.(html, e.getText())
       onPlainTextChange?.(e.getText())
     },
   })
@@ -156,7 +162,12 @@ export function EmailEditor({
       )}
     >
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-0.5 border-b border-border/60 px-2 py-1.5">
+      <div
+        className={cn(
+          'flex flex-wrap items-center gap-0.5 border-b border-border/60 px-2 py-1.5',
+          compact && 'hidden',
+        )}
+      >
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBold().run()}
           active={editor.isActive('bold')}

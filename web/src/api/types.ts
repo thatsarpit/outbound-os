@@ -507,6 +507,7 @@ export interface InboxThreadSummary {
   leadEmail: string | null
   mobile?: string | null
   leadMobile: string | null
+  waUserId?: string | null
   leadTelegramPeer: string | null
   status?: LeadStatus | string
   threadState?: InboxThreadState
@@ -607,6 +608,7 @@ export interface MediaFile {
 
 export interface InboxSendResponse {
   success: boolean
+  reason?: string
   message?: InboxMessage
   thread?: InboxThreadDetail
   error?: string

@@ -1650,3 +1650,79 @@ describe('Analytics selected periods', () => {
     }
   });
 });
+
+// Phone queues must not lose older replies behind the default 50-row page.
+test('Inbox filters before pagination and returns stable queue totals', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const ids = [];
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.71' };
+  try {
+    for (let i = 0; i < 54; i++) {
+      const old = i < 2;
+      const date = new Date(old ? '2020-01-01T00:00:00Z' : '2026-01-01T00:00:00Z');
+      const lead = await prisma.lead.create({ data: { name: `Mobile Queue Fixture ${i}`, mobile: `no-phone:mobile-queue-${i}`, source: 'manual', status: 'contacted', updatedAt: date, lastMessageAt: date, messages: { create: { direction: old ? 'inbound' : 'outbound', channel: 'email', status: 'sent', content: 'Queue fixture', createdAt: date } } } });
+      ids.push(lead.id);
+    }
+    const first = await request('GET', '/api/inbox/threads?search=Mobile%20Queue%20Fixture&state=needs_reply&limit=1', { headers });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.total, 2);
+    assert.equal(first.body.pages, 2);
+    assert.equal(first.body.needsReply, 2);
+    assert.equal(first.body.threads.length, 1);
+    const second = await request('GET', '/api/inbox/threads?search=Mobile%20Queue%20Fixture&state=needs_reply&limit=1&page=2', { headers });
+    assert.equal(second.body.threads.length, 1);
+    assert.notEqual(first.body.threads[0].leadId, second.body.threads[0].leadId);
+    const all = await request('GET', '/api/inbox/threads?search=Mobile%20Queue%20Fixture&limit=25', { headers });
+    assert.equal(all.body.total, 54);
+    assert.equal(all.body.pages, 3);
+    assert.equal(all.body.needsReply, 2);
+    assert.equal(all.body.threads.length, 25);
+    assert.equal(all.body.threads[0].leadId, ids[53]);
+  } finally {
+    await prisma.message.deleteMany({ where: { leadId: { in: ids } } });
+    await prisma.lead.deleteMany({ where: { id: { in: ids } } });
+  }
+});
+
+test('Mobile follow-ups validate edits, enforce lead ownership, and paginate workspace tasks', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.72' };
+  const leads = await Promise.all([1, 2].map(i => prisma.lead.create({ data: { name: `Mobile Task ${i}`, mobile: `no-phone:mobile-task-${i}`, source: 'manual' } })));
+  const viewer = await prisma.user.create({ data: { name: 'Mobile Viewer', email: 'mobile-viewer@example.test', passwordHash: 'not-a-password', role: 'viewer' } });
+  try {
+    const leadId = leads[0].id;
+    for (const body of [{ title: '  ' }, { title: 1 }, { title: 'Call buyer', dueAt: 'bad date' }]) {
+      assert.equal((await request('POST', `/api/leads/${leadId}/tasks`, { headers, body })).status, 400);
+    }
+    const created = await request('POST', `/api/leads/${leadId}/tasks`, { headers, body: { title: ' Call buyer ', dueAt: '2020-01-01T12:00:00Z' } });
+    assert.equal(created.status, 200);
+    assert.equal(created.body.title, 'Call buyer');
+    const taskId = created.body.id;
+    assert.equal((await request('PATCH', `/api/leads/${leadId}/tasks/${taskId}`, { headers, body: { done: 'false' } })).status, 400);
+    assert.equal((await request('PATCH', `/api/leads/${leadId}/tasks/${taskId}`, { headers, body: { title: '' } })).status, 400);
+    assert.equal((await request('PATCH', `/api/leads/${leads[1].id}/tasks/${taskId}`, { headers, body: { done: true } })).status, 404);
+    assert.equal((await request('DELETE', `/api/leads/${leads[1].id}/tasks/${taskId}`, { headers })).status, 404);
+    const note = await request('POST', `/api/leads/${leadId}/notes`, { headers, body: { content: 'Customer asked to follow up' } });
+    assert.equal((await request('DELETE', `/api/leads/${leads[1].id}/notes/${note.body.id}`, { headers })).status, 404);
+    const readonlyHeaders = { Authorization: `Bearer ${signToken(viewer)}`, 'X-Forwarded-For': '192.0.2.73' };
+    assert.equal((await request('GET', '/api/tasks', { headers: readonlyHeaders })).status, 200);
+    assert.equal((await request('PATCH', `/api/leads/${leadId}/tasks/${taskId}`, { headers: readonlyHeaders, body: { done: true } })).status, 403);
+    const queue = await request('GET', '/api/tasks?limit=1', { headers });
+    assert.equal(queue.body.tasks.length, 1);
+    assert.ok(queue.body.total >= 1);
+    assert.ok(queue.body.overdueCount >= 1);
+    assert.equal(queue.body.pages, queue.body.total);
+    assert.equal((await request('PATCH', `/api/leads/${leadId}/tasks/${taskId}`, { headers, body: { done: true, dueAt: null } })).status, 200);
+    const pending = await request('GET', `/api/leads/${leadId}/tasks`, { headers });
+    assert.equal(pending.body[0].done, true);
+    assert.equal(pending.body[0].dueAt, null);
+    assert.equal((await request('DELETE', `/api/leads/${leadId}/notes/${note.body.id}`, { headers })).status, 200);
+  } finally {
+    const ids = leads.map(lead => lead.id);
+    await prisma.leadTask.deleteMany({ where: { leadId: { in: ids } } });
+    await prisma.leadNote.deleteMany({ where: { leadId: { in: ids } } });
+    await prisma.lead.deleteMany({ where: { id: { in: ids } } });
+    await prisma.user.delete({ where: { id: viewer.id } });
+  }
+});
