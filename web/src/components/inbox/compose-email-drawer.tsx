@@ -1,3 +1,5 @@
+import { useAuthStore } from '@/stores/auth-store'
+import { useOnlineStatus } from '@/hooks/use-online-status'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Loader2, Mail, Search, User, X } from 'lucide-react'
@@ -21,6 +23,8 @@ type ComposeEmailDrawerProps = {
 }
 
 export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawerProps) {
+  const role = useAuthStore((state) => state.user?.role)
+  const online = useOnlineStatus()
   const [search, setSearch] = useState('')
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [showLeadPicker, setShowLeadPicker] = useState(!initialLeadId)
@@ -29,6 +33,7 @@ export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawe
   const [plainBody, setPlainBody] = useState('')
   const [senderAccountId, setSenderAccountId] = useState<number | null>(null)
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | null>(null)
+  const [uploading, setUploading] = useState(false)
   const [attachments, setAttachments] = useState<MediaFile[]>([])
   const [cc, setCc] = useState('')
   const [bcc, setBcc] = useState('')
@@ -96,7 +101,11 @@ export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawe
 
   // Send
   const sendMutation = useMutation({
+    networkMode: 'always',
+    retry: false,
     mutationFn: async () => {
+      if (!online || role === 'viewer')
+        throw new Error(!online ? 'Reconnect before sending.' : 'Read-only access.')
       if (!selectedLead) throw new Error('Select a recipient lead')
       if (!selectedLead.email) throw new Error('Selected lead has no email address')
       if (!plainBody.trim()) throw new Error('Email body cannot be empty')
@@ -130,10 +139,21 @@ export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawe
     setSearch('')
   }, [])
 
-  const canSend = !!selectedLead?.email && !!plainBody.trim() && !sendMutation.isPending
+  const canSend =
+    !!selectedLead?.email &&
+    !!plainBody.trim() &&
+    !sendMutation.isPending &&
+    !uploading &&
+    !applyTemplateMutation.isPending &&
+    online &&
+    role !== 'viewer'
 
+  const busy = sendMutation.isPending || uploading || applyTemplateMutation.isPending
+  const close = () => {
+    if (!busy) onClose()
+  }
   return (
-    <DrawerShell onClose={onClose} panelClassName="lg:max-w-2xl">
+    <DrawerShell onClose={close} panelClassName="lg:max-w-2xl">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-5 py-4">
         <div className="flex items-center gap-3">
@@ -147,14 +167,15 @@ export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawe
         </div>
         <button
           type="button"
-          onClick={onClose}
+          onClick={close}
+          disabled={busy}
           className="rounded-lg p-2 text-text-muted transition-colors hover:bg-surface-raised hover:text-text-secondary"
         >
           <X className="h-5 w-5" />
         </button>
       </div>
 
-      <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-5">
+      <fieldset disabled={busy} className="flex flex-1 flex-col gap-4 overflow-y-auto p-5">
         {/* To field */}
         <div>
           <label className="mb-1.5 block text-xs font-medium text-text-muted">To</label>
@@ -307,6 +328,7 @@ export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawe
               accounts={senderAccounts}
               value={senderAccountId}
               onChange={setSenderAccountId}
+              disabled={busy}
             />
           </div>
         )}
@@ -317,6 +339,7 @@ export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawe
             templates={templates.map((t) => ({ id: t.id, name: t.name }))}
             value={selectedTemplateId}
             onChange={setSelectedTemplateId}
+            disabled={busy}
             onApply={() => {
               if (selectedTemplateId) applyTemplateMutation.mutate(selectedTemplateId)
             }}
@@ -335,18 +358,19 @@ export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawe
             onChange={setHtmlBody}
             onPlainTextChange={setPlainBody}
             placeholder="Write your email..."
-            disabled={!selectedLead}
+            disabled={!selectedLead || busy || role === 'viewer'}
           />
         </div>
 
         {/* Attachments */}
         <AttachmentPicker
           attachments={attachments}
+          onUploadingChange={setUploading}
           onAdd={(file) => setAttachments((prev) => [...prev, file])}
           onRemove={(id) => setAttachments((prev) => prev.filter((a) => a.id !== id))}
-          disabled={!selectedLead}
+          disabled={!selectedLead || busy || role === 'viewer'}
         />
-      </div>
+      </fieldset>
 
       {/* Footer */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-4">
@@ -359,6 +383,7 @@ export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawe
           {/* Schedule option */}
           <div className="flex items-center gap-2">
             <input
+              disabled={busy}
               type="datetime-local"
               value={scheduleDate}
               onChange={(e) => setScheduleDate(e.target.value)}

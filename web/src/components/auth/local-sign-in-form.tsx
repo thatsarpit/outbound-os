@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { signInWithPassword } from '@/components/auth/local-auth-bridge'
+import { loginReturnPath } from '@/lib/login-return'
 import { useAuthStore } from '@/stores/auth-store'
 
 /** The built-in email + password form, used when the server's provider is `local`. */
@@ -20,8 +21,10 @@ export function LocalSignInForm() {
     setError(null)
     try {
       await signInWithPassword(email.trim(), password)
-      const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname
-      navigate(from && from !== '/login' ? from : useAuthStore.getState().getHomeRoute(), {
+      const from = loginReturnPath(
+        (location.state as { from?: { pathname?: string; search?: string } } | null)?.from,
+      )
+      navigate(from || useAuthStore.getState().getHomeRoute(), {
         replace: true,
       })
     } catch (err) {
@@ -33,6 +36,7 @@ export function LocalSignInForm() {
   return (
     <form onSubmit={onSubmit} className="flex flex-col gap-4" noValidate>
       <Input
+        className="min-h-11 text-base sm:text-sm"
         label="Work email"
         type="email"
         autoComplete="username"
@@ -42,6 +46,7 @@ export function LocalSignInForm() {
         autoFocus
       />
       <Input
+        className="min-h-11 text-base sm:text-sm"
         label="Password"
         type="password"
         autoComplete="current-password"
@@ -50,7 +55,10 @@ export function LocalSignInForm() {
         required
       />
       {error && (
-        <p role="alert" className="rounded-md border border-danger bg-danger-muted px-3 py-2 text-[13px] text-danger">
+        <p
+          role="alert"
+          className="rounded-md border border-danger bg-danger-muted px-3 py-2 text-[13px] text-danger"
+        >
           {error}
         </p>
       )}
@@ -64,7 +72,8 @@ export function LocalSignInForm() {
       </Button>
       <p className="text-[11px] leading-4 text-text-muted">
         Forgot your password? Ask a workspace admin to set a new one under Team, or run{' '}
-        <code className="rounded bg-surface-raised px-1">npm run reset-password</code> on the server.
+        <code className="rounded bg-surface-raised px-1">npm run reset-password</code> on the
+        server.
       </p>
     </form>
   )

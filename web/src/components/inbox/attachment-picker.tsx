@@ -29,10 +29,13 @@ export function AttachmentPicker({
   const inputRef = useRef<HTMLInputElement>(null)
 
   const uploadMutation = useMutation({
+    networkMode: 'always',
+    retry: false,
     mutationFn: (file: File) => inboxApi.uploadMedia(file),
     onSuccess: (data) => {
       if (data) onAdd(data)
     },
+    onSettled: () => onUploadingChange?.(false),
   })
 
   useEffect(() => {
@@ -46,6 +49,7 @@ export function AttachmentPicker({
       alert('File must be under 10 MB')
       return
     }
+    onUploadingChange?.(true)
     uploadMutation.mutate(file)
     e.target.value = ''
   }

@@ -29,7 +29,7 @@ Reply drafts are saved locally on each edit, scoped to the signed-in person,
 workspace, lead, channel and sender account. They expire after seven days and
 are cleared on explicit sign-out. Sending clears only the submitted revision,
 so a slow result cannot delete a newer draft. Storage failures are visible.
-Provider rejections preserve the draft. Files must be reattached after reopening
+Provider rejections preserve the draft. Shared query caches are discarded on account/workspace changes and role changes, and the protected shell remounts to clear in-memory editor state. Files must be reattached after reopening
 a conversation; this version does not store files or confidential API responses
 for offline use. Pending uploads block Send and sender/channel changes.
 

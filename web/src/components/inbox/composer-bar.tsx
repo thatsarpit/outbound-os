@@ -62,7 +62,7 @@ export function ComposerBar({
   helperLabel,
   placeholder,
   disabled = false,
-  sendDisabled = false,
+  sendDisabled: externallyDisabled = false,
   templates = [],
   selectedTemplateId = null,
   onTemplateChange,
@@ -81,6 +81,8 @@ export function ComposerBar({
   onBccChange,
   onScheduleSend,
 }: ComposerBarProps) {
+  const [uploading, setUploading] = useState(false)
+  const sendDisabled = externallyDisabled || uploading || disabled
   const isEmail = channel === 'email'
   const showTemplatePicker = isEmail && onTemplateChange && onApplyTemplate
   const noSenders = isEmail && senderAccounts.length === 0
@@ -105,6 +107,7 @@ export function ComposerBar({
                   key={id}
                   type="button"
                   onClick={() => onChannelChange(id)}
+                  disabled={disabled || uploading || sendPending}
                   aria-pressed={active}
                   className={cn(
                     'inline-flex shrink-0 items-center gap-1.5 rounded-sm px-2 py-1 text-xs font-medium transition-colors',
@@ -145,7 +148,7 @@ export function ComposerBar({
                     value={subject}
                     onChange={(event) => onSubjectChange(event.target.value)}
                     placeholder="Email subject"
-                    disabled={disabled}
+                    disabled={disabled || uploading || sendPending}
                     className={cn(
                       'min-h-9 rounded-md border border-border bg-surface-raised px-3 py-2 text-xs text-text-primary',
                       'placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30',
@@ -156,7 +159,7 @@ export function ComposerBar({
                     accounts={senderAccounts}
                     value={senderAccountId}
                     onChange={onSenderAccountChange}
-                    disabled={disabled}
+                    disabled={disabled || uploading || sendPending}
                   />
                 </div>
 
@@ -170,7 +173,7 @@ export function ComposerBar({
                           value={cc}
                           onChange={(e) => onCcChange(e.target.value)}
                           placeholder="CC (comma-separated emails)"
-                          disabled={disabled}
+                          disabled={disabled || uploading || sendPending}
                           className={cn(
                             'rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary',
                             'placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30',
@@ -181,7 +184,7 @@ export function ComposerBar({
                           value={bcc}
                           onChange={(e) => onBccChange(e.target.value)}
                           placeholder="BCC (comma-separated emails)"
-                          disabled={disabled}
+                          disabled={disabled || uploading || sendPending}
                           className={cn(
                             'rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary',
                             'placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30',
@@ -206,9 +209,10 @@ export function ComposerBar({
               {onAddAttachment && onRemoveAttachment && (
                 <AttachmentPicker
                   attachments={attachments}
+                  onUploadingChange={setUploading}
                   onAdd={onAddAttachment}
                   onRemove={onRemoveAttachment}
-                  disabled={disabled || noSenders}
+                  disabled={disabled || sendPending || noSenders}
                 />
               )}
               {showTemplatePicker && (
@@ -223,7 +227,7 @@ export function ComposerBar({
                     onApply={onApplyTemplate}
                     loading={templatesLoading}
                     applyPending={templateApplyPending}
-                    disabled={disabled || templateDisabled}
+                    disabled={disabled || uploading || sendPending || templateDisabled}
                     label={templateLabel}
                     description={templateDescription}
                     className="border-0 p-3"
@@ -237,9 +241,10 @@ export function ComposerBar({
         {channel === 'whatsapp' && onAddAttachment && onRemoveAttachment && (
           <AttachmentPicker
             attachments={attachments}
+            onUploadingChange={setUploading}
             onAdd={onAddAttachment}
             onRemove={onRemoveAttachment}
-            disabled={disabled || noSenders}
+            disabled={disabled || sendPending || noSenders}
           />
         )}
 
@@ -251,7 +256,7 @@ export function ComposerBar({
               onPlainTextChange={onTextChange}
               onSend={sendDisabled ? undefined : onSend}
               placeholder={placeholder || 'Write your email\u2026'}
-              disabled={disabled || noSenders}
+              disabled={disabled || sendPending || noSenders}
               className="flex-1"
             />
           ) : (
@@ -259,14 +264,14 @@ export function ComposerBar({
               value={text}
               onChange={(event) => onTextChange(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault()
                   if (!sendDisabled) onSend()
                 }
               }}
               placeholder={placeholder || `Type a ${getChannel(channel).label} reply\u2026`}
               rows={3}
-              disabled={disabled}
+              disabled={disabled || uploading || sendPending}
               className={cn(
                 'min-h-24 flex-1 resize-none rounded-md border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary',
                 'placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30',

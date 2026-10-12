@@ -311,6 +311,7 @@ export function ConversationSurface({
             : `Type the ${getChannel(composerChannel).label} reply…`
         }
         sendDisabled={sendDisabled}
+        disabled={replyPending || replyDisabledReason?.startsWith('Read-only')}
       />
 
       {(replyError || replyDisabledReason) && (

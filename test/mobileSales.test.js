@@ -70,3 +70,30 @@ test('mobile follow-ups use workspace time, including DST and half-hour offsets'
   assert.throws(() => workspaceWallTimeToUtc('2026-03-29T01:30', 'Europe/London'), /clock change/);
   assert.throws(() => workspaceWallTimeToUtc('2026-10-25T01:30', 'Europe/London'), /clock change/);
 });
+
+test('login cache discards previous account data and role permissions but survives token refresh', async () => {
+  const { bindSessionCache } = await import('../web/src/lib/session-cache.ts');
+  let listener;
+  let unsubscribed = false;
+  const data = new Map([['leads', ['private contact']]]);
+  let clears = 0;
+  const unbind = bindSessionCache({ subscribe(fn) { listener = fn; return () => { unsubscribed = true; }; } }, { clear() { data.clear(); clears++; } });
+  const a = { dashboardScope: 'clerk:workspace-a:user-a', user: { role: 'admin' } };
+  listener({ ...a }, a);
+  assert.equal(data.size, 1, 'token refresh keeps the same session cache');
+  listener({ ...a, user: { role: 'viewer' } }, a);
+  assert.equal(data.size, 0, 'a role downgrade clears previously privileged data');
+  listener({ ...a, dashboardScope: 'clerk:workspace-b:user-a' }, a);
+  listener({ ...a, dashboardScope: 'clerk:workspace-a:user-b' }, a);
+  listener({ dashboardScope: 'signed-out', user: null }, a);
+  assert.equal(clears, 4);
+  unbind();
+  assert.equal(unsubscribed, true);
+});
+
+test('login resumes the selected conversation but rejects external redirect paths', async () => {
+  const { loginReturnPath } = await import('../web/src/lib/login-return.ts');
+  assert.equal(loginReturnPath({ pathname: '/m/inbox', search: '?leadId=12&channel=email' }), '/m/inbox?leadId=12&channel=email');
+  for (const pathname of ['//example.test', '/\\example.test', 'https://example.test', '/login', '/\t/example.test', '']) assert.equal(loginReturnPath({ pathname }), null);
+  assert.equal(loginReturnPath({ pathname: '/m/tasks', search: 'https://example.test' }), '/m/tasks');
+});

@@ -1,3 +1,6 @@
+import { useAuthStore } from '@/stores/auth-store'
+import { useOnlineStatus } from '@/hooks/use-online-status'
+import { useWorkspaceTimezone } from '@/hooks/use-workspace-timezone'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
@@ -71,6 +74,10 @@ export function LeadContextPanel({
   thread: InboxThreadDetail
   className?: string
 }) {
+  const role = useAuthStore((state) => state.user?.role)
+  const online = useOnlineStatus()
+  const canEdit = role !== 'viewer' && online
+  const { timezone } = useWorkspaceTimezone()
   const leadId = thread.leadId
   const queryClient = useQueryClient()
   const [noteDraft, setNoteDraft] = useState('')
@@ -103,6 +110,7 @@ export function LeadContextPanel({
 
   const addNote = useMutation({
     mutationFn: () => notesApi.create(leadId, { content: noteDraft.trim(), type: noteType }),
+    onError: (error: Error) => toast.error(error.message),
     onSuccess: () => {
       setNoteDraft('')
       invalidate('lead-notes')
@@ -116,6 +124,7 @@ export function LeadContextPanel({
 
   const addTask = useMutation({
     mutationFn: () => tasksApi.create(leadId, { title: taskDraft.trim() }),
+    onError: (error: Error) => toast.error(error.message),
     onSuccess: () => {
       setTaskDraft('')
       invalidate('lead-tasks')
@@ -126,6 +135,7 @@ export function LeadContextPanel({
     mutationFn: ({ id, done }: { id: number; done: boolean }) =>
       tasksApi.update(leadId, id, { done }),
     onSuccess: () => invalidate('lead-tasks'),
+    onError: (error: Error) => toast.error(error.message),
   })
 
   const openTasks = tasks.filter((t) => !t.done)
@@ -189,7 +199,7 @@ export function LeadContextPanel({
 
       {/* Contact + commercial detail */}
       <div className="space-y-2 border-b border-border px-4 py-3.5">
-        {thread.leadMobile && (
+        {thread.leadMobile && /^\+?[\d\s()-]{7,20}$/.test(thread.leadMobile) && (
           <Row icon={Phone}>
             <a href={`tel:${thread.leadMobile}`} className="hover:text-text-primary">
               {thread.leadMobile}
@@ -221,12 +231,13 @@ export function LeadContextPanel({
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            if (!taskDraft.trim() || addTask.isPending) return
+            if (!canEdit || !taskDraft.trim() || addTask.isPending) return
             addTask.mutate()
           }}
           className="flex items-center gap-1"
         >
           <input
+            disabled={!canEdit || addTask.isPending}
             value={taskDraft}
             onChange={(e) => setTaskDraft(e.target.value)}
             placeholder="Add a follow-up"
@@ -235,7 +246,7 @@ export function LeadContextPanel({
           <button
             type="submit"
             aria-label="Add task"
-            disabled={!taskDraft.trim() || addTask.isPending}
+            disabled={!canEdit || !taskDraft.trim() || addTask.isPending}
             className="shrink-0 rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-raised hover:text-text-primary disabled:opacity-40"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -250,6 +261,7 @@ export function LeadContextPanel({
               <li key={task.id} className="flex items-start gap-2">
                 <button
                   type="button"
+                  disabled={!canEdit || toggleTask.isPending}
                   onClick={() => toggleTask.mutate({ id: task.id, done: !task.done })}
                   aria-label={task.done ? 'Mark as not done' : 'Mark as done'}
                   className={cn(
@@ -272,7 +284,15 @@ export function LeadContextPanel({
                   </span>
                   {task.dueAt && (
                     <span className="text-[10px] text-text-muted">
-                      Due {formatRelativeTime(task.dueAt)}
+                      Due{' '}
+                      {new Date(task.dueAt).toLocaleString(undefined, {
+                        timeZone: timezone,
+                        month: 'short',
+                        day: 'numeric',
+                        hour: 'numeric',
+                        minute: '2-digit',
+                        timeZoneName: 'short',
+                      })}
                     </span>
                   )}
                 </span>
@@ -289,12 +309,13 @@ export function LeadContextPanel({
         <form
           onSubmit={(e) => {
             e.preventDefault()
-            if (!noteDraft.trim() || addNote.isPending) return
+            if (!canEdit || !noteDraft.trim() || addNote.isPending) return
             addNote.mutate()
           }}
           className="space-y-1.5"
         >
           <textarea
+            disabled={!canEdit || addNote.isPending}
             value={noteDraft}
             onChange={(e) => setNoteDraft(e.target.value)}
             rows={2}
@@ -307,6 +328,7 @@ export function LeadContextPanel({
                 <button
                   key={t.value}
                   type="button"
+                  disabled={!canEdit}
                   onClick={() => setNoteType(t.value)}
                   aria-pressed={noteType === t.value}
                   className={cn(
@@ -324,7 +346,7 @@ export function LeadContextPanel({
               type="submit"
               size="sm"
               variant="secondary"
-              disabled={!noteDraft.trim()}
+              disabled={!canEdit || !noteDraft.trim()}
               pending={addNote.isPending}
               className="h-7 shrink-0 px-2 text-[11px]"
             >
@@ -354,6 +376,7 @@ export function LeadContextPanel({
                         onError: () => toast.error('Could not delete note'),
                       })
                     }}
+                    disabled={!canEdit || removeNote.isPending}
                     aria-label="Delete note"
                     className="ml-auto rounded-sm p-0.5 text-text-muted opacity-0 transition-opacity hover:text-danger focus-visible:opacity-100 group-hover:opacity-100"
                   >

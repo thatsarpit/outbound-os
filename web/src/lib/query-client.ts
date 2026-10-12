@@ -1,3 +1,5 @@
+import { useAuthStore } from '@/stores/auth-store'
+import { bindSessionCache } from './session-cache'
 import { MutationCache, QueryCache, QueryClient } from '@tanstack/react-query'
 import { toast } from '@/stores/toast-store'
 
@@ -42,3 +44,6 @@ export const queryClient = new QueryClient({
     },
   }),
 })
+
+const unbindSessionCache = bindSessionCache(useAuthStore, queryClient)
+if (import.meta.hot) import.meta.hot.dispose(unbindSessionCache)

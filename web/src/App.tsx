@@ -65,7 +65,7 @@ function FullPageLoader() {
 
 /* ── Auth guard ── */
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading, hasCapability, user } = useAuthStore()
+  const { isAuthenticated, isLoading, hasCapability, user, dashboardScope } = useAuthStore()
   const location = useLocation()
 
   if (isLoading) return <FullPageLoader />
@@ -76,7 +76,11 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   if (requiredCapability && !hasCapability(requiredCapability)) {
     return <Navigate to={getFirstAccessibleRoute(user?.role, hasCapability)} replace />
   }
-  return <>{children}</>
+  return (
+    <div key={dashboardScope} className="contents">
+      {children}
+    </div>
+  )
 }
 
 function RoleHomeRoute() {

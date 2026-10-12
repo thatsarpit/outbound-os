@@ -1726,3 +1726,32 @@ test('Mobile follow-ups validate edits, enforce lead ownership, and paginate wor
     await prisma.user.delete({ where: { id: viewer.id } });
   }
 });
+
+test('follow-up endpoints reject malformed IDs and missing parents without server errors', async () => {
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.74' };
+  assert.equal((await request('GET', '/api/leads/1junk/tasks', { headers })).status, 400);
+  assert.equal((await request('PATCH', '/api/leads/1/tasks/-2', { headers, body: { done: true } })).status, 400);
+  assert.equal((await request('POST', '/api/leads/2147483647/tasks', { headers, body: { title: 'Missing buyer' } })).status, 404);
+  assert.equal((await request('POST', '/api/leads/2147483647/notes', { headers, body: { content: 'Missing buyer' } })).status, 404);
+  assert.equal((await request('POST', '/api/leads/1/notes', { headers, body: { content: 'Test', type: 'invented' } })).status, 400);
+});
+
+test('inbox detail and queue agree on the latest message when timestamps tie', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const date = new Date('2026-01-01T12:00:00Z');
+  const lead = await prisma.lead.create({ data: { name: 'Queue Tie Fixture', source: 'manual', mobile: 'no-phone:queue-tie', lastMessageAt: new Date('2020-01-01T00:00:00Z') } });
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.75' };
+  try {
+    await prisma.message.create({ data: { leadId: lead.id, channel: 'email', direction: 'inbound', content: 'Question', status: 'delivered', createdAt: date } });
+    const sent = await prisma.message.create({ data: { leadId: lead.id, channel: 'email', direction: 'outbound', content: 'Answered', status: 'sent', createdAt: date } });
+    const queue = await request('GET', '/api/inbox/threads?search=Queue%20Tie%20Fixture', { headers });
+    assert.equal(queue.body.threads[0].replyNeeded, false);
+    assert.equal(queue.body.threads[0].lastMessageAt, date.toISOString());
+    const detail = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+    assert.equal(detail.body.messages.at(-1).id, sent.id);
+    assert.equal(detail.body.replyNeeded, false);
+  } finally {
+    await prisma.message.deleteMany({ where: { leadId: lead.id } });
+    await prisma.lead.delete({ where: { id: lead.id } });
+  }
+});

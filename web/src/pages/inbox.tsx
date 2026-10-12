@@ -20,10 +20,11 @@ import { ThreadListItem } from '@/components/inbox/thread-list-item'
 import { LeadContextPanel } from '@/components/inbox/lead-context-panel'
 import { DrawerShell, SkeletonCard, Button } from '@/components/ui'
 import { buildReplySubject, getRenderedTemplateText } from '@/lib/email-compose'
-import { saveDraft, loadDraft, clearDraft } from '@/lib/email-drafts'
+import { saveDraft, loadDraft, clearDraft, clearSubmittedDraft } from '@/lib/email-drafts'
 import { ROLE_EXPERIENCE } from '@/lib/role-shell'
 import { cn } from '@/lib/utils'
 import { CHANNELS, CHANNEL_ORDER } from '@/lib/channels'
+import { useOnlineStatus } from '@/hooks/use-online-status'
 import { useUIStore } from '@/stores/ui-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { toast } from '@/stores/toast-store'
@@ -74,11 +75,13 @@ function parseLeadId(value: string | null) {
 function InboxInner() {
   const queryClient = useQueryClient()
   const isMobileViewport = useUIStore((state) => state.isMobileViewport)
+  const online = useOnlineStatus()
   const { user, dashboardScope } = useAuthStore()
   const role = user?.role || 'viewer'
   const experience = ROLE_EXPERIENCE[role]
   const [searchParams, setSearchParams] = useSearchParams()
 
+  const [page, setPage] = useState(1)
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearchQuery = useDeferredValue(searchQuery.trim())
   const [channelFilter, setChannelFilter] = useState<'all' | InboxChannel>('all')
@@ -98,7 +101,7 @@ function InboxInner() {
     ? (searchParams.get('channel') as InboxChannel)
     : null
   const autoAppliedRouteTemplateRef = useRef<string | null>(null)
-  const hydratedLeadIdRef = useRef<number | null>(null)
+  const [hydratedContext, setHydratedContext] = useState('')
 
   // Navigation owns the selected conversation and channel. Mirroring these
   // into local state with effects lets a stale URL undo a person's selection.
@@ -147,15 +150,23 @@ function InboxInner() {
     isLoading: threadsLoading,
     error: threadsError,
   } = useQuery({
-    queryKey: ['inbox-threads', channelFilter, threadStateFilter, deferredSearchQuery],
+    queryKey: ['inbox-threads', channelFilter, threadStateFilter, deferredSearchQuery, page],
     queryFn: () =>
       inboxApi.listThreads({
         channel: channelFilter === 'all' ? undefined : channelFilter,
         state: threadStateFilter === 'all' ? undefined : threadStateFilter,
         search: deferredSearchQuery || undefined,
+        page,
       }),
     refetchInterval: 15_000,
   })
+
+  useEffect(() => {
+    setPage(1)
+  }, [channelFilter, threadStateFilter, deferredSearchQuery])
+  useEffect(() => {
+    if (threadListData) setPage((current) => Math.min(current, Math.max(1, threadListData.pages)))
+  }, [threadListData])
 
   const threads = useMemo(() => threadListData?.threads ?? [], [threadListData?.threads])
 
@@ -210,93 +221,103 @@ function InboxInner() {
     setSelectedTemplateId(routedTemplateId)
   }, [routedTemplateId])
 
+  const draftAccountId = composerChannel === 'email' ? senderAccountId : null
+  const draftContext = `${dashboardScope}:${selectedLeadId}:${composerChannel}:${draftAccountId}`
   useEffect(() => {
-    if (!activeThread || activeThread.leadId !== selectedLeadId) return
-    hydratedLeadIdRef.current = activeThread.leadId
-    const draft = loadDraft(dashboardScope, activeThread.leadId)
-    if (draft && draft.plainBody.trim()) {
-      setReplyText(draft.plainBody)
-      setHtmlBody(draft.htmlBody)
-      setComposerSubject(draft.subject)
-      setCc(draft.cc)
-      setBcc(draft.bcc)
-      // Explicit links win over a saved draft; fill only absent route choices.
-      const patch: Record<string, string | null> = {}
-      if (!routedChannel) patch.channel = draft.channel
-      if (!routedAccountId && draft.senderAccountId) patch.accountId = String(draft.senderAccountId)
-      if (Object.keys(patch).length) updateRoute(patch)
-    } else {
-      setReplyText('')
-      setHtmlBody('')
-      setCc('')
-      setBcc('')
-      setComposerSubject(buildReplySubject(latestEmailMessage?.subject || activeThread.subject))
-    }
+    if (!activeThread || activeThread.leadId !== selectedLeadId || hydratedContext === draftContext)
+      return
+    const draft = loadDraft(dashboardScope, activeThread.leadId, composerChannel, draftAccountId)
+    setReplyText(draft?.plainBody ?? '')
+    setHtmlBody(draft?.htmlBody ?? '')
+    setCc(draft?.cc ?? '')
+    setBcc(draft?.bcc ?? '')
+    setComposerSubject(
+      draft?.subject ?? buildReplySubject(latestEmailMessage?.subject || activeThread.subject),
+    )
     setAttachments([])
-    // Hydrate once per conversation; polling and channel changes must preserve
-    // the text a person is writing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeThread?.leadId])
+    setHydratedContext(draftContext)
+  }, [
+    activeThread,
+    selectedLeadId,
+    dashboardScope,
+    composerChannel,
+    draftAccountId,
+    draftContext,
+    hydratedContext,
+    latestEmailMessage?.subject,
+  ])
 
-  // Auto-save draft to localStorage (debounced via effect)
+  // Save promptly so browser Back and tab suspension retain the latest edit.
+  // Hydration and persistence share a context guard; channel/sender switches
+  // cannot write the old editor's contents into the new identity's draft.
   useEffect(() => {
-    if (!selectedLeadId || hydratedLeadIdRef.current !== selectedLeadId) return
-    const timer = setTimeout(() => {
-      if (!replyText.trim()) {
-        clearDraft(dashboardScope, selectedLeadId, composerChannel, senderAccountId)
-        return
-      }
-      saveDraft(dashboardScope, selectedLeadId, {
-        subject: composerSubject,
-        htmlBody,
-        plainBody: replyText,
-        channel: composerChannel,
-        senderAccountId,
-        cc,
-        bcc,
-      })
-    }, 1000)
-    return () => clearTimeout(timer)
+    if (!selectedLeadId || hydratedContext !== draftContext) return
+    saveDraft(dashboardScope, selectedLeadId, {
+      subject: composerSubject,
+      htmlBody,
+      plainBody: replyText,
+      channel: composerChannel,
+      senderAccountId: draftAccountId,
+      cc,
+      bcc,
+    })
   }, [
     dashboardScope,
     selectedLeadId,
+    hydratedContext,
+    draftContext,
     replyText,
     htmlBody,
     composerSubject,
     composerChannel,
-    senderAccountId,
+    draftAccountId,
     cc,
     bcc,
   ])
 
-  const replyDisabledReason = !activeThread
-    ? threadLoading
-      ? 'Loading conversation…'
-      : 'Select a conversation to reply.'
-    : composerChannel === 'email'
-      ? !activeThread.leadEmail
-        ? 'This lead does not have an email address yet.'
-        : activeThread.availableSenderAccounts?.length
-          ? null
-          : 'No verified sender account is available for this lead.'
-      : composerChannel === 'telegram'
-        ? !activeThread.leadTelegramPeer
-          ? 'Add a Telegram @username, phone number, or peer ID to this lead first.'
-          : channelHealth?.telegram.status === 'ready'
-            ? null
-            : 'No connected Telegram account is available.'
-        : !activeThread.leadMobile
-          ? `This lead does not have a mobile number for ${composerChannel === 'imessage' ? 'iMessage' : 'WhatsApp'}.`
-          : null
+  const replyDisabledReason =
+    role === 'viewer'
+      ? 'Read-only access. Ask your administrator for reply access.'
+      : !online
+        ? 'Offline. Reconnect to send your reply.'
+        : !activeThread
+          ? threadLoading
+            ? 'Loading conversation…'
+            : 'Select a conversation to reply.'
+          : composerChannel === 'email'
+            ? !activeThread.leadEmail
+              ? 'This lead does not have an email address yet.'
+              : activeThread.availableSenderAccounts?.length
+                ? null
+                : 'No verified sender account is available for this lead.'
+            : composerChannel === 'telegram'
+              ? !activeThread.leadTelegramPeer
+                ? 'Add a Telegram @username, phone number, or peer ID to this lead first.'
+                : channelHealth?.telegram.status === 'ready'
+                  ? null
+                  : 'No connected Telegram account is available.'
+              : !activeThread.leadMobile
+                ? `This lead does not have a mobile number for ${composerChannel === 'imessage' ? 'iMessage' : 'WhatsApp'}.`
+                : null
 
   const sendMutation = useMutation({
+    networkMode: 'always',
+    retry: false,
     mutationFn: async () => {
       if (!selectedLeadId) throw new Error('No lead selected')
+      if (replyDisabledReason) throw new Error(replyDisabledReason)
+      const submitted = loadDraft(dashboardScope, selectedLeadId, composerChannel, draftAccountId)
+      const send = async (payload: Parameters<typeof inboxApi.send>[0]) => ({
+        response: await inboxApi.send(payload),
+        submitted,
+        leadId: selectedLeadId,
+        channel: composerChannel,
+      })
       const messageBody = replyText.trim()
 
       // WhatsApp files: the text, if any, is the first file's caption.
       if (composerChannel === 'whatsapp' && attachments.length > 0) {
-        return inboxApi.send({
+        return send({
           leadId: selectedLeadId,
           channel: 'whatsapp',
           text: messageBody,
@@ -312,7 +333,7 @@ function InboxInner() {
           buildReplySubject(latestEmailMessage?.subject || activeThread?.subject)
 
         const emailHtml = htmlBody.trim()
-        return inboxApi.send({
+        return send({
           leadId: selectedLeadId,
           channel: 'email',
           text: messageBody,
@@ -327,15 +348,14 @@ function InboxInner() {
         })
       }
 
-      return inboxApi.send({
+      return send({
         leadId: selectedLeadId,
         channel: composerChannel,
         text: messageBody,
       })
     },
-    onSuccess: () => {
-      if (selectedLeadId)
-        clearDraft(dashboardScope, selectedLeadId, composerChannel, senderAccountId)
+    onSuccess: ({ submitted, leadId }) => {
+      clearSubmittedDraft(dashboardScope, leadId, submitted)
       setReplyText('')
       setHtmlBody('')
       setAttachments([])
@@ -357,6 +377,8 @@ function InboxInner() {
   })
 
   const applyTemplateMutation = useMutation({
+    networkMode: 'always',
+    retry: false,
     mutationFn: async (templateId: number) => {
       if (!selectedLeadId) throw new Error('No lead selected')
       return templatesApi.render(templateId, {
@@ -456,7 +478,7 @@ function InboxInner() {
   })
 
   const persistCurrentDraft = () => {
-    if (!selectedLeadId || hydratedLeadIdRef.current !== selectedLeadId) return
+    if (!selectedLeadId || hydratedContext !== draftContext) return
     if (!replyText.trim()) {
       clearDraft(dashboardScope, selectedLeadId, composerChannel, senderAccountId)
       return
@@ -466,7 +488,7 @@ function InboxInner() {
       htmlBody,
       plainBody: replyText,
       channel: composerChannel,
-      senderAccountId,
+      senderAccountId: draftAccountId,
       cc,
       bcc,
     })
@@ -485,32 +507,37 @@ function InboxInner() {
     setAttachments((prev) => prev.filter((a) => a.id !== id))
 
   const scheduleSendMutation = useMutation({
+    networkMode: 'always',
+    retry: false,
     mutationFn: async (scheduledAt: string) => {
       if (!selectedLeadId) throw new Error('No lead selected')
       const messageBody = replyText.trim()
       if (!messageBody) throw new Error('Reply cannot be empty')
+      if (replyDisabledReason) throw new Error(replyDisabledReason)
+      const submitted = loadDraft(dashboardScope, selectedLeadId, composerChannel, draftAccountId)
       const emailHtml = htmlBody.trim()
       const subjectLine =
         composerSubject.trim() ||
         buildReplySubject(latestEmailMessage?.subject || activeThread?.subject)
-      return inboxApi.send({
-        leadId: selectedLeadId,
-        channel: 'email',
-        text: messageBody,
-        body: messageBody,
-        htmlBody: emailHtml || undefined,
-        subject: subjectLine,
-        accountId: senderAccountId ?? undefined,
-        replyToMessageId: latestEmailMessage?.id ?? undefined,
-        attachmentIds: attachments.length > 0 ? attachments.map((a) => a.id) : undefined,
-        cc: cc.trim() || undefined,
-        bcc: bcc.trim() || undefined,
-        scheduledAt,
-      })
+      return inboxApi
+        .send({
+          leadId: selectedLeadId,
+          channel: 'email',
+          text: messageBody,
+          body: messageBody,
+          htmlBody: emailHtml || undefined,
+          subject: subjectLine,
+          accountId: senderAccountId ?? undefined,
+          replyToMessageId: latestEmailMessage?.id ?? undefined,
+          attachmentIds: attachments.length > 0 ? attachments.map((a) => a.id) : undefined,
+          cc: cc.trim() || undefined,
+          bcc: bcc.trim() || undefined,
+          scheduledAt,
+        })
+        .then((response) => ({ response, submitted, leadId: selectedLeadId }))
     },
-    onSuccess: () => {
-      if (selectedLeadId)
-        clearDraft(dashboardScope, selectedLeadId, composerChannel, senderAccountId)
+    onSuccess: ({ submitted, leadId }) => {
+      clearSubmittedDraft(dashboardScope, leadId, submitted)
       setReplyText('')
       setHtmlBody('')
       setAttachments([])
@@ -534,12 +561,11 @@ function InboxInner() {
                 <h1 className="truncate text-sm font-semibold tracking-tight">Conversations</h1>
                 <p className="mt-0.5 text-[11px] text-text-muted">
                   <span className="tabular-nums">{threadListData?.needsReply ?? 0}</span> need reply
-                  &middot; <span className="tabular-nums">{threadListData?.unread ?? 0}</span>{' '}
-                  unread
                 </p>
               </div>
               <Button
                 size="sm"
+                disabled={role === 'viewer'}
                 onClick={() => setShowCompose(true)}
                 leftIcon={<PenSquare className="h-3.5 w-3.5" />}
               >
@@ -674,6 +700,32 @@ function InboxInner() {
               ))
             )}
           </div>
+          {(threadListData?.pages ?? 0) > 1 && (
+            <nav
+              aria-label="Conversation pages"
+              className="flex items-center justify-between gap-2 border-t border-border p-3"
+            >
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={page <= 1}
+                onClick={() => setPage((current) => current - 1)}
+              >
+                Previous
+              </Button>
+              <span className="text-xs tabular-nums text-text-muted">
+                {page} / {threadListData?.pages}
+              </span>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={page >= (threadListData?.pages ?? 1)}
+                onClick={() => setPage((current) => current + 1)}
+              >
+                Next
+              </Button>
+            </nav>
+          )}
         </div>
 
         {!isMobileViewport && (
@@ -727,7 +779,7 @@ function InboxInner() {
                   templatesLoading={templatesLoading}
                   templateApplyPending={applyTemplateMutation.isPending}
                   onSend={() => sendMutation.mutate()}
-                  replyPending={sendMutation.isPending}
+                  replyPending={sendMutation.isPending || scheduleSendMutation.isPending}
                   replyError={resolvedReplyError}
                   replyDisabledReason={replyDisabledReason}
                   onResolve={() => resolveThreadMutation.mutate()}
@@ -783,7 +835,7 @@ function InboxInner() {
               templatesLoading={templatesLoading}
               templateApplyPending={applyTemplateMutation.isPending}
               onSend={() => sendMutation.mutate()}
-              replyPending={sendMutation.isPending}
+              replyPending={sendMutation.isPending || scheduleSendMutation.isPending}
               replyError={resolvedReplyError}
               replyDisabledReason={replyDisabledReason}
               drawer
@@ -814,9 +866,11 @@ function InboxInner() {
 }
 
 export default function InboxPage() {
+  const [params] = useSearchParams()
+  const scope = useAuthStore((state) => state.dashboardScope)
   return (
     <InboxErrorBoundary>
-      <InboxInner />
+      <InboxInner key={`${scope}:${params.get('leadId') || 'queue'}`} />
     </InboxErrorBoundary>
   )
 }
