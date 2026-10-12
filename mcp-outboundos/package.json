@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "type": "module",
   "private": true,
-  "description": "MCP server for Outbound OS — Streamable HTTP transport",
+  "description": "MCP server for Outbound OS \u2014 Streamable HTTP transport",
   "engines": {
     "node": ">=24"
   },
   "scripts": {
     "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/server.test.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.18.0",

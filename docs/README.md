@@ -5,3 +5,6 @@
 - [WhatsApp template samples](whatsapp-templates/README.md)
 - [iMessage through a Mac mini](imessage-mac-mini-setup.md)
 - [Email accounts from the command line](EMAIL_CLI_RUNBOOK.md)
+
+- [Dashboard](dashboard.md)
+- [Mobile sales workspace](mobile-sales.md)
