@@ -3176,14 +3176,27 @@ app.get('/api/inbox/threads', async (req, res) => {
     // Determine queue membership before pagination. Only the newest message's
     // metadata is needed here; full history and message bodies stay out of this
     // workspace-wide scan. Fetch the visible page with its previews afterwards.
-    const candidates = await prisma.lead.findMany({
-      where,
-      select: {
-        id: true, status: true, assignedToId: true, lastMessageAt: true, updatedAt: true,
-        messages: { where: visibleMessageWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
-          select: { direction: true, createdAt: true } },
-      },
-    });
+    // Prisma loads these related messages with an IN parameter per parent.
+    // Bound each scan below SQLite's parameter limit; keep scanning the whole
+    // queue so older replies and totals are still correct before pagination.
+    const candidates = [];
+    const scanSize = 400;
+    let afterId = 0;
+    while (true) {
+      const batch = await prisma.lead.findMany({
+        where: { AND: [where, { id: { gt: afterId } }] },
+        orderBy: { id: 'asc' },
+        take: scanSize,
+        select: {
+          id: true, status: true, assignedToId: true, lastMessageAt: true, updatedAt: true,
+          messages: { where: visibleMessageWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
+            select: { direction: true, createdAt: true } },
+        },
+      });
+      candidates.push(...batch);
+      if (batch.length < scanSize) break;
+      afterId = batch[batch.length - 1].id;
+    }
     const queue = candidates.map((lead) => ({
       ...lead,
       threadState: normalizeInboxThreadState({ lead, lastMessage: lead.messages[0], assignedToId: lead.assignedToId }),
