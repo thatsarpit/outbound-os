@@ -42,3 +42,10 @@ npx wrangler pages dev out
 npm run build
 npx wrangler pages deploy out --project-name=outboundos-site
 ```
+
+## Optional GA4
+
+Public marketing pages use `G-GS1BKVLCM0` (property `557595873`) through
+`public/site-analytics.js`. Google loads only after visitor opt-in. Page views
+omit query strings/fragments and form details. Enhanced measurement is off.
+This integration is restricted to the public website and its production hosts.
