@@ -5,6 +5,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import log from './logger.js';
 import { registerAllTools } from './registerTools.js';
 import { mountOAuth, verifyOAuthToken } from './oauth.js';
+import { requestOrigin } from './requestOrigin.js';
 
 // ── Config ──
 const PORT = parseInt(process.env.PORT) || 3002;
@@ -82,11 +83,9 @@ mountOAuth(app);
 // by the provider above. On failure, emits the RFC 9728 WWW-Authenticate
 // challenge so clients can discover the OAuth flow.
 function unauthorized(req, res, message) {
-  const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
-  const host = req.headers['x-forwarded-host'] || req.headers.host;
   res.set(
     'WWW-Authenticate',
-    `Bearer resource_metadata="${proto}://${host}/.well-known/oauth-protected-resource"`
+    `Bearer resource_metadata="${requestOrigin(req)}/.well-known/oauth-protected-resource"`
   );
   return res.status(401).json({ error: message });
 }

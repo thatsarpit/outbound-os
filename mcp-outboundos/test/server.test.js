@@ -21,7 +21,7 @@ test('MCP transport authenticates, initializes and exposes tools without contact
   await new Promise(resolve => probe.close(resolve));
   const child = spawn(process.execPath, [serverPath], {
     cwd: temp,
-    env: { PATH: process.env.PATH, NODE_ENV: 'test', PORT: String(port), MCP_BEARER_TOKEN: 'isolated-mcp-test-token', MCP_SERVICE_TOKEN: 'isolated-backend-test-token', BACKEND_URL: 'http://127.0.0.1:1', OAUTH_STORE_PATH: path.join(temp, 'oauth-store.json') },
+    env: { PATH: process.env.PATH, NODE_ENV: 'test', PORT: String(port), TRUST_PROXY: '127.0.0.2', MCP_BEARER_TOKEN: 'isolated-mcp-test-token', MCP_SERVICE_TOKEN: 'isolated-backend-test-token', BACKEND_URL: 'http://127.0.0.1:1', OAUTH_STORE_PATH: path.join(temp, 'oauth-store.json') },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let logs = '';
@@ -38,6 +38,14 @@ test('MCP transport authenticates, initializes and exposes tools without contact
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     assert.ok(ready, 'isolated MCP listener became healthy');
+    const forged = { 'X-Forwarded-Host': 'untrusted.example.test', 'X-Forwarded-Proto': 'https' };
+    const resource = await (await fetch(`${base}/.well-known/oauth-protected-resource`, { headers: forged })).json();
+    assert.equal(resource.resource, `${base}/mcp`, 'untrusted forwarded headers cannot redirect resource discovery');
+    const metadata = await (await fetch(`${base}/.well-known/oauth-authorization-server`, { headers: forged })).json();
+    assert.equal(metadata.issuer, base);
+    const denied = await fetch(`${base}/mcp`, { headers: forged });
+    assert.equal(denied.status, 401);
+    assert.equal(denied.headers.get('www-authenticate'), `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource"`);
     assert.equal((await fetch(`${base}/mcp`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).status, 401);
     assert.equal((await fetch(`${base}/mcp`, { headers: { Authorization: 'Bearer invalid' } })).status, 401);
     await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers: { Authorization: 'Bearer isolated-mcp-test-token' } } }));
