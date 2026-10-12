@@ -1849,3 +1849,59 @@ test('Brevo campaign recording handles nullable tenant keys and retries without 
     await prisma.systemConfig.deleteMany({ where: { key: { startsWith: `email.daily.brevo.batch.2026-10-12.${account.id}` } } });
   }
 });
+
+test('IMAP MIME replies retain the sending account, cancel follow-ups and retry partial bodies once', async () => {
+  const { Readable } = await import('node:stream');
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { default: email } = await import('../src/services/emailService.js');
+  const { default: scorer } = await import('../src/services/leadScorer.js');
+  const originalClient = email._createImapClient;
+  const originalScore = scorer.calculateScore;
+  const lead = await prisma.lead.create({ data: { name: 'MIME Reply Fixture', mobile: 'no-phone:mime-reply', email: 'mime-reply@example.test', status: 'contacted' } });
+  const accounts = await Promise.all([1, 2].map(i => prisma.emailAccount.create({ data: { name: `MIME Sender ${i}`, email: `mime-sender-${i}@example.test`, smtpHost: 'smtp.example.test', smtpUser: 'fake', smtpPass: 'fake-key', imapHost: 'imap.example.test' } })));
+  const outgoingId = '<fixture-original@example.test>';
+  const incomingId = '<fixture-reply@example.test>';
+  const headers = `Message-ID: ${incomingId}\r\nIn-Reply-To: ${outgoingId}\r\n`;
+  const before = new Date('2026-10-01T01:00:00Z');
+  let brokenDownload = true;
+  try {
+    scorer.calculateScore = async () => {};
+    await prisma.emailAccount.update({ where: { id: accounts[0].id }, data: { lastSyncAt: before } });
+    await prisma.message.createMany({ data: [
+      { leadId: lead.id, emailAccountId: accounts[1].id, channel: 'email', direction: 'outbound', status: 'sent', content: 'Original', emailMessageId: outgoingId },
+      { leadId: lead.id, channel: 'email', direction: 'outbound', status: 'queued', content: 'Follow-up' },
+    ] });
+    email._createImapClient = () => ({
+      on() {}, connect: async () => {}, logout: async () => {},
+      getMailboxLock: async () => ({ release() {} }),
+      search: async () => [101],
+      fetchAll: async () => [{ uid: 101, headers: Buffer.from(headers), envelope: { from: [{ address: lead.email }], subject: 'Fixture reply' } }],
+      download: async (uid, part, options) => {
+        assert.equal(uid, 101); assert.equal(options.uid, true);
+        if (brokenDownload) throw new Error('fixture download failed');
+        return { content: Readable.from([Buffer.from(`${headers}MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${Buffer.from('Thanks, please send the quotation.').toString('base64')}`)]) };
+      },
+    });
+    await assert.rejects(email.syncInbox(accounts[0].id), /could not be processed/);
+    let inbound = await prisma.message.findFirst({ where: { leadId: lead.id, direction: 'inbound' } });
+    assert.equal(inbound.status, 'partial');
+    assert.equal(inbound.emailAccountId, accounts[1].id);
+    assert.equal((await prisma.emailAccount.findUnique({ where: { id: accounts[0].id } })).lastSyncAt.getTime(), before.getTime());
+    assert.equal(await prisma.message.count({ where: { leadId: lead.id, status: 'queued' } }), 0);
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'replied');
+    brokenDownload = false;
+    await email.syncInbox(accounts[0].id);
+    await email.syncInbox(accounts[0].id);
+    inbound = await prisma.message.findUnique({ where: { id: inbound.id } });
+    assert.equal(inbound.status, 'delivered');
+    assert.equal(inbound.content, 'Thanks, please send the quotation.');
+    assert.equal(await prisma.message.count({ where: { leadId: lead.id, direction: 'inbound' } }), 1);
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'replied', 'body recovery must not count as another reply');
+  } finally {
+    email._createImapClient = originalClient;
+    scorer.calculateScore = originalScore;
+    await prisma.message.deleteMany({ where: { leadId: lead.id } });
+    await prisma.lead.delete({ where: { id: lead.id } });
+    await prisma.emailAccount.deleteMany({ where: { id: { in: accounts.map(a => a.id) } } });
+  }
+});

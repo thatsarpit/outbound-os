@@ -977,6 +977,7 @@ class EmailService {
 
         const senderAccounts = await prisma.emailAccount.findMany({ select: { id: true, email: true } });
         const uids = await client.search({ since }, { uid: true });
+        if (!Array.isArray(uids)) throw new Error('Inbox search failed; sync will retry');
         for (let offset = 0; offset < uids.length; offset += 100) {
           // Finish each FETCH before downloading bodies: ImapFlow queues other
           // commands until a streaming FETCH finishes, so nesting can deadlock.
@@ -1060,6 +1061,9 @@ class EmailService {
             }
 
             if (!downloadOk) {
+              // Keep the sync cursor behind this message until its body is
+              // recovered, even if the next attempt is over five minutes later.
+              failedMessages++;
               bodyText = `[Email reply from ${from}] Subject: ${subject} — body not yet downloaded`;
               logger.warn(`📭 Saving inbound email ${messageId || '(no id)'} as 'partial' — body retrieval failed; will retry next sync`);
             }
