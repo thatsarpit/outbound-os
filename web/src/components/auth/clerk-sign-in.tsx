@@ -33,11 +33,22 @@ export function ClerkSignIn() {
         },
         elements: {
           rootBox: { width: '100%', maxWidth: 'none' },
-          cardBox: { width: '100%', maxWidth: 'none', boxShadow: 'none' },
+          // The app supplies the outer card. Clerk's rounded clipping box
+          // otherwise cuts the first label and focused input at its edges.
+          cardBox: {
+            width: '100%',
+            maxWidth: 'none',
+            boxShadow: 'none',
+            border: 0,
+            borderRadius: 0,
+            overflow: 'visible',
+            background: 'transparent',
+          },
           card: {
             width: '100%',
             maxWidth: 'none',
             padding: 0,
+            margin: 0,
             border: 0,
             background: 'transparent',
             boxShadow: 'none',
