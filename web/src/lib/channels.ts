@@ -111,3 +111,8 @@ export function getThreadSubtitle(thread: {
       return thread.leadCompany || thread.leadMobile || null
   }
 }
+
+/** Keep guidance from older API releases aligned with the current navigation. */
+export function formatChannelHealthDetail(detail: string): string {
+  return detail.replace(/Settings\s*→\s*(WhatsApp|Email|iMessage)/g, 'Integrations → $1')
+}

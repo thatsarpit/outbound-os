@@ -1,3 +1,6 @@
+import { ErrorState } from '@/components/ui/error-state'
+import { LoadingState } from '@/components/ui/loading-state'
+import { EmptyState } from '@/components/ui/empty-state'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CreditCard, Factory, Plus, Trash2 } from 'lucide-react'
@@ -30,11 +33,21 @@ export default function CommerceSettingsPage() {
     queryClient.invalidateQueries({ queryKey: ['suppliers'] })
   }
 
-  const { data: methods } = useQuery({
+  const {
+    data: methods,
+    isLoading: methodsLoading,
+    isError: methodsError,
+    refetch: refetchMethods,
+  } = useQuery({
     queryKey: ['payment-methods'],
     queryFn: () => salesApi.listPaymentMethods(),
   })
-  const { data: suppliers } = useQuery({
+  const {
+    data: suppliers,
+    isLoading: suppliersLoading,
+    isError: suppliersError,
+    refetch: refetchSuppliers,
+  } = useQuery({
     queryKey: ['suppliers'],
     queryFn: () => salesApi.listSuppliers(),
   })
@@ -107,93 +120,112 @@ export default function CommerceSettingsPage() {
   })
 
   return (
-    <>
+    <div className="space-y-4">
+      <p className="text-xs text-text-muted">
+        Existing fields save when you leave them. Status changes save immediately.
+      </p>
       <SettingsPanel
         icon={CreditCard}
         title="Payment methods"
-        description="What each way of paying costs, and whether the customer covers it. Applied to orders at the rate stored here; changing a rate does not alter orders that already settled."
+        description="Fees and who pays them. Changes apply to future settlements."
       >
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm" style={{ minWidth: 640 }}>
-            <thead>
-              <tr className="border-b border-border text-[11px] uppercase tracking-[0.06em] text-text-muted">
-                <th className="px-2 py-2 text-left font-medium">Method</th>
-                <th className="px-2 py-2 text-right font-medium">Fee</th>
-                <th className="px-2 py-2 text-left font-medium">Default handling</th>
-                <th className="px-2 py-2 text-left font-medium">Status</th>
-                <th className="px-2 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {(methods?.data ?? []).map((m) => (
-                <tr key={m.id} className="border-b border-border-subtle last:border-0">
-                  <td className="px-2 py-2">
-                    <input
-                      className={inputClass}
-                      defaultValue={m.name}
-                      onBlur={(e) => {
-                        if (e.target.value !== m.name)
-                          saveMethod.mutate({ id: m.id, patch: { name: e.target.value } })
-                      }}
-                    />
-                  </td>
-                  <td className="px-2 py-2">
-                    <div className="flex items-center justify-end gap-1">
+        {methodsLoading ? (
+          <LoadingState variant="table" rows={3} />
+        ) : methodsError ? (
+          <ErrorState title="Could not load payment methods" onRetry={() => refetchMethods()} />
+        ) : !methods?.data.length ? (
+          <EmptyState
+            compact
+            icon={CreditCard}
+            title="No payment methods yet"
+            description="Add one below to use it on your orders."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" style={{ minWidth: 640 }}>
+              <thead>
+                <tr className="border-b border-border text-[11px] uppercase tracking-[0.06em] text-text-muted">
+                  <th className="px-2 py-2 text-left font-medium">Method</th>
+                  <th className="px-2 py-2 text-right font-medium">Fee</th>
+                  <th className="px-2 py-2 text-left font-medium">Default handling</th>
+                  <th className="px-2 py-2 text-left font-medium">Status</th>
+                  <th className="px-2 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {(methods?.data ?? []).map((m) => (
+                  <tr key={m.id} className="border-b border-border-subtle last:border-0">
+                    <td className="px-2 py-2">
                       <input
-                        className={cn(inputClass, 'w-20 text-right')}
-                        inputMode="decimal"
-                        defaultValue={(m.feeBps / 100).toString()}
+                        className={inputClass}
+                        aria-label={`Name for ${m.name}`}
+                        defaultValue={m.name}
                         onBlur={(e) => {
-                          const bps = Math.round((Number(e.target.value) || 0) * 100)
-                          if (bps !== m.feeBps)
-                            saveMethod.mutate({ id: m.id, patch: { feeBps: bps } })
+                          if (e.target.value !== m.name)
+                            saveMethod.mutate({ id: m.id, patch: { name: e.target.value } })
                         }}
                       />
-                      <span className="text-[13px] text-text-muted">%</span>
-                    </div>
-                  </td>
-                  <td className="px-2 py-2">
-                    <select
-                      className={inputClass}
-                      value={m.passOnByDefault ? 'pass_on' : 'absorb'}
-                      onChange={(e) =>
-                        saveMethod.mutate({
-                          id: m.id,
-                          patch: { passOnByDefault: e.target.value === 'pass_on' },
-                        })
-                      }
-                    >
-                      <option value="absorb">We absorb it</option>
-                      <option value="pass_on">Client pays it</option>
-                    </select>
-                  </td>
-                  <td className="px-2 py-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        saveMethod.mutate({ id: m.id, patch: { enabled: !m.enabled } })
-                      }
-                    >
-                      <Badge variant={m.enabled ? 'success' : 'neutral'}>
-                        {m.enabled ? 'Enabled' : 'Disabled'}
-                      </Badge>
-                    </button>
-                  </td>
-                  <td className="px-2 py-2 text-right">
-                    <button
-                      type="button"
-                      aria-label={`Remove ${m.name}`}
-                      onClick={() => removeMethod.mutate(m.id)}
-                      className="text-text-muted transition-colors hover:text-danger"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    </td>
+                    <td className="px-2 py-2">
+                      <div className="flex items-center justify-end gap-1">
+                        <input
+                          className={cn(inputClass, 'w-20 text-right')}
+                          aria-label={`Fee percent for ${m.name}`}
+                          inputMode="decimal"
+                          defaultValue={(m.feeBps / 100).toString()}
+                          onBlur={(e) => {
+                            const bps = Math.round((Number(e.target.value) || 0) * 100)
+                            if (bps !== m.feeBps)
+                              saveMethod.mutate({ id: m.id, patch: { feeBps: bps } })
+                          }}
+                        />
+                        <span className="text-[13px] text-text-muted">%</span>
+                      </div>
+                    </td>
+                    <td className="px-2 py-2">
+                      <select
+                        className={inputClass}
+                        aria-label={`Fee handling for ${m.name}`}
+                        value={m.passOnByDefault ? 'pass_on' : 'absorb'}
+                        onChange={(e) =>
+                          saveMethod.mutate({
+                            id: m.id,
+                            patch: { passOnByDefault: e.target.value === 'pass_on' },
+                          })
+                        }
+                      >
+                        <option value="absorb">We absorb it</option>
+                        <option value="pass_on">Client pays it</option>
+                      </select>
+                    </td>
+                    <td className="px-2 py-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          saveMethod.mutate({ id: m.id, patch: { enabled: !m.enabled } })
+                        }
+                      >
+                        <Badge variant={m.enabled ? 'success' : 'neutral'}>
+                          {m.enabled ? 'Enabled' : 'Disabled'}
+                        </Badge>
+                      </button>
+                    </td>
+                    <td className="px-2 py-2 text-right">
+                      <button
+                        type="button"
+                        aria-label={`Remove ${m.name}`}
+                        onClick={() => removeMethod.mutate(m.id)}
+                        className="rounded p-2 text-text-muted transition-colors hover:bg-danger-muted hover:text-danger focus-visible:outline-2 focus-visible:outline-focus"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3">
           <label className="min-w-0 flex-1">
@@ -231,87 +263,103 @@ export default function CommerceSettingsPage() {
       <SettingsPanel
         icon={Factory}
         title="Suppliers"
-        description="Who fulfils an order. The match tag routes a lead to its supplier automatically — a lead tagged acme becomes an Acme order. Lower priority wins when a lead carries more than one supplier's tag."
+        description="Fulfilment partners, matched to leads by tag. Lower priority numbers take precedence."
       >
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm" style={{ minWidth: 640 }}>
-            <thead>
-              <tr className="border-b border-border text-[11px] uppercase tracking-[0.06em] text-text-muted">
-                <th className="px-2 py-2 text-left font-medium">Supplier</th>
-                <th className="px-2 py-2 text-left font-medium">Match tag</th>
-                <th className="px-2 py-2 text-right font-medium">Priority</th>
-                <th className="px-2 py-2 text-right font-medium">Orders</th>
-                <th className="px-2 py-2 text-left font-medium">Status</th>
-                <th className="px-2 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {(suppliers?.data ?? []).map((s) => (
-                <tr key={s.id} className="border-b border-border-subtle last:border-0">
-                  <td className="px-2 py-2">
-                    <input
-                      className={inputClass}
-                      defaultValue={s.name}
-                      onBlur={(e) => {
-                        if (e.target.value !== s.name)
-                          saveSupplier.mutate({ id: s.id, patch: { name: e.target.value } })
-                      }}
-                    />
-                  </td>
-                  <td className="px-2 py-2">
-                    <input
-                      className={inputClass}
-                      placeholder="lead tag"
-                      defaultValue={s.matchTag ?? ''}
-                      onBlur={(e) => {
-                        if (e.target.value !== (s.matchTag ?? '')) {
-                          saveSupplier.mutate({ id: s.id, patch: { matchTag: e.target.value } })
-                        }
-                      }}
-                    />
-                  </td>
-                  <td className="px-2 py-2">
-                    <input
-                      className={cn(inputClass, 'w-20 text-right')}
-                      inputMode="numeric"
-                      defaultValue={String(s.matchPriority)}
-                      onBlur={(e) => {
-                        const n = Number(e.target.value) || 0
-                        if (n !== s.matchPriority)
-                          saveSupplier.mutate({ id: s.id, patch: { matchPriority: n } })
-                      }}
-                    />
-                  </td>
-                  <td className="px-2 py-2 text-right tabular-nums text-text-secondary">
-                    {s.orderCount ?? 0}
-                  </td>
-                  <td className="px-2 py-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        saveSupplier.mutate({ id: s.id, patch: { enabled: !s.enabled } })
-                      }
-                    >
-                      <Badge variant={s.enabled ? 'success' : 'neutral'}>
-                        {s.enabled ? 'Enabled' : 'Disabled'}
-                      </Badge>
-                    </button>
-                  </td>
-                  <td className="px-2 py-2 text-right">
-                    <button
-                      type="button"
-                      aria-label={`Remove ${s.name}`}
-                      onClick={() => removeSupplier.mutate(s.id)}
-                      className="text-text-muted transition-colors hover:text-danger"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </button>
-                  </td>
+        {suppliersLoading ? (
+          <LoadingState variant="table" rows={3} />
+        ) : suppliersError ? (
+          <ErrorState title="Could not load suppliers" onRetry={() => refetchSuppliers()} />
+        ) : !suppliers?.data.length ? (
+          <EmptyState
+            compact
+            icon={Factory}
+            title="No suppliers yet"
+            description="Add one below to use it on your orders."
+          />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm" style={{ minWidth: 640 }}>
+              <thead>
+                <tr className="border-b border-border text-[11px] uppercase tracking-[0.06em] text-text-muted">
+                  <th className="px-2 py-2 text-left font-medium">Supplier</th>
+                  <th className="px-2 py-2 text-left font-medium">Match tag</th>
+                  <th className="px-2 py-2 text-right font-medium">Priority</th>
+                  <th className="px-2 py-2 text-right font-medium">Orders</th>
+                  <th className="px-2 py-2 text-left font-medium">Status</th>
+                  <th className="px-2 py-2" />
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {(suppliers?.data ?? []).map((s) => (
+                  <tr key={s.id} className="border-b border-border-subtle last:border-0">
+                    <td className="px-2 py-2">
+                      <input
+                        className={inputClass}
+                        aria-label={`Name for ${s.name}`}
+                        defaultValue={s.name}
+                        onBlur={(e) => {
+                          if (e.target.value !== s.name)
+                            saveSupplier.mutate({ id: s.id, patch: { name: e.target.value } })
+                        }}
+                      />
+                    </td>
+                    <td className="px-2 py-2">
+                      <input
+                        className={inputClass}
+                        aria-label={`Match tag for ${s.name}`}
+                        placeholder="lead tag"
+                        defaultValue={s.matchTag ?? ''}
+                        onBlur={(e) => {
+                          if (e.target.value !== (s.matchTag ?? '')) {
+                            saveSupplier.mutate({ id: s.id, patch: { matchTag: e.target.value } })
+                          }
+                        }}
+                      />
+                    </td>
+                    <td className="px-2 py-2">
+                      <input
+                        className={cn(inputClass, 'w-20 text-right')}
+                        aria-label={`Priority for ${s.name}`}
+                        inputMode="numeric"
+                        defaultValue={String(s.matchPriority)}
+                        onBlur={(e) => {
+                          const n = Number(e.target.value) || 0
+                          if (n !== s.matchPriority)
+                            saveSupplier.mutate({ id: s.id, patch: { matchPriority: n } })
+                        }}
+                      />
+                    </td>
+                    <td className="px-2 py-2 text-right tabular-nums text-text-secondary">
+                      {s.orderCount ?? 0}
+                    </td>
+                    <td className="px-2 py-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          saveSupplier.mutate({ id: s.id, patch: { enabled: !s.enabled } })
+                        }
+                      >
+                        <Badge variant={s.enabled ? 'success' : 'neutral'}>
+                          {s.enabled ? 'Enabled' : 'Disabled'}
+                        </Badge>
+                      </button>
+                    </td>
+                    <td className="px-2 py-2 text-right">
+                      <button
+                        type="button"
+                        aria-label={`Remove ${s.name}`}
+                        onClick={() => removeSupplier.mutate(s.id)}
+                        className="rounded p-2 text-text-muted transition-colors hover:bg-danger-muted hover:text-danger focus-visible:outline-2 focus-visible:outline-focus"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3">
           <label className="min-w-0 flex-1">
@@ -344,7 +392,7 @@ export default function CommerceSettingsPage() {
           </Button>
         </div>
       </SettingsPanel>
-    </>
+    </div>
   )
 }
 

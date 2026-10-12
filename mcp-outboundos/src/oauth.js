@@ -16,6 +16,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import log from './logger.js';
+import { requestOrigin } from './requestOrigin.js';
 
 const CODE_TTL_MS = 10 * 60 * 1000;            // authorization codes: 10 min
 const ACCESS_TTL_MS = 30 * 24 * 60 * 60 * 1000; // access tokens: 30 days
@@ -60,12 +61,6 @@ loadStore();
 // ── Helpers ──
 function rand(bytes = 32) {
   return crypto.randomBytes(bytes).toString('base64url');
-}
-
-function baseUrl(req) {
-  const proto = req.headers['x-forwarded-proto'] || (req.secure ? 'https' : 'http');
-  const host = req.headers['x-forwarded-host'] || req.headers.host;
-  return `${proto}://${host}`;
 }
 
 function pkceMatches(verifier, challenge) {
@@ -157,7 +152,7 @@ export function mountOAuth(app) {
 
   // RFC 9728 — Protected Resource Metadata
   app.get('/.well-known/oauth-protected-resource', (req, res) => {
-    const base = baseUrl(req);
+    const base = requestOrigin(req);
     res.json({
       resource: `${base}/mcp`,
       authorization_servers: [base],
@@ -166,7 +161,7 @@ export function mountOAuth(app) {
 
   // RFC 8414 — Authorization Server Metadata
   const authServerMetadata = (req, res) => {
-    const base = baseUrl(req);
+    const base = requestOrigin(req);
     res.json({
       issuer: base,
       authorization_endpoint: `${base}/oauth/authorize`,

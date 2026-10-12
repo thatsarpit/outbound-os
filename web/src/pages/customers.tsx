@@ -1,3 +1,5 @@
+import { SearchInput } from '@/components/ui/search-input'
+import { ErrorState } from '@/components/ui/error-state'
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -53,7 +55,7 @@ export default function CustomersPage() {
     )
   }
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['customers', search],
     queryFn: () => crmApi.listCustomers({ search: search || undefined }),
   })
@@ -88,20 +90,47 @@ export default function CustomersPage() {
       </div>
 
       <SectionCard title="All customers" description="Most recent order first.">
-        <input
-          className={cn(inputClass, 'mb-3 max-w-xs')}
-          placeholder="Search name, company, email…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <SearchInput
+            label="Search customers"
+            placeholder="Name, company or email…"
+            value={search}
+            onChange={setSearch}
+          />
+          {!isLoading && !isError && (
+            <span className="text-xs text-text-muted">{customers.length} shown</span>
+          )}
+        </div>
 
         {isLoading ? (
           <SkeletonTable rows={6} />
+        ) : isError ? (
+          <ErrorState title="Could not load customers" onRetry={() => refetch()} />
         ) : customers.length === 0 ? (
           <EmptyState
             icon={Users}
-            title="No customers yet"
-            description="A lead becomes a customer on their first order — convert one from the Leads page, or record an order directly."
+            tone={search ? 'filtered' : 'waiting'}
+            title={search ? 'No matching customers' : 'No customers yet'}
+            description={
+              search
+                ? 'Try another name, company or email.'
+                : 'Customers appear when you record their first order.'
+            }
+            action={
+              search ? (
+                <button
+                  type="button"
+                  onClick={() => setSearch('')}
+                  className="text-sm text-accent hover:underline"
+                >
+                  Clear search
+                </button>
+              ) : (
+                <Link to="/leads" className="text-sm text-accent hover:underline">
+                  View leads
+                </Link>
+              )
+            }
           />
         ) : (
           <div className="overflow-x-auto rounded-lg border border-border">
@@ -125,7 +154,16 @@ export default function CustomersPage() {
                     className="cursor-pointer border-b border-border-subtle transition-colors hover:bg-surface-raised"
                   >
                     <td className="px-3 py-2">
-                      <div className="text-text-primary">{c.name}</div>
+                      <button
+                        type="button"
+                        className="text-left font-medium text-text-primary hover:underline focus-visible:outline-2 focus-visible:outline-focus"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          setOpenId(c.id)
+                        }}
+                      >
+                        {c.name}
+                      </button>
                       {c.company && <div className="text-[11px] text-text-muted">{c.company}</div>}
                     </td>
                     <td className="px-3 py-2 text-[12px] text-text-secondary">

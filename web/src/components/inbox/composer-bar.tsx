@@ -62,7 +62,7 @@ export function ComposerBar({
   helperLabel,
   placeholder,
   disabled = false,
-  sendDisabled = false,
+  sendDisabled: externallyDisabled = false,
   templates = [],
   selectedTemplateId = null,
   onTemplateChange,
@@ -81,6 +81,8 @@ export function ComposerBar({
   onBccChange,
   onScheduleSend,
 }: ComposerBarProps) {
+  const [uploading, setUploading] = useState(false)
+  const sendDisabled = externallyDisabled || uploading || disabled
   const isEmail = channel === 'email'
   const showTemplatePicker = isEmail && onTemplateChange && onApplyTemplate
   const noSenders = isEmail && senderAccounts.length === 0
@@ -89,9 +91,9 @@ export function ComposerBar({
   const [scheduleDate, setScheduleDate] = useState('')
 
   return (
-    <div className="border-t border-border px-4 py-3 sm:px-5">
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="max-h-[65%] shrink-0 overflow-y-auto border-t border-border px-4 py-3 sm:px-5">
+      <div className="flex flex-col gap-2">
+        <div className="flex flex-wrap items-center justify-between gap-1.5">
           {/* Channel switcher. One entry per channel from the shared registry,
               so a new channel appears here automatically and the active tint
               always matches the colour used in the thread list and header. */}
@@ -105,9 +107,10 @@ export function ComposerBar({
                   key={id}
                   type="button"
                   onClick={() => onChannelChange(id)}
+                  disabled={disabled || uploading || sendPending}
                   aria-pressed={active}
                   className={cn(
-                    'inline-flex shrink-0 items-center gap-1.5 rounded-sm px-2.5 py-1.5 text-[13px] font-medium transition-colors',
+                    'inline-flex shrink-0 items-center gap-1.5 rounded-sm px-2 py-1 text-xs font-medium transition-colors',
                     active
                       ? cn(meta.bg, meta.text)
                       : 'text-text-secondary hover:bg-surface hover:text-text-primary',
@@ -125,26 +128,29 @@ export function ComposerBar({
         </div>
 
         {isEmail && (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {noSenders ? (
               <div className="rounded-md border border-warning/30 bg-warning-muted/30 px-4 py-3 text-sm text-warning">
                 No email sender configured.{' '}
-                <a href="/settings" className="font-medium underline hover:text-warning/80">
-                  Add one in Settings
+                <a
+                  href="/integrations/email"
+                  className="font-medium underline hover:text-warning/80"
+                >
+                  Add one in Integrations
                 </a>{' '}
                 to start sending emails.
               </div>
             ) : (
               <div className="space-y-2">
-                <div className="grid gap-2 lg:grid-cols-[minmax(0,1fr)_260px]">
+                <div className="grid gap-2 sm:grid-cols-2">
                   <input
                     type="text"
                     value={subject}
                     onChange={(event) => onSubjectChange(event.target.value)}
                     placeholder="Email subject"
-                    disabled={disabled}
+                    disabled={disabled || uploading || sendPending}
                     className={cn(
-                      'min-h-11 rounded-md border border-border bg-surface-raised px-4 py-2.5 text-sm text-text-primary',
+                      'min-h-9 rounded-md border border-border bg-surface-raised px-3 py-2 text-xs text-text-primary',
                       'placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30',
                       'disabled:cursor-not-allowed disabled:opacity-50',
                     )}
@@ -153,29 +159,21 @@ export function ComposerBar({
                     accounts={senderAccounts}
                     value={senderAccountId}
                     onChange={onSenderAccountChange}
-                    disabled={disabled}
+                    disabled={disabled || uploading || sendPending}
                   />
                 </div>
 
                 {/* CC/BCC toggle + fields */}
                 {onCcChange && onBccChange && (
                   <>
-                    {!showCcBcc ? (
-                      <button
-                        type="button"
-                        onClick={() => setShowCcBcc(true)}
-                        className="text-xs text-text-muted transition-colors hover:text-text-secondary"
-                      >
-                        + CC / BCC
-                      </button>
-                    ) : (
+                    {showCcBcc && (
                       <div className="grid gap-2 sm:grid-cols-2">
                         <input
                           type="text"
                           value={cc}
                           onChange={(e) => onCcChange(e.target.value)}
                           placeholder="CC (comma-separated emails)"
-                          disabled={disabled}
+                          disabled={disabled || uploading || sendPending}
                           className={cn(
                             'rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary',
                             'placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30',
@@ -186,7 +184,7 @@ export function ComposerBar({
                           value={bcc}
                           onChange={(e) => onBccChange(e.target.value)}
                           placeholder="BCC (comma-separated emails)"
-                          disabled={disabled}
+                          disabled={disabled || uploading || sendPending}
                           className={cn(
                             'rounded-md border border-border bg-surface-raised px-3 py-2 text-sm text-text-primary',
                             'placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30',
@@ -198,29 +196,55 @@ export function ComposerBar({
                 )}
               </div>
             )}
-            {showTemplatePicker && (
-              <TemplatePicker
-                templates={templates}
-                value={selectedTemplateId}
-                onChange={onTemplateChange}
-                onApply={onApplyTemplate}
-                loading={templatesLoading}
-                applyPending={templateApplyPending}
-                disabled={disabled || templateDisabled}
-                label={templateLabel}
-                description={templateDescription}
-                className="p-3"
-              />
-            )}
+            <div className="flex flex-wrap items-start gap-x-4 gap-y-2">
+              {!showCcBcc && onCcChange && onBccChange && (
+                <button
+                  type="button"
+                  onClick={() => setShowCcBcc(true)}
+                  className="py-1 text-xs text-text-muted hover:text-text-primary"
+                >
+                  + CC / BCC
+                </button>
+              )}
+              {onAddAttachment && onRemoveAttachment && (
+                <AttachmentPicker
+                  attachments={attachments}
+                  onUploadingChange={setUploading}
+                  onAdd={onAddAttachment}
+                  onRemove={onRemoveAttachment}
+                  disabled={disabled || sendPending || noSenders}
+                />
+              )}
+              {showTemplatePicker && (
+                <details className="min-w-0 open:w-full open:rounded-md open:border open:border-border open:bg-surface-raised/50">
+                  <summary className="cursor-pointer py-1 text-xs font-medium text-text-secondary">
+                    Use an email template
+                  </summary>
+                  <TemplatePicker
+                    templates={templates}
+                    value={selectedTemplateId}
+                    onChange={onTemplateChange}
+                    onApply={onApplyTemplate}
+                    loading={templatesLoading}
+                    applyPending={templateApplyPending}
+                    disabled={disabled || uploading || sendPending || templateDisabled}
+                    label={templateLabel}
+                    description={templateDescription}
+                    className="border-0 p-3"
+                  />
+                </details>
+              )}
+            </div>
           </div>
         )}
 
-        {(isEmail || channel === 'whatsapp') && onAddAttachment && onRemoveAttachment && (
+        {channel === 'whatsapp' && onAddAttachment && onRemoveAttachment && (
           <AttachmentPicker
             attachments={attachments}
+            onUploadingChange={setUploading}
             onAdd={onAddAttachment}
             onRemove={onRemoveAttachment}
-            disabled={disabled || noSenders}
+            disabled={disabled || sendPending || noSenders}
           />
         )}
 
@@ -232,7 +256,7 @@ export function ComposerBar({
               onPlainTextChange={onTextChange}
               onSend={sendDisabled ? undefined : onSend}
               placeholder={placeholder || 'Write your email\u2026'}
-              disabled={disabled || noSenders}
+              disabled={disabled || sendPending || noSenders}
               className="flex-1"
             />
           ) : (
@@ -240,17 +264,14 @@ export function ComposerBar({
               value={text}
               onChange={(event) => onTextChange(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
+                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault()
                   if (!sendDisabled) onSend()
                 }
               }}
-              placeholder={
-                placeholder ||
-                `Type a ${getChannel(channel).label} reply\u2026`
-              }
+              placeholder={placeholder || `Type a ${getChannel(channel).label} reply\u2026`}
               rows={3}
-              disabled={disabled}
+              disabled={disabled || uploading || sendPending}
               className={cn(
                 'min-h-24 flex-1 resize-none rounded-md border border-border bg-surface-raised px-4 py-3 text-sm text-text-primary',
                 'placeholder:text-text-muted focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30',
@@ -264,9 +285,9 @@ export function ComposerBar({
               onClick={onSend}
               disabled={sendDisabled}
               className={cn(
-                'inline-flex min-h-12 items-center justify-center gap-2 px-4 py-3 text-sm font-medium text-accent-fg',
+                'inline-flex min-h-10 items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-accent-fg',
                 'transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50',
-                isEmail && onScheduleSend ? 'rounded-l-2xl bg-accent' : 'rounded-md bg-accent',
+                isEmail && onScheduleSend ? 'rounded-l-md bg-accent' : 'rounded-md bg-accent',
               )}
             >
               {sendPending ? (
@@ -284,10 +305,11 @@ export function ComposerBar({
               <div className="relative">
                 <button
                   type="button"
+                  aria-label="Schedule email"
                   onClick={() => setShowSchedule(!showSchedule)}
                   disabled={sendDisabled}
                   className={cn(
-                    'inline-flex min-h-12 items-center justify-center rounded-r-2xl border-l border-border bg-accent px-2.5 py-3 text-accent-fg',
+                    'inline-flex min-h-10 items-center justify-center rounded-r-md border-l border-border bg-accent px-2.5 py-2 text-accent-fg',
                     'transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50',
                   )}
                 >

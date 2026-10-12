@@ -1,3 +1,5 @@
+import { useLocation } from 'react-router-dom'
+import { loginReturnPath } from '@/lib/login-return'
 import { SignIn } from '@clerk/react'
 
 /**
@@ -7,12 +9,16 @@ import { SignIn } from '@clerk/react'
  * disabled in Clerk too.
  */
 export function ClerkSignIn() {
+  const location = useLocation()
+  const from = loginReturnPath(
+    (location.state as { from?: { pathname?: string; search?: string } } | null)?.from,
+  )
   return (
     <SignIn
       routing="hash"
       withSignUp={false}
       transferable={false}
-      fallbackRedirectUrl="/"
+      fallbackRedirectUrl={from || '/'}
       appearance={{
         variables: {
           colorPrimary: 'var(--color-accent)',
@@ -45,9 +51,9 @@ export function ClerkSignIn() {
           form: 'gap-4',
           formFieldLabel: 'text-[12px] font-medium text-text-secondary',
           formFieldInput:
-            'h-10 rounded-md border-border bg-surface px-3 text-[13px] text-text-primary shadow-none placeholder:text-text-muted focus:border-focus focus:ring-2 focus:ring-focus-muted',
+            'h-11 rounded-md border-border bg-surface px-3 text-base sm:text-[13px] text-text-primary shadow-none placeholder:text-text-muted focus:border-focus focus:ring-2 focus:ring-focus-muted',
           formButtonPrimary:
-            'h-10 rounded-md bg-accent text-[13px] font-medium text-accent-fg shadow-none hover:bg-accent-hover focus:ring-2 focus:ring-focus-muted',
+            'h-11 rounded-md bg-accent text-sm font-medium text-accent-fg shadow-none hover:bg-accent-hover focus:ring-2 focus:ring-focus-muted',
           identityPreview: 'rounded-md border border-border bg-surface-raised',
           otpCodeFieldInput:
             'h-11 rounded-md border-border bg-surface text-text-primary shadow-none focus:border-focus focus:ring-2 focus:ring-focus-muted',

@@ -1,26 +1,29 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import { Button, Input, SelectField as UISelectField, ConfirmDialog } from '@/components/ui'
+import { useAuthStore } from '@/stores/auth-store'
+import {
+  Button,
+  Input,
+  SelectField as UISelectField,
+  ConfirmDialog,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui'
+import type { EmailAccount } from '@/api/types'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { Loader2, Mail, Plus, TestTube, Trash2, X } from 'lucide-react'
 import { InfoTile } from '@/components/integrations/integration-helpers'
-
-interface EmailAccount {
-  id: number
-  provider: string
-  email: string
-  name: string
-  enabled: boolean
-  sentToday: number
-  lastSyncAt: string | null
-  createdAt: string
-}
 
 export default function EmailSection() {
   const queryClient = useQueryClient()
   const [showAdd, setShowAdd] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<EmailAccount | null>(null)
+  const [inboxAccount, setInboxAccount] = useState<EmailAccount | null>(null)
+  const canConfigure = useAuthStore((state) => state.user?.role === 'admin')
 
   const { data: rawAccounts, isLoading } = useQuery({
     queryKey: ['email-accounts'],
@@ -29,6 +32,7 @@ export default function EmailSection() {
       if (!res) throw new Error('Empty response')
       return res
     },
+    refetchInterval: 30_000,
   })
 
   const accounts = Array.isArray(rawAccounts) ? rawAccounts : []
@@ -62,6 +66,7 @@ export default function EmailSection() {
           </div>
           <Button
             size="sm"
+            disabled={!canConfigure}
             onClick={() => setShowAdd(true)}
             leftIcon={<Plus className="w-3.5 h-3.5" />}
           >
@@ -128,11 +133,28 @@ export default function EmailSection() {
               </div>
             </div>
             <div className="p-5">
-              <div className="flex gap-2">
+              <p className="mb-3 text-xs text-text-secondary">
+                {acc.imapHost
+                  ? `Replies: ${acc.imapUser} · ${acc.lastSyncAt ? `checked ${formatRelativeTime(acc.lastSyncAt)}` : 'first sync pending'}`
+                  : 'Reply inbox not connected'}
+              </p>
+              {acc.imapHost && acc.lastError && (
+                <p className="mb-3 text-xs text-danger">{acc.lastError}</p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!canConfigure}
+                  onClick={() => setInboxAccount(acc)}
+                >
+                  {acc.imapHost ? 'Inbox settings' : 'Connect Gmail inbox'}
+                </Button>
                 <Button
                   variant="secondary"
                   size="sm"
                   isLoading={testMutation.isPending}
+                  disabled={!canConfigure}
                   onClick={() => testMutation.mutate(acc.id)}
                   leftIcon={<TestTube className="w-3.5 h-3.5" />}
                 >
@@ -142,6 +164,7 @@ export default function EmailSection() {
                   variant="ghost"
                   size="sm"
                   className="hover:text-danger hover:bg-danger-muted"
+                  disabled={!canConfigure}
                   onClick={() => setConfirmDelete(acc)}
                   leftIcon={<Trash2 className="w-3.5 h-3.5" />}
                 >
@@ -164,6 +187,9 @@ export default function EmailSection() {
       )}
 
       {showAdd && <AddEmailModal onClose={() => setShowAdd(false)} />}
+      {inboxAccount && (
+        <GmailInboxModal account={inboxAccount} onClose={() => setInboxAccount(null)} />
+      )}
 
       <ConfirmDialog
         open={!!confirmDelete}
@@ -183,6 +209,108 @@ export default function EmailSection() {
   )
 }
 
+function GmailInboxModal({ account, onClose }: { account: EmailAccount; onClose: () => void }) {
+  const queryClient = useQueryClient()
+  const [user, setUser] = useState(account.imapHost === 'imap.gmail.com' ? account.imapUser : '')
+  const [password, setPassword] = useState('')
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.patch(`/email/accounts/${account.id}`, {
+        imapHost: 'imap.gmail.com',
+        imapPort: 993,
+        imapSecure: true,
+        imapUser: user.trim(),
+        imapPass: password.replace(/\s/g, ''),
+      }),
+    onSuccess: () => {
+      setPassword('')
+      queryClient.invalidateQueries({ queryKey: ['email-accounts'] })
+      onClose()
+    },
+  })
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !mutation.isPending) onClose()
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Connect Gmail reply inbox</DialogTitle>
+          <DialogDescription>
+            Receive replies here while keeping your existing sending provider.
+          </DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-4 p-6"
+          onSubmit={(event) => {
+            event.preventDefault()
+            mutation.mutate()
+          }}
+        >
+          <Input
+            label="Gmail inbox address"
+            type="email"
+            required
+            value={user}
+            autoComplete="username"
+            disabled={mutation.isPending}
+            onChange={(event) => setUser(event.target.value)}
+          />
+          <Input
+            label="Gmail app password"
+            type="password"
+            required
+            value={password}
+            autoComplete="new-password"
+            disabled={mutation.isPending}
+            description="Use a Google app password, not your normal Gmail password."
+            onChange={(event) => setPassword(event.target.value)}
+          />
+          <p className="text-xs text-text-secondary">
+            Enable Google 2-Step Verification, then create an app password named Outbound OS at{' '}
+            <a
+              className="text-accent underline"
+              href="https://myaccount.google.com/apppasswords"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Google App Passwords
+            </a>
+            .
+          </p>
+          <p className="text-xs text-text-secondary">
+            Connecting grants Outbound OS access to this Gmail mailbox. It reads inbox messages to
+            match lead replies and saves matching replies in your CRM. The app password is encrypted
+            on your server. Enabled accounts are checked every 5 minutes. New inboxes initially
+            check the last 24 hours. Saving settings does not test the Gmail connection; check the
+            account’s sync status after the next scheduled check.
+          </p>
+          {mutation.error && (
+            <p role="alert" className="text-sm text-danger">
+              {mutation.error.message}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" disabled={mutation.isPending} onClick={onClose}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              isLoading={mutation.isPending}
+              disabled={!user.trim() || !/^[a-zA-Z]{16}$/.test(password.replace(/\s/g, ''))}
+            >
+              Save inbox settings
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function AddEmailModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient()
   const [form, setForm] = useState({
@@ -199,6 +327,8 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
   const testConfigMutation = useMutation({
     mutationFn: () =>
       api.post<{ success: boolean; error?: string }>('/email/accounts/test-config', {
+        provider: form.provider,
+        email: form.email,
         smtpHost: form.smtpHost || (form.provider === 'gmail' ? 'smtp.gmail.com' : ''),
         smtpPort: form.smtpPort,
         smtpUser: form.smtpUser,
@@ -252,7 +382,7 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
               </p>
               <h2 className="mt-2 text-lg font-semibold tracking-tight">Add Email Account</h2>
               <p className="mt-1 text-sm text-text-secondary">
-                Attach a sending inbox and define its SMTP profile.
+                Connect your sending provider and verify its credentials.
               </p>
             </div>
             <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close">
@@ -296,17 +426,30 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
               />
             </>
           )}
+          {form.provider !== 'brevo' && (
+            <Input
+              label="SMTP User"
+              value={form.smtpUser}
+              onChange={(e) => setForm({ ...form, smtpUser: e.target.value })}
+            />
+          )}
           <Input
-            label="SMTP User / App Password"
-            value={form.smtpUser}
-            onChange={(e) => setForm({ ...form, smtpUser: e.target.value })}
-          />
-          <Input
-            label="SMTP Password"
+            label={form.provider === 'brevo' ? 'Brevo API key' : 'SMTP Password'}
+            description={
+              form.provider === 'brevo'
+                ? 'Use an API key from the Brevo account where this sender is verified.'
+                : undefined
+            }
+            autoComplete="new-password"
             type="password"
             value={form.smtpPass}
             onChange={(e) => setForm({ ...form, smtpPass: e.target.value })}
           />
+          {mutation.error && (
+            <p role="alert" className="text-sm text-danger">
+              {mutation.error.message}
+            </p>
+          )}
           {/* Test result banner */}
           {testResult && (
             <div
@@ -317,7 +460,7 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
                   : 'border-danger/20 bg-danger-muted/40 text-danger',
               )}
             >
-              {testResult.success ? '✓ SMTP connection verified' : `✗ ${testResult.error}`}
+              {testResult.success ? '✓ Sending provider verified' : `✗ ${testResult.error}`}
             </div>
           )}
         </div>
@@ -325,7 +468,7 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
           <Button
             variant="secondary"
             size="sm"
-            disabled={!form.smtpUser || !form.smtpPass}
+            disabled={!form.smtpPass || (form.provider === 'brevo' ? !form.email : !form.smtpUser)}
             isLoading={testConfigMutation.isPending}
             onClick={() => {
               setTestResult(null)
@@ -341,7 +484,7 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
             </Button>
             <Button
               onClick={() => mutation.mutate()}
-              disabled={!form.email}
+              disabled={!form.email || !form.smtpPass}
               isLoading={mutation.isPending}
             >
               Add

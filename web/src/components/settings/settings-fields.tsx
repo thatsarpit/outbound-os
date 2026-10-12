@@ -26,6 +26,7 @@ export function SettingsField({
   return (
     <Input
       label={label}
+      className="px-3 py-2 text-[13px]"
       type={type}
       value={value}
       onChange={(event) => onChange(event.target.value)}

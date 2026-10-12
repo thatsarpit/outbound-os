@@ -62,6 +62,7 @@ export function WidgetCard({
     <ErrorState onRetry={onRetry} />
   ) : rows.length === 0 ? (
     <EmptyState
+      compact
       icon={Inbox}
       tone="waiting"
       title="No data yet"

@@ -12,3 +12,22 @@ data
 dashboard
 web/node_modules
 web/dist
+
+.env.*
+!**/.env.example
+web/dist-demo
+website/node_modules
+website/.next
+website/out
+instance-secrets.json
+**/instance-secrets.json
+*-private.json
+*.db
+*.db-*
+*.pem
+*.key
+exports
+
+# OAuth provider state contains access and refresh tokens.
+oauth-store.json
+**/oauth-store.json

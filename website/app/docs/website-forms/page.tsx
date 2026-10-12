@@ -229,6 +229,20 @@ export default function WebsiteFormsDoc() {
         check trigger failure notifications because it does not implement automatic retries.
       </p>
 
+      <h2 id="verification">Verify your form connection</h2>
+      <p>
+        Provider payload mapping, source authentication and duplicate delivery are covered
+        by Outbound OS&rsquo;s automated tests. Contact Form 7 was also exercised through a
+        published form in an isolated WordPress installation. Webflow, WPForms, Tally,
+        Typeform and Google Forms still need a submission from your published form:
+        check the provider&rsquo;s delivery log, the lead&rsquo;s saved fields and a repeated
+        delivery before turning on outreach. Builder screens and plans can change.
+      </p>
+      <p>
+        Sanitized verification records and the remaining provider checks are tracked in
+        <a href="https://github.com/thatsarpit/outbound-os/tree/main/docs/validation"> the repository&rsquo;s validation notes</a>.
+      </p>
+
       <h2 id="test">Test without sending anything</h2>
       <p>
         Add <code>&quot;test&quot;: true</code> to a JSON body. The response shows

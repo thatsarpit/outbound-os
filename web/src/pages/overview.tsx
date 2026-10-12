@@ -141,6 +141,7 @@ export default function OverviewPage() {
     replied: variant.replied,
     sent: variant.sent,
   }))
+  const emailChartHeight = Math.max(140, emailRows.length * 38 + 60)
   const average = email?.totals.sent ? (email.totals.replied / email.totals.sent) * 100 : 0
   const emailScale = Math.min(
     100,
@@ -212,7 +213,7 @@ export default function OverviewPage() {
       >
         <ChartContainer
           config={channelConfig}
-          className="h-72 w-full"
+          className="h-64 w-full"
           role="img"
           aria-label="Messages sent by channel each day"
         >
@@ -338,7 +339,7 @@ export default function OverviewPage() {
     pipeline: (
       <WidgetCard
         title="Pipeline"
-        description="Current lead share by stage. Select a stage to see its leads."
+        description="Lead share by stage. Select a stage to open its leads."
         rows={stageRows.map((s) => ({ stage: labelFor(s.status), leads: s._count.id }))}
         loading={chartsQuery.isLoading}
         error={chartsQuery.isError}
@@ -350,14 +351,14 @@ export default function OverviewPage() {
     email: (
       <WidgetCard
         title="Email template reply rates"
-        description={`Recipients who replied out of recipients sent each template, last ${days} days.`}
+        description={`Replies per recipient, last ${days} days.`}
         rows={emailRows}
         loading={emailQuery.isLoading}
         error={emailQuery.isError}
         onRetry={() => emailQuery.refetch()}
       >
         <div className="grid min-w-0 grid-cols-[minmax(0,94px)_minmax(0,1fr)_110px] gap-1 sm:grid-cols-[minmax(0,136px)_minmax(0,1fr)_120px]">
-          <div className="flex h-64 flex-col pb-[34px] pt-[26px]">
+          <div className="flex flex-col pb-[34px] pt-[26px]" style={{ height: emailChartHeight }}>
             {emailRows.map((row) => (
               <div key={row.variant} className="flex min-h-0 flex-1 items-center">
                 <span
@@ -371,7 +372,8 @@ export default function OverviewPage() {
           </div>
           <ChartContainer
             config={{ rate: { label: 'Reply rate', color: theme.channel.email } }}
-            className="h-64 min-w-0 w-full"
+            className="min-w-0 w-full"
+            style={{ height: emailChartHeight }}
             role="img"
             aria-label={`Email reply rates by template on a zero to ${emailScale} percent scale`}
           >
@@ -452,7 +454,7 @@ export default function OverviewPage() {
               />
             </BarChart>
           </ChartContainer>
-          <div className="flex h-64 flex-col pb-[34px] pt-[26px]">
+          <div className="flex flex-col pb-[34px] pt-[26px]" style={{ height: emailChartHeight }}>
             {emailRows.map((row) => (
               <div
                 key={row.variant}
@@ -468,31 +470,34 @@ export default function OverviewPage() {
   }
 
   return (
-    <div className="animate-fade-in space-y-6">
+    <div className="animate-fade-in space-y-5">
       <PageHeader
         title="Overview"
         description="Live pipeline health across every connected channel."
+        actions={
+          <div className="flex flex-wrap items-center gap-2" aria-label="Reporting period">
+            <span className="mr-1 text-sm text-text-secondary">Last</span>
+            {([7, 14, 30] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setDays(value)}
+                aria-pressed={days === value}
+                className={cn(
+                  'rounded-md border px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-focus',
+                  days === value
+                    ? 'border-accent bg-accent text-accent-fg'
+                    : 'border-border bg-surface text-text-secondary hover:bg-surface-raised',
+                )}
+              >
+                {value} days
+              </button>
+            ))}
+          </div>
+        }
       />
       <SetupChecklist />
-      <div className="flex flex-wrap items-center gap-2" aria-label="Reporting period">
-        <span className="mr-1 text-sm text-text-secondary">Last</span>
-        {([7, 14, 30] as const).map((value) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setDays(value)}
-            aria-pressed={days === value}
-            className={cn(
-              'rounded-md border px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-focus',
-              days === value
-                ? 'border-accent bg-accent text-accent-fg'
-                : 'border-border bg-surface text-text-secondary hover:bg-surface-raised',
-            )}
-          >
-            {value} days
-          </button>
-        ))}
-      </div>
+
       {statsQuery.isError ? (
         <ErrorState title="Could not load overview" onRetry={() => statsQuery.refetch()} />
       ) : statsQuery.isLoading ? (

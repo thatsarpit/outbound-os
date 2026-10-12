@@ -3,16 +3,25 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import { QueryClientProvider } from '@tanstack/react-query'
 import { queryClient } from '@/lib/query-client'
 import { useAuthStore } from '@/stores/auth-store'
+import { MobileShell } from '@/components/mobile/mobile-shell'
 import { AppShell } from '@/components/layout/app-shell'
 import { Loader2 } from 'lucide-react'
 import { getFirstAccessibleRoute, resolveCapabilityForPath } from '@/lib/role-shell'
+import { ChannelWorkspace } from '@/components/integrations/channel-workspace'
 import { TooltipProvider } from '@/components/ui'
+
+const MobileInboxPage = lazy(() => import('@/pages/mobile/inbox'))
+const MobileLeadsPage = lazy(() => import('@/pages/mobile/leads'))
+const MobileTasksPage = lazy(() => import('@/pages/mobile/tasks'))
+const MobileInstallPage = lazy(() => import('@/pages/mobile/install'))
 
 /* ── Page imports ── */
 const LoginPage = lazy(() => import('@/pages/login'))
 const SetupPage = lazy(() => import('@/pages/setup'))
 const IntegrationCataloguePage = lazy(() => import('@/pages/integrations/catalogue'))
 const OverviewPage = lazy(() => import('@/pages/overview'))
+const AutomationPage = lazy(() => import('@/pages/automation'))
+const IMessageIntegrationPage = lazy(() => import('@/pages/integrations/imessage'))
 const InboxPage = lazy(() => import('@/pages/inbox'))
 const LeadsPage = lazy(() => import('@/pages/leads'))
 const CommerceSettingsPage = lazy(() => import('@/pages/settings/commerce'))
@@ -39,7 +48,6 @@ const SettingsLayout = lazy(() => import('@/pages/settings/settings-layout'))
 const WorkspaceSettingsPage = lazy(() => import('@/pages/settings/workspace'))
 const WhatsAppSettingsPage = lazy(() => import('@/pages/settings/whatsapp'))
 const EmailSettingsPage = lazy(() => import('@/pages/settings/email'))
-const IMessageSettingsPage = lazy(() => import('@/pages/settings/imessage'))
 // Dev-only: design-system showcase and the sample-data shell. The imports sit
 // behind `import.meta.env.DEV` as well as the routes, so production and demo
 // builds do not even emit their chunks.
@@ -57,7 +65,7 @@ function FullPageLoader() {
 
 /* ── Auth guard ── */
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading, hasCapability, user } = useAuthStore()
+  const { isAuthenticated, isLoading, hasCapability, user, dashboardScope } = useAuthStore()
   const location = useLocation()
 
   if (isLoading) return <FullPageLoader />
@@ -68,7 +76,11 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   if (requiredCapability && !hasCapability(requiredCapability)) {
     return <Navigate to={getFirstAccessibleRoute(user?.role, hasCapability)} replace />
   }
-  return <>{children}</>
+  return (
+    <div key={dashboardScope} className="contents">
+      {children}
+    </div>
+  )
 }
 
 function RoleHomeRoute() {
@@ -100,6 +112,7 @@ function AuthInit({ children }: { children: React.ReactNode }) {
  */
 const PAGE_ROUTES: Array<{ path: string; element: React.ReactNode }> = [
   { path: 'overview', element: <OverviewPage /> },
+  { path: 'automation', element: <AutomationPage /> },
   { path: 'inbox', element: <InboxPage /> },
   { path: 'leads', element: <LeadsPage /> },
   { path: 'orders', element: <OrdersPage /> },
@@ -119,6 +132,36 @@ const PAGE_ROUTES: Array<{ path: string; element: React.ReactNode }> = [
 
 const pageRoutes = () =>
   PAGE_ROUTES.map((r) => <Route key={r.path} path={r.path} element={r.element} />)
+
+const configurationRoutes = () => (
+  <>
+    <Route path="integrations" element={<IntegrationsLayout />}>
+      <Route index element={<Navigate to="all" replace />} />
+      <Route path="all" element={<IntegrationCataloguePage />} />
+      <Route path="whatsapp" element={<ChannelWorkspace channel="whatsapp" />}>
+        <Route index element={<WhatsAppIntegrationPage />} />
+        <Route path="configure" element={<WhatsAppSettingsPage />} />
+      </Route>
+      <Route path="email" element={<ChannelWorkspace channel="email" />}>
+        <Route index element={<EmailIntegrationPage />} />
+        <Route path="defaults" element={<EmailSettingsPage />} />
+      </Route>
+      <Route path="imessage" element={<IMessageIntegrationPage />} />
+      <Route path="telegram" element={<TelegramIntegrationPage />} />
+      <Route path="webhooks" element={<WebhooksIntegrationPage />} />
+      <Route path="sheets" element={<SheetsIntegrationPage />} />
+    </Route>
+    <Route path="channels" element={<Navigate to="/integrations" replace />} />
+    <Route path="settings" element={<SettingsLayout />}>
+      <Route index element={<Navigate to="workspace" replace />} />
+      <Route path="workspace" element={<WorkspaceSettingsPage />} />
+      <Route path="commerce" element={<CommerceSettingsPage />} />
+      <Route path="whatsapp" element={<Navigate to="/integrations/whatsapp/configure" replace />} />
+      <Route path="email" element={<Navigate to="/integrations/email/defaults" replace />} />
+      <Route path="imessage" element={<Navigate to="/integrations/imessage" replace />} />
+    </Route>
+  </>
+)
 
 export default function App() {
   return (
@@ -142,27 +185,27 @@ export default function App() {
                   <Route path="/dev/shell" element={<DevShellPage />}>
                     <Route index element={<OverviewPage />} />
                     <Route path="ui" element={<DevUiPage />} />
-                    <Route path="inbox" element={<InboxPage />} />
-                    <Route path="activity" element={<ActivityPage />} />
-                    <Route path="account" element={<AccountPage />} />
-                    <Route path="settings" element={<SettingsLayout />}>
-                      <Route index element={<WorkspaceSettingsPage />} />
-                      <Route path="workspace" element={<WorkspaceSettingsPage />} />
-                      <Route path="whatsapp" element={<WhatsAppSettingsPage />} />
-                      <Route path="commerce" element={<CommerceSettingsPage />} />
-                    </Route>
-                    <Route path="integrations" element={<IntegrationsLayout />}>
-                      <Route index element={<IntegrationCataloguePage />} />
-                      <Route path="all" element={<IntegrationCataloguePage />} />
-                      <Route path="whatsapp" element={<WhatsAppIntegrationPage />} />
-                      <Route path="email" element={<EmailIntegrationPage />} />
-                      <Route path="telegram" element={<TelegramIntegrationPage />} />
-                    </Route>
+                    {configurationRoutes()}
                     {pageRoutes()}
                     <Route path="*" element={<NotFoundPage />} />
                   </Route>
                 )}
 
+                <Route
+                  path="/m"
+                  element={
+                    <RequireAuth>
+                      <MobileShell />
+                    </RequireAuth>
+                  }
+                >
+                  <Route index element={<Navigate to="inbox" replace />} />
+                  <Route path="inbox" element={<MobileInboxPage />} />
+                  <Route path="tasks" element={<MobileTasksPage />} />
+                  <Route path="leads" element={<MobileLeadsPage />} />
+                  <Route path="install" element={<MobileInstallPage />} />
+                  <Route path="*" element={<NotFoundPage />} />
+                </Route>
                 {/* Protected */}
                 <Route
                   element={
@@ -173,24 +216,7 @@ export default function App() {
                 >
                   <Route index element={<RoleHomeRoute />} />
                   {pageRoutes()}
-                  <Route path="integrations" element={<IntegrationsLayout />}>
-                    <Route index element={<Navigate to="/integrations/all" replace />} />
-                    <Route path="all" element={<IntegrationCataloguePage />} />
-                    <Route path="whatsapp" element={<WhatsAppIntegrationPage />} />
-                    <Route path="email" element={<EmailIntegrationPage />} />
-                    <Route path="telegram" element={<TelegramIntegrationPage />} />
-                    <Route path="webhooks" element={<WebhooksIntegrationPage />} />
-                    <Route path="sheets" element={<SheetsIntegrationPage />} />
-                  </Route>
-                  <Route path="channels" element={<Navigate to="/integrations" replace />} />
-                  <Route path="settings" element={<SettingsLayout />}>
-                    <Route index element={<Navigate to="/settings/workspace" replace />} />
-                    <Route path="workspace" element={<WorkspaceSettingsPage />} />
-                    <Route path="whatsapp" element={<WhatsAppSettingsPage />} />
-                    <Route path="email" element={<EmailSettingsPage />} />
-                    <Route path="imessage" element={<IMessageSettingsPage />} />
-                    <Route path="commerce" element={<CommerceSettingsPage />} />
-                  </Route>
+                  {configurationRoutes()}
 
                   {/* Anything else under the shell is a real not-found page, not a
                       silent redirect that hides the broken link. */}

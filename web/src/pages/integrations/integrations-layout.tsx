@@ -17,42 +17,48 @@ export default function IntegrationsLayout() {
   const active = tabs.find((tab) => canonicalPath.startsWith(tab.to)) ?? tabs[0]
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-5 animate-fade-in">
       <PageHeader
-        eyebrow="Integrations"
-        title={`${active.label} connections`}
+        title={active.id === 'all' ? 'Integrations' : active.label}
         description={active.description}
         breadcrumbs={[{ label: 'Integrations', href: '/integrations' }, { label: active.label }]}
       />
 
-      {/* Sibling views, so an underlined tab row rather than solid ink pills —
-          a filled pill reads as a primary action, not as "you are here". */}
-      <div className="scrollbar-hide -mb-px flex gap-4 overflow-x-auto border-b border-border">
-        {tabs.map((tab) => {
-          const Icon = tab.icon
-          return (
-            <NavLink
-              key={tab.id}
-              to={tab.to}
-              className={({ isActive }) =>
-                cn(
-                  'flex shrink-0 items-center gap-1.5 border-b-2 pb-2 text-[13px] transition-colors',
-                  isActive
-                    ? 'border-accent font-medium text-text-primary'
-                    : 'border-transparent font-normal text-text-secondary hover:text-text-primary',
-                )
-              }
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {tab.label}
-            </NavLink>
-          )
-        })}
+      <div className="grid gap-5 xl:grid-cols-[184px_minmax(0,1fr)]">
+        <nav
+          aria-label="Integration categories"
+          className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-surface p-2 xl:sticky xl:top-16 xl:flex-col xl:self-start"
+        >
+          <p className="hidden px-3 pb-2 text-[10px] font-semibold uppercase tracking-wider text-text-muted xl:block">
+            Connections
+          </p>
+          {tabs.map((tab) => {
+            const Icon = tab.icon
+            return (
+              <NavLink
+                key={tab.id}
+                to={tab.to}
+                className={({ isActive }) =>
+                  cn(
+                    'flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-[13px] transition-colors',
+                    isActive
+                      ? 'bg-surface-raised font-medium text-text-primary'
+                      : 'text-text-secondary hover:bg-surface-raised hover:text-text-primary',
+                  )
+                }
+              >
+                <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
+                {tab.label}
+              </NavLink>
+            )
+          })}
+        </nav>
+        <div className="min-w-0">
+          <ErrorBoundary key={location.pathname}>
+            <Outlet />
+          </ErrorBoundary>
+        </div>
       </div>
-
-      <ErrorBoundary key={location.pathname}>
-        <Outlet />
-      </ErrorBoundary>
     </div>
   )
 }

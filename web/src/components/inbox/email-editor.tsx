@@ -20,11 +20,13 @@ import { cn } from '@/lib/utils'
 
 type EmailEditorProps = {
   content: string
-  onChange: (html: string) => void
+  onChange?: (html: string) => void
+  onContentChange?: (html: string, text: string) => void
   onPlainTextChange?: (text: string) => void
   onSend?: () => void
   placeholder?: string
   disabled?: boolean
+  compact?: boolean
   className?: string
 }
 
@@ -47,6 +49,7 @@ function ToolbarButton({
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-label={title}
       className={cn(
         'inline-flex h-7 w-7 items-center justify-center rounded-md transition-colors',
         'hover:bg-surface-raised disabled:cursor-not-allowed disabled:opacity-40',
@@ -61,16 +64,21 @@ function ToolbarButton({
 export function EmailEditor({
   content,
   onChange,
+  onContentChange,
   onPlainTextChange,
   onSend,
   placeholder = 'Write your email\u2026',
   disabled = false,
   className,
+  compact = false,
 }: EmailEditorProps) {
   const editor = useEditor({
+    immediatelyRender: false,
     extensions: [
       StarterKit.configure({
         heading: false,
+        link: false,
+        underline: false,
         codeBlock: false,
         code: false,
         horizontalRule: false,
@@ -86,15 +94,19 @@ export function EmailEditor({
     editable: !disabled,
     editorProps: {
       attributes: {
+        role: 'textbox',
+        'aria-label': 'Email message',
+        'aria-multiline': 'true',
         class: cn(
-          'min-h-[100px] max-h-[280px] overflow-y-auto px-4 py-3 text-sm text-text-primary',
+          'min-h-[76px] overflow-y-auto px-4 py-3 text-text-primary',
+          compact ? 'max-h-[140px] text-base' : 'max-h-[280px] text-sm',
           'outline-none prose prose-invert prose-sm max-w-none',
           'prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0.5 prose-blockquote:my-1',
           'prose-a:text-info prose-strong:text-text-primary',
         ),
       },
       handleKeyDown: (_view, event) => {
-        if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+        if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
           // Only send if there's no active composition (autocomplete, CJK input, etc.)
           if (!event.isComposing && onSend) {
             event.preventDefault()
@@ -107,14 +119,15 @@ export function EmailEditor({
     },
     onUpdate: ({ editor: e }) => {
       const html = e.getHTML()
-      onChange(html)
+      onChange?.(html)
+      onContentChange?.(html, e.getText())
       onPlainTextChange?.(e.getText())
     },
   })
 
   // Sync external content changes (e.g., template apply, AI draft)
   useEffect(() => {
-    if (!editor) return
+    if (!editor || editor.isDestroyed) return
     const current = editor.getHTML()
     if (content !== current) {
       editor.commands.setContent(content, { emitUpdate: false })
@@ -122,7 +135,7 @@ export function EmailEditor({
   }, [content, editor])
 
   useEffect(() => {
-    if (editor) editor.setEditable(!disabled)
+    if (editor && !editor.isDestroyed) editor.setEditable(!disabled)
   }, [disabled, editor])
 
   const addLink = useCallback(() => {
@@ -149,7 +162,12 @@ export function EmailEditor({
       )}
     >
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-0.5 border-b border-border/60 px-2 py-1.5">
+      <div
+        className={cn(
+          'flex flex-wrap items-center gap-0.5 border-b border-border/60 px-2 py-1.5',
+          compact && 'hidden',
+        )}
+      >
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBold().run()}
           active={editor.isActive('bold')}

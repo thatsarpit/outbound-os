@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, GripVertical } from 'lucide-react'
 import { api, ApiClientError } from '@/api/client'
@@ -73,6 +73,37 @@ function AccountDashboardLayout({
   })
   const layout = draft ?? query.data?.layout ?? defaultDashboardLayout(page)
   const editing = draft !== null
+  const gridRef = useRef<HTMLDivElement>(null)
+  const layoutKey = layout.widgets
+    .map(({ id, width, visible }) => `${id}:${width}:${visible}`)
+    .join('|')
+
+  // Measure intrinsic card heights so short cards do not inherit a tall
+  // neighbor's row. Keep DOM order and saved widths for keyboard navigation.
+  useLayoutEffect(() => {
+    const grid = gridRef.current
+    if (!grid) return
+    const cards = Array.from(grid.querySelectorAll<HTMLElement>('[data-widget-id]'))
+    let frame = 0
+    const measure = () => {
+      const gap = Number.parseFloat(getComputedStyle(grid).rowGap) || 16
+      const heights = cards.map((card) => card.getBoundingClientRect().height)
+      cards.forEach((card, index) => {
+        const rows = Math.ceil((heights[index] + gap) / (1 + gap))
+        card.style.setProperty('--widget-rows', String(rows))
+      })
+    }
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(measure)
+    })
+    cards.forEach((card) => observer.observe(card))
+    measure()
+    return () => {
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+    }
+  }, [layoutKey, editing])
   const titles = Object.fromEntries(
     DASHBOARD_WIDGETS[page].map((widget) => [widget.id, widget.title]),
   )
@@ -96,10 +127,11 @@ function AccountDashboardLayout({
   const conflict = save.error instanceof ApiClientError && save.error.status === 409
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
         {!editing ? (
           <Button
             variant="secondary"
+            size="sm"
             disabled={query.isPending || query.isError}
             onClick={() => {
               save.reset()
@@ -203,7 +235,10 @@ function AccountDashboardLayout({
           All widgets are hidden. Use Customize layout to show them again.
         </p>
       )}
-      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+      <div
+        ref={gridRef}
+        className="grid grid-cols-1 items-start gap-4 lg:auto-rows-[1px] lg:grid-cols-2"
+      >
         {layout.widgets
           .filter((widget) => widget.visible)
           .map((widget) => {
@@ -212,7 +247,7 @@ function AccountDashboardLayout({
               <div
                 key={widget.id}
                 data-widget-id={widget.id}
-                className={`min-w-0 ${widget.width === 2 ? 'lg:col-span-2' : ''}`}
+                className={`min-w-0 lg:[grid-row-end:span_var(--widget-rows,1)] ${widget.width === 2 ? 'lg:col-span-2' : ''}`}
                 onDragOver={(event) => {
                   if (editing && dragged) {
                     event.preventDefault()

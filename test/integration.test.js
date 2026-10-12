@@ -1650,3 +1650,258 @@ describe('Analytics selected periods', () => {
     }
   });
 });
+
+// Phone queues must not lose older replies behind the default 50-row page.
+test('Inbox filters before pagination and returns stable queue totals', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const ids = [];
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.71' };
+  try {
+    for (let i = 0; i < 54; i++) {
+      const old = i < 2;
+      const date = new Date(old ? '2020-01-01T00:00:00Z' : '2026-01-01T00:00:00Z');
+      const lead = await prisma.lead.create({ data: { name: `Mobile Queue Fixture ${i}`, mobile: `no-phone:mobile-queue-${i}`, source: 'manual', status: 'contacted', updatedAt: date, lastMessageAt: date, messages: { create: { direction: old ? 'inbound' : 'outbound', channel: 'email', status: 'sent', content: 'Queue fixture', createdAt: date } } } });
+      ids.push(lead.id);
+    }
+    const first = await request('GET', '/api/inbox/threads?search=Mobile%20Queue%20Fixture&state=needs_reply&limit=1', { headers });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.total, 2);
+    assert.equal(first.body.pages, 2);
+    assert.equal(first.body.needsReply, 2);
+    assert.equal(first.body.threads.length, 1);
+    const second = await request('GET', '/api/inbox/threads?search=Mobile%20Queue%20Fixture&state=needs_reply&limit=1&page=2', { headers });
+    assert.equal(second.body.threads.length, 1);
+    assert.notEqual(first.body.threads[0].leadId, second.body.threads[0].leadId);
+    const all = await request('GET', '/api/inbox/threads?search=Mobile%20Queue%20Fixture&limit=25', { headers });
+    assert.equal(all.body.total, 54);
+    assert.equal(all.body.pages, 3);
+    assert.equal(all.body.needsReply, 2);
+    assert.equal(all.body.threads.length, 25);
+    assert.equal(all.body.threads[0].leadId, ids[53]);
+  } finally {
+    await prisma.message.deleteMany({ where: { leadId: { in: ids } } });
+    await prisma.lead.deleteMany({ where: { id: { in: ids } } });
+  }
+});
+
+test('Mobile follow-ups validate edits, enforce lead ownership, and paginate workspace tasks', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.72' };
+  const leads = await Promise.all([1, 2].map(i => prisma.lead.create({ data: { name: `Mobile Task ${i}`, mobile: `no-phone:mobile-task-${i}`, source: 'manual' } })));
+  const viewer = await prisma.user.create({ data: { name: 'Mobile Viewer', email: 'mobile-viewer@example.test', passwordHash: 'not-a-password', role: 'viewer' } });
+  try {
+    const leadId = leads[0].id;
+    for (const body of [{ title: '  ' }, { title: 1 }, { title: 'Call buyer', dueAt: 'bad date' }]) {
+      assert.equal((await request('POST', `/api/leads/${leadId}/tasks`, { headers, body })).status, 400);
+    }
+    const created = await request('POST', `/api/leads/${leadId}/tasks`, { headers, body: { title: ' Call buyer ', dueAt: '2020-01-01T12:00:00Z' } });
+    assert.equal(created.status, 200);
+    assert.equal(created.body.title, 'Call buyer');
+    const taskId = created.body.id;
+    assert.equal((await request('PATCH', `/api/leads/${leadId}/tasks/${taskId}`, { headers, body: { done: 'false' } })).status, 400);
+    assert.equal((await request('PATCH', `/api/leads/${leadId}/tasks/${taskId}`, { headers, body: { title: '' } })).status, 400);
+    assert.equal((await request('PATCH', `/api/leads/${leads[1].id}/tasks/${taskId}`, { headers, body: { done: true } })).status, 404);
+    assert.equal((await request('DELETE', `/api/leads/${leads[1].id}/tasks/${taskId}`, { headers })).status, 404);
+    const note = await request('POST', `/api/leads/${leadId}/notes`, { headers, body: { content: 'Customer asked to follow up' } });
+    assert.equal((await request('DELETE', `/api/leads/${leads[1].id}/notes/${note.body.id}`, { headers })).status, 404);
+    const readonlyHeaders = { Authorization: `Bearer ${signToken(viewer)}`, 'X-Forwarded-For': '192.0.2.73' };
+    assert.equal((await request('GET', '/api/tasks', { headers: readonlyHeaders })).status, 200);
+    assert.equal((await request('PATCH', `/api/leads/${leadId}/tasks/${taskId}`, { headers: readonlyHeaders, body: { done: true } })).status, 403);
+    const queue = await request('GET', '/api/tasks?limit=1', { headers });
+    assert.equal(queue.body.tasks.length, 1);
+    assert.ok(queue.body.total >= 1);
+    assert.ok(queue.body.overdueCount >= 1);
+    assert.equal(queue.body.pages, queue.body.total);
+    assert.equal((await request('PATCH', `/api/leads/${leadId}/tasks/${taskId}`, { headers, body: { done: true, dueAt: null } })).status, 200);
+    const pending = await request('GET', `/api/leads/${leadId}/tasks`, { headers });
+    assert.equal(pending.body[0].done, true);
+    assert.equal(pending.body[0].dueAt, null);
+    assert.equal((await request('DELETE', `/api/leads/${leadId}/notes/${note.body.id}`, { headers })).status, 200);
+  } finally {
+    const ids = leads.map(lead => lead.id);
+    await prisma.leadTask.deleteMany({ where: { leadId: { in: ids } } });
+    await prisma.leadNote.deleteMany({ where: { leadId: { in: ids } } });
+    await prisma.lead.deleteMany({ where: { id: { in: ids } } });
+    await prisma.user.delete({ where: { id: viewer.id } });
+  }
+});
+
+test('follow-up endpoints reject malformed IDs and missing parents without server errors', async () => {
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.74' };
+  assert.equal((await request('GET', '/api/leads/1junk/tasks', { headers })).status, 400);
+  assert.equal((await request('PATCH', '/api/leads/1/tasks/-2', { headers, body: { done: true } })).status, 400);
+  assert.equal((await request('POST', '/api/leads/2147483647/tasks', { headers, body: { title: 'Missing buyer' } })).status, 404);
+  assert.equal((await request('POST', '/api/leads/2147483647/notes', { headers, body: { content: 'Missing buyer' } })).status, 404);
+  assert.equal((await request('POST', '/api/leads/1/notes', { headers, body: { content: 'Test', type: 'invented' } })).status, 400);
+});
+
+test('inbox detail and queue agree on the latest message when timestamps tie', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const date = new Date('2026-01-01T12:00:00Z');
+  const lead = await prisma.lead.create({ data: { name: 'Queue Tie Fixture', source: 'manual', mobile: 'no-phone:queue-tie', lastMessageAt: new Date('2020-01-01T00:00:00Z') } });
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.75' };
+  try {
+    await prisma.message.create({ data: { leadId: lead.id, channel: 'email', direction: 'inbound', content: 'Question', status: 'delivered', createdAt: date } });
+    const sent = await prisma.message.create({ data: { leadId: lead.id, channel: 'email', direction: 'outbound', content: 'Answered', status: 'sent', createdAt: date } });
+    const queue = await request('GET', '/api/inbox/threads?search=Queue%20Tie%20Fixture', { headers });
+    assert.equal(queue.body.threads[0].replyNeeded, false);
+    assert.equal(queue.body.threads[0].lastMessageAt, date.toISOString());
+    const detail = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+    assert.equal(detail.body.messages.at(-1).id, sent.id);
+    assert.equal(detail.body.replyNeeded, false);
+  } finally {
+    await prisma.message.deleteMany({ where: { leadId: lead.id } });
+    await prisma.lead.delete({ where: { id: lead.id } });
+  }
+});
+
+test('Gmail inbox settings use the existing admin account update without changing delivery or exposing passwords', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const account = await prisma.emailAccount.create({ data: { name: 'Reply Inbox Fixture', email: 'sender@example.test', provider: 'brevo', smtpHost: 'api.brevo.com', smtpPort: 443, smtpUser: 'sender@example.test', smtpPass: 'fake-existing-smtp-secret' } });
+  const manager = await prisma.user.create({ data: { name: 'Email Manager Fixture', email: 'email-manager@example.test', passwordHash: 'not-a-password', role: 'manager' } });
+  const password = 'abcdefghijklmnop';
+  const body = { imapHost: 'imap.gmail.com', imapPort: 993, imapSecure: true, imapUser: 'reply-inbox@example.test', imapPass: password };
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.76' };
+  try {
+    assert.equal((await request('PATCH', `/api/email/accounts/${account.id}`, { body, headers: { 'X-Forwarded-For': '192.0.2.77' } })).status, 401);
+    assert.equal((await request('PATCH', `/api/email/accounts/${account.id}`, { body, headers: { Authorization: `Bearer ${signToken(manager)}`, 'X-Forwarded-For': '192.0.2.78' } })).status, 403);
+    const saved = await request('PATCH', `/api/email/accounts/${account.id}`, { body, headers });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.account.imapHost, 'imap.gmail.com');
+    assert.equal(saved.body.account.imapUser, body.imapUser);
+    assert.equal(saved.body.account.hasImapPass, true);
+    assert.equal(saved.body.account.imapPass, undefined);
+    assert.equal(saved.body.account.smtpPass, undefined);
+    const stored = await prisma.emailAccount.findUnique({ where: { id: account.id } });
+    assert.match(stored.imapPass, /^enc:v1:/);
+    assert.notEqual(stored.imapPass, password);
+    assert.equal(stored.provider, 'brevo');
+    assert.equal(stored.smtpPass, account.smtpPass);
+    assert.equal(stored.smtpHost, account.smtpHost);
+    assert.equal(stored.smtpPort, account.smtpPort);
+    const listed = await request('GET', `/api/email/accounts/${account.id}`, { headers });
+    assert.equal(listed.body.imapPass, undefined);
+    assert.equal(listed.body.smtpPass, undefined);
+  } finally {
+    await prisma.emailAccount.delete({ where: { id: account.id } });
+    await prisma.user.delete({ where: { id: manager.id } });
+  }
+});
+
+test('deployed Gmail routes validate access, save atomically and serialize shared inbox syncs', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { default: email } = await import('../src/services/emailService.js');
+  const originalClient = email._createImapClient;
+  const originalRead = email._readRepliesForAccount;
+  const accounts = await Promise.all([1, 2].map(i => prisma.emailAccount.create({ data: { name: `Gmail Route Fixture ${i}`, email: `gmail-route-${i}@example.test`, provider: 'brevo', smtpHost: 'api.brevo.com', smtpPort: 443, smtpUser: 'fake', smtpPass: 'fake-existing-key' } })));
+  const ids = accounts.map(a => a.id);
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.81' };
+  const body = { accountIds: ids, user: 'shared@example.test', appPassword: 'abcd efgh ijkl mnop' };
+  let active = 0;
+  let maximum = 0;
+  try {
+    email._createImapClient = () => ({ connect: async () => {}, getMailboxLock: async () => ({ release() {} }), logout: async () => {} });
+    assert.equal((await request('POST', `/api/email/accounts/${ids[0]}/gmail-inbox`, { body, headers: { 'X-Forwarded-For': '192.0.2.82' } })).status, 401);
+    assert.equal((await request('POST', `/api/email/accounts/${ids[0]}/gmail-inbox`, { headers, body: { ...body, accountIds: 'bad' } })).status, 400);
+    assert.equal((await request('POST', `/api/email/accounts/${ids[0]}/gmail-inbox`, { headers, body: { ...body, appPassword: 'bad' } })).status, 400);
+    const connected = await request('POST', `/api/email/accounts/${ids[0]}/gmail-inbox`, { headers, body });
+    assert.equal(connected.status, 200);
+    assert.equal(JSON.stringify(connected.body).includes('abcdefghijklmnop'), false);
+    for (const id of ids) {
+      const saved = await prisma.emailAccount.findUnique({ where: { id } });
+      assert.equal(saved.imapUser, body.user);
+      assert.match(saved.imapPass, /^enc:v1:/);
+      assert.equal(saved.smtpPass, 'fake-existing-key');
+    }
+    email._readRepliesForAccount = async () => { active++; maximum = Math.max(maximum, active); await new Promise(resolve => setTimeout(resolve, 15)); active--; return 1; };
+    const synced = await Promise.all(ids.map(id => request('POST', `/api/email/accounts/${id}/sync-inbox`, { headers })));
+    assert.ok(synced.every(r => r.status === 200 && r.body.replies === 1));
+    assert.equal(maximum, 1, 'shared mailbox operations must not race and import duplicate replies');
+    email._createImapClient = () => ({ connect: async () => { throw new Error('provider private credential failure'); }, logout: async () => {} });
+    const failed = await request('POST', `/api/email/accounts/${ids[0]}/gmail-inbox`, { headers, body: { ...body, user: 'changed@example.test' } });
+    assert.equal(failed.status, 400);
+    assert.equal(JSON.stringify(failed.body).includes('private credential'), false);
+    assert.equal((await prisma.emailAccount.findUnique({ where: { id: ids[0] } })).imapUser, body.user, 'failed validation preserves existing inbox settings');
+  } finally {
+    email._createImapClient = originalClient;
+    email._readRepliesForAccount = originalRead;
+    await prisma.emailAccount.deleteMany({ where: { id: { in: ids } } });
+  }
+});
+
+test('Brevo campaign recording handles nullable tenant keys and retries without duplicate counters', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { default: campaigns } = await import('../src/services/brevoMarketingCampaigns.js');
+  const lead = await prisma.lead.create({ data: { name: 'Campaign Retry Fixture', mobile: 'no-phone:campaign-retry', email: 'campaign-retry@example.test' } });
+  const account = await prisma.emailAccount.create({ data: { name: 'Campaign Retry Sender', email: 'campaign-sender@example.test', provider: 'brevo', smtpHost: 'api.brevo.com', smtpUser: 'fake', smtpPass: 'fake-key' } });
+  try {
+    const input = { date: '2026-10-12', account, leads: [lead], state: { campaignId: 123, sentAt: '2026-10-12T01:00:00Z' } };
+    await campaigns._recordAcceptedCampaign(input);
+    await campaigns._recordAcceptedCampaign(input);
+    assert.equal(await prisma.message.count({ where: { leadId: lead.id } }), 1);
+    assert.equal((await prisma.emailAccount.findUnique({ where: { id: account.id } })).sentToday, 1);
+  } finally {
+    await prisma.message.deleteMany({ where: { leadId: lead.id } });
+    await prisma.lead.delete({ where: { id: lead.id } });
+    await prisma.emailAccount.delete({ where: { id: account.id } });
+    await prisma.systemConfig.deleteMany({ where: { key: { startsWith: `email.daily.brevo.batch.2026-10-12.${account.id}` } } });
+  }
+});
+
+test('IMAP MIME replies retain the sending account, cancel follow-ups and retry partial bodies once', async () => {
+  const { Readable } = await import('node:stream');
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { default: email } = await import('../src/services/emailService.js');
+  const { default: scorer } = await import('../src/services/leadScorer.js');
+  const originalClient = email._createImapClient;
+  const originalScore = scorer.calculateScore;
+  const lead = await prisma.lead.create({ data: { name: 'MIME Reply Fixture', mobile: 'no-phone:mime-reply', email: 'mime-reply@example.test', status: 'contacted' } });
+  const accounts = await Promise.all([1, 2].map(i => prisma.emailAccount.create({ data: { name: `MIME Sender ${i}`, email: `mime-sender-${i}@example.test`, smtpHost: 'smtp.example.test', smtpUser: 'fake', smtpPass: 'fake-key', imapHost: 'imap.example.test' } })));
+  const outgoingId = '<fixture-original@example.test>';
+  const incomingId = '<fixture-reply@example.test>';
+  const headers = `Message-ID: ${incomingId}\r\nIn-Reply-To: ${outgoingId}\r\n`;
+  const before = new Date('2026-10-01T01:00:00Z');
+  let brokenDownload = true;
+  try {
+    scorer.calculateScore = async () => {};
+    await prisma.emailAccount.update({ where: { id: accounts[0].id }, data: { lastSyncAt: before } });
+    await prisma.message.createMany({ data: [
+      { leadId: lead.id, emailAccountId: accounts[1].id, channel: 'email', direction: 'outbound', status: 'sent', content: 'Original', emailMessageId: outgoingId },
+      { leadId: lead.id, channel: 'email', direction: 'outbound', status: 'queued', content: 'Follow-up' },
+    ] });
+    email._createImapClient = () => ({
+      on() {}, connect: async () => {}, logout: async () => {},
+      getMailboxLock: async () => ({ release() {} }),
+      search: async () => [101],
+      fetchAll: async () => [{ uid: 101, headers: Buffer.from(headers), envelope: { from: [{ address: lead.email }], subject: 'Fixture reply' } }],
+      download: async (uid, part, options) => {
+        assert.equal(uid, 101); assert.equal(options.uid, true);
+        if (brokenDownload) throw new Error('fixture download failed');
+        return { content: Readable.from([Buffer.from(`${headers}MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${Buffer.from('Thanks, please send the quotation.').toString('base64')}`)]) };
+      },
+    });
+    await assert.rejects(email.syncInbox(accounts[0].id), /could not be processed/);
+    let inbound = await prisma.message.findFirst({ where: { leadId: lead.id, direction: 'inbound' } });
+    assert.equal(inbound.status, 'partial');
+    assert.equal(inbound.emailAccountId, accounts[1].id);
+    assert.equal((await prisma.emailAccount.findUnique({ where: { id: accounts[0].id } })).lastSyncAt.getTime(), before.getTime());
+    assert.equal(await prisma.message.count({ where: { leadId: lead.id, status: 'queued' } }), 0);
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'replied');
+    brokenDownload = false;
+    await email.syncInbox(accounts[0].id);
+    await email.syncInbox(accounts[0].id);
+    inbound = await prisma.message.findUnique({ where: { id: inbound.id } });
+    assert.equal(inbound.status, 'delivered');
+    assert.equal(inbound.content, 'Thanks, please send the quotation.');
+    assert.equal(await prisma.message.count({ where: { leadId: lead.id, direction: 'inbound' } }), 1);
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'replied', 'body recovery must not count as another reply');
+  } finally {
+    email._createImapClient = originalClient;
+    scorer.calculateScore = originalScore;
+    await prisma.message.deleteMany({ where: { leadId: lead.id } });
+    await prisma.lead.delete({ where: { id: lead.id } });
+    await prisma.emailAccount.deleteMany({ where: { id: { in: accounts.map(a => a.id) } } });
+  }
+});

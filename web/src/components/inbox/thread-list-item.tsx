@@ -26,10 +26,12 @@ export function ThreadListItem({
   thread,
   selected,
   onSelect,
+  mobile = false,
 }: {
   thread: InboxThreadSummary
   selected: boolean
   onSelect: () => void
+  mobile?: boolean
 }) {
   const meta = getChannel(thread.channel)
   const Icon = meta.icon
@@ -44,6 +46,7 @@ export function ThreadListItem({
       aria-current={selected ? 'true' : undefined}
       className={cn(
         'relative flex w-full gap-2.5 border-b border-border-subtle py-2.5 pl-3 pr-3 text-left transition-colors',
+        mobile && 'min-h-24 py-4',
         selected ? 'bg-surface-raised' : 'hover:bg-surface-raised/60',
       )}
     >
@@ -54,7 +57,11 @@ export function ThreadListItem({
       {/* Unread marker sits in its own narrow column so names stay aligned. */}
       <span className="flex w-1.5 shrink-0 items-center justify-center pt-1.5">
         {thread.unread && (
-          <span className="h-1.5 w-1.5 rounded-full bg-focus" title="Unread" aria-label="Unread" />
+          <span
+            className="h-1.5 w-1.5 rounded-full bg-focus"
+            title="Needs reply"
+            aria-label="Needs reply"
+          />
         )}
       </span>
 
@@ -66,7 +73,8 @@ export function ThreadListItem({
         <span className="flex items-baseline gap-2">
           <span
             className={cn(
-              'min-w-0 flex-1 truncate text-[13px]',
+              'min-w-0 flex-1 truncate',
+              mobile ? 'text-sm' : 'text-[13px]',
               thread.unread ? 'font-semibold text-text-primary' : 'font-medium text-text-primary',
             )}
           >

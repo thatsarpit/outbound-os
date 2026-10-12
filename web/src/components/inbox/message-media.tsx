@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Download, FileText, Loader2, Mic } from 'lucide-react'
+import { useAuthStore } from '@/stores/auth-store'
 import { apiFetchBlob } from '@/api/client'
 import { cn } from '@/lib/utils'
 
@@ -21,8 +22,13 @@ export function MessageMedia({
   filename: string | null
   className?: string
 }) {
-  const { data: blob, isLoading, isError } = useQuery({
-    queryKey: ['message-media', messageId],
+  const dashboardScope = useAuthStore((state) => state.dashboardScope)
+  const {
+    data: blob,
+    isLoading,
+    isError,
+  } = useQuery({
+    queryKey: ['message-media', messageId, dashboardScope],
     queryFn: () => apiFetchBlob(`/messages/${messageId}/media`),
     staleTime: Infinity,
     gcTime: 10 * 60_000,
@@ -40,7 +46,12 @@ export function MessageMedia({
 
   if (isLoading) {
     return (
-      <div className={cn('mt-2 flex h-20 w-48 items-center justify-center rounded-md bg-surface', className)}>
+      <div
+        className={cn(
+          'mt-2 flex h-20 w-48 items-center justify-center rounded-md bg-surface',
+          className,
+        )}
+      >
         <Loader2 className="h-4 w-4 animate-spin text-text-muted" />
       </div>
     )
@@ -52,7 +63,11 @@ export function MessageMedia({
   if (mediaType === 'image') {
     return (
       <a href={url} target="_blank" rel="noreferrer" className={cn('mt-2 block', className)}>
-        <img src={url} alt={name} className="max-h-72 max-w-full rounded-md border border-border object-contain" />
+        <img
+          src={url}
+          alt={name}
+          className="max-h-72 max-w-full rounded-md border border-border object-contain"
+        />
       </a>
     )
   }
@@ -65,7 +80,13 @@ export function MessageMedia({
     )
   }
   if (mediaType === 'video') {
-    return <video controls src={url} className={cn('mt-2 max-h-72 max-w-full rounded-md border border-border', className)} />
+    return (
+      <video
+        controls
+        src={url}
+        className={cn('mt-2 max-h-72 max-w-full rounded-md border border-border', className)}
+      />
+    )
   }
 
   return (

@@ -31,3 +31,24 @@ coderabbit_review.md
 # `npm run browser:install` rather than committed.
 data/browsers/
 backups/
+
+# Runtime secrets and generated SQLite files must never enter Git.
+instance-secrets.json
+**/instance-secrets.json
+*-private.json
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+*.p12
+*.pfx
+exports/
+logs/
+
+# OAuth provider state contains access and refresh tokens.
+oauth-store.json
+**/oauth-store.json

@@ -1,3 +1,4 @@
+import { WhatsAppDefaultsPanel } from '@/components/settings/whatsapp-defaults-panel'
 import {
   Brain,
   CheckCircle2,
@@ -74,6 +75,8 @@ export default function WhatsAppSettingsPage() {
       </SettingsPanel>
 
       <WhatsAppPricingPanel />
+
+      <WhatsAppDefaultsPanel />
 
       {selectedAccount && accountForm && (
         <>
@@ -286,7 +289,6 @@ export default function WhatsAppSettingsPage() {
               testMutation={testConnectionMutation}
             />
           </div>
-
         </>
       )}
 

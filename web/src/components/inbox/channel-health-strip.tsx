@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { InboxChannelHealth, InboxChannel } from '@/api/types'
-import { CHANNELS, CHANNEL_ORDER } from '@/lib/channels'
+import { CHANNELS, CHANNEL_ORDER, formatChannelHealthDetail } from '@/lib/channels'
 import { cn } from '@/lib/utils'
 
 const STATUS_DOT: Record<string, string> = {
@@ -10,9 +10,9 @@ const STATUS_DOT: Record<string, string> = {
 }
 
 const SETTINGS_ROUTE: Record<InboxChannel, string> = {
-  whatsapp: '/settings/whatsapp',
-  imessage: '/settings/imessage',
-  email: '/settings/email',
+  whatsapp: '/integrations/whatsapp',
+  imessage: '/integrations/imessage',
+  email: '/integrations/email',
   telegram: '/integrations/telegram',
 }
 
@@ -47,7 +47,7 @@ export function ChannelHealthStrip({ health }: { health?: InboxChannelHealth }) 
           <Link
             key={id}
             to={SETTINGS_ROUTE[id]}
-            title={`${meta.label} — ${data.detail}`}
+            title={`${meta.label} — ${formatChannelHealthDetail(data.detail)}`}
             className={cn(
               'inline-flex shrink-0 items-center gap-1.5 rounded-sm px-1.5 py-1 text-[11px] transition-colors',
               'hover:bg-surface-raised',
@@ -61,7 +61,9 @@ export function ChannelHealthStrip({ health }: { health?: InboxChannelHealth }) 
               className={cn('h-1.5 w-1.5 rounded-full', STATUS_DOT[data.status] || 'bg-text-muted')}
               aria-label={data.status}
             />
-            {!isReady && <span className="text-text-muted">{data.detail}</span>}
+            {!isReady && (
+              <span className="text-text-muted">{formatChannelHealthDetail(data.detail)}</span>
+            )}
           </Link>
         )
       })}

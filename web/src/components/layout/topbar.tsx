@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 
 const PAGE_TITLES: Array<{ route: string; title: string }> = [
+  { route: '/automation', title: 'Automation' },
   { route: '/overview', title: 'Overview' },
   { route: '/inbox', title: 'Inbox' },
   { route: '/leads', title: 'Leads' },

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { LucideIcon } from 'lucide-react'
 import {
   Bot,
-  Check,
+  ArrowUpRight,
   FileSpreadsheet,
   Globe,
   Megaphone,
@@ -17,6 +17,9 @@ import {
   Workflow,
 } from 'lucide-react'
 import { onboardingApi, type OnboardingStatus } from '@/api/endpoints/onboarding'
+import { inboxApi } from '@/api/endpoints/inbox'
+import type { InboxChannelHealth, InboxChannel } from '@/api/types'
+import { CHANNEL_ORDER, formatChannelHealthDetail } from '@/lib/channels'
 import { cn } from '@/lib/utils'
 
 type Integration = {
@@ -26,6 +29,7 @@ type Integration = {
   to: string
   /** Reads connected-ness from the onboarding status; omitted = no status shown. */
   connected?: (status: OnboardingStatus) => boolean
+  channel?: InboxChannel
 }
 
 type Group = { title: string; blurb: string; items: Integration[] }
@@ -38,20 +42,22 @@ type Group = { title: string; blurb: string; items: Integration[] }
 const GROUPS: Group[] = [
   {
     title: 'Reach out',
-    blurb: 'Where your first message and follow-ups are sent. Replies land in one inbox.',
+    blurb: 'Messaging accounts and reply connections for your shared inbox.',
     items: [
       {
         name: 'WhatsApp',
         detail: "Meta's official Cloud API, or AiSensy. Approved templates for first contact.",
         icon: MessageSquare,
-        to: '/settings/whatsapp',
+        to: '/integrations/whatsapp',
+        channel: 'whatsapp',
         connected: (s) => s.channels.whatsapp,
       },
       {
         name: 'Email',
         detail: 'Any SMTP/IMAP mailbox or Brevo, with reply sync and bounce handling.',
         icon: Mail,
-        to: '/settings/email',
+        to: '/integrations/email',
+        channel: 'email',
         connected: (s) => s.channels.email,
       },
       {
@@ -59,26 +65,28 @@ const GROUPS: Group[] = [
         detail: 'Your own Telegram account for one-to-one conversations.',
         icon: Send,
         to: '/integrations/telegram',
+        channel: 'telegram',
         connected: (s) => s.channels.telegram,
       },
       {
         name: 'iMessage',
         detail: 'Through a Mac running BlueBubbles.',
         icon: MessageCircle,
-        to: '/settings/imessage',
+        to: '/integrations/imessage',
+        channel: 'imessage',
         connected: (s) => s.channels.imessage,
       },
     ],
   },
   {
     title: 'Bring leads in',
-    blurb: 'Every source gets its own signed web address. New leads are contacted within seconds.',
+    blurb: 'Capture leads from forms, imports and external tools.',
     items: [
       {
         name: 'Website forms',
         detail: 'Plain HTML, Webflow, WordPress, Framer — post a form straight in.',
         icon: Globe,
-        to: '/setup?step=sources',
+        to: '/integrations/webhooks',
         connected: (s) => s.counts.leadSources > 0,
       },
       {
@@ -101,7 +109,7 @@ const GROUPS: Group[] = [
       },
       {
         name: 'CSV import',
-        detail: 'Bring a list from another CRM. Duplicates are merged.',
+        detail: 'Bring a list from another CRM. Existing contacts are deduplicated.',
         icon: FileSpreadsheet,
         to: '/import',
       },
@@ -143,17 +151,51 @@ export default function IntegrationCatalogue() {
     meta: { silent: true },
   })
 
+  const { data: health, isError: healthError } = useQuery({
+    queryKey: ['inbox-channel-health'],
+    queryFn: inboxApi.channelHealth,
+    refetchInterval: 60_000,
+    meta: { silent: true },
+  })
+  const readyCount = health
+    ? CHANNEL_ORDER.filter((channel) => health[channel].status === 'ready').length
+    : null
+
   return (
-    <div className="space-y-8 pt-2">
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-4 rounded-lg border border-border bg-surface px-5 py-4">
+        <div>
+          <h2 className="text-sm font-semibold text-text-primary">Your connected workspace</h2>
+          <p className="mt-1 text-xs leading-5 text-text-secondary">
+            Manage channel accounts, inbox connections, and data sources in one place.
+          </p>
+        </div>
+        <span className="rounded-full border border-border px-3 py-1.5 text-xs text-text-secondary">
+          {readyCount !== null
+            ? `${readyCount} of 4 messaging channels ready`
+            : healthError
+              ? 'Channel status unavailable'
+              : 'Checking channel health…'}
+        </span>
+      </div>
       {GROUPS.map((group) => (
         <section key={group.title} aria-labelledby={`group-${group.title}`}>
-          <h2 id={`group-${group.title}`} className="text-sm font-semibold tracking-tight text-text-primary">
+          <h2
+            id={`group-${group.title}`}
+            className="text-sm font-semibold tracking-tight text-text-primary"
+          >
             {group.title}
           </h2>
           <p className="mt-0.5 text-[12px] text-text-secondary">{group.blurb}</p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
             {group.items.map((item) => (
-              <IntegrationCard key={item.name} item={item} status={status || undefined} />
+              <IntegrationCard
+                key={item.name}
+                item={item}
+                status={status || undefined}
+                health={health || undefined}
+                healthError={healthError}
+              />
             ))}
           </div>
         </section>
@@ -162,32 +204,67 @@ export default function IntegrationCatalogue() {
   )
 }
 
-function IntegrationCard({ item, status }: { item: Integration; status?: OnboardingStatus }) {
+function IntegrationCard({
+  item,
+  status,
+  health,
+  healthError,
+}: {
+  item: Integration
+  status?: OnboardingStatus
+  health?: InboxChannelHealth
+  healthError: boolean
+}) {
   const Icon = item.icon
-  const connected = status && item.connected ? item.connected(status) : false
+  const channel = item.channel && health?.[item.channel]
+  const configured = status && item.connected ? item.connected(status) : false
+  const label = item.channel
+    ? channel
+      ? { ready: 'Ready', limited: 'Limited', offline: 'Offline' }[channel.status]
+      : healthError
+        ? 'Unavailable'
+        : 'Checking…'
+    : item.connected
+      ? status
+        ? configured
+          ? 'Configured'
+          : 'Not configured'
+        : 'Checking…'
+      : null
+  const tone =
+    channel?.status === 'ready'
+      ? 'bg-success-muted text-success'
+      : channel?.status === 'offline'
+        ? 'bg-danger-muted text-danger'
+        : channel?.status === 'limited'
+          ? 'bg-warning-muted text-warning'
+          : 'bg-surface-raised text-text-muted'
   const external = item.to.startsWith('http')
-  const className = cn(
-    'group flex h-full flex-col gap-2 rounded-md border p-4 transition-colors',
-    connected ? 'border-success/30' : 'border-border hover:border-border-strong hover:bg-surface-raised',
-  )
+  const className =
+    'group flex h-full min-w-0 flex-col rounded-lg border border-border bg-surface p-4 transition-colors hover:border-border-strong hover:bg-surface-raised focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent'
   const body = (
     <>
-      <span className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-2 text-sm font-semibold text-text-primary">
-          <Icon aria-hidden="true" className="h-4 w-4 text-text-muted" />
-          {item.name}
+      <span className="flex items-start justify-between gap-2">
+        <span className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-background">
+          <Icon aria-hidden="true" className="h-4 w-4 text-text-secondary" />
         </span>
-        {connected ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-success-muted px-2 py-0.5 text-[11px] font-medium text-success">
-            <Check aria-hidden="true" className="h-3 w-3" /> Connected
-          </span>
-        ) : (
-          <span className="text-[11px] font-medium text-accent opacity-0 transition-opacity group-hover:opacity-100">
-            {external ? 'Docs →' : 'Set up →'}
+        {label && (
+          <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-medium', tone)}>
+            {label}
           </span>
         )}
       </span>
-      <span className="text-[12px] leading-5 text-text-secondary">{item.detail}</span>
+      <span className="mt-3 text-sm font-semibold text-text-primary">{item.name}</span>
+      <span className="mt-1 flex-1 text-xs leading-5 text-text-secondary">{item.detail}</span>
+      {channel && channel.status !== 'ready' && (
+        <span className="mt-2 text-[11px] leading-4 text-text-muted">
+          {formatChannelHealthDetail(channel.detail)}
+        </span>
+      )}
+      <span className="mt-4 inline-flex items-center gap-1 text-xs font-medium text-text-primary">
+        {external ? 'View documentation' : 'Manage connection'}{' '}
+        <ArrowUpRight aria-hidden="true" className="h-3 w-3" />
+      </span>
     </>
   )
   return external ? (

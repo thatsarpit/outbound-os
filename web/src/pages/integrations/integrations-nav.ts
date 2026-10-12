@@ -1,4 +1,4 @@
-import { LayoutGrid, Mail, MessageSquare, Send, Sheet, Webhook } from 'lucide-react'
+import { LayoutGrid, Mail, MessageSquare, Smartphone, Send, Sheet, Webhook } from 'lucide-react'
 
 /**
  * Channel catalog for the /integrations/* sub-routes.
@@ -7,7 +7,7 @@ export const INTEGRATION_TABS = [
   {
     id: 'all',
     to: '/integrations/all',
-    label: 'All',
+    label: 'All integrations',
     description: 'Everything Outbound OS connects to: channels, lead sources and data exports.',
     icon: LayoutGrid,
   },
@@ -26,6 +26,13 @@ export const INTEGRATION_TABS = [
     icon: Mail,
   },
   {
+    id: 'imessage',
+    to: '/integrations/imessage',
+    label: 'iMessage',
+    description: 'Mac connections through BlueBubbles, delivery limits and connection health.',
+    icon: Smartphone,
+  },
+  {
     id: 'telegram',
     to: '/integrations/telegram',
     label: 'Telegram',
@@ -35,7 +42,7 @@ export const INTEGRATION_TABS = [
   {
     id: 'webhooks',
     to: '/integrations/webhooks',
-    label: 'Webhooks',
+    label: 'Lead sources & webhooks',
     description: 'Inbound sources that feed leads into the workspace.',
     icon: Webhook,
   },

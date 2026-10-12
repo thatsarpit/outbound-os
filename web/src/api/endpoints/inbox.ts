@@ -16,6 +16,8 @@ export interface InboxThreadFilters {
   state?: Exclude<InboxThreadState, 'all'>
   search?: string
   poolId?: number | null
+  page?: number
+  limit?: number
 }
 
 export const inboxApi = {
@@ -27,6 +29,8 @@ export const inboxApi = {
     if (filters.state) params.set('state', filters.state)
     if (filters.search) params.set('search', filters.search)
     if (filters.poolId) params.set('poolId', String(filters.poolId))
+    if (filters.page) params.set('page', String(filters.page))
+    if (filters.limit) params.set('limit', String(filters.limit))
     const query = params.toString()
     return api.get<InboxThreadListResponse>(`/inbox/threads${query ? `?${query}` : ''}`)
   },
@@ -39,7 +43,16 @@ export const inboxApi = {
       `/inbox/senders${leadId ? `?leadId=${encodeURIComponent(String(leadId))}` : ''}`,
     ),
 
-  send: (payload: InboxSendPayload) => api.post<InboxSendResponse>('/inbox/send', payload),
+  send: async (payload: InboxSendPayload) => {
+    const result = await api.post<InboxSendResponse>('/inbox/send', payload)
+    if (!result?.success)
+      throw new Error(
+        result?.error ||
+          result?.reason ||
+          'The provider did not accept this message. Your draft is still here.',
+      )
+    return result
+  },
 
   // Legacy bridge for the current WhatsApp-only UI while Inbox is being refactored.
   replyWhatsApp: (leadId: number, text: string) =>

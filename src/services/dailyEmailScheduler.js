@@ -206,15 +206,25 @@ class DailyEmailScheduler {
       const targetCount = Math.min(batchSize, Object.values(remaining).reduce((sum, value) => sum + value, 0));
       const leads = await this.getEligibleLeads(targetCount);
       const allocations = [];
+      const brevoCapacity = await emailService.getBrevoDailyCapacity();
+      const brevoRemaining = new Map([...brevoCapacity.values()].map(capacity => [capacity.group, capacity.remaining]));
       let senderCursor = 0;
       for (const lead of leads) {
         let selected = null;
         for (let attempt = 0; attempt < readyAccounts.length; attempt += 1) {
           const index = (senderCursor + attempt) % readyAccounts.length;
           const candidate = readyAccounts[index];
-          if (remaining[candidate.id] > 0) {
+          const capacity = candidate.provider === 'brevo' ? brevoCapacity.get(candidate.id) : null;
+          if (remaining[candidate.id] > 0 && (!capacity || brevoRemaining.get(capacity.group) > 0)) {
             selected = candidate;
             remaining[candidate.id] -= 1;
+            if (capacity) {
+              for (const [group, available] of brevoRemaining) {
+                if (capacity.group === 'unverified' || group === capacity.group || group === 'unverified') {
+                  brevoRemaining.set(group, available - 1);
+                }
+              }
+            }
             senderCursor = (index + 1) % readyAccounts.length;
             break;
           }
