@@ -124,6 +124,13 @@ sudo certbot renew --dry-run`}</Code>
       </p>
       <Code label="Find the Docker bridge gateway">{'docker inspect "$(docker compose ps -q app)" --format \'{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}\''}</Code>
       <p>
+        This configuration was exercised on Debian 12 with Nginx 1.28.0 in isolated
+        Docker containers on October 12, 2026. CI checks forwarded headers,
+        authentication and unbuffered event delivery using <code>npm run test:proxy</code>.
+        Certificate issuance and renewal still require your public domain and DNS.
+        The sanitized results are in <code>docs/validation/nginx-proxy.json</code>.
+      </p>
+      <p>
         No open ports? A{' '}
         <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/">
           Cloudflare Tunnel

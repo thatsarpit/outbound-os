@@ -1,0 +1,25 @@
+{
+  "testedAt": "2026-10-12",
+  "environment": {
+    "distro": "Debian GNU/Linux 12 (bookworm)",
+    "nginxVersion": "nginx version: nginx/1.28.0",
+    "deployment": "isolated Docker containers",
+    "appImage": "outbound-os:ci"
+  },
+  "checks": {
+    "healthStatus": 200,
+    "forwardedHost": "crm.example.com",
+    "forwardedProtocol": "http",
+    "forgedClientIpRejected": true,
+    "unauthenticatedSseStatus": 401,
+    "serviceTokenSseStatus": 401,
+    "authenticatedSseStatus": 200,
+    "firstEventMs": 5,
+    "eventStreamUnbuffered": true
+  },
+  "limitations": [
+    "Certbot certificate issuance and DNS require the installation's real public domain and were not exercised."
+  ],
+  "ciRun": "https://github.com/thatsarpit/outbound-os/actions/runs/38197900326",
+  "revision": "7c82a40369ef2a7f8fdc17f4e7a5064f84bc1e7e"
+}

@@ -130,4 +130,9 @@ jobs:
         run: node scripts/verify-nginx.mjs
       - name: Logs on failure
         if: failure()
-        run: docker logs obos || true
+        run: docker logs obos 2>&1 | sed '/First admin created:/s/with generated password .*/with generated password <redacted>/' || true
+      - name: Clean up isolated boot test
+        if: always()
+        run: |
+          docker rm -f obos || true
+          rm -f .env
