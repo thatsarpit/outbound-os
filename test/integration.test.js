@@ -1395,7 +1395,16 @@ describe('Replies always stop automation, and nothing a lead sends is dropped', 
       type: 'image', image: { id: `MEDIA-${id}`, mime_type: 'image/jpeg' },
     })));
 
-    const photos = await prisma.message.findMany({ where: { leadId: lead.id, direction: 'inbound' } });
+    // The webhook acknowledges before processing its media batch. Wait for
+    // the observable result rather than assuming every CI runner finishes
+    // three sequential downloads within the fixed delivery settling window.
+    const deadline = Date.now() + 3000;
+    let photos;
+    do {
+      photos = await prisma.message.findMany({ where: { leadId: lead.id, direction: 'inbound' } });
+      if (photos.length === 3) break;
+      await new Promise(resolve => setTimeout(resolve, 25));
+    } while (Date.now() < deadline);
     assert.equal(photos.length, 3);
   });
 });
