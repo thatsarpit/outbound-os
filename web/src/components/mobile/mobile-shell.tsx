@@ -28,6 +28,7 @@ import { useOnlineStatus } from '@/hooks/use-online-status'
 import { getFirstAccessibleRoute } from '@/lib/role-shell'
 import { cn } from '@/lib/utils'
 import { IS_DEMO } from '@/demo/demo-chrome'
+import { BrandMark } from '@/components/layout/brand-mark'
 
 const destinations = [
   { to: '/m/inbox', label: 'Inbox', icon: Inbox, capability: 'page.inbox' },
@@ -59,13 +60,16 @@ export function MobileShell() {
       <div className="mx-auto flex min-h-dvh max-w-2xl flex-col bg-background">
         {!conversationOpen && (
           <header className="sticky top-0 z-30 flex min-h-16 items-center justify-between gap-3 border-b border-border bg-surface px-4 pt-[env(safe-area-inset-top)]">
-            <div className="min-w-0 py-2">
-              <p className="text-[11px] font-medium text-text-muted">
-                {IS_DEMO ? 'Outbound OS · sample workspace' : 'Outbound OS'}
-              </p>
-              <h1 className="text-xl font-semibold tracking-tight">
-                {page?.label ?? 'Sales workspace'}
-              </h1>
+            <div className="flex min-w-0 items-center gap-3 py-2">
+              <BrandMark className="h-9 w-9 shrink-0 text-text-primary" />
+              <div className="min-w-0">
+                <p className="text-[11px] font-medium text-text-muted">
+                  {IS_DEMO ? 'Outbound OS · sample workspace' : 'Outbound OS'}
+                </p>
+                <h1 className="text-xl font-semibold tracking-tight">
+                  {page?.label ?? 'Sales workspace'}
+                </h1>
+              </div>
             </div>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -74,7 +78,15 @@ export function MobileShell() {
                   aria-label="Sales workspace menu"
                   className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface-raised text-text-secondary"
                 >
-                  <UserRound className="h-5 w-5" />
+                  <span className="text-sm font-semibold">
+                    {(user?.name || 'Sales')
+                      .trim()
+                      .split(/\s+/)
+                      .slice(0, 2)
+                      .map((part) => part[0])
+                      .join('')
+                      .toUpperCase()}
+                  </span>
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -152,7 +164,7 @@ export function MobileShell() {
                   className={({ isActive }) =>
                     cn(
                       'flex min-h-14 flex-1 flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-medium focus-visible:outline-2 focus-visible:outline-focus',
-                      isActive ? 'text-accent' : 'text-text-muted',
+                      isActive ? 'bg-accent-muted text-accent' : 'text-text-muted',
                     )
                   }
                 >

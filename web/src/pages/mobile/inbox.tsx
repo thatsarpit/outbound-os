@@ -8,6 +8,7 @@ import { ThreadListItem } from '@/components/inbox/thread-list-item'
 import {
   MobileError,
   MobilePagination,
+  MobileRefresh,
   mobileInput,
   mobileLeadId,
 } from '@/components/mobile/mobile-shared'
@@ -25,11 +26,23 @@ export default function MobileInboxPage() {
   const { dashboardScope } = useAuthStore()
   const [params, setParams] = useSearchParams()
   const selected = mobileLeadId(params.get('leadId'))
-  const [search, setSearch] = useState('')
+  const [search, setSearch] = useState(params.get('search') || '')
   const deferred = useDeferredValue(search.trim())
-  const [channel, setChannel] = useState<'all' | InboxChannel>('all')
-  const [needsReply, setNeedsReply] = useState(true)
-  const [page, setPage] = useState(1)
+  const [channel, setChannel] = useState<'all' | InboxChannel>(() =>
+    CHANNEL_ORDER.includes(params.get('filterChannel') as InboxChannel)
+      ? (params.get('filterChannel') as InboxChannel)
+      : 'all',
+  )
+  const [needsReply, setNeedsReply] = useState(params.get('state') !== 'all')
+  const [page, setPage] = useState(Math.max(1, Number(params.get('page')) || 1))
+  const queueParams = () => {
+    const next = new URLSearchParams()
+    if (search.trim()) next.set('search', search.trim())
+    if (channel !== 'all') next.set('filterChannel', channel)
+    if (!needsReply) next.set('state', 'all')
+    if (page > 1) next.set('page', String(page))
+    return next
+  }
   const result = useQuery({
     refetchOnWindowFocus: true,
     queryKey: ['inbox-threads', 'mobile', dashboardScope, deferred, channel, needsReply, page],
@@ -61,9 +74,17 @@ export default function MobileInboxPage() {
           key={`${dashboardScope}:${selected}`}
           leadId={selected}
           initialChannel={params.get('channel')}
-          onClose={() => setParams({})}
+          onClose={() => setParams(queueParams())}
           onChannelNavigate={(channel) =>
-            setParams({ leadId: String(selected), channel }, { replace: true })
+            setParams(
+              () => {
+                const next = queueParams()
+                next.set('leadId', String(selected))
+                next.set('channel', channel)
+                return next
+              },
+              { replace: true },
+            )
           }
         />
       </Suspense>
@@ -74,6 +95,11 @@ export default function MobileInboxPage() {
       <p className="text-sm text-text-secondary">
         Your workspace conversations, across every channel.
       </p>
+      <MobileRefresh
+        updatedAt={result.dataUpdatedAt}
+        refreshing={result.isFetching}
+        onRefresh={() => void result.refetch()}
+      />
       <label className="relative block">
         <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-text-muted" />
         <span className="sr-only">Search conversations</span>
@@ -146,10 +172,10 @@ export default function MobileInboxPage() {
                   selected={false}
                   onSelect={() => {
                     const draft = loadDraft(dashboardScope, thread.leadId)
-                    setParams({
-                      leadId: String(thread.leadId),
-                      channel: draft?.channel ?? thread.channel,
-                    })
+                    const next = queueParams()
+                    next.set('leadId', String(thread.leadId))
+                    next.set('channel', draft?.channel ?? thread.channel)
+                    setParams(next)
                   }}
                 />
               ))}

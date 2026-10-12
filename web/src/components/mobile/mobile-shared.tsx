@@ -1,9 +1,45 @@
 import { ArrowLeft, ArrowRight, RefreshCw } from 'lucide-react'
+import { useOnlineStatus } from '@/hooks/use-online-status'
 
 export const mobileInput =
   'min-h-11 w-full min-w-0 rounded-lg border border-border bg-surface px-3 py-2 text-base text-text-primary placeholder:text-text-muted focus:border-focus focus:outline-none focus:ring-2 focus:ring-focus-muted disabled:opacity-50'
 export const mobileButton =
   'inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-border bg-surface px-3 text-sm font-medium disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-focus'
+
+export function MobileRefresh({
+  updatedAt,
+  refreshing,
+  onRefresh,
+}: {
+  updatedAt: number
+  refreshing: boolean
+  onRefresh: () => void
+}) {
+  const online = useOnlineStatus()
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-xs text-text-muted" role="status">
+        {!online
+          ? 'Offline · showing loaded data'
+          : refreshing
+            ? 'Checking for updates…'
+            : updatedAt
+              ? `Updated ${new Date(updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+              : 'Waiting for updates'}
+      </p>
+      <button
+        type="button"
+        className={`${mobileButton} shrink-0`}
+        aria-label="Refresh results"
+        disabled={!online || refreshing}
+        onClick={onRefresh}
+      >
+        <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+        Refresh
+      </button>
+    </div>
+  )
+}
 
 export function MobileError({ message, retry }: { message: string; retry: () => void }) {
   return (

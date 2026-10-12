@@ -10,7 +10,7 @@ The three mobile destinations are:
   search and paginated results. A conversation opens full-screen. Email sender,
   subject, CC/BCC, templates and attachments are behind Options. Lead details,
   notes and follow-ups are available from the conversation header.
-- **Tasks:** pending workspace follow-ups, overdue counts, completion and links
+- **Tasks:** pending/all workspace follow-ups, overdue counts, completion/reopening and links
   to their leads. Open a lead to add another follow-up.
 - **Leads:** searchable contacts, contact details, conversation access, phone
   calls, notes and follow-ups.
@@ -38,6 +38,11 @@ there is no offline send queue or background transmission. Visible queries
 refresh on foreground/reconnect, with periodic inbox refresh while the app is
 open. Background push notifications are not implemented.
 
+Inbox, Leads and Tasks show their last refresh and provide a manual Refresh
+button. Inbox filters and lead searches survive opening and closing a contact.
+Long conversations provide a Latest messages shortcut without pulling you away
+from older messages. The mobile header uses the same brand mark as desktop.
+
 Follow-up dates use the workspace time zone returned by `/api/config/brand`.
 The picker labels that zone and converts its wall-clock time to UTC for the API.
 Missing or repeated times during a daylight-saving clock change require the
@@ -49,6 +54,11 @@ Open the HTTPS app in Safari, choose Share → Add to Home Screen, leave Open as
 Web App enabled when shown, and open the new icon. The manifest starts at
 `/m/inbox`; normal sign-in and permissions still apply. No service worker caches
 authenticated CRM data.
+
+If an older Home Screen shortcut displays a generic letter, remove that shortcut,
+reload the deployed app in Safari and add it again. The release checks validate
+the Apple icon and both manifest PNG sizes, including their actual bytes, so a
+missing file served as dashboard HTML cannot pass as a working icon.
 
 Before a production rollout, deploy the inbox/task API fixes and then the
 frontend bundle with the production authentication configuration. Verify on an

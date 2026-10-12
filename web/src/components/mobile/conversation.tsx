@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ChevronDown, Info, Send } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ChevronDown, Info, Send } from 'lucide-react'
 import { inboxApi } from '@/api/endpoints/inbox'
 import { EMAIL_TEMPLATE_LIST_QUERY_KEY, templatesApi } from '@/api/endpoints/templates'
 import type { InboxChannel, InboxThreadDetail, MediaFile } from '@/api/types'
@@ -84,6 +84,7 @@ export function MobileConversation({
   const timeline = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
+  const [showLatest, setShowLatest] = useState(false)
   const [details, setDetails] = useState(false)
   const [channelChoice, setChannel] = useState<InboxChannel | null>(
     CHANNEL_ORDER.includes(initialChannel as InboxChannel)
@@ -170,7 +171,10 @@ export function MobileConversation({
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3"
         onScroll={() => {
           const node = timeline.current
-          if (node) stick.current = node.scrollHeight - node.scrollTop - node.clientHeight < 64
+          if (node) {
+            stick.current = node.scrollHeight - node.scrollTop - node.clientHeight < 64
+            setShowLatest(!stick.current)
+          }
         }}
       >
         <div ref={content} className="space-y-3">
@@ -230,6 +234,20 @@ export function MobileConversation({
           )}
         </div>
       </div>
+      {showLatest && (
+        <button
+          type="button"
+          className={`${mobileButton} mx-auto mb-2 shrink-0 rounded-full shadow-sm`}
+          onClick={() => {
+            stick.current = true
+            if (timeline.current) timeline.current.scrollTop = timeline.current.scrollHeight
+            setShowLatest(false)
+          }}
+        >
+          <ArrowDown className="h-4 w-4" />
+          Latest messages
+        </button>
+      )}
       {!!thread && (
         <MobileReplyComposer
           key={`${channel}:${channel === 'email' ? accountId : 'default'}`}

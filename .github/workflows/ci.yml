@@ -56,6 +56,8 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
+      - name: Home Screen manifest and actual PNG assets
+        run: node ../scripts/verify-web-assets.mjs dist
       - name: Demo build, and sample data only in it
         run: |
           npm run build:demo

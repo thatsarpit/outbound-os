@@ -1,0 +1,16 @@
+/*
+  X-Robots-Tag: noindex
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+/index.html
+  Cache-Control: no-cache
+/manifest.webmanifest
+  Cache-Control: no-cache
+/apple-touch-icon.png
+  Cache-Control: public, max-age=3600, must-revalidate
+/app-icon-192.png
+  Cache-Control: public, max-age=3600, must-revalidate
+/app-icon-512.png
+  Cache-Control: public, max-age=3600, must-revalidate
