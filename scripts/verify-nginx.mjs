@@ -47,7 +47,13 @@ try {
   const config = source.match(/export const nginxExample = `([\s\S]*?)`/)?.[1];
   assert.ok(config, 'documented Nginx example exists');
   writeFileSync(path.join(temp, 'nginx.conf'), config);
-  writeFileSync(path.join(temp, 'server.mjs'), `import app from '/app/src/api.js';\napp.get('/api/proxy-proof', (req, res) => res.json({ ip: req.ip, protocol: req.protocol, host: req.get('host') }));\napp.listen(3001, '0.0.0.0');\n`);
+  writeFileSync(path.join(temp, 'server.mjs'), `import app from '/app/src/api.js';
+import prisma from '/app/src/utils/prismaClient.js';
+import { signToken } from '/app/src/auth/rbac.js';
+const user = await prisma.user.create({ data: { name: 'Proxy test', email: 'proxy-test@example.test', passwordHash: 'disabled-test-password', role: 'viewer' } });
+app.get('/api/proxy-proof', (req, res) => res.json({ ip: req.ip, protocol: req.protocol, host: req.get('host'), sessionToken: signToken(user) }));
+app.listen(3001, '0.0.0.0');
+`);
   docker('run', '-d', '--name', app, '--label', 'outboundos.test=nginx', '-p', '127.0.0.1::80',
     '-e', 'DATABASE_URL=file:/app/data/proxy-test.db', '-e', 'NODE_ENV=test', '-e', 'AUTH_PROVIDER=local',
     '-e', 'TRUST_PROXY=loopback', '-e', `MCP_SERVICE_TOKEN=${token}`, '-e', `JWT_SECRET=${randomBytes(32).toString('hex')}`,
@@ -71,14 +77,16 @@ try {
   assert.notEqual(forwarded.ip, '192.0.2.55', 'trust stops at the real client, not its forged header');
   const unauthorized = await request(port, '/api/events');
   assert.equal(unauthorized.status, 401);
-  const event = await request(port, `/api/events?token=${token}`, {}, true);
+  const serviceEvent = await request(port, `/api/events?token=${token}`);
+  assert.equal(serviceEvent.status, 401, 'SSE requires a user session, not a service token');
+  const event = await request(port, `/api/events?token=${encodeURIComponent(forwarded.sessionToken)}`, {}, true);
   assert.equal(event.status, 200);
   assert.match(event.headers['content-type'], /text\/event-stream/);
   assert.ok(event.elapsedMs < 2000, 'SSE first event arrives without buffering');
   assert.equal(event.headers['cache-control'], 'no-cache');
   const nginxVersion = docker('exec', proxy, 'sh', '-c', 'nginx -v 2>&1');
   const distro = docker('exec', proxy, 'sh', '-c', '. /etc/os-release; printf "%s" "$PRETTY_NAME"');
-  const result = { testedAt: new Date().toISOString().slice(0, 10), environment: { distro, nginxVersion, deployment: 'isolated local Docker containers', appImage: image }, checks: { healthStatus: 200, forwardedHost: forwarded.host, forwardedProtocol: forwarded.protocol, forgedClientIpRejected: true, unauthenticatedSseStatus: 401, authenticatedSseStatus: 200, firstEventMs: event.elapsedMs, eventStreamUnbuffered: true }, limitations: ['Certbot certificate issuance and DNS require the installation\'s real public domain and were not exercised.'] };
+  const result = { testedAt: new Date().toISOString().slice(0, 10), environment: { distro, nginxVersion, deployment: 'isolated Docker containers', appImage: image }, checks: { healthStatus: 200, forwardedHost: forwarded.host, forwardedProtocol: forwarded.protocol, forgedClientIpRejected: true, unauthenticatedSseStatus: 401, serviceTokenSseStatus: 401, authenticatedSseStatus: 200, firstEventMs: event.elapsedMs, eventStreamUnbuffered: true }, limitations: ['Certbot certificate issuance and DNS require the installation\'s real public domain and were not exercised.'] };
   console.log(JSON.stringify(result, null, 2));
 } finally {
   for (const name of [proxy, app]) { try { docker('rm', '-f', name); } catch { /* Also runs after a failed boot or assertion. */ } }
