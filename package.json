@@ -47,7 +47,7 @@
     "node-cron": "^4.6.0",
     "node-fetch": "^3.3.2",
     "nodemailer": "^10.0.10",
-    "prisma": "^6.19.2",
+    "prisma": "^7.10.0",
     "teleproto": "^1.228.4",
     "winston": "^3.17.0"
   },
