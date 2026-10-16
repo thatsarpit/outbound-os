@@ -40,6 +40,7 @@ import replyDetector from './services/replyDetector.js';
 import leadStateService, { LEAD_STATUS } from './domain/leadStateService.js';
 import emailService from './services/emailService.js';
 import dailyEmailScheduler from './services/dailyEmailScheduler.js';
+import { prepareBatchTemplate, validateBatchSettings } from './utils/emailBatchPolicy.js';
 import brevoMarketingCampaigns from './services/brevoMarketingCampaigns.js';
 import interventionEngine from './services/interventionEngine.js';
 import reportingService from './services/reportingService.js';
@@ -3587,8 +3588,7 @@ app.post('/api/email/accounts/:id/test', requireRole('admin'), async (req, res) 
   }
 });
 
-// Daily marketing batch, rotated across the configured senders. Queue creation is idempotent by day;
-// actual delivery remains governed by the global sending pause.
+// Marketing batches require a reviewed manual launch. Status and previews are read-only.
 app.get('/api/email/daily/status', requireRole('manager'), async (req, res) => {
   try { res.json(await dailyEmailScheduler.getStatus()); }
   catch (error) { res.status(500).json({ error: error.message }); }
@@ -3596,40 +3596,40 @@ app.get('/api/email/daily/status', requireRole('manager'), async (req, res) => {
 
 app.patch('/api/email/daily/settings', requireRole('admin'), async (req, res) => {
   try {
-    const updates = [];
-    if (typeof req.body.enabled === 'boolean') updates.push(['email.daily.enabled', String(req.body.enabled)]);
-    if (typeof req.body.marketingEnabled === 'boolean') {
-      await brevoMarketingCampaigns.setEnabled(req.body.marketingEnabled);
+    // Validate the complete patch before persisting any field.
+    const updates = validateBatchSettings(req.body);
+    if (req.body.templateId != null) {
+      const template = await prisma.emailTemplate.findUnique({ where: { id: req.body.templateId } });
+      prepareBatchTemplate(template);
+    }
+    if (req.body.senderIds?.length) {
+      const ids = [...new Set(req.body.senderIds)];
+      const count = await prisma.emailAccount.count({ where: { id: { in: ids }, provider: 'brevo' } });
+      if (count !== ids.length) throw new Error('Every selected sender must be an existing Brevo account');
     }
     if (req.body.brevoFolderId !== undefined) {
-      const rawFolderId = req.body.brevoFolderId;
-      if (rawFolderId != null && String(rawFolderId).trim() !== '' && !/^[1-9]\d*$/.test(String(rawFolderId).trim())) {
-        return res.status(400).json({ error: 'brevoFolderId must be a positive integer or null' });
-      }
-      await brevoMarketingCampaigns.setFolderId(req.body.brevoFolderId);
+      const scoped = await prisma.systemConfig.count({ where: { key: { startsWith: 'email.daily.marketing.brevo_folder_id.' } } });
+      if (scoped) throw new Error('Configure the campaign folder separately for each Brevo account');
     }
-    if (req.body.batchSize != null) {
-      const batchSize = Number(req.body.batchSize);
-      if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 200) {
-        return res.status(400).json({ error: 'batchSize must be an integer from 1 to 200' });
-      }
-      updates.push(['email.daily.batch_size', String(batchSize)]);
-    }
-    for (const [key, value] of updates) {
-      await prisma.systemConfig.upsert({ where: { key }, update: { value }, create: { key, value } });
-    }
+    await prisma.$transaction(updates.map(([key, value]) => prisma.systemConfig.upsert({
+      where: { key }, update: { value }, create: { key, value },
+    })));
     res.json({ success: true, ...(await dailyEmailScheduler.getStatus()) });
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  } catch (error) { res.status(400).json({ error: error.message }); }
 });
 
 app.post('/api/email/daily/preview', requireRole('manager'), async (req, res) => {
-  try { res.json(await dailyEmailScheduler.run({ dryRun: true, force: true, limit: req.body?.limit })); }
+  try { res.json(await dailyEmailScheduler.run({ dryRun: true, limit: req.body?.limit })); }
   catch (error) { res.status(500).json({ error: error.message }); }
 });
 
 app.post('/api/email/daily/queue', requireRole('admin'), async (req, res) => {
-  try { res.json(await dailyEmailScheduler.run({ force: req.body?.force === true, limit: req.body?.limit })); }
-  catch (error) { res.status(500).json({ error: error.message }); }
+  try {
+    res.json(await dailyEmailScheduler.run({
+      trigger: 'manual', force: req.body?.force === true, limit: req.body?.limit,
+      expectedPreviewHash: req.body?.previewHash,
+    }));
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
 // Send a message from Inbox across supported channels
