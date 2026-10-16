@@ -308,6 +308,16 @@ const MESSAGES: InboxMessage[] = [
       providerStatusReason: 'brevo_webhook:soft_bounce',
     },
   ),
+  message(
+    6,
+    'inbound',
+    18,
+    'This is a delivery status report. The destination mailbox is temporarily unavailable.',
+    {
+      emailInboundKind: 'delivery_report',
+      subject: 'Delivery status notification',
+    },
+  ),
 ]
 
 files.set(

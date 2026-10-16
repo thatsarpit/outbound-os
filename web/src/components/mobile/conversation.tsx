@@ -23,7 +23,7 @@ import { useOnlineStatus } from '@/hooks/use-online-status'
 import { CHANNELS, CHANNEL_ORDER } from '@/lib/channels'
 import { buildReplySubject, getRenderedTemplateText } from '@/lib/email-compose'
 import { clearSubmittedDraft, loadDraft, saveDraft, type EmailDraft } from '@/lib/email-drafts'
-import { describeEmailDelivery } from '@/lib/email-delivery'
+import { describeEmailDelivery, isReplyableEmail } from '@/lib/email-delivery'
 import { IS_DEMO } from '@/demo/demo-chrome'
 import { toast } from '@/stores/toast-store'
 
@@ -216,7 +216,7 @@ export function MobileConversation({
                   </div>
                   {delivery.detail && (
                     <p
-                      className={`mt-2 text-xs leading-5 ${delivery.failed ? 'text-danger' : 'text-warning'}`}
+                      className={`mt-2 text-xs leading-5 ${delivery.failed ? 'text-danger' : delivery.temporary ? 'text-warning' : 'text-text-muted'}`}
                     >
                       {delivery.detail}
                     </p>
@@ -320,7 +320,7 @@ function MobileReplyComposer({
   const { dashboardScope, user } = useAuthStore()
   const online = useOnlineStatus()
   const client = useQueryClient()
-  const latestEmail = [...thread.messages].reverse().find((message) => message.channel === 'email')
+  const latestEmail = [...thread.messages].reverse().find(isReplyableEmail)
   const empty = (): Omit<EmailDraft, 'savedAt'> => ({
     subject: buildReplySubject(latestEmail?.subject || thread.subject),
     plainBody: '',
@@ -400,7 +400,7 @@ function MobileReplyComposer({
                 htmlBody: draft.htmlBody || undefined,
                 subject: draft.subject.trim(),
                 accountId,
-                replyToMessageId: latestEmail?.id,
+                replyToMessageId: latestEmail?.emailMessageId ? latestEmail.id : undefined,
                 cc: draft.cc.trim() || undefined,
                 bcc: draft.bcc.trim() || undefined,
               }
