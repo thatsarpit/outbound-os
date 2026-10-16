@@ -32,14 +32,14 @@
     "admin-user": "node scripts/admin-user.mjs"
   },
   "dependencies": {
-    "@clerk/express": "^2.1.66",
+    "@clerk/express": "^2.1.78",
     "@prisma/client": "^6.19.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.0",
     "express": "^4.21.0",
-    "express-rate-limit": "^8.3.1",
-    "helmet": "^8.1.0",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
     "imapflow": "^1.2.16",
     "jsonwebtoken": "^9.0.3",
     "mailparser": "^3.9.38",
@@ -48,11 +48,11 @@
     "node-fetch": "^3.3.2",
     "nodemailer": "^10.0.10",
     "prisma": "^6.19.2",
-    "teleproto": "^1.228.4",
+    "teleproto": "^1.230.0",
     "winston": "^3.17.0"
   },
   "devDependencies": {
-    "csv-parse": "^7.0.2"
+    "csv-parse": "^7.0.3"
   },
   "overrides": {
     "deepmerge-ts": "^8.0.0",
