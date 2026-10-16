@@ -1,3 +1,4 @@
+import { HUMAN_REPLY_WHERE } from '../utils/emailInbound.js';
 import prisma from '../utils/prismaClient.js';
 import { isBsuid } from '../utils/whatsappAddress.js';
 import logger from '../utils/logger.js';
@@ -361,7 +362,7 @@ class ReplyDetector {
       this._bindLeadIdentities(lead.id, accountId, candidates);
       if (waUserId) await this._rememberWhatsAppUser(lead, waUserId, meta.waUsername);
 
-      const inboundWhere = { leadId: lead.id, direction: 'inbound' };
+      const inboundWhere = { leadId: lead.id, ...HUMAN_REPLY_WHERE };
       const [inboundCount, previousInbound] = await Promise.all([
         prisma.message.count({ where: inboundWhere }),
         prisma.message.findFirst({

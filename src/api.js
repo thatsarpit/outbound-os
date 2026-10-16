@@ -12,6 +12,7 @@ import { randomUUID, randomBytes } from 'crypto';
 
 
 import prisma from './utils/prismaClient.js';
+import { ACTIONABLE_CONVERSATION_WHERE, HUMAN_REPLY_WHERE, isActionableConversationMessage, isHumanReply } from './utils/emailInbound.js';
 import salesRoutes from './routes/sales.js';
 import analyticsViewRoutes from './routes/analyticsViews.js';
 import { analyticsWindow } from './utils/analyticsWindow.js';
@@ -170,7 +171,7 @@ function isRoleAtLeast(role, minRole) {
 
 function normalizeInboxThreadState({ lead, lastMessage, assignedToId }) {
   if (lead.status === 'closed') return 'resolved';
-  if (lastMessage?.direction === 'inbound') return 'needs_reply';
+  if (isHumanReply(lastMessage)) return 'needs_reply';
   if (assignedToId) return 'assigned';
   return 'unassigned';
 }
@@ -188,12 +189,13 @@ function buildInboxMessage(message, emailAccountsById = {}, telegramAccountsById
   };
 }
 
-function buildInboxThreadSummary(lead, emailAccountsById = {}, telegramAccountsById = {}) {
+function buildInboxThreadSummary(lead, emailAccountsById = {}, telegramAccountsById = {}, lastActionableMessage = undefined) {
   const lastMessageRaw = Array.isArray(lead.messages) ? lead.messages[0] || null : null;
   const lastMessage = lastMessageRaw ? buildInboxMessage(lastMessageRaw, emailAccountsById, telegramAccountsById) : null;
+  const actionable = lastActionableMessage === undefined ? lastMessage : lastActionableMessage;
   const threadState = normalizeInboxThreadState({
     lead,
-    lastMessage,
+    lastMessage: actionable,
     assignedToId: lead.assignedToId,
   });
 
@@ -215,8 +217,8 @@ function buildInboxThreadSummary(lead, emailAccountsById = {}, telegramAccountsB
     lastMessage: lastMessage?.content || '',
     lastMessagePreview: lastMessage?.content || '',
     lastMessageAt: lastMessage?.createdAt || lead.lastMessageAt || lead.updatedAt,
-    lastInboundAt: lastMessage?.direction === 'inbound' ? lastMessage.createdAt : null,
-    lastOutboundAt: lastMessage?.direction === 'outbound' ? lastMessage.createdAt : null,
+    lastInboundAt: isHumanReply(actionable) ? actionable.createdAt : null,
+    lastOutboundAt: actionable?.direction === 'outbound' ? actionable.createdAt : null,
     unread: threadState === 'needs_reply',
     replyNeeded: threadState === 'needs_reply',
     assignmentState: lead.assignedToId ? 'assigned' : 'unassigned',
@@ -1176,7 +1178,7 @@ app.get('/api/stats/overview', async (req, res) => {
         } }),
       prisma.message.count({ where: { status: { in: ['queued', 'sending'] }, lead: poolFilter } }),
       prisma.lead.groupBy({ by: ['engagementLevel'], where: poolFilter, _count: true }),
-      prisma.message.findMany({ where: { direction: 'inbound', lead: poolFilter }, select: { leadId: true }, distinct: ['leadId'] }),
+      prisma.message.findMany({ where: { ...HUMAN_REPLY_WHERE, lead: poolFilter }, select: { leadId: true }, distinct: ['leadId'] }),
       prisma.message.findMany({
         where: {
           direction: "outbound",
@@ -1209,7 +1211,7 @@ app.get('/api/stats/overview', async (req, res) => {
       const [newLeads, outbound, inbound] = await Promise.all([
         prisma.lead.count({ where: { ...poolFilter, ...buildNewLeadDateWhere(start, end) } }),
         prisma.message.findMany({ where: { direction: 'outbound', status: { in: DELIVERED_MESSAGE_STATUSES }, sentAt: { gte: start, lt: end }, lead: poolFilter }, select: { leadId: true } }),
-        prisma.message.findMany({ where: { direction: 'inbound', createdAt: { gte: start, lt: end }, lead: poolFilter }, select: { leadId: true } }),
+        prisma.message.findMany({ where: { ...HUMAN_REPLY_WHERE, createdAt: { gte: start, lt: end }, lead: poolFilter }, select: { leadId: true } }),
       ]);
       return {
         newLeads,
@@ -1312,7 +1314,7 @@ app.get('/api/stats/charts', async (req, res) => {
       },
       select: { sentAt: true, channel: true, leadId: true },
     }), prisma.message.findMany({
-      where: { direction: 'inbound', createdAt: { gte: sinceUTC, lt: tomorrowStartUTC }, lead: poolFilter },
+      where: { ...HUMAN_REPLY_WHERE, createdAt: { gte: sinceUTC, lt: tomorrowStartUTC }, lead: poolFilter },
       select: { leadId: true, createdAt: true },
     }), prisma.lead.findMany({
       where: { ...poolFilter, ...buildNewLeadDateWhere(sinceUTC, tomorrowStartUTC) },
@@ -2851,7 +2853,7 @@ app.get('/api/whatsapp/status', async (req, res) => {
             lead: poolFilter,
           },
           }),
-          prisma.message.count({ where: { direction: 'inbound',
+          prisma.message.count({ where: { ...HUMAN_REPLY_WHERE,
             ...buildMessageEventDateWhere(dayStart, dayEnd),
             lead: poolFilter,
           } }),
@@ -3201,16 +3203,31 @@ app.get('/api/inbox/threads', async (req, res) => {
         select: {
           id: true, status: true, assignedToId: true, lastMessageAt: true, updatedAt: true,
           messages: { where: visibleMessageWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
-            select: { direction: true, createdAt: true } },
+            select: { direction: true, channel: true, emailInboundKind: true, status: true, createdAt: true } },
         },
       });
-      candidates.push(...batch);
+      // Preserve latest-visible ordering, while determining reply ownership
+      // from customer/outbound messages. Automatic notices remain in history.
+      const needsPrevious = batch.filter(lead => !isActionableConversationMessage(lead.messages[0]));
+      const actionableRows = needsPrevious.length ? await prisma.lead.findMany({
+        where: { id: { in: needsPrevious.map(lead => lead.id) } },
+        select: { id: true, messages: {
+          where: { AND: [visibleMessageWhere, ACTIONABLE_CONVERSATION_WHERE] },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
+          select: { direction: true, channel: true, emailInboundKind: true, status: true, createdAt: true },
+        } },
+      }) : [];
+      const actionable = new Map([
+        ...batch.filter(lead => isActionableConversationMessage(lead.messages[0])).map(lead => [lead.id, lead.messages[0]]),
+        ...actionableRows.map(lead => [lead.id, lead.messages[0] || null]),
+      ]);
+      candidates.push(...batch.map(lead => ({ ...lead, lastActionableMessage: actionable.get(lead.id) || null })));
       if (batch.length < scanSize) break;
       afterId = batch[batch.length - 1].id;
     }
     const queue = candidates.map((lead) => ({
       ...lead,
-      threadState: normalizeInboxThreadState({ lead, lastMessage: lead.messages[0], assignedToId: lead.assignedToId }),
+      threadState: normalizeInboxThreadState({ lead, lastMessage: lead.lastActionableMessage, assignedToId: lead.assignedToId }),
       latestAt: lead.messages[0]?.createdAt || lead.lastMessageAt || lead.updatedAt,
     })).filter((lead) => {
       if (state === 'needs_reply') return lead.threadState === 'needs_reply';
@@ -3236,7 +3253,8 @@ app.get('/api/inbox/threads', async (req, res) => {
     const emailAccountsById = Object.fromEntries(emailAccounts.map((account) => [account.id, account]));
     const telegramAccountsById = Object.fromEntries(telegramSenderAccounts.map((account) => [account.id, account]));
     const byId = new Map(leads.map((lead) => [lead.id, lead]));
-    const threads = ids.filter((id) => byId.has(id)).map((id) => buildInboxThreadSummary(byId.get(id), emailAccountsById, telegramAccountsById));
+    const actionableById = new Map(queue.map(lead => [lead.id, lead.lastActionableMessage]));
+    const threads = ids.filter((id) => byId.has(id)).map((id) => buildInboxThreadSummary(byId.get(id), emailAccountsById, telegramAccountsById, actionableById.get(id)));
     const needsReply = queue.filter((lead) => lead.threadState === 'needs_reply').length;
     res.json({ threads, total, page, pages: Math.ceil(total / limit), unread: needsReply, needsReply });
   } catch (error) {
@@ -3293,7 +3311,7 @@ async function sendInboxThreadDetail(req, res) {
     const summary = buildInboxThreadSummary({
       ...lead,
       messages: lastMessage ? [lastMessage] : [],
-    }, emailAccountsById, telegramAccountsById);
+    }, emailAccountsById, telegramAccountsById, lead.messages.findLast(isActionableConversationMessage) || null);
 
     res.json({
       ...summary,
@@ -4026,10 +4044,10 @@ app.get('/api/activity', async (req, res) => {
 
     // Fetch last 15 messages
     const recentMessages = await prisma.message.findMany({
-      where: { status: { in: ['sent', 'delivered', 'read', 'failed'] } },
+      where: { status: { in: ['sent', 'delivered', 'read', 'failed'] }, ...ACTIONABLE_CONVERSATION_WHERE },
       take: 15,
       orderBy: { createdAt: 'desc' },
-      select: { id: true, direction: true, channel: true, status: true, createdAt: true, lead: { select: { name: true } } }
+      select: { id: true, direction: true, channel: true, status: true, emailInboundKind: true, createdAt: true, lead: { select: { name: true } } }
     });
 
     // Synthesize into a unified timeline
@@ -4058,6 +4076,7 @@ app.get('/api/activity', async (req, res) => {
     });
 
     recentMessages.forEach((msg) => {
+      if (msg.direction === 'inbound' && !isHumanReply(msg)) return;
       let type = 'system_error';
       let text = 'Unknown message event';
       const channelLabel = msg.channel === 'email'
@@ -4236,13 +4255,13 @@ app.get('/api/analytics/funnel', async (req, res) => {
     // outreach event and made recovered historical data look artificially slow.
     const repliedLeads = await prisma.lead.findMany({
       where: { ...activeWhere,
-        messages: { some: { direction: "inbound" } },
+        messages: { some: HUMAN_REPLY_WHERE },
       },
       select: {
         messages: {
           where: {
             OR: [
-              { direction: "inbound" },
+              HUMAN_REPLY_WHERE,
               {
                 direction: "outbound",
                 status: { in: DELIVERED_MESSAGE_STATUSES },
@@ -4440,7 +4459,7 @@ app.get('/api/analytics/email-performance', async (req, res) => {
           where: {
             leadId: { in: [...variantLeadIds] },
             channel: 'email',
-            direction: 'inbound',
+            ...HUMAN_REPLY_WHERE,
             ...(since ? { createdAt: { gte: since } } : {}),
           },
           select: {

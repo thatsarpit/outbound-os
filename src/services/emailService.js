@@ -12,6 +12,7 @@ import whatsappManager from './whatsapp.js';
 import leadStateService from '../domain/leadStateService.js';
 import leadScorer from './leadScorer.js';
 import { isSameZonedDay } from '../utils/workspaceTime.js';
+import { classifyInboundEmail, HUMAN_REPLY_WHERE } from '../utils/emailInbound.js';
 
 /**
  * Unsubscribe requests go to the mailbox that sent the email, which is the one
@@ -990,7 +991,7 @@ class EmailService {
           // Finish each FETCH before downloading bodies: ImapFlow queues other
           // commands until a streaming FETCH finishes, so nesting can deadlock.
           const messages = await client.fetchAll(uids.slice(offset, offset + 100).join(','),
-            { envelope: true, headers: ['in-reply-to', 'references', 'message-id', 'from', 'to', 'subject'] },
+            { envelope: true, internalDate: true, headers: ['in-reply-to', 'references', 'message-id', 'from', 'to', 'subject', 'content-type', 'auto-submitted', 'x-autoreply', 'x-autorespond', 'x-auto-reply'] },
             { uid: true });
         for (const msg of messages) {
           try {
@@ -999,8 +1000,15 @@ class EmailService {
             const from = msg.envelope?.from?.[0]?.address || '';
             const subject = msg.envelope?.subject || '';
             const messageId = headers.messageId || msg.envelope?.messageId || '';
+            const inboundKey = `imap-inbound:${crypto.createHash('sha256').update(JSON.stringify([
+              account.imapHost.toLowerCase(), account.imapPort, (account.imapUser || account.smtpUser).toLowerCase(),
+              String(client.mailbox?.uidValidity || ''), msg.uid,
+              // The original date/header fingerprint also protects the fallback
+              // when a server omits UIDVALIDITY in an incomplete mailbox state.
+              msg.internalDate || msg.envelope?.date || null, String(msg.headers || ''),
+            ])).digest('hex')}`;
 
-            if (!from || from === account.email) continue; // skip own emails
+            if (!from || senderAccounts.some(sender => sender.email.trim().toLowerCase() === from.trim().toLowerCase())) continue;
 
             // Match reply to a lead by In-Reply-To or sender email
             let lead = null;
@@ -1039,28 +1047,33 @@ class EmailService {
             // Dedup: check if we already saved this message. If we previously saved
             // it as 'partial' (download failed), allow this iteration to retry the
             // download and upgrade the row instead of skipping.
+            const inboundIdentity = { channel: 'email', direction: 'inbound', OR: [
+              ...(messageId ? [{ emailMessageId: messageId }] : []), { idempotencyKey: inboundKey },
+            ] };
             let existingPartial = null;
-            if (messageId) {
+            if (messageId || msg.uid) {
               const existing = await prisma.message.findFirst({
-                where: { emailMessageId: messageId, direction: 'inbound' },
+                where: inboundIdentity,
               });
               if (existing && existing.status !== 'partial') continue;
               if (existing && existing.status === 'partial') existingPartial = existing;
             }
 
             // Fetch body text for the reply content. If the IMAP download fails,
-            // we still record the reply (so lead state updates and queued follow-ups
-            // get cancelled) but mark it 'partial' so the next sync can retry.
+            // retain a pending message and hold queued follow-ups, without
+            // inventing a human reply before the next sync recovers its body.
             let bodyText = null;
             let downloadOk = false;
+            let parsedBody = null;
             try {
               const download = await client.download(msg.uid, undefined, { uid: true });
               if (download?.content) {
                 const chunks = [];
                 for await (const chunk of download.content) chunks.push(chunk);
                 const parsed = await simpleParser(Buffer.concat(chunks), { skipTextToHtml: true });
-                if (parsed.text?.trim()) {
-                  bodyText = parsed.text.trim().substring(0, 2000);
+                parsedBody = parsed;
+                if (parsed.text?.trim() || classifyInboundEmail(parsed) !== 'human') {
+                  bodyText = parsed.text?.trim().substring(0, 2000) || `[${classifyInboundEmail(parsed) === 'delivery_report' ? 'Delivery report' : 'Automatic reply'}] ${subject}`;
                   downloadOk = true;
                 }
               }
@@ -1076,74 +1089,59 @@ class EmailService {
               logger.warn(`📭 Saving inbound email ${messageId || '(no id)'} as 'partial' — body retrieval failed; will retry next sync`);
             }
 
-            let inboundMessage;
-            if (existingPartial) {
-              // Upgrade the previously-saved partial row.
-              if (downloadOk) {
-                inboundMessage = await prisma.message.update({
-                  where: { id: existingPartial.id },
-                  data: { content: bodyText, status: 'delivered' },
+            const headerKind = classifyInboundEmail({ headers: headers.headers, subject });
+            const bodyKind = parsedBody ? classifyInboundEmail(parsedBody) : null;
+            const inboundKind = headerKind !== 'human' ? headerKind : bodyKind && bodyKind !== 'human'
+              ? bodyKind : downloadOk ? 'human' : 'pending';
+            const rawEventAt = msg.internalDate || msg.envelope?.date || parsedBody?.date;
+            const parsedEventAt = rawEventAt ? new Date(rawEventAt) : null;
+            const eventAt = parsedEventAt && Number.isFinite(parsedEventAt.getTime()) ? parsedEventAt : new Date();
+            const saved = await prisma.$transaction(async tx => {
+              // Another inbox may carry the same forwarded message. Recheck
+              // identity under the write transaction after downloading MIME.
+              const current = await tx.message.findFirst({ where: inboundIdentity });
+              if (current && current.status !== 'partial') return { inbound: current, humanReply: false };
+              const partial = current || existingPartial;
+              // The old importer already ran reply side effects for partial
+              // rows. Recover their bodies without emitting the reply again.
+              const legacyPartial = partial && partial.emailInboundKind == null;
+              const data = {
+                content: bodyText, status: downloadOk ? 'delivered' : 'partial', emailInboundKind: inboundKind,
+                ...(legacyPartial ? { emailReplyProcessedAt: new Date() } : {}),
+              };
+              const inbound = partial
+                ? await tx.message.update({ where: { id: partial.id }, data })
+                : await tx.message.create({ data: {
+                    ...data, leadId: lead.id, direction: 'inbound', channel: 'email', waAccount: 0,
+                    emailAccountId: replyAccountId, emailSubject: subject, emailMessageId: messageId,
+                    idempotencyKey: inboundKey,
+                    emailInReplyTo: inReplyTo, providerCreatedAt: eventAt, sentAt: eventAt,
+                  } });
+              // Hold uncertain matched mail without inventing engagement. A
+              // recovered human body is processed once in the same transaction.
+              if (inboundKind === 'pending' || inboundKind === 'human') {
+                await tx.message.updateMany({
+                  where: { leadId: lead.id, direction: 'outbound', status: 'queued' },
+                  data: { status: 'cancelled', providerStatusReason: inboundKind === 'pending' ? 'inbound_email_pending_review' : 'human_reply_received' },
                 });
-                logger.info(`📨 Recovered body for previously-partial inbound email (msg ${existingPartial.id})`);
-              } else {
-                inboundMessage = existingPartial;
               }
-            } else {
-              inboundMessage = await prisma.message.create({
-                data: {
-                  leadId: lead.id,
-                  direction: 'inbound',
-                  channel: 'email',
-                  content: bodyText,
-                  waAccount: 0,
-                  emailAccountId: replyAccountId,
-                  status: downloadOk ? 'delivered' : 'partial',
-                  emailSubject: subject,
-                  emailMessageId: messageId,
-                  emailInReplyTo: inReplyTo,
-                },
-              });
-            }
-
-            // Side effects (status change, followup cancel, activity log) only run on
-            // first observation. If we just recovered a partial body, they already ran.
-            if (existingPartial) {
-              continue;
-            }
-
-            // Update lead status (same logic as WhatsApp reply detection)
-            const inboundCount = await prisma.message.count({
-              where: { leadId: lead.id, direction: 'inbound' },
+              if (inboundKind !== 'human' || inbound.emailReplyProcessedAt) return { inbound, humanReply: false };
+              await tx.message.update({ where: { id: inbound.id }, data: { emailReplyProcessedAt: new Date() } });
+              const inboundCount = await tx.message.count({ where: { leadId: lead.id, ...HUMAN_REPLY_WHERE } });
+              const currentLead = await tx.lead.findUnique({ where: { id: lead.id } });
+              const newStatus = inboundCount >= 2 ? 'engaged' : 'replied';
+              if (['new', 'contacted', 'replied'].includes(currentLead.status)) {
+                await tx.lead.update({ where: { id: lead.id }, data: {
+                  status: newStatus, repliedAt: currentLead.repliedAt || eventAt,
+                  emailStatus: currentLead.emailOptOut || ['bounced', 'complained', 'unsubscribed', 'suppressed'].includes(currentLead.emailStatus)
+                    ? currentLead.emailStatus : 'replied',
+                  lastMessageAt: currentLead.lastMessageAt && currentLead.lastMessageAt > eventAt ? currentLead.lastMessageAt : eventAt,
+                } });
+              }
+              return { inbound, humanReply: true };
             });
-
-            const newStatus = inboundCount >= 2 ? 'engaged' : 'replied';
-            const validTransition = ['new', 'contacted', 'replied'].includes(lead.status)
-              || (lead.status === 'replied' && newStatus === 'engaged');
-
-            if (validTransition) {
-              await prisma.lead.update({
-                where: { id: lead.id },
-                data: {
-                  status: newStatus,
-                  repliedAt: lead.repliedAt || new Date(),
-                  emailStatus: 'replied',
-                  lastMessageAt: new Date(),
-                },
-              });
-
-              // Cancel pending follow-up messages (same as WhatsApp reply handling)
-              const cancelled = await prisma.message.updateMany({
-                where: {
-                  leadId: lead.id,
-                  status: 'queued',
-                  direction: 'outbound',
-                },
-                data: { status: 'cancelled' },
-              });
-              if (cancelled.count > 0) {
-                logger.info(`📧 Cancelled ${cancelled.count} queued follow-up(s) for Lead ${lead.id} after email reply`);
-              }
-            }
+            if (!saved.humanReply) continue;
+            const inboundMessage = saved.inbound;
 
             activityLog.add(EVENT_TYPES.EMAIL_REPLY, `Email reply from ${lead.name} (${from})`, {
               leadId: lead.id,

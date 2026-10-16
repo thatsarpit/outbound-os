@@ -1,3 +1,4 @@
+import { isReplyableEmail } from '@/lib/email-delivery'
 import {
   useCallback,
   useDeferredValue,
@@ -203,10 +204,7 @@ function InboxInner() {
     null
 
   const latestEmailMessage =
-    activeThread?.messages
-      ?.slice()
-      .reverse()
-      .find((message) => message.channel === 'email') || null
+    activeThread?.messages?.slice().reverse().find(isReplyableEmail) || null
 
   const { data: templates = [], isLoading: templatesLoading } = useQuery({
     queryKey: EMAIL_TEMPLATE_LIST_QUERY_KEY,
@@ -341,7 +339,7 @@ function InboxInner() {
           htmlBody: emailHtml || undefined,
           subject,
           accountId: senderAccountId ?? undefined,
-          replyToMessageId: latestEmailMessage?.id ?? undefined,
+          replyToMessageId: latestEmailMessage?.emailMessageId ? latestEmailMessage.id : undefined,
           attachmentIds: attachments.length > 0 ? attachments.map((a) => a.id) : undefined,
           cc: cc.trim() || undefined,
           bcc: bcc.trim() || undefined,
@@ -528,7 +526,7 @@ function InboxInner() {
           htmlBody: emailHtml || undefined,
           subject: subjectLine,
           accountId: senderAccountId ?? undefined,
-          replyToMessageId: latestEmailMessage?.id ?? undefined,
+          replyToMessageId: latestEmailMessage?.emailMessageId ? latestEmailMessage.id : undefined,
           attachmentIds: attachments.length > 0 ? attachments.map((a) => a.id) : undefined,
           cc: cc.trim() || undefined,
           bcc: bcc.trim() || undefined,

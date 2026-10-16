@@ -1,4 +1,5 @@
 import prisma from '../utils/prismaClient.js';
+import { HUMAN_REPLY_WHERE } from '../utils/emailInbound.js';
 import logger from '../utils/logger.js';
 import activityLog, { EVENT_TYPES } from '../utils/activityLog.js';
 import emailService from './emailService.js';
@@ -361,7 +362,7 @@ class ReportingService {
       }),
       prisma.message.count({
         where: {
-          direction: 'inbound',
+          ...HUMAN_REPLY_WHERE,
           createdAt: rangeMessage,
         },
       }),
@@ -376,7 +377,7 @@ class ReportingService {
       }),
       prisma.message.findMany({
         where: {
-          direction: 'inbound',
+          ...HUMAN_REPLY_WHERE,
           createdAt: rangeMessage,
         },
         distinct: ['leadId'],
@@ -426,7 +427,7 @@ class ReportingService {
         },
       }),
       prisma.message.findMany({
-        where: { direction: 'inbound', createdAt: rangeMessage },
+        where: { ...HUMAN_REPLY_WHERE, createdAt: rangeMessage },
         orderBy: { createdAt: 'desc' },
         take: 5,
         include: {

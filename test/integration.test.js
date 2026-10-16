@@ -1899,15 +1899,19 @@ test('IMAP MIME replies retain the sending account, cancel follow-ups and retry 
     await assert.rejects(email.syncInbox(accounts[0].id), /could not be processed/);
     let inbound = await prisma.message.findFirst({ where: { leadId: lead.id, direction: 'inbound' } });
     assert.equal(inbound.status, 'partial');
+    assert.equal(inbound.emailInboundKind, 'pending');
+    assert.equal(inbound.emailReplyProcessedAt, null);
     assert.equal(inbound.emailAccountId, accounts[1].id);
     assert.equal((await prisma.emailAccount.findUnique({ where: { id: accounts[0].id } })).lastSyncAt.getTime(), before.getTime());
     assert.equal(await prisma.message.count({ where: { leadId: lead.id, status: 'queued' } }), 0);
-    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'replied');
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'contacted');
     brokenDownload = false;
     await email.syncInbox(accounts[0].id);
     await email.syncInbox(accounts[0].id);
     inbound = await prisma.message.findUnique({ where: { id: inbound.id } });
     assert.equal(inbound.status, 'delivered');
+    assert.equal(inbound.emailInboundKind, 'human');
+    assert.ok(inbound.emailReplyProcessedAt);
     assert.equal(inbound.content, 'Thanks, please send the quotation.');
     assert.equal(await prisma.message.count({ where: { leadId: lead.id, direction: 'inbound' } }), 1);
     assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'replied', 'body recovery must not count as another reply');
@@ -2359,4 +2363,151 @@ describe('Brevo delivery receipts', () => {
     assert.equal((await post(batch)).status, 200);
     assert.equal(await prisma.emailDeliveryEvent.count({ where: { messageId: message.id } }), 2);
   }));
+});
+
+// IMAP fixtures are MIME messages delivered by an in-memory mailbox, without
+// network credentials. These assertions cover ingestion through dashboard data.
+describe('Inbound email classification', () => {
+  test('delivery reports and automatic replies stay visible without customer engagement, notifications or reply credit', async t => {
+    const { Readable } = await import('node:stream');
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const { default: email } = await import('../src/services/emailService.js');
+    const { default: scorer } = await import('../src/services/leadScorer.js');
+    const { default: reporting } = await import('../src/services/reportingService.js');
+    const { default: activity } = await import('../src/utils/activityLog.js');
+    const lead = await prisma.lead.create({ data: {
+      name: 'Classification Fixture', mobile: 'no-phone:classification', email: 'classify@example.test', status: 'contacted', emailStatus: 'sent',
+    } });
+    const account = await prisma.emailAccount.create({ data: {
+      name: 'Classification Inbox', email: 'classify-sender@example.test', smtpHost: 'smtp.example.test', smtpUser: 'fake', smtpPass: 'fake', imapHost: 'imap.example.test',
+    } });
+    const originalId = '<classification-original@example.test>';
+    const at = new Date(Date.now() - 300000);
+    const sent = await prisma.message.create({ data: { leadId: lead.id, emailAccountId: account.id, channel: 'email', direction: 'outbound', status: 'sent', content: 'Fictional quotation', sentAt: at, createdAt: at, emailMessageId: originalId, templateVariant: 'classification-fixture' } });
+    const queued = await prisma.message.create({ data: { leadId: lead.id, channel: 'email', direction: 'outbound', status: 'queued', content: 'Pending follow-up' } });
+    const mailbox = [];
+    const add = (uid, from, extraHeaders, content) => {
+      const headers = `Message-ID: <classification-${uid}@example.test>\r\nIn-Reply-To: ${originalId}\r\nFrom: ${from}\r\nTo: ${account.email}\r\nSubject: Re: Fixture quotation\r\n${extraHeaders}`;
+      mailbox.push({ uid, headers: Buffer.from(headers), envelope: { from: [{ address: from }], to: [{ address: account.email }], subject: 'Re: Fixture quotation' }, internalDate: new Date(Date.now() - 60000), raw: `${headers}\r\n\r\n${content}` });
+    };
+    const score = t.mock.method(scorer, 'calculateScore', async () => {});
+    t.mock.method(email, '_createImapClient', () => ({
+      mailbox: { uidValidity: 123n }, on() {}, connect: async () => {}, logout: async () => {},
+      getMailboxLock: async () => ({ release() {} }), search: async () => mailbox.map(msg => msg.uid),
+      fetchAll: async () => mailbox,
+      download: async uid => ({ content: Readable.from([Buffer.from(mailbox.find(msg => msg.uid === uid).raw)]) }),
+    }));
+    const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.202' };
+    const overview = () => request('GET', '/api/stats/overview', { headers });
+    const performance = () => request('GET', '/api/analytics/email-performance?range=all', { headers });
+    const range = [new Date(Date.now() - 3600000), new Date(Date.now() + 3600000)];
+    const baseOverview = await overview();
+    const baseReport = await reporting._getPeriodMetrics(...range);
+    const baseEvents = activity.getRecent(100).filter(event => event.type === 'email_reply').length;
+    try {
+      add(301, 'postmaster@example.test', 'Content-Type: multipart/report; report-type=delivery-status; boundary="report"', '--report\r\nContent-Type: text/plain\r\n\r\nDelivery failed for classify@example.test\r\n--report\r\nContent-Type: message/delivery-status\r\n\r\nFinal-Recipient: rfc822; classify@example.test\r\nAction: failed\r\nStatus: 5.1.1\r\n--report--');
+      add(302, lead.email, 'Auto-Submitted: auto-replied\r\nContent-Type: text/plain', 'I am away. This is an automatic response.');
+      assert.equal((await email.syncInbox(account.id)).replies, 0);
+      await email.syncInbox(account.id);
+      const machine = await prisma.message.findMany({ where: { leadId: lead.id, direction: 'inbound' }, orderBy: { id: 'asc' } });
+      assert.deepEqual(machine.map(message => message.emailInboundKind), ['delivery_report', 'automatic_reply']);
+      assert.ok(machine.every(message => !message.emailReplyProcessedAt));
+      const leadAfter = await prisma.lead.findUnique({ where: { id: lead.id } });
+      assert.equal(leadAfter.status, 'contacted');
+      assert.equal(leadAfter.repliedAt, null);
+      assert.equal(leadAfter.emailStatus, 'sent');
+      assert.equal((await prisma.message.findUnique({ where: { id: queued.id } })).status, 'queued');
+      assert.equal(score.mock.callCount(), 0);
+      assert.equal(activity.getRecent(100).filter(event => event.type === 'email_reply').length, baseEvents);
+      assert.equal((await overview()).body.replied, baseOverview.body.replied);
+      assert.equal((await reporting._getPeriodMetrics(...range)).repliesReceived, baseReport.repliesReceived);
+      assert.equal((await performance()).body.variants.find(variant => variant.variant === 'classification-fixture').replied, 0);
+      let queue = await request('GET', `/api/inbox/threads?leadId=${lead.id}&state=needs_reply`, { headers });
+      assert.equal(queue.body.total, 0);
+      const detail = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+      assert.equal(detail.body.messages.length, 3);
+      assert.equal(detail.body.replyNeeded, false);
+      // A human reply is processed once, and later automatic mail cannot hide
+      // that unanswered human message from the Needs Reply queue.
+      add(303, lead.email, 'Auto-Submitted: no\r\nContent-Type: text/plain', 'Please quote five boxes. I am out of office tomorrow.');
+      assert.equal((await email.syncInbox(account.id)).replies, 1);
+      assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'replied');
+      assert.equal((await prisma.message.findUnique({ where: { id: queued.id } })).status, 'cancelled');
+      assert.equal(score.mock.callCount(), 1);
+      assert.equal((await overview()).body.replied, baseOverview.body.replied + 1);
+      assert.equal((await reporting._getPeriodMetrics(...range)).repliesReceived, baseReport.repliesReceived + 1);
+      assert.equal((await performance()).body.variants.find(variant => variant.variant === 'classification-fixture').replied, 1);
+      add(304, lead.email, 'Auto-Submitted: auto-generated\r\nContent-Type: text/plain', 'Automated ticket acknowledgement');
+      assert.equal((await email.syncInbox(account.id)).replies, 0);
+      assert.equal(score.mock.callCount(), 1);
+      assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'replied');
+      queue = await request('GET', `/api/inbox/threads?leadId=${lead.id}&state=needs_reply`, { headers });
+      assert.equal(queue.body.total, 1);
+      assert.equal(queue.body.threads[0].replyNeeded, true);
+      assert.equal((await request('GET', `/api/inbox/threads/${lead.id}`, { headers })).body.replyNeeded, true);
+      assert.equal(await prisma.message.count({ where: { leadId: lead.id, direction: 'inbound' } }), 4);
+      await prisma.message.createMany({ data: Array.from({ length: 20 }, (_, index) => ({
+        leadId: lead.id, direction: 'inbound', channel: 'email', status: 'delivered',
+        emailInboundKind: 'automatic_reply', content: 'Fictional automated acknowledgement', createdAt: new Date(Date.now() + index),
+      })) });
+      const feed = await request('GET', '/api/activity', { headers });
+      assert.ok(feed.body.some(item => item.type === 'reply_received' && item.message.includes(lead.name)), 'automatic mail must be excluded before activity pagination');
+      assert.ok(sent.id);
+    } finally {
+      await prisma.lead.delete({ where: { id: lead.id } });
+      await prisma.emailAccount.delete({ where: { id: account.id } });
+    }
+  });
+
+  test('a matched message without Message-ID is imported once across repeated syncs', async t => {
+    const { Readable } = await import('node:stream');
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const { default: email } = await import('../src/services/emailService.js');
+    const { default: scorer } = await import('../src/services/leadScorer.js');
+    const lead = await prisma.lead.create({ data: { name: 'No ID Fixture', mobile: 'no-phone:inbound-no-id', email: 'no-id@example.test', status: 'contacted' } });
+    const account = await prisma.emailAccount.create({ data: { name: 'No ID Inbox', email: 'no-id-sender@example.test', smtpHost: 'smtp.example.test', smtpUser: 'fake', smtpPass: 'fake', imapHost: 'imap.example.test' } });
+    t.mock.method(scorer, 'calculateScore', async () => {});
+    const header = `From: ${lead.email}\r\nTo: ${account.email}\r\nSubject: Enquiry\r\nContent-Type: text/plain`;
+    t.mock.method(email, '_createImapClient', () => ({
+      mailbox: { uidValidity: 456n }, on() {}, connect: async () => {}, logout: async () => {},
+      getMailboxLock: async () => ({ release() {} }), search: async () => [401],
+      fetchAll: async () => [{ uid: 401, headers: Buffer.from(header), envelope: { from: [{ address: lead.email }] } }],
+      download: async () => ({ content: Readable.from([Buffer.from(`${header}\r\n\r\nCould you share the specification?`)]) }),
+    }));
+    try {
+      assert.equal((await email.syncInbox(account.id)).replies, 1);
+      assert.equal((await email.syncInbox(account.id)).replies, 0);
+      assert.equal(await prisma.message.count({ where: { leadId: lead.id } }), 1);
+      assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'replied');
+      const legacy = await prisma.message.findFirst({ where: { leadId: lead.id } });
+      await prisma.message.update({ where: { id: legacy.id }, data: { status: 'partial', emailInboundKind: null, emailReplyProcessedAt: null } });
+      assert.equal((await email.syncInbox(account.id)).replies, 0, 'legacy partial rows already emitted their first reply');
+      assert.ok((await prisma.message.findUnique({ where: { id: legacy.id } })).emailReplyProcessedAt);
+    } finally {
+      await prisma.lead.delete({ where: { id: lead.id } });
+      await prisma.emailAccount.delete({ where: { id: account.id } });
+    }
+  });
+});
+
+test('lead scoring and priority triage ignore machine mail and retain the last unanswered human reply', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { default: scorer } = await import('../src/services/leadScorer.js');
+  const { default: intervention } = await import('../src/services/interventionEngine.js');
+  const lead = await prisma.lead.create({ data: { name: 'Scoring Classification Fixture', mobile: 'no-phone:score-classification', status: 'replied', email: 'score-classification@example.test', repliedAt: new Date() } });
+  try {
+    await prisma.message.create({ data: { leadId: lead.id, channel: 'email', direction: 'outbound', status: 'sent', content: 'Specification', sentAt: new Date(Date.now() - 3600000), createdAt: new Date(Date.now() - 3600000) } });
+    const before = await scorer.calculateScore(lead.id);
+    const content = 'Urgent order, please quote the price and shipping for 100 boxes.';
+    const machine = await prisma.message.create({ data: { leadId: lead.id, channel: 'email', direction: 'inbound', status: 'delivered', content, emailInboundKind: 'automatic_reply' } });
+    assert.equal(await scorer.calculateScore(lead.id), before);
+    let priority = (await intervention.getPriorityInbox(100)).find(row => row.id === lead.id);
+    assert.equal(priority.waitingForResponse, false);
+    await prisma.message.create({ data: { leadId: lead.id, channel: 'email', direction: 'inbound', status: 'delivered', content, emailInboundKind: 'human', createdAt: new Date(Date.now() - 60000) } });
+    assert.ok(await scorer.calculateScore(lead.id) > before);
+    await prisma.message.update({ where: { id: machine.id }, data: { createdAt: new Date() } });
+    priority = (await intervention.getPriorityInbox(100)).find(row => row.id === lead.id);
+    assert.equal(priority.waitingForResponse, true);
+    assert.equal(priority.messages[0].content, content);
+  } finally { await prisma.lead.delete({ where: { id: lead.id } }); }
 });

@@ -67,7 +67,14 @@ export function EmailMessageCard({
 
       {delivery.detail && (
         <p
-          className={cn('mt-3 text-xs leading-5', delivery.failed ? 'text-danger' : 'text-warning')}
+          className={cn(
+            'mt-3 text-xs leading-5',
+            delivery.failed
+              ? 'text-danger'
+              : delivery.temporary
+                ? 'text-warning'
+                : 'text-text-muted',
+          )}
         >
           {delivery.detail}
         </p>
