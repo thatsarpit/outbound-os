@@ -4,10 +4,7 @@ import crypto from 'crypto';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
 import emailService from './emailService.js';
-import {
-  buildWhatsAppCtaEmail,
-  DAILY_EMAIL_TEMPLATE_VARIANT,
-} from '../templates/emailWhatsappCta.js';
+import { batchContactAttributes, batchRecipientIdentity, countryAllowed, prepareBatchTemplate, renderBatchTemplate } from '../utils/emailBatchPolicy.js';
 
 /**
  * Brevo Marketing Campaign adapter
@@ -43,31 +40,6 @@ function normalEmail(value) {
 
 function recipientHash(value) {
   return crypto.createHash('sha256').update(normalEmail(value)).digest('hex').slice(0, 24);
-}
-
-function marketingTemplate() {
-  // Brevo renders these contact attributes independently for each recipient.
-  // Every attribute receives a fallback so incomplete imported leads never
-  // expose a raw placeholder.
-  return buildWhatsAppCtaEmail({
-    name: '{{ contact.FIRSTNAME|default:"there" }}',
-    product: '{{ contact.PRODUCT|default:"our products" }}',
-    country: '{{ contact.COUNTRY|default:"your market" }}',
-  });
-}
-
-function firstName(value) {
-  const cleaned = String(value || '').trim();
-  if (!cleaned || /^user$/i.test(cleaned)) return '';
-  return cleaned.split(/\s+/)[0].slice(0, 80);
-}
-
-function contactAttributes(lead) {
-  return Object.fromEntries(Object.entries({
-    FIRSTNAME: firstName(lead.name),
-    PRODUCT: String(lead.product || '').trim().slice(0, 180),
-    COUNTRY: String(lead.country || '').trim().slice(0, 120),
-  }).filter(([, value]) => Boolean(value)));
 }
 
 async function readConfig(key) {
@@ -134,7 +106,6 @@ class BrevoMarketingCampaigns {
   }
 
   async isEnabled() {
-    await this.ensureDefaults();
     const row = await readConfig(KEYS.enabled);
     return row?.value === 'true';
   }
@@ -167,7 +138,6 @@ class BrevoMarketingCampaigns {
   }
 
   async getStatus({ senderIds = [] } = {}) {
-    await this.ensureDefaults();
     const uniqueIds = [...new Set(senderIds.map(Number).filter(Number.isInteger))];
     const [enabled, paused, folderRow, accounts, consentedCount, optOutCount] = await Promise.all([
       this.isEnabled(),
@@ -182,7 +152,7 @@ class BrevoMarketingCampaigns {
       prisma.lead.count({ where: { emailMarketingConsent: true, emailOptOut: false, email: { not: null } } }),
       prisma.lead.count({ where: { emailOptOut: true } }),
     ]);
-    const configuredBrevoSenders = accounts.length > 0
+    const configuredBrevoSenders = accounts.length > 0 && accounts.length === uniqueIds.length
       && accounts.every((account) => account.provider === 'brevo' && account.enabled && account.status === 'verified');
     const folderId = positiveInteger(folderRow?.value);
     const identities = await emailService.getBrevoAccountGroups(accounts.map(account => account.id));
@@ -237,7 +207,7 @@ class BrevoMarketingCampaigns {
   async _ensureContactAttributes(account) {
     const response = await emailService.brevoRequestForAccount(account.id, '/contacts/attributes');
     const existing = new Set((response?.attributes || []).map((attribute) => String(attribute.name || '').toUpperCase()));
-    for (const name of ['PRODUCT', 'COUNTRY']) {
+    for (const name of ['PRODUCT', 'COUNTRY', 'COMPANY']) {
       if (existing.has(name)) continue;
       await emailService.brevoRequestForAccount(account.id, `/contacts/attributes/normal/${name}`, {
         method: 'POST',
@@ -255,15 +225,15 @@ class BrevoMarketingCampaigns {
       method: 'POST',
       body: {
         email,
-        attributes: contactAttributes(lead),
+        attributes: batchContactAttributes(lead),
         listIds: [listId],
         updateEnabled: true,
       },
     });
   }
 
-  async _createCampaign({ account, date, listId }) {
-    const email = marketingTemplate();
+  async _createCampaign({ account, date, listId, template }) {
+    const email = prepareBatchTemplate(template);
     const result = await emailService.brevoRequestForAccount(account.id, '/emailCampaigns', {
       method: 'POST',
       body: {
@@ -286,18 +256,28 @@ class BrevoMarketingCampaigns {
     return emailService.brevoRequestForAccount(account.id, `/emailCampaigns/${encodeURIComponent(campaignId)}`);
   }
 
-  async _ensureCampaign({ date, account, leads, folderId }) {
-    const key = stateKey(date, account.id);
+  async _ensureCampaign({ date, account, leads, folderId, template, countries }) {
+    const prepared = prepareBatchTemplate(template);
     let state = await this._readBatchState(date, account.id);
     const leadIds = leads.map((lead) => Number(lead.id)).sort((a, b) => a - b);
     const recipientHashes = leads.map((lead) => recipientHash(lead.email)).sort();
+    const contentHash = crypto.createHash('sha256').update(JSON.stringify(leads.map(batchRecipientIdentity))).digest('hex');
 
+    if (state.createdAt && (state.templateHash !== prepared.hash || state.contentHash !== contentHash
+      || JSON.stringify(state.countries) !== JSON.stringify(countries)
+      || JSON.stringify(state.recipientHashes) !== JSON.stringify(recipientHashes))) {
+      throw new Error(`Saved batch content or audience changed for ${date} sender ${account.id}; review the existing provider draft`);
+    }
     if (state.leadIds && JSON.stringify(state.leadIds) !== JSON.stringify(leadIds)) {
       throw new Error(`Brevo daily batch state mismatch for ${date} sender ${account.id}; review before changing recipients`);
     }
     if (!state.createdAt) {
       state = {
-        version: 1,
+        version: 2,
+        templateId: template.id,
+        templateHash: prepared.hash,
+        contentHash,
+        countries,
         date,
         accountId: account.id,
         sender: account.email,
@@ -322,7 +302,7 @@ class BrevoMarketingCampaigns {
     }
 
     if (!state.campaignId) {
-      state.campaignId = await this._createCampaign({ account, date, listId: state.listId });
+      state.campaignId = await this._createCampaign({ account, date, listId: state.listId, template });
       state.campaignCreatedAt = new Date().toISOString();
       await this._writeBatchState(date, account.id, state);
     }
@@ -330,7 +310,7 @@ class BrevoMarketingCampaigns {
     return state;
   }
 
-  async _dispatchCampaign({ date, account, leads, state, allowWhileGloballyPaused = false }) {
+  async _dispatchCampaign({ date, account, leads, state, validateRecipients, allowWhileGloballyPaused = false }) {
     if (state.sentAt) return { state, alreadySent: true };
 
     // If a crash happened after accepting sendNow, do not issue the request a
@@ -348,6 +328,14 @@ class BrevoMarketingCampaigns {
       return { state, pendingReview: true, providerStatus: status || 'unknown' };
     }
 
+    const currentAccount = await prisma.emailAccount.findUnique({ where: { id: account.id } });
+    const capacity = (await emailService.getBrevoDailyCapacity({ readOnly: true })).get(account.id);
+    const remaining = currentAccount && Math.max(0, currentAccount.dailyLimit - currentAccount.sentToday);
+    if (!currentAccount?.enabled || currentAccount.provider !== 'brevo' || currentAccount.status !== 'verified'
+      || currentAccount.email !== account.email || currentAccount.senderName !== account.senderName
+      || currentAccount.smtpPass !== account.smtpPass || remaining < leads.length
+      || !capacity || capacity.remaining < leads.length || !await this.isEnabled()
+      || !await validateRecipients(leads)) return { state, blocked: true, reason: 'audience_or_settings_changed' };
     if (!allowWhileGloballyPaused && await isGloballyPaused()) return { state, paused: true };
     state.sendRequestedAt = new Date().toISOString();
     await this._writeBatchState(date, account.id, state);
@@ -358,9 +346,9 @@ class BrevoMarketingCampaigns {
     return { state, sent: true };
   }
 
-  async _recordAcceptedCampaign({ date, account, leads, state }) {
+  async _recordAcceptedCampaign({ date, account, leads, state, template }) {
     const sentAt = new Date(state.sentAt || state.sendRequestedAt || Date.now());
-    const email = marketingTemplate();
+    const prepared = prepareBatchTemplate(template);
     await prisma.$transaction(async (tx) => {
       const automationKeys = leads.map((lead) => `daily-email:brevo:${date}:${recipientHash(lead.email)}`);
       const existing = await tx.message.findMany({
@@ -371,6 +359,7 @@ class BrevoMarketingCampaigns {
       const existingMessages = new Map(existing.map((message) => [messageKey(message.tenantId, message.automationKey), message.id]));
       let newlyRecorded = 0;
       for (const lead of leads) {
+        const email = renderBatchTemplate(template, lead);
         const normalized = normalEmail(lead.email);
         const automationKey = `daily-email:brevo:${date}:${recipientHash(normalized)}`;
         const tenantId = lead.tenantId ?? null;
@@ -391,7 +380,7 @@ class BrevoMarketingCampaigns {
           sentAt,
           providerCampaignId: String(state.campaignId),
           providerMessageId: `brevo-campaign:${state.campaignId}:${recipientHash(normalized)}`,
-          templateVariant: DAILY_EMAIL_TEMPLATE_VARIANT,
+          templateVariant: `saved-email-template:${template.id}:${prepared.hash.slice(0, 16)}`,
           automationKey,
         };
         const update = {
@@ -424,8 +413,15 @@ class BrevoMarketingCampaigns {
     }
   }
 
-  async dispatchDailyBatch({ date, allocations = [], dryRun = false, allowWhileGloballyPaused = false } = {}) {
-    await this.ensureDefaults();
+  async dispatchDailyBatch({ date, allocations = [], template, countries = [], validateRecipients, dryRun = false, allowWhileGloballyPaused = false } = {}) {
+    if (!template || !countries.length || typeof validateRecipients !== 'function') {
+      return { handled: true, skipped: true, reason: 'batch_policy_required' };
+    }
+    prepareBatchTemplate(template);
+    if (allocations.some(({ lead }) => !countryAllowed(lead?.country, countries))) {
+      return { handled: true, skipped: true, reason: 'audience_country_not_allowed' };
+    }
+    if (!dryRun) await this.ensureDefaults();
     const groups = new Map();
     for (const allocation of allocations) {
       if (!allocation?.lead || !allocation?.account) continue;
@@ -434,6 +430,15 @@ class BrevoMarketingCampaigns {
     }
     const senderIds = [...groups.keys()];
     const readiness = await this.getStatus({ senderIds });
+    if (dryRun) {
+      return {
+        handled: true,
+        dryRun: true,
+        recipients: allocations.length,
+        campaigns: [...groups.values()].map(({ account, leads }) => ({ accountId: account.id, sender: account.email, recipientCount: leads.length })),
+        readiness,
+      };
+    }
     if (!readiness.enabled) return { handled: true, skipped: true, reason: 'brevo_marketing_campaigns_disabled', readiness };
     if (readiness.globallyPaused && !allowWhileGloballyPaused) {
       return { handled: true, skipped: true, reason: 'sending_paused', readiness };
@@ -444,7 +449,7 @@ class BrevoMarketingCampaigns {
     if (allocations.some(({ lead }) => !lead.emailMarketingConsent || lead.emailOptOut)) {
       return { handled: true, skipped: true, reason: 'marketing_consent_required', readiness };
     }
-    const capacity = await emailService.getBrevoDailyCapacity();
+    const capacity = await emailService.getBrevoDailyCapacity({ readOnly: dryRun });
     for (const { account } of groups.values()) {
       const available = capacity.get(account.id);
       const recipients = allocations.filter(item => !available || available.group === 'unverified'
@@ -454,31 +459,23 @@ class BrevoMarketingCampaigns {
         return { handled: true, skipped: true, reason: 'brevo_shared_daily_limit', readiness };
       }
     }
-    if (dryRun) {
-      return {
-        handled: true,
-        dryRun: true,
-        recipients: allocations.length,
-        campaigns: [...groups.values()].map(({ account, leads }) => ({ accountId: account.id, sender: account.email, recipientCount: leads.length })),
-        readiness,
-      };
-    }
 
     const results = [];
     for (const { account, leads } of groups.values()) {
-      const state = await this._ensureCampaign({ date, account, leads, folderId: readiness.folderIdsByAccount[account.id] });
+      const state = await this._ensureCampaign({ date, account, leads, template, countries, folderId: readiness.folderIdsByAccount[account.id] });
       const dispatched = await this._dispatchCampaign({
         date,
         account,
         leads,
         state,
         allowWhileGloballyPaused,
+        validateRecipients,
       });
-      if (dispatched.paused || dispatched.pendingReview) {
+      if (dispatched.paused || dispatched.pendingReview || dispatched.blocked) {
         results.push({ accountId: account.id, sender: account.email, ...dispatched });
         continue;
       }
-      if (dispatched.state.sentAt) await this._recordAcceptedCampaign({ date, account, leads, state: dispatched.state });
+      if (dispatched.state.sentAt) await this._recordAcceptedCampaign({ date, account, leads, state: dispatched.state, template });
       results.push({
         accountId: account.id,
         sender: account.email,

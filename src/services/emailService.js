@@ -473,9 +473,11 @@ class EmailService {
     }));
   }
 
-  async getBrevoDailyCapacity() {
+  async getBrevoDailyCapacity({ readOnly = false } = {}) {
     const accounts = await prisma.emailAccount.findMany({ where: { provider: 'brevo' } });
-    const reset = await Promise.all(accounts.map(account => this._resetAccountCounterIfNeeded(account)));
+    const reset = readOnly
+      ? accounts.map(account => isSameZonedDay(account.lastResetAt || new Date(0)) ? account : { ...account, sentToday: 0 })
+      : await Promise.all(accounts.map(account => this._resetAccountCounterIfNeeded(account)));
     const groups = await this.getBrevoAccountGroups(accounts.map(account => account.id));
     return new Map(reset.map(account => {
       const group = groups.get(account.id);

@@ -5,7 +5,6 @@ import config from '../config.js';
 import freshLeadOutreach from './freshLeadOutreach.js';
 import followupEngine from './followup.js';
 import emailService from './emailService.js';
-import dailyEmailScheduler from './dailyEmailScheduler.js';
 import { computeRecoverySince, isWakeGap } from '../utils/recovery.js';
 
 const KEYS = {
@@ -137,17 +136,11 @@ class RecoveryCoordinator {
 
       const reconciliation = await freshLeadOutreach.reconcileRecent({ since });
       const stuck = await followupEngine.recoverStuckMessages();
-      let dailyEmail = { skipped: true, reason: 'not_run' };
-      try {
-        // Idempotent by workspace date: this catches a daily run missed while the
-        // server was down, without ever selecting the daily batch twice.
-        dailyEmail = await dailyEmailScheduler.run();
-      } catch (error) {
-        dailyEmail = { failed: true, error: error.message };
-      }
+      // Recovery repairs existing work. Creating a marketing audience requires
+      // an explicit, reviewed launch through the email batch endpoint.
+      const dailyEmail = { skipped: true, reason: 'explicit_launch_required' };
       const degraded = reconciliation.errors > 0
-        || emailReplySync.ok === false
-        || dailyEmail.failed === true;
+        || emailReplySync.ok === false;
       const summary = {
         reason,
         startedAt: runStarted.toISOString(),

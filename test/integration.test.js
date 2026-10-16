@@ -672,7 +672,7 @@ describe('Daily Brevo marketing campaign gates', () => {
     assert.equal(clear.body.marketing.folderConfigured, false);
   });
 
-  test('repairs legacy daily delivery mode instead of choosing transactional email', async () => {
+  test('does not mutate legacy settings or launch without a reviewed preview', async () => {
     const { default: prisma } = await import('../src/utils/prismaClient.js');
     await prisma.systemConfig.upsert({
       where: { key: 'email.daily.delivery_mode' },
@@ -687,11 +687,11 @@ describe('Daily Brevo marketing campaign gates', () => {
     });
     assert.equal(res.status, 200);
     assert.equal(res.body.skipped, true);
-    assert.equal(res.body.reason, 'campaign_senders_required');
+    assert.equal(res.body.reason, 'reviewed_preview_required');
 
     const mode = await prisma.systemConfig.findUnique({ where: { key: 'email.daily.delivery_mode' } });
     const messagesAfter = await prisma.message.count({ where: { channel: 'email' } });
-    assert.equal(mode.value, 'brevo_marketing');
+    assert.equal(mode.value, 'transactional', 'an invalid launch must not repair or mutate settings');
     assert.equal(messagesAfter, messagesBefore);
   });
 });
@@ -1846,7 +1846,7 @@ test('Brevo campaign recording handles nullable tenant keys and retries without 
   const lead = await prisma.lead.create({ data: { name: 'Campaign Retry Fixture', mobile: 'no-phone:campaign-retry', email: 'campaign-retry@example.test' } });
   const account = await prisma.emailAccount.create({ data: { name: 'Campaign Retry Sender', email: 'campaign-sender@example.test', provider: 'brevo', smtpHost: 'api.brevo.com', smtpUser: 'fake', smtpPass: 'fake-key' } });
   try {
-    const input = { date: '2026-10-12', account, leads: [lead], state: { campaignId: 123, sentAt: '2026-10-12T01:00:00Z' } };
+    const input = { date: '2026-10-12', account, leads: [lead], template: { id: 123, name: 'Fixture template', subject: 'Hello {{name}}', htmlBody: '<p>{{name}}</p>', textBody: 'Hello {{name}}' }, state: { campaignId: 123, sentAt: '2026-10-12T01:00:00Z' } };
     await campaigns._recordAcceptedCampaign(input);
     await campaigns._recordAcceptedCampaign(input);
     assert.equal(await prisma.message.count({ where: { leadId: lead.id } }), 1);
@@ -1855,7 +1855,7 @@ test('Brevo campaign recording handles nullable tenant keys and retries without 
     await prisma.message.deleteMany({ where: { leadId: lead.id } });
     await prisma.lead.delete({ where: { id: lead.id } });
     await prisma.emailAccount.delete({ where: { id: account.id } });
-    await prisma.systemConfig.deleteMany({ where: { key: { startsWith: `email.daily.brevo.batch.2026-10-12.${account.id}` } } });
+    await prisma.systemConfig.deleteMany({ where: { key: { startsWith: `email.daily.marketing.batch.2026-10-12.${account.id}` } } });
   }
 });
 
@@ -1950,4 +1950,182 @@ test('Inbox queue stays complete above SQLite relation parameter limits', async 
       await prisma.lead.deleteMany({ where: { id: { in: chunk } } });
     }
   }
+});
+
+// These tests replace the provider transport with an in-memory fake. They can
+// exercise a real launch through HTTP without contacting or emailing anyone.
+describe('Reviewed manual email batches', () => {
+  test('status and preview are read-only; the reviewed audience uses four senders and the saved template', async t => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const { default: email } = await import('../src/services/emailService.js');
+    const { default: scheduler } = await import('../src/services/dailyEmailScheduler.js');
+    const { default: campaigns } = await import('../src/services/brevoMarketingCampaigns.js');
+    const batchRequest = (method, route, options = {}) => request(method, route, { ...options, headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.200' } });
+    const priorConfig = await prisma.systemConfig.findMany({ where: { key: { startsWith: 'email.daily.' } } });
+    const oldUrl = process.env.BREVO_WEBHOOK_PUBLIC_URL;
+    const oldSecret = process.env.BREVO_WEBHOOK_SECRET;
+    const senders = [];
+    const calls = [];
+    let remoteId = 7000;
+    let beforeSend = null;
+    const template = await prisma.emailTemplate.create({ data: { name: 'Batch Fixture Brand', subject: 'Fixture {{name}}', htmlBody: '<h1>Fixture Brand</h1><p>{{product}} to {{country}}</p><a href="{{ unsubscribe }}">Unsubscribe</a>', textBody: 'Fixture {{name}}: {{product}} to {{country}}' } });
+    try {
+      await prisma.systemConfig.deleteMany({ where: { key: { startsWith: 'email.daily.' } } });
+      process.env.BREVO_WEBHOOK_PUBLIC_URL = 'https://api.example.test';
+      process.env.BREVO_WEBHOOK_SECRET = 'fake-batch-webhook-secret';
+      for (let i = 0; i < 4; i++) senders.push(await prisma.emailAccount.create({ data: {
+        name: `Batch fixture sender ${i}`, email: `batch-sender-${i}@example.test`, provider: 'brevo',
+        smtpHost: 'api.brevo.com', smtpUser: 'fake', smtpPass: 'fake-not-a-credential', status: 'verified',
+        dailyLimit: 50, sentToday: 50, lastResetAt: new Date('2020-01-01'),
+      } }));
+      await prisma.lead.createMany({ data: Array.from({ length: 200 }, (_, i) => ({
+        name: `Batch fixture buyer ${i}`, mobile: `no-phone:batch-fixture-${i}`, email: `batch-buyer-${i}@example.test`,
+        country: ['USA', 'UK', 'Australia'][i % 3], product: 'Fixture product', status: 'new', score: 1000,
+        emailMarketingConsent: true,
+      })) });
+      await prisma.lead.createMany({ data: [
+        { name: 'Outside scope', mobile: 'no-phone:batch-fixture-outside', email: 'batch-outside@example.test', country: 'Canada', score: 9000, emailMarketingConsent: true },
+        { name: 'Missing country', mobile: 'no-phone:batch-fixture-unknown', email: 'batch-unknown@example.test', country: '', score: 9000, emailMarketingConsent: true },
+        { name: 'Opt-out duplicate', mobile: 'no-phone:batch-fixture-optout', email: 'BATCH-DUP@example.test', country: 'USA', score: 9000, emailMarketingConsent: true, emailOptOut: true },
+        { name: 'Other duplicate row', mobile: 'no-phone:batch-fixture-duplicate', email: 'batch-dup@example.test', country: 'USA', score: 9000, emailMarketingConsent: true },
+      ] });
+      const save = await batchRequest('PATCH', '/api/email/daily/settings', { headers: authHeader(), body: {
+        enabled: true, marketingEnabled: true, countries: ['US', 'UK', 'AU'], templateId: template.id,
+        senderIds: senders.map(sender => sender.id), perSenderQuota: 50, batchSize: 200, brevoFolderId: 123,
+      } });
+      assert.equal(save.status, 200, JSON.stringify(save.body));
+      assert.equal(save.body.launchMode, 'manual');
+      assert.deepEqual(save.body.senderIds, senders.map(sender => sender.id));
+      const snapshot = async () => JSON.stringify(await Promise.all([
+        prisma.systemConfig.findMany({ orderBy: { key: 'asc' } }),
+        prisma.emailTemplate.findMany({ orderBy: { id: 'asc' } }),
+        prisma.emailAccount.findMany({ orderBy: { id: 'asc' } }),
+        prisma.message.count(),
+      ]));
+      await batchRequest('PATCH', '/api/email/daily/settings', { body: { marketingEnabled: false } });
+      const before = await snapshot();
+      await batchRequest('GET', '/api/email/daily/status', { headers: authHeader() });
+      await batchRequest('GET', '/api/email/daily/status', { headers: authHeader() });
+      t.mock.method(email, 'brevoRequestForAccount', async (accountId, route, options = {}) => {
+        calls.push({ accountId, route, options });
+        if (route === '/contacts/attributes') return { attributes: [{ name: 'PRODUCT' }, { name: 'COUNTRY' }, { name: 'COMPANY' }] };
+        if (route === '/emailCampaigns' && beforeSend) await beforeSend();
+        return { id: ++remoteId };
+      });
+      const preview = await batchRequest('POST', '/api/email/daily/preview', { headers: authHeader() });
+      assert.equal(preview.status, 200);
+      assert.equal(preview.body.skipped, undefined, JSON.stringify(preview.body));
+      assert.equal(preview.body.count, 200);
+      assert.equal(new Set(preview.body.items.map(item => item.email.toLowerCase())).size, 200);
+      assert.ok(preview.body.items.every(item => item.email.startsWith('batch-buyer-')));
+      for (const sender of senders) assert.equal(preview.body.items.filter(item => item.accountId === sender.id).length, 50);
+      assert.equal(await snapshot(), before, 'GETs and preview must not write defaults, templates, counters or messages');
+      assert.equal(calls.length, 0, 'preview must not create any provider resources');
+      const invalid = await batchRequest('PATCH', '/api/email/daily/settings', { headers: authHeader(), body: { enabled: false, batchSize: 0 } });
+      assert.equal(invalid.status, 400);
+      assert.equal(await snapshot(), before, 'invalid settings must not partially change launch gates');
+      const disarmed = await batchRequest('POST', '/api/email/daily/queue', { body: { previewHash: preview.body.previewHash } });
+      assert.equal(disarmed.body.reason, 'brevo_marketing_campaigns_disabled');
+      assert.equal(calls.length, 0);
+      await batchRequest('PATCH', '/api/email/daily/settings', { body: { marketingEnabled: true } });
+      await prisma.emailTemplate.update({ where: { id: template.id }, data: { subject: 'Edited fixture {{name}}' } });
+      const stale = await batchRequest('POST', '/api/email/daily/queue', { headers: authHeader(), body: { previewHash: preview.body.previewHash } });
+      assert.equal(stale.body.reason, 'preview_changed');
+      assert.equal(calls.length, 0);
+      const fresh = await batchRequest('POST', '/api/email/daily/preview', { headers: authHeader() });
+      const launched = await batchRequest('POST', '/api/email/daily/queue', { headers: authHeader(), body: { previewHash: fresh.body.previewHash } });
+      assert.equal(launched.body.queued, 200, JSON.stringify(launched.body));
+      assert.equal(calls.filter(call => call.route.endsWith('/sendNow')).length, 4);
+      for (const call of calls.filter(call => call.route === '/emailCampaigns')) {
+        assert.match(call.options.body.htmlContent, /Fixture Brand/);
+        assert.match(call.options.body.subject, /Edited fixture/);
+        assert.match(call.options.body.htmlContent, /contact.PRODUCT/);
+      }
+      const recorded = await prisma.message.findMany({ where: { lead: { mobile: { startsWith: 'no-phone:batch-fixture-' } } } });
+      assert.equal(recorded.length, 200);
+      assert.ok(recorded.every(row => !row.content.includes('{{name}}') && row.templateVariant.startsWith(`saved-email-template:${template.id}:`)));
+      const after = await batchRequest('POST', '/api/email/daily/queue', { headers: authHeader(), body: { previewHash: fresh.body.previewHash } });
+      assert.equal(after.body.reason, 'already_ran_today');
+      assert.equal(calls.filter(call => call.route.endsWith('/sendNow')).length, 4);
+      assert.deepEqual(await scheduler.run(), { skipped: true, reason: 'explicit_launch_required' });
+
+      // Simulate an opt-out after provider draft creation but before sendNow.
+      await batchRequest('PATCH', '/api/email/daily/settings', { headers: authHeader(), body: { batchSize: 1, senderIds: [senders[0].id] } });
+      await prisma.lead.createMany({ data: Array.from({ length: 3005 }, (_, i) => ({
+        name: 'Previously contacted duplicate fixture', mobile: `no-phone:batch-fixture-page-${i}`,
+        email: 'batch-buyer-0@example.test', country: 'US', score: 3000, emailMarketingConsent: true,
+      })) });
+      const late = await prisma.lead.create({ data: { name: 'Late opt-out fixture', mobile: 'no-phone:batch-fixture-late', email: 'batch-late@example.test', country: 'UK', score: 2000, emailMarketingConsent: true } });
+      await prisma.systemConfig.deleteMany({ where: { key: { in: ['email.daily.last_run_date', ...senders.map(sender => `email.daily.marketing.batch.${fresh.body.date}.${sender.id}`)] } } });
+      await prisma.emailAccount.updateMany({ where: { id: { in: senders.map(sender => sender.id) } }, data: { sentToday: 0 } });
+      const next = await batchRequest('POST', '/api/email/daily/preview', { headers: authHeader() });
+      assert.equal(next.body.count, 1, JSON.stringify(next.body));
+      assert.equal(next.body.items[0].leadId, late.id, 'selection must scan beyond 3,000 previously contacted duplicate rows');
+      const sendsBefore = calls.filter(call => call.route.endsWith('/sendNow')).length;
+      beforeSend = async () => prisma.lead.update({ where: { id: late.id }, data: { emailOptOut: true } });
+      const blocked = await batchRequest('POST', '/api/email/daily/queue', { headers: authHeader(), body: { previewHash: next.body.previewHash } });
+      assert.equal(blocked.body.queued, 0, JSON.stringify(blocked.body));
+      assert.equal(calls.filter(call => call.route.endsWith('/sendNow')).length, sendsBefore);
+      assert.equal(await prisma.message.count({ where: { leadId: late.id } }), 0);
+      // A gate or global pause changed during draft creation must win over
+      // the earlier preview, even when the recipient itself is still eligible.
+      beforeSend = null;
+      const clearDraft = () => prisma.systemConfig.deleteMany({ where: { key: `email.daily.marketing.batch.${fresh.body.date}.${senders[0].id}` } });
+      await clearDraft();
+      await prisma.lead.update({ where: { id: late.id }, data: { emailOptOut: false } });
+      let retry = await batchRequest('POST', '/api/email/daily/preview');
+      beforeSend = async () => prisma.systemConfig.update({ where: { key: 'email.daily.marketing.enabled' }, data: { value: 'false' } });
+      const disarmedLate = await batchRequest('POST', '/api/email/daily/queue', { body: { previewHash: retry.body.previewHash } });
+      assert.equal(disarmedLate.body.queued, 0);
+      assert.equal(calls.filter(call => call.route.endsWith('/sendNow')).length, sendsBefore);
+      await clearDraft();
+      await prisma.systemConfig.update({ where: { key: 'email.daily.marketing.enabled' }, data: { value: 'true' } });
+      retry = await batchRequest('POST', '/api/email/daily/preview');
+      const pauseBefore = await prisma.systemConfig.findUnique({ where: { key: 'sending_paused' } });
+      beforeSend = async () => prisma.systemConfig.upsert({ where: { key: 'sending_paused' }, update: { value: 'true' }, create: { key: 'sending_paused', value: 'true' } });
+      try {
+        const pausedLate = await batchRequest('POST', '/api/email/daily/queue', { body: { previewHash: retry.body.previewHash } });
+        assert.equal(pausedLate.body.queued, 0);
+        assert.equal(calls.filter(call => call.route.endsWith('/sendNow')).length, sendsBefore);
+      } finally {
+        if (pauseBefore) await prisma.systemConfig.update({ where: { key: 'sending_paused' }, data: { value: pauseBefore.value } });
+        else await prisma.systemConfig.deleteMany({ where: { key: 'sending_paused' } });
+      }
+      assert.equal((await campaigns.getStatus({ senderIds: [senders[0].id, 2147483647] })).configuredBrevoSenders, false);
+    } finally {
+      if (oldUrl === undefined) delete process.env.BREVO_WEBHOOK_PUBLIC_URL; else process.env.BREVO_WEBHOOK_PUBLIC_URL = oldUrl;
+      if (oldSecret === undefined) delete process.env.BREVO_WEBHOOK_SECRET; else process.env.BREVO_WEBHOOK_SECRET = oldSecret;
+      await prisma.message.deleteMany({ where: { lead: { mobile: { startsWith: 'no-phone:batch-fixture-' } } } });
+      await prisma.lead.deleteMany({ where: { mobile: { startsWith: 'no-phone:batch-fixture-' } } });
+      await prisma.emailAccount.deleteMany({ where: { id: { in: senders.map(sender => sender.id) } } });
+      await prisma.emailTemplate.delete({ where: { id: template.id } });
+      await prisma.systemConfig.deleteMany({ where: { key: { startsWith: 'email.daily.' } } });
+      await prisma.systemConfig.createMany({ data: priorConfig });
+    }
+  });
+
+  test('startup, wake and manual runtime recovery never invoke the marketing selector', async t => {
+    const { default: scheduler } = await import('../src/services/dailyEmailScheduler.js');
+    const { default: recovery } = await import('../src/services/recoveryCoordinator.js');
+    const { default: fresh } = await import('../src/services/freshLeadOutreach.js');
+    const { default: followup } = await import('../src/services/followup.js');
+    const { default: email } = await import('../src/services/emailService.js');
+    const { default: config } = await import('../src/config.js');
+    t.mock.method(fresh, 'reconcileRecent', async () => ({ errors: 0 }));
+    t.mock.method(followup, 'recoverStuckMessages', async () => ({ count: 0 }));
+    t.mock.method(email, 'syncAllReplies', async () => []);
+    const run = t.mock.method(scheduler, 'run', () => { throw new Error('Recovery must not select marketing recipients'); });
+    const previous = config.recovery.enabled;
+    config.recovery.enabled = true;
+    try {
+      const startup = await recovery.start();
+      assert.equal(startup.summary.dailyEmail.reason, 'explicit_launch_required');
+      for (const reason of ['wake', 'manual']) {
+        const result = await recovery.runRecovery({ reason });
+        assert.equal(result.status, 'ok');
+        assert.equal(result.dailyEmail.reason, 'explicit_launch_required');
+      }
+      assert.equal(run.mock.callCount(), 0);
+    } finally { await recovery.stop(); config.recovery.enabled = previous; }
+  });
 });
