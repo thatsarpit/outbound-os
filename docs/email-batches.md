@@ -74,3 +74,9 @@ new policy values use the existing SystemConfig table. On production, verify sta
 reads do not change templates/counters and that recovery records
 `explicit_launch_required`. Configure the intended saved policy, then inspect a
 preview. Do not use a real outreach send as a deployment smoke test.
+
+Before rolling back to a version with the old recovery selector, explicitly turn
+off both batch-launch permission and Brevo marketing delivery and verify those
+persisted gates. Keep them off throughout the downgrade. An image-only rollback
+can restore the startup-send bug if the previous gates remain armed. Preserve the
+current database and policy values; restoring an old database would lose new work.
