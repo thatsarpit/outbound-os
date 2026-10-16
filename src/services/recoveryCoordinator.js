@@ -5,6 +5,7 @@ import config from '../config.js';
 import freshLeadOutreach from './freshLeadOutreach.js';
 import followupEngine from './followup.js';
 import emailService from './emailService.js';
+import brevoDeliveryEvents from './brevoDeliveryEvents.js';
 import { computeRecoverySince, isWakeGap } from '../utils/recovery.js';
 
 const KEYS = {
@@ -197,13 +198,14 @@ class RecoveryCoordinator {
       || validDate(state[KEYS.lastRecoveryAt])
       || new Date(Date.now() - config.recovery.initialLookbackHours * 60 * 60 * 1000);
     const since = new Date(anchor.getTime() - config.recovery.overlapMinutes * 60 * 1000);
-    const [stuck, reconciliation] = await Promise.all([
+    const [stuck, reconciliation, emailDeliveryEvents] = await Promise.all([
       followupEngine.recoverStuckMessages(),
       freshLeadOutreach.reconcileRecent({ since }),
+      brevoDeliveryEvents.replayUnmatched(),
     ]);
     const finishedAt = new Date().toISOString();
     await writeConfig({ [KEYS.lastMaintenanceAt]: finishedAt });
-    return { finishedAt, stuckMessagesRecovered: Number(stuck?.count ?? stuck ?? 0), reconciliation };
+    return { finishedAt, stuckMessagesRecovered: Number(stuck?.count ?? stuck ?? 0), reconciliation, emailDeliveryEvents };
   }
 
   async getStatus() {

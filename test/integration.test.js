@@ -1848,8 +1848,13 @@ test('Brevo campaign recording handles nullable tenant keys and retries without 
   try {
     const input = { date: '2026-10-12', account, leads: [lead], template: { id: 123, name: 'Fixture template', subject: 'Hello {{name}}', htmlBody: '<p>{{name}}</p>', textBody: 'Hello {{name}}' }, state: { campaignId: 123, sentAt: '2026-10-12T01:00:00Z' } };
     await campaigns._recordAcceptedCampaign(input);
+    const original = await prisma.message.findFirst({ where: { leadId: lead.id } });
+    await prisma.message.update({ where: { id: original.id }, data: { status: 'read', providerDeliveryStatus: 'opened' } });
+    await prisma.lead.update({ where: { id: lead.id }, data: { emailOptOut: true, emailStatus: 'unsubscribed' } });
     await campaigns._recordAcceptedCampaign(input);
     assert.equal(await prisma.message.count({ where: { leadId: lead.id } }), 1);
+    assert.equal((await prisma.message.findUnique({ where: { id: original.id } })).status, 'read');
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).emailStatus, 'unsubscribed');
     assert.equal((await prisma.emailAccount.findUnique({ where: { id: account.id } })).sentToday, 1);
   } finally {
     await prisma.message.deleteMany({ where: { leadId: lead.id } });
@@ -2128,4 +2133,230 @@ describe('Reviewed manual email batches', () => {
       assert.equal(run.mock.callCount(), 0);
     } finally { await recovery.stop(); config.recovery.enabled = previous; }
   });
+});
+
+// Receipt fixtures have no transports or provider credentials. Every callback
+// uses the public HTTP endpoint and the real transaction/migration path.
+let deliveryFixtureSequence = 0;
+async function withDeliveryFixture(run) {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const sequence = ++deliveryFixtureSequence;
+  const recipient = `receipt-${sequence}@example.test`;
+  const priorSecret = process.env.BREVO_WEBHOOK_SECRET;
+  process.env.BREVO_WEBHOOK_SECRET = 'fake-delivery-webhook-secret';
+  const lead = await prisma.lead.create({ data: { name: 'Delivery Receipt Fixture', email: recipient, mobile: `no-phone:delivery-${sequence}`, emailStatus: 'sent' } });
+  const accounts = await Promise.all([1, 2].map(i => prisma.emailAccount.create({ data: {
+    name: `Receipt Sender ${i}`, email: `receipt-sender-${sequence}-${i}@example.test`, provider: 'brevo',
+    smtpHost: 'api.brevo.com', smtpUser: 'fake', smtpPass: 'fake-no-network-credential',
+  } })));
+  const createMessage = (data = {}) => prisma.message.create({ data: {
+    leadId: lead.id, emailAccountId: accounts[0].id, channel: 'email', direction: 'outbound',
+    content: 'Fictional receipt test', status: 'sent', sentAt: new Date('2026-10-16T01:00:00Z'),
+    emailRecipient: recipient, providerCampaignId: '71', ...data,
+  } });
+  const post = (body, query = '', headers = { 'x-brevo-webhook-secret': 'fake-delivery-webhook-secret' }) => request('POST', `/webhook/brevo${query}`, { body, headers });
+  const event = (name, data = {}) => ({ id: 99, event: name, email: recipient, camp_id: 71, ts_event: 1792112400, ...data });
+  try { await run({ prisma, lead, accounts, recipient, createMessage, post, event }); }
+  finally {
+    if (priorSecret === undefined) delete process.env.BREVO_WEBHOOK_SECRET; else process.env.BREVO_WEBHOOK_SECRET = priorSecret;
+    await prisma.emailDeliveryEvent.deleteMany({ where: { recipient } });
+    await prisma.lead.deleteMany({ where: { mobile: { startsWith: `no-phone:delivery-${sequence}` } } });
+    await prisma.systemConfig.deleteMany({ where: { key: { in: accounts.map(account => `email.brevo.identity.${account.id}`) } } });
+    await prisma.emailAccount.deleteMany({ where: { id: { in: accounts.map(account => account.id) } } });
+  }
+}
+
+describe('Brevo delivery receipts', () => {
+  test('only the identified campaign recipient changes among many historical emails', async () => withDeliveryFixture(async ({ prisma, lead, createMessage, post, event }) => {
+    const target = await createMessage();
+    for (let i = 0; i < 24; i++) await createMessage({ providerCampaignId: String(100 + i) });
+    await createMessage({ direction: 'inbound', status: 'delivered' });
+    assert.equal((await post(event('delivered'))).status, 200);
+    assert.equal((await prisma.message.findUnique({ where: { id: target.id } })).status, 'delivered');
+    assert.equal(await prisma.message.count({ where: { leadId: lead.id, status: 'sent' } }), 24);
+    assert.equal(await prisma.emailDeliveryEvent.count({ where: { messageId: target.id, outcome: 'applied' } }), 1);
+    await post(event('delivered', { id: 100, delivery_attempt: 2 }));
+    assert.equal(await prisma.emailDeliveryEvent.count({ where: { messageId: target.id } }), 1, 'webhook registration IDs are not event identities');
+    await post(event('delivered', { camp_id: undefined }));
+    assert.equal(await prisma.message.count({ where: { leadId: lead.id, status: 'sent' } }), 24);
+    assert.ok(await prisma.emailDeliveryEvent.findFirst({ where: { reason: 'provider_identity_missing' } }));
+  }));
+
+  test('colliding campaign IDs are quarantined unless sender account scope resolves them', async () => withDeliveryFixture(async ({ prisma, accounts, createMessage, post, event }) => {
+    const first = await createMessage();
+    const second = await createMessage({ emailAccountId: accounts[1].id });
+    await post(event('delivered'));
+    assert.equal((await prisma.message.findUnique({ where: { id: first.id } })).status, 'sent');
+    assert.equal((await prisma.message.findUnique({ where: { id: second.id } })).status, 'sent');
+    assert.ok(await prisma.emailDeliveryEvent.findFirst({ where: { reason: 'ambiguous_provider_identity' } }));
+    assert.equal((await post(event('delivered'), `?accountId=${accounts[0].id}`)).status, 200);
+    assert.equal((await prisma.message.findUnique({ where: { id: first.id } })).status, 'delivered');
+    assert.equal((await prisma.message.findUnique({ where: { id: second.id } })).status, 'sent');
+    for (const id of ['1abc', '0', '999999999999999999999', '2147483647']) assert.equal((await post(event('delivered'), `?accountId=${id}`)).status, 400);
+  }));
+
+  test('SMTP IDs match with or without brackets and use the send-time recipient after lead edits', async () => withDeliveryFixture(async ({ prisma, lead, recipient, createMessage, post, event }) => {
+    const smtp = await createMessage({ providerCampaignId: null, emailMessageId: '<receipt-smtp@example.test>' });
+    const provider = await createMessage({ providerCampaignId: null, providerMessageId: 'receipt-provider@example.test' });
+    await prisma.lead.update({ where: { id: lead.id }, data: { email: 'edited@example.test' } });
+    await post(event('delivered', { camp_id: undefined, 'message-id': 'receipt-smtp@example.test' }));
+    await post(event('delivered', { camp_id: undefined, 'message-id': '<receipt-provider@example.test>' }));
+    assert.equal((await prisma.message.findUnique({ where: { id: smtp.id } })).status, 'delivered');
+    assert.equal((await prisma.message.findUnique({ where: { id: provider.id } })).status, 'delivered');
+    await post(event('opened', { email: 'edited@example.test', camp_id: undefined, 'message-id': 'receipt-smtp@example.test' }));
+    assert.equal((await prisma.message.findUnique({ where: { id: smtp.id } })).status, 'delivered');
+    await prisma.emailDeliveryEvent.deleteMany({ where: { recipient: 'edited@example.test' } });
+    assert.equal((await prisma.message.findUnique({ where: { id: smtp.id } })).emailRecipient, recipient);
+  }));
+
+  test('verified shared Brevo identities scope multiple senders and account changes hold historical receipts', async () => withDeliveryFixture(async ({ prisma, accounts, createMessage, post, event }) => {
+    const { default: delivery } = await import('../src/services/brevoDeliveryEvents.js');
+    const identity = crypto.createHash('sha256').update('fixture-brevo-account@example.test').digest('hex');
+    await prisma.systemConfig.createMany({ data: accounts.map(account => ({
+      key: `email.brevo.identity.${account.id}`,
+      value: JSON.stringify({ identity, credential: crypto.createHash('sha256').update(account.smtpPass).digest('hex') }),
+    })) });
+    const message = await createMessage({ emailAccountId: accounts[1].id });
+    await post(event('delivered'), `?accountId=${accounts[0].id}`);
+    assert.equal((await prisma.message.findUnique({ where: { id: message.id } })).status, 'delivered');
+    await post(event('delivered', { camp_id: 73 }), `?accountId=${accounts[0].id}`);
+    const early = await createMessage({ providerCampaignId: '73' });
+    await prisma.emailAccount.update({ where: { id: accounts[0].id }, data: { smtpPass: 'fake-changed-provider-account' } });
+    await delivery.replayUnmatched();
+    assert.equal((await prisma.message.findUnique({ where: { id: early.id } })).status, 'sent');
+    await prisma.emailAccount.update({ where: { id: accounts[0].id }, data: { smtpPass: accounts[0].smtpPass } });
+    assert.equal((await delivery.replayUnmatched()).applied, 1);
+  }));
+
+  test('simultaneous retries commit one receipt and a subsequent retry is harmless', async () => withDeliveryFixture(async ({ prisma, createMessage, post, event }) => {
+    const message = await createMessage();
+    const attempts = await Promise.all([post(event('delivered')), post(event('delivered'))]);
+    assert.ok(attempts.every(result => [200, 503].includes(result.status)));
+    assert.ok(attempts.some(result => result.status === 200));
+    assert.equal((await post(event('delivered'))).status, 200);
+    assert.equal(await prisma.emailDeliveryEvent.count({ where: { messageId: message.id } }), 1);
+    assert.equal((await prisma.message.findUnique({ where: { id: message.id } })).status, 'delivered');
+  }));
+
+  test('temporary bounces do not suppress recipients or enter the send queue; late receipts do not downgrade delivery', async () => withDeliveryFixture(async ({ prisma, lead, createMessage, post, event }) => {
+    const message = await createMessage();
+    await post(event('softBounce'));
+    let stored = await prisma.message.findUnique({ where: { id: message.id } });
+    assert.equal(stored.status, 'sent');
+    assert.equal(stored.providerDeliveryStatus, 'soft_bounce');
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).emailStatus, 'sent');
+    assert.equal((await request('POST', `/api/messages/${message.id}/requeue`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.201' } })).status, 409);
+    await post(event('delivered', { ts_event: 1792112401 }));
+    await post(event('opened', { ts_event: 1792112402 }));
+    await post(event('delivered', { ts_event: 1792112403 }));
+    await post(event('hard_bounce', { ts_event: 1792112399 }));
+    stored = await prisma.message.findUnique({ where: { id: message.id } });
+    assert.equal(stored.status, 'read');
+    assert.equal(stored.providerDeliveryStatus, 'opened');
+    assert.equal(stored.providerDeliveryAt.toISOString(), new Date(1792112402000).toISOString());
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).emailStatus, 'sent');
+  }));
+
+  test('hard bounces suppress duplicate addresses while blocked sender events do not; marketing campaigns cannot be requeued as SMTP', async () => withDeliveryFixture(async ({ prisma, lead, recipient, createMessage, post, event }) => {
+    const duplicate = await prisma.lead.create({ data: { name: 'Duplicate Receipt Fixture', email: ` ${recipient.toUpperCase()} `, mobile: `${lead.mobile}-duplicate` } });
+    const hard = await createMessage();
+    const blocked = await createMessage({ providerCampaignId: '72' });
+    await post(event('blocked', { camp_id: 72 }));
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).emailStatus, 'sent');
+    assert.equal((await prisma.message.findUnique({ where: { id: blocked.id } })).status, 'permanently_failed');
+    await post(event('hard_bounce'));
+    assert.equal((await prisma.message.findUnique({ where: { id: hard.id } })).status, 'permanently_failed');
+    assert.equal((await prisma.lead.findUnique({ where: { id: duplicate.id } })).emailStatus, 'bounced');
+    const retry = await request('POST', `/api/messages/${hard.id}/requeue`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.201' } });
+    assert.equal(retry.status, 409);
+    assert.match(retry.body.error, /marketing campaign/i);
+    await createMessage({ status: 'permanently_failed', sentAt: null, providerCampaignId: null, content: 'Unsent fixture' });
+    const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.201' };
+    const queue = await request('GET', `/api/inbox/threads?leadId=${lead.id}&channel=email`, { headers });
+    assert.equal(queue.body.total, 1);
+    assert.equal(queue.body.threads[0].messageCount, 2);
+    const detail = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+    assert.equal(detail.body.messages.length, 2, 'provider failures remain visible; unsent drafts do not');
+    assert.equal(detail.body.messages[0].providerDeliveryStatus, 'hard_bounce');
+    const history = await request('GET', `/api/inbox/threads/${lead.id}/messages`, { headers });
+    assert.equal(history.body.length, 2);
+  }));
+
+  test('legacy marketing requeues are held before any SMTP transport is invoked', async t => withDeliveryFixture(async ({ prisma, createMessage }) => {
+    const { default: email } = await import('../src/services/emailService.js');
+    const send = t.mock.method(email, 'sendEmail', () => { throw new Error('Marketing campaigns cannot enter SMTP retry'); });
+    const queued = await createMessage({ status: 'queued', scheduledAt: new Date(0) });
+    await email.processEmailQueue({ messageIds: [queued.id] });
+    assert.equal(send.mock.callCount(), 0);
+    const message = await prisma.message.findUnique({ where: { id: queued.id } });
+    assert.equal(message.status, 'permanently_failed');
+    assert.equal(message.providerStatusReason, 'marketing_campaign_requires_review');
+  }));
+
+  test('marketing unsubscribe and transactional unsubscribed suppress all duplicate contacts and cancel queued email', async () => withDeliveryFixture(async ({ prisma, lead, recipient, createMessage, post, event }) => {
+    const duplicate = await prisma.lead.create({ data: { name: 'Opt-out Duplicate Fixture', email: ` ${recipient.toUpperCase()} `, mobile: `${lead.mobile}-duplicate` } });
+    const queued = await createMessage({ leadId: duplicate.id, providerCampaignId: null, status: 'queued' });
+    await post(event('unsubscribe', { camp_id: undefined }));
+    for (const id of [lead.id, duplicate.id]) {
+      const contact = await prisma.lead.findUnique({ where: { id } });
+      assert.equal(contact.emailOptOut, true);
+      assert.equal(contact.emailStatus, 'unsubscribed');
+      assert.ok(contact.emailOptOutAt);
+    }
+    assert.equal((await prisma.message.findUnique({ where: { id: queued.id } })).status, 'cancelled');
+    const firstOptOut = (await prisma.lead.findUnique({ where: { id: lead.id } })).emailOptOutAt;
+    await post(event('spam', { ts_event: 1792112401 }));
+    await post(event('unsubscribed', { ts_event: 1792112402 }));
+    const stored = await prisma.lead.findUnique({ where: { id: lead.id } });
+    assert.equal(stored.emailStatus, 'complained');
+    assert.equal(+stored.emailOptOutAt, +firstOptOut);
+  }));
+
+  test('proxy opens and unrelated provider events remain distinct from human engagement', async () => withDeliveryFixture(async ({ prisma, createMessage, post, event }) => {
+    const message = await createMessage();
+    await post(event('proxy_open'));
+    await post(event('contact_updated'));
+    assert.equal((await prisma.message.findUnique({ where: { id: message.id } })).status, 'sent');
+    assert.ok(await prisma.emailDeliveryEvent.findFirst({ where: { messageId: message.id, reason: 'proxy_open_not_human_engagement' } }));
+  }));
+
+  test('early callbacks are durable and maintenance replay links them after send recording', async t => withDeliveryFixture(async ({ prisma, createMessage, post, event }) => {
+    const { default: delivery } = await import('../src/services/brevoDeliveryEvents.js');
+    const { default: fresh } = await import('../src/services/freshLeadOutreach.js');
+    const { default: followup } = await import('../src/services/followup.js');
+    const { default: recovery } = await import('../src/services/recoveryCoordinator.js');
+    t.mock.method(fresh, 'reconcileRecent', async () => ({ errors: 0 }));
+    t.mock.method(followup, 'recoverStuckMessages', async () => ({ count: 0 }));
+    await post(event('delivered'));
+    const message = await createMessage();
+    assert.equal((await recovery.runMaintenance()).emailDeliveryEvents.applied, 1);
+    assert.equal((await prisma.message.findUnique({ where: { id: message.id } })).status, 'delivered');
+    assert.equal(await prisma.emailDeliveryEvent.count({ where: { messageId: message.id } }), 1);
+    assert.equal((await delivery.replayUnmatched()).applied, 0);
+  }));
+
+  test('authentication, payload validation and atomic batch rollback happen before acknowledgement', async t => withDeliveryFixture(async ({ prisma, createMessage, post, event }) => {
+    const { default: delivery } = await import('../src/services/brevoDeliveryEvents.js');
+    const message = await createMessage();
+    assert.equal((await post(event('delivered'), '', {})).status, 401);
+    assert.equal((await post(event('delivered'), '', { 'x-brevo-webhook-secret': 'wrong-secret' })).status, 401);
+    assert.equal((await post([])).status, 400);
+    assert.equal((await post([event('delivered'), { event: 'opened' }])).status, 400);
+    assert.equal((await post(Array.from({ length: 1001 }, () => event('delivered')))).status, 400);
+    const apply = delivery._apply.bind(delivery);
+    const fail = t.mock.method(delivery, '_apply', async (...args) => {
+      if (args[1].event === 'opened') throw new Error('Fictional transient persistence failure');
+      return apply(...args);
+    });
+    const batch = [event('delivered'), event('opened', { ts_event: 1792112401 })];
+    assert.equal((await post(batch)).status, 503);
+    assert.equal((await prisma.message.findUnique({ where: { id: message.id } })).status, 'sent');
+    assert.equal(await prisma.emailDeliveryEvent.count({ where: { messageId: message.id } }), 0);
+    fail.mock.restore();
+    assert.equal((await post(batch)).status, 200);
+    assert.equal((await prisma.message.findUnique({ where: { id: message.id } })).status, 'read');
+    assert.equal(await prisma.emailDeliveryEvent.count({ where: { messageId: message.id } }), 2);
+    assert.equal((await post(batch)).status, 200);
+    assert.equal(await prisma.emailDeliveryEvent.count({ where: { messageId: message.id } }), 2);
+  }));
 });

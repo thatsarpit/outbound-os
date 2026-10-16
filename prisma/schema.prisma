@@ -204,6 +204,7 @@ model Message {
   emailSubject         String? // Subject line (email only)
   emailHtmlBody        String? // Rendered inline HTML retained by the async queue
   emailMessageId       String? // SMTP Message-ID for threading
+  emailRecipient       String? // Normalized address at send time, independent of later lead edits
   emailInReplyTo       String? // In-Reply-To header for threading
   imessageMessageId    String? // BlueBubbles GUID for webhook deduplication
   telegramMessageId    String? // Telegram message ID scoped to telegramAccountId
@@ -211,6 +212,9 @@ model Message {
   providerCampaignId   String? // Provider-side campaign identity (AiSensy dashboard reconciliation)
   providerCreatedAt    DateTime? // Original provider timestamp when it differs from ingestion time
   providerStatusReason String? // Stable failure/status reason retained for diagnostics
+  providerDeliveryStatus String? // Accepted, temporary failure, delivery or tracked engagement; separate from send acceptance
+  providerDeliveryAt   DateTime? // UTC occurrence time of the last applied delivery event
+  emailDeliveryEvents  EmailDeliveryEvent[]
   idempotencyKey       String? // Client-supplied key preventing duplicate manual/API sends
   // Durable automation identity. Unlike provider/client idempotency keys this
   // is global across nullable account FKs, so a reboot can safely reconcile a
@@ -242,7 +246,33 @@ model Message {
   @@index([waMessageId])
   @@index([pricingCategory])
   @@index([providerCampaignId])
+  @@index([providerMessageId])
+  @@index([emailMessageId])
   @@index([ackStatus])
+}
+
+// Acknowledged provider facts and unmatched receipts survive process restarts.
+// No raw webhook body, credentials, tracking URL or email content is retained.
+model EmailDeliveryEvent {
+  id                 Int      @id @default(autoincrement())
+  eventKey           String   @unique
+  provider           String   @default("brevo")
+  event              String
+  recipient          String
+  providerCampaignId String?
+  providerMessageId  String?
+  emailAccountId     Int?
+  accountScope       String? // Verified Brevo account identity, or an exact local sender fallback
+  messageId          Int?
+  message            Message? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  occurredAt         DateTime?
+  receivedAt         DateTime @default(now())
+  lastAttemptAt      DateTime @default(now())
+  outcome            String // applied | recorded | unmatched | ignored
+  reason             String?
+
+  @@index([messageId])
+  @@index([outcome, lastAttemptAt])
 }
 
 // Cache of whatsapp-web.js isRegisteredUser() results so we don't burn a send slot

@@ -676,10 +676,13 @@ class EmailService {
       emailSubject: normalizedSubject,
       emailHtmlBody: fullHtml,
       emailMessageId: messageId,
+      emailRecipient: String(lead.email).trim().toLowerCase(),
       emailInReplyTo: inReplyTo || null,
       emailCc: cc || null,
       emailBcc: bcc || null,
       providerStatusReason: 'provider_accepted',
+      providerDeliveryStatus: account.provider === 'brevo' ? 'sent' : null,
+      providerDeliveryAt: null,
     };
 
     let msg = null;
@@ -712,7 +715,10 @@ class EmailService {
             status: 'sent',
             sentAt: acceptedAt,
             emailMessageId: messageId,
+            emailRecipient: String(lead.email).trim().toLowerCase(),
             providerStatusReason: 'provider_accepted_persistence_repair_needed',
+            providerDeliveryStatus: account.provider === 'brevo' ? 'sent' : null,
+            providerDeliveryAt: null,
           },
         }).catch(() => {});
       }
@@ -1279,6 +1285,16 @@ class EmailService {
           data: { status: 'sending' },
         });
         if (claimed.count === 0) continue;
+
+        // An accepted marketing campaign is owned by Brevo. Legacy/manual
+        // requeues must never turn its delivery failure into an SMTP send.
+        if (msg.providerCampaignId || String(msg.providerMessageId || '').startsWith('brevo-campaign:')) {
+          await prisma.message.update({
+            where: { id: msg.id },
+            data: { status: 'permanently_failed', providerStatusReason: 'marketing_campaign_requires_review' },
+          });
+          continue;
+        }
 
         // Re-fetch lead state after claim. If the lead has replied / been paused /
         // closed since this email was queued, cancel the send rather than dispatch
