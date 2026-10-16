@@ -135,6 +135,13 @@ const VALID_LEAD_STATUSES = ['new', 'contacted', 'replied', 'engaged', 'closed',
 // queue. Drafts that never left the system remain available to campaign/admin
 // diagnostics but must not masquerade as chats with a lead.
 const INBOX_HIDDEN_MESSAGE_STATUSES = ['queued', 'cancelled', 'failed', 'permanently_failed'];
+const INBOX_VISIBLE_MESSAGE_WHERE = { AND: [{ OR: [
+  { status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES } },
+  // An email accepted by the provider stays in conversation history when a
+  // subsequent receipt reports failure. It is not an unsent draft.
+  { channel: 'email', direction: 'outbound', sentAt: { not: null },
+    providerDeliveryStatus: { in: ['hard_bounce', 'invalid', 'blocked', 'error'] } },
+] }] };
 
 function parsePositiveInt(value) {
   const parsed = Number.parseInt(String(value), 10);
@@ -2788,6 +2795,9 @@ app.get('/api/whatsapp/status', async (req, res) => {
       if (msg.status !== 'permanently_failed') {
         return res.status(409).json({ error: `Cannot requeue message in status '${msg.status}'` });
       }
+      if (msg.channel === 'email' && msg.providerCampaignId) {
+        return res.status(409).json({ error: 'Review this marketing campaign in Brevo. Campaign deliveries cannot be retried through the email queue.' });
+      }
       await prisma.message.update({
         where: { id },
         data: {
@@ -3135,7 +3145,7 @@ app.get('/api/inbox/threads', async (req, res) => {
     const poolId = parsePositiveInt(req.query.poolId);
 
     const visibleMessageWhere = {
-      status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES },
+      ...INBOX_VISIBLE_MESSAGE_WHERE,
       ...(channel ? { channel } : {}),
     };
     const where = { messages: { some: visibleMessageWhere } };
@@ -3163,7 +3173,7 @@ app.get('/api/inbox/threads', async (req, res) => {
         {
           messages: {
             some: {
-              status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES },
+              ...INBOX_VISIBLE_MESSAGE_WHERE,
               OR: [
                 { content: { contains: search } },
                 { emailSubject: { contains: search } },
@@ -3217,7 +3227,7 @@ app.get('/api/inbox/threads', async (req, res) => {
         where: { id: { in: ids } },
         include: {
           messages: { where: visibleMessageWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1 },
-          _count: { select: { messages: { where: { status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES } } } } },
+          _count: { select: { messages: { where: INBOX_VISIBLE_MESSAGE_WHERE } } },
         },
       }),
       prisma.emailAccount.findMany({ where: { enabled: true }, orderBy: { id: 'asc' } }),
@@ -3243,12 +3253,12 @@ async function sendInboxThreadDetail(req, res) {
       where: { id: leadId },
       include: {
         messages: {
-          where: { status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES } },
+          where: INBOX_VISIBLE_MESSAGE_WHERE,
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         },
         _count: {
           select: {
-            messages: { where: { status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES } } },
+            messages: { where: INBOX_VISIBLE_MESSAGE_WHERE },
           },
         },
       },
@@ -3309,7 +3319,7 @@ app.get('/api/inbox/threads/:leadId/messages', async (req, res) => {
     const messages = await prisma.message.findMany({
       where: {
         leadId,
-        status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES },
+        ...INBOX_VISIBLE_MESSAGE_WHERE,
       },
       orderBy: { createdAt: 'asc' },
     });

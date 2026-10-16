@@ -2,8 +2,8 @@ import businessProfile from '../businessProfile.js';
 import crypto from 'crypto';
 
 import prisma from '../utils/prismaClient.js';
-import logger from '../utils/logger.js';
 import emailService from './emailService.js';
+import brevoDeliveryEvents from './brevoDeliveryEvents.js';
 import { batchContactAttributes, batchRecipientIdentity, countryAllowed, prepareBatchTemplate, renderBatchTemplate } from '../utils/emailBatchPolicy.js';
 
 /**
@@ -366,14 +366,16 @@ class BrevoMarketingCampaigns {
         const key = messageKey(tenantId, automationKey);
         const existingId = existingMessages.get(key);
         // Nullable tenant keys cannot be used in a Prisma compound-unique
-        // upsert. Resolve the row inside this transaction and update by id.
+        // upsert. Resolve the row inside this transaction before creating it.
         const create = {
           tenantId,
           leadId: lead.id,
           emailAccountId: account.id,
+          emailRecipient: normalized,
           channel: 'email',
           direction: 'outbound',
           status: 'sent',
+          providerDeliveryStatus: 'sent',
           content: email.textBody,
           emailSubject: email.subject,
           emailHtmlBody: email.htmlBody,
@@ -383,16 +385,9 @@ class BrevoMarketingCampaigns {
           templateVariant: `saved-email-template:${template.id}:${prepared.hash.slice(0, 16)}`,
           automationKey,
         };
-        const update = {
-          status: 'sent',
-          sentAt,
-          emailAccountId: account.id,
-          providerCampaignId: String(state.campaignId),
-          providerMessageId: `brevo-campaign:${state.campaignId}:${recipientHash(normalized)}`,
-          providerStatusReason: null,
-        };
         if (existingId != null) {
-          await tx.message.update({ where: { id: existingId }, data: update });
+          // A recording retry must preserve later delivery events and replies.
+          continue;
         } else {
           const message = await tx.message.create({ data: create });
           existingMessages.set(key, message.id);
@@ -489,49 +484,8 @@ class BrevoMarketingCampaigns {
     return result;
   }
 
-  async reconcileWebhook(payload = {}) {
-    const event = String(payload.event || payload.type || '').toLowerCase();
-    const email = normalEmail(payload.email || payload.recipient || payload.to);
-    if (!email || !event) return { ignored: true, reason: 'email_or_event_missing' };
-    const rows = await prisma.$queryRaw`
-      SELECT id FROM Lead WHERE lower(trim(email)) = ${email}
-    `;
-    const leadIds = rows.map((row) => Number(row.id)).filter(Number.isInteger);
-    if (!leadIds.length) return { ignored: true, reason: 'lead_not_found' };
-
-    const status = /(?:delivered)/.test(event) ? 'delivered'
-      : /(?:opened|click)/.test(event) ? 'read'
-      : /(?:hard_bounce|soft_bounce|invalid|blocked|error)/.test(event) ? 'permanently_failed'
-      : null;
-    const optOut = /(?:unsubscribed|spam|complaint)/.test(event);
-    const messages = await prisma.message.findMany({
-      where: {
-        leadId: { in: leadIds }, channel: 'email', direction: 'outbound',
-        status: { in: ['queued', 'sending', 'sent', 'delivered'] },
-      },
-      select: { id: true, leadId: true, status: true },
-      orderBy: { sentAt: 'desc' },
-      take: 20,
-    });
-    const updates = [];
-    for (const message of messages) {
-      if (!status) continue;
-      if (message.status === 'delivered' && status === 'sent') continue;
-      updates.push(prisma.message.update({
-        where: { id: message.id },
-        data: { status, providerStatusReason: `brevo_webhook:${event}` },
-      }));
-    }
-    if (optOut || status === 'permanently_failed') {
-      const emailStatus = optOut ? (event.includes('spam') || event.includes('complaint') ? 'complained' : 'unsubscribed') : 'bounced';
-      updates.push(prisma.lead.updateMany({
-        where: { id: { in: leadIds } },
-        data: { ...(optOut ? { emailOptOut: true } : {}), emailStatus },
-      }));
-    }
-    if (updates.length) await prisma.$transaction(updates);
-    logger.info(`Brevo webhook reconciled ${event} for ${leadIds.length} local lead(s)`);
-    return { ignored: false, event, leadCount: leadIds.length, messagesUpdated: messages.length, optedOut: optOut };
+  async reconcileWebhook(payload = {}, options = {}) {
+    return brevoDeliveryEvents.reconcile(payload, options);
   }
 }
 

@@ -479,6 +479,7 @@ export type InboxMessageStatus =
   | 'delivered'
   | 'read'
   | 'failed'
+  | 'permanently_failed'
   | 'synced'
 
 export interface InboxSenderAccount {
@@ -542,6 +543,9 @@ export interface InboxMessage {
   content: string
   subject: string | null
   status: InboxMessageStatus
+  providerDeliveryStatus?: string | null
+  providerDeliveryAt?: string | null
+  providerStatusReason?: string | null
   pricingCategory?: string | null
   pricingType?: string | null
   billable?: boolean | null
