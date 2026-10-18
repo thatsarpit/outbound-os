@@ -913,7 +913,15 @@ describe('Meta WhatsApp webhook', () => {
         } }] }],
       };
       await deliver(payload);
-      const inbound = await prisma.message.findFirst({ where: { waMessageId: 'wamid.PHOTO-IN-1', direction: 'inbound' } });
+      // Meta is acknowledged before its media download and database write.
+      // A slow runner must wait for that result before restoring the fake API.
+      const deadline = Date.now() + 3000;
+      let inbound;
+      do {
+        inbound = await prisma.message.findFirst({ where: { waMessageId: 'wamid.PHOTO-IN-1', direction: 'inbound' } });
+        if (inbound) break;
+        await new Promise(resolve => setTimeout(resolve, 25));
+      } while (Date.now() < deadline);
       assert.ok(inbound, 'the photo message was recorded');
       assert.equal(inbound.leadId, lead.id);
       assert.equal(inbound.mediaType, 'image');
