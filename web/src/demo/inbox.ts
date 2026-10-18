@@ -155,6 +155,22 @@ const THREADS: Thread[] = [
     threadState: 'resolved',
     assignmentState: 'assigned',
   },
+  {
+    leadId: 6,
+    leadName: 'Kai Morgan',
+    leadCompany: 'Harbour Supplies',
+    leadEmail: 'kai@harbour.example',
+    leadMobile: null,
+    channel: 'email',
+    threadKey: 'em-6',
+    subject: 'Your product specification',
+    senderAccountId: 2,
+    assignedToId: 1,
+    unread: false,
+    replyNeeded: false,
+    threadState: 'assigned',
+    assignmentState: 'assigned_to_me',
+  },
 ]
 
 let nextId = 100
@@ -280,6 +296,28 @@ const MESSAGES: InboxMessage[] = [
     'Your order ACM-1042 is packed and ships tomorrow morning. Tracking follows once it is collected.',
   ),
   message(5, 'inbound', 1450, 'Order confirmed. Thanks for the quick turnaround.'),
+  message(
+    6,
+    'outbound',
+    20,
+    'Hi Kai, here is the specification you requested. Let me know if you need any other details.',
+    {
+      status: 'sent',
+      providerDeliveryStatus: 'soft_bounce',
+      providerDeliveryAt: ago(18),
+      providerStatusReason: 'brevo_webhook:soft_bounce',
+    },
+  ),
+  message(
+    6,
+    'inbound',
+    18,
+    'This is a delivery status report. The destination mailbox is temporarily unavailable.',
+    {
+      emailInboundKind: 'delivery_report',
+      subject: 'Delivery status notification',
+    },
+  ),
 ]
 
 files.set(

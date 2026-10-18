@@ -12,6 +12,7 @@ import { randomUUID, randomBytes } from 'crypto';
 
 
 import prisma from './utils/prismaClient.js';
+import { ACTIONABLE_CONVERSATION_WHERE, HUMAN_REPLY_WHERE, isActionableConversationMessage, isHumanReply } from './utils/emailInbound.js';
 import salesRoutes from './routes/sales.js';
 import analyticsViewRoutes from './routes/analyticsViews.js';
 import { analyticsWindow } from './utils/analyticsWindow.js';
@@ -40,6 +41,7 @@ import replyDetector from './services/replyDetector.js';
 import leadStateService, { LEAD_STATUS } from './domain/leadStateService.js';
 import emailService from './services/emailService.js';
 import dailyEmailScheduler from './services/dailyEmailScheduler.js';
+import { prepareBatchTemplate, validateBatchSettings } from './utils/emailBatchPolicy.js';
 import brevoMarketingCampaigns from './services/brevoMarketingCampaigns.js';
 import interventionEngine from './services/interventionEngine.js';
 import reportingService from './services/reportingService.js';
@@ -134,6 +136,13 @@ const VALID_LEAD_STATUSES = ['new', 'contacted', 'replied', 'engaged', 'closed',
 // queue. Drafts that never left the system remain available to campaign/admin
 // diagnostics but must not masquerade as chats with a lead.
 const INBOX_HIDDEN_MESSAGE_STATUSES = ['queued', 'cancelled', 'failed', 'permanently_failed'];
+const INBOX_VISIBLE_MESSAGE_WHERE = { AND: [{ OR: [
+  { status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES } },
+  // An email accepted by the provider stays in conversation history when a
+  // subsequent receipt reports failure. It is not an unsent draft.
+  { channel: 'email', direction: 'outbound', sentAt: { not: null },
+    providerDeliveryStatus: { in: ['hard_bounce', 'invalid', 'blocked', 'error'] } },
+] }] };
 
 function parsePositiveInt(value) {
   const parsed = Number.parseInt(String(value), 10);
@@ -162,7 +171,7 @@ function isRoleAtLeast(role, minRole) {
 
 function normalizeInboxThreadState({ lead, lastMessage, assignedToId }) {
   if (lead.status === 'closed') return 'resolved';
-  if (lastMessage?.direction === 'inbound') return 'needs_reply';
+  if (isHumanReply(lastMessage)) return 'needs_reply';
   if (assignedToId) return 'assigned';
   return 'unassigned';
 }
@@ -180,12 +189,13 @@ function buildInboxMessage(message, emailAccountsById = {}, telegramAccountsById
   };
 }
 
-function buildInboxThreadSummary(lead, emailAccountsById = {}, telegramAccountsById = {}) {
+function buildInboxThreadSummary(lead, emailAccountsById = {}, telegramAccountsById = {}, lastActionableMessage = undefined) {
   const lastMessageRaw = Array.isArray(lead.messages) ? lead.messages[0] || null : null;
   const lastMessage = lastMessageRaw ? buildInboxMessage(lastMessageRaw, emailAccountsById, telegramAccountsById) : null;
+  const actionable = lastActionableMessage === undefined ? lastMessage : lastActionableMessage;
   const threadState = normalizeInboxThreadState({
     lead,
-    lastMessage,
+    lastMessage: actionable,
     assignedToId: lead.assignedToId,
   });
 
@@ -207,8 +217,8 @@ function buildInboxThreadSummary(lead, emailAccountsById = {}, telegramAccountsB
     lastMessage: lastMessage?.content || '',
     lastMessagePreview: lastMessage?.content || '',
     lastMessageAt: lastMessage?.createdAt || lead.lastMessageAt || lead.updatedAt,
-    lastInboundAt: lastMessage?.direction === 'inbound' ? lastMessage.createdAt : null,
-    lastOutboundAt: lastMessage?.direction === 'outbound' ? lastMessage.createdAt : null,
+    lastInboundAt: isHumanReply(actionable) ? actionable.createdAt : null,
+    lastOutboundAt: actionable?.direction === 'outbound' ? actionable.createdAt : null,
     unread: threadState === 'needs_reply',
     replyNeeded: threadState === 'needs_reply',
     assignmentState: lead.assignedToId ? 'assigned' : 'unassigned',
@@ -1168,7 +1178,7 @@ app.get('/api/stats/overview', async (req, res) => {
         } }),
       prisma.message.count({ where: { status: { in: ['queued', 'sending'] }, lead: poolFilter } }),
       prisma.lead.groupBy({ by: ['engagementLevel'], where: poolFilter, _count: true }),
-      prisma.message.findMany({ where: { direction: 'inbound', lead: poolFilter }, select: { leadId: true }, distinct: ['leadId'] }),
+      prisma.message.findMany({ where: { ...HUMAN_REPLY_WHERE, lead: poolFilter }, select: { leadId: true }, distinct: ['leadId'] }),
       prisma.message.findMany({
         where: {
           direction: "outbound",
@@ -1201,7 +1211,7 @@ app.get('/api/stats/overview', async (req, res) => {
       const [newLeads, outbound, inbound] = await Promise.all([
         prisma.lead.count({ where: { ...poolFilter, ...buildNewLeadDateWhere(start, end) } }),
         prisma.message.findMany({ where: { direction: 'outbound', status: { in: DELIVERED_MESSAGE_STATUSES }, sentAt: { gte: start, lt: end }, lead: poolFilter }, select: { leadId: true } }),
-        prisma.message.findMany({ where: { direction: 'inbound', createdAt: { gte: start, lt: end }, lead: poolFilter }, select: { leadId: true } }),
+        prisma.message.findMany({ where: { ...HUMAN_REPLY_WHERE, createdAt: { gte: start, lt: end }, lead: poolFilter }, select: { leadId: true } }),
       ]);
       return {
         newLeads,
@@ -1304,7 +1314,7 @@ app.get('/api/stats/charts', async (req, res) => {
       },
       select: { sentAt: true, channel: true, leadId: true },
     }), prisma.message.findMany({
-      where: { direction: 'inbound', createdAt: { gte: sinceUTC, lt: tomorrowStartUTC }, lead: poolFilter },
+      where: { ...HUMAN_REPLY_WHERE, createdAt: { gte: sinceUTC, lt: tomorrowStartUTC }, lead: poolFilter },
       select: { leadId: true, createdAt: true },
     }), prisma.lead.findMany({
       where: { ...poolFilter, ...buildNewLeadDateWhere(sinceUTC, tomorrowStartUTC) },
@@ -2787,6 +2797,9 @@ app.get('/api/whatsapp/status', async (req, res) => {
       if (msg.status !== 'permanently_failed') {
         return res.status(409).json({ error: `Cannot requeue message in status '${msg.status}'` });
       }
+      if (msg.channel === 'email' && msg.providerCampaignId) {
+        return res.status(409).json({ error: 'Review this marketing campaign in Brevo. Campaign deliveries cannot be retried through the email queue.' });
+      }
       await prisma.message.update({
         where: { id },
         data: {
@@ -2840,7 +2853,7 @@ app.get('/api/whatsapp/status', async (req, res) => {
             lead: poolFilter,
           },
           }),
-          prisma.message.count({ where: { direction: 'inbound',
+          prisma.message.count({ where: { ...HUMAN_REPLY_WHERE,
             ...buildMessageEventDateWhere(dayStart, dayEnd),
             lead: poolFilter,
           } }),
@@ -3134,7 +3147,7 @@ app.get('/api/inbox/threads', async (req, res) => {
     const poolId = parsePositiveInt(req.query.poolId);
 
     const visibleMessageWhere = {
-      status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES },
+      ...INBOX_VISIBLE_MESSAGE_WHERE,
       ...(channel ? { channel } : {}),
     };
     const where = { messages: { some: visibleMessageWhere } };
@@ -3162,7 +3175,7 @@ app.get('/api/inbox/threads', async (req, res) => {
         {
           messages: {
             some: {
-              status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES },
+              ...INBOX_VISIBLE_MESSAGE_WHERE,
               OR: [
                 { content: { contains: search } },
                 { emailSubject: { contains: search } },
@@ -3190,16 +3203,31 @@ app.get('/api/inbox/threads', async (req, res) => {
         select: {
           id: true, status: true, assignedToId: true, lastMessageAt: true, updatedAt: true,
           messages: { where: visibleMessageWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
-            select: { direction: true, createdAt: true } },
+            select: { direction: true, channel: true, emailInboundKind: true, status: true, createdAt: true } },
         },
       });
-      candidates.push(...batch);
+      // Preserve latest-visible ordering, while determining reply ownership
+      // from customer/outbound messages. Automatic notices remain in history.
+      const needsPrevious = batch.filter(lead => !isActionableConversationMessage(lead.messages[0]));
+      const actionableRows = needsPrevious.length ? await prisma.lead.findMany({
+        where: { id: { in: needsPrevious.map(lead => lead.id) } },
+        select: { id: true, messages: {
+          where: { AND: [visibleMessageWhere, ACTIONABLE_CONVERSATION_WHERE] },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
+          select: { direction: true, channel: true, emailInboundKind: true, status: true, createdAt: true },
+        } },
+      }) : [];
+      const actionable = new Map([
+        ...batch.filter(lead => isActionableConversationMessage(lead.messages[0])).map(lead => [lead.id, lead.messages[0]]),
+        ...actionableRows.map(lead => [lead.id, lead.messages[0] || null]),
+      ]);
+      candidates.push(...batch.map(lead => ({ ...lead, lastActionableMessage: actionable.get(lead.id) || null })));
       if (batch.length < scanSize) break;
       afterId = batch[batch.length - 1].id;
     }
     const queue = candidates.map((lead) => ({
       ...lead,
-      threadState: normalizeInboxThreadState({ lead, lastMessage: lead.messages[0], assignedToId: lead.assignedToId }),
+      threadState: normalizeInboxThreadState({ lead, lastMessage: lead.lastActionableMessage, assignedToId: lead.assignedToId }),
       latestAt: lead.messages[0]?.createdAt || lead.lastMessageAt || lead.updatedAt,
     })).filter((lead) => {
       if (state === 'needs_reply') return lead.threadState === 'needs_reply';
@@ -3216,7 +3244,7 @@ app.get('/api/inbox/threads', async (req, res) => {
         where: { id: { in: ids } },
         include: {
           messages: { where: visibleMessageWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1 },
-          _count: { select: { messages: { where: { status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES } } } } },
+          _count: { select: { messages: { where: INBOX_VISIBLE_MESSAGE_WHERE } } },
         },
       }),
       prisma.emailAccount.findMany({ where: { enabled: true }, orderBy: { id: 'asc' } }),
@@ -3225,7 +3253,8 @@ app.get('/api/inbox/threads', async (req, res) => {
     const emailAccountsById = Object.fromEntries(emailAccounts.map((account) => [account.id, account]));
     const telegramAccountsById = Object.fromEntries(telegramSenderAccounts.map((account) => [account.id, account]));
     const byId = new Map(leads.map((lead) => [lead.id, lead]));
-    const threads = ids.filter((id) => byId.has(id)).map((id) => buildInboxThreadSummary(byId.get(id), emailAccountsById, telegramAccountsById));
+    const actionableById = new Map(queue.map(lead => [lead.id, lead.lastActionableMessage]));
+    const threads = ids.filter((id) => byId.has(id)).map((id) => buildInboxThreadSummary(byId.get(id), emailAccountsById, telegramAccountsById, actionableById.get(id)));
     const needsReply = queue.filter((lead) => lead.threadState === 'needs_reply').length;
     res.json({ threads, total, page, pages: Math.ceil(total / limit), unread: needsReply, needsReply });
   } catch (error) {
@@ -3242,12 +3271,12 @@ async function sendInboxThreadDetail(req, res) {
       where: { id: leadId },
       include: {
         messages: {
-          where: { status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES } },
+          where: INBOX_VISIBLE_MESSAGE_WHERE,
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         },
         _count: {
           select: {
-            messages: { where: { status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES } } },
+            messages: { where: INBOX_VISIBLE_MESSAGE_WHERE },
           },
         },
       },
@@ -3282,7 +3311,7 @@ async function sendInboxThreadDetail(req, res) {
     const summary = buildInboxThreadSummary({
       ...lead,
       messages: lastMessage ? [lastMessage] : [],
-    }, emailAccountsById, telegramAccountsById);
+    }, emailAccountsById, telegramAccountsById, lead.messages.findLast(isActionableConversationMessage) || null);
 
     res.json({
       ...summary,
@@ -3308,7 +3337,7 @@ app.get('/api/inbox/threads/:leadId/messages', async (req, res) => {
     const messages = await prisma.message.findMany({
       where: {
         leadId,
-        status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES },
+        ...INBOX_VISIBLE_MESSAGE_WHERE,
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -3587,8 +3616,7 @@ app.post('/api/email/accounts/:id/test', requireRole('admin'), async (req, res) 
   }
 });
 
-// Daily marketing batch, rotated across the configured senders. Queue creation is idempotent by day;
-// actual delivery remains governed by the global sending pause.
+// Marketing batches require a reviewed manual launch. Status and previews are read-only.
 app.get('/api/email/daily/status', requireRole('manager'), async (req, res) => {
   try { res.json(await dailyEmailScheduler.getStatus()); }
   catch (error) { res.status(500).json({ error: error.message }); }
@@ -3596,40 +3624,40 @@ app.get('/api/email/daily/status', requireRole('manager'), async (req, res) => {
 
 app.patch('/api/email/daily/settings', requireRole('admin'), async (req, res) => {
   try {
-    const updates = [];
-    if (typeof req.body.enabled === 'boolean') updates.push(['email.daily.enabled', String(req.body.enabled)]);
-    if (typeof req.body.marketingEnabled === 'boolean') {
-      await brevoMarketingCampaigns.setEnabled(req.body.marketingEnabled);
+    // Validate the complete patch before persisting any field.
+    const updates = validateBatchSettings(req.body);
+    if (req.body.templateId != null) {
+      const template = await prisma.emailTemplate.findUnique({ where: { id: req.body.templateId } });
+      prepareBatchTemplate(template);
+    }
+    if (req.body.senderIds?.length) {
+      const ids = [...new Set(req.body.senderIds)];
+      const count = await prisma.emailAccount.count({ where: { id: { in: ids }, provider: 'brevo' } });
+      if (count !== ids.length) throw new Error('Every selected sender must be an existing Brevo account');
     }
     if (req.body.brevoFolderId !== undefined) {
-      const rawFolderId = req.body.brevoFolderId;
-      if (rawFolderId != null && String(rawFolderId).trim() !== '' && !/^[1-9]\d*$/.test(String(rawFolderId).trim())) {
-        return res.status(400).json({ error: 'brevoFolderId must be a positive integer or null' });
-      }
-      await brevoMarketingCampaigns.setFolderId(req.body.brevoFolderId);
+      const scoped = await prisma.systemConfig.count({ where: { key: { startsWith: 'email.daily.marketing.brevo_folder_id.' } } });
+      if (scoped) throw new Error('Configure the campaign folder separately for each Brevo account');
     }
-    if (req.body.batchSize != null) {
-      const batchSize = Number(req.body.batchSize);
-      if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > 200) {
-        return res.status(400).json({ error: 'batchSize must be an integer from 1 to 200' });
-      }
-      updates.push(['email.daily.batch_size', String(batchSize)]);
-    }
-    for (const [key, value] of updates) {
-      await prisma.systemConfig.upsert({ where: { key }, update: { value }, create: { key, value } });
-    }
+    await prisma.$transaction(updates.map(([key, value]) => prisma.systemConfig.upsert({
+      where: { key }, update: { value }, create: { key, value },
+    })));
     res.json({ success: true, ...(await dailyEmailScheduler.getStatus()) });
-  } catch (error) { res.status(500).json({ error: error.message }); }
+  } catch (error) { res.status(400).json({ error: error.message }); }
 });
 
 app.post('/api/email/daily/preview', requireRole('manager'), async (req, res) => {
-  try { res.json(await dailyEmailScheduler.run({ dryRun: true, force: true, limit: req.body?.limit })); }
+  try { res.json(await dailyEmailScheduler.run({ dryRun: true, limit: req.body?.limit })); }
   catch (error) { res.status(500).json({ error: error.message }); }
 });
 
 app.post('/api/email/daily/queue', requireRole('admin'), async (req, res) => {
-  try { res.json(await dailyEmailScheduler.run({ force: req.body?.force === true, limit: req.body?.limit })); }
-  catch (error) { res.status(500).json({ error: error.message }); }
+  try {
+    res.json(await dailyEmailScheduler.run({
+      trigger: 'manual', force: req.body?.force === true, limit: req.body?.limit,
+      expectedPreviewHash: req.body?.previewHash,
+    }));
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
 // Send a message from Inbox across supported channels
@@ -4016,10 +4044,10 @@ app.get('/api/activity', async (req, res) => {
 
     // Fetch last 15 messages
     const recentMessages = await prisma.message.findMany({
-      where: { status: { in: ['sent', 'delivered', 'read', 'failed'] } },
+      where: { status: { in: ['sent', 'delivered', 'read', 'failed'] }, ...ACTIONABLE_CONVERSATION_WHERE },
       take: 15,
       orderBy: { createdAt: 'desc' },
-      select: { id: true, direction: true, channel: true, status: true, createdAt: true, lead: { select: { name: true } } }
+      select: { id: true, direction: true, channel: true, status: true, emailInboundKind: true, createdAt: true, lead: { select: { name: true } } }
     });
 
     // Synthesize into a unified timeline
@@ -4048,6 +4076,7 @@ app.get('/api/activity', async (req, res) => {
     });
 
     recentMessages.forEach((msg) => {
+      if (msg.direction === 'inbound' && !isHumanReply(msg)) return;
       let type = 'system_error';
       let text = 'Unknown message event';
       const channelLabel = msg.channel === 'email'
@@ -4226,13 +4255,13 @@ app.get('/api/analytics/funnel', async (req, res) => {
     // outreach event and made recovered historical data look artificially slow.
     const repliedLeads = await prisma.lead.findMany({
       where: { ...activeWhere,
-        messages: { some: { direction: "inbound" } },
+        messages: { some: HUMAN_REPLY_WHERE },
       },
       select: {
         messages: {
           where: {
             OR: [
-              { direction: "inbound" },
+              HUMAN_REPLY_WHERE,
               {
                 direction: "outbound",
                 status: { in: DELIVERED_MESSAGE_STATUSES },
@@ -4430,7 +4459,7 @@ app.get('/api/analytics/email-performance', async (req, res) => {
           where: {
             leadId: { in: [...variantLeadIds] },
             channel: 'email',
-            direction: 'inbound',
+            ...HUMAN_REPLY_WHERE,
             ...(since ? { createdAt: { gte: since } } : {}),
           },
           select: {

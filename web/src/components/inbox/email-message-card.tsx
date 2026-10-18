@@ -2,6 +2,7 @@ import { ExternalLink, Mail, Reply, Send } from 'lucide-react'
 import type { InboxMessage } from '@/api/types'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { ChannelBadge } from './channel-badge'
+import { describeEmailDelivery } from '@/lib/email-delivery'
 
 export function EmailMessageCard({
   message,
@@ -11,6 +12,7 @@ export function EmailMessageCard({
   className?: string
 }) {
   const isInbound = message.direction === 'inbound'
+  const delivery = describeEmailDelivery(message)
 
   return (
     <article
@@ -36,8 +38,17 @@ export function EmailMessageCard({
               {isInbound ? 'Inbound' : 'Outbound'}
             </span>
             {message.status && (
-              <span className="rounded-full bg-surface-overlay px-2 py-0.5 text-[10px] text-text-muted">
-                {message.status}
+              <span
+                className={cn(
+                  'rounded-full px-2 py-0.5 text-[10px]',
+                  delivery.failed
+                    ? 'bg-danger-muted text-danger'
+                    : delivery.temporary
+                      ? 'bg-warning-muted text-warning'
+                      : 'bg-surface-overlay text-text-muted',
+                )}
+              >
+                {delivery.label}
               </span>
             )}
           </div>
@@ -53,6 +64,21 @@ export function EmailMessageCard({
           {formatRelativeTime(message.sentAt || message.createdAt)}
         </span>
       </div>
+
+      {delivery.detail && (
+        <p
+          className={cn(
+            'mt-3 text-xs leading-5',
+            delivery.failed
+              ? 'text-danger'
+              : delivery.temporary
+                ? 'text-warning'
+                : 'text-text-muted',
+          )}
+        >
+          {delivery.detail}
+        </p>
+      )}
 
       <div className="mt-4 rounded-md border border-border bg-black/10 px-4 py-3">
         <p className="whitespace-pre-wrap text-sm leading-6 text-text-primary">

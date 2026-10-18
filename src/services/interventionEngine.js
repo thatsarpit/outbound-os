@@ -1,3 +1,4 @@
+import { HUMAN_REPLY_WHERE, isHumanReply, ACTIONABLE_CONVERSATION_WHERE } from '../utils/emailInbound.js';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
 import activityLog, { EVENT_TYPES } from '../utils/activityLog.js';
@@ -63,7 +64,7 @@ class InterventionEngine {
 
     // ── 1. First Reply Alert ──
     const inboundCount = await prisma.message.count({
-      where: { leadId: lead.id, direction: 'inbound' },
+      where: { leadId: lead.id, ...HUMAN_REPLY_WHERE },
     });
 
     if (inboundCount <= 1) {
@@ -141,6 +142,7 @@ class InterventionEngine {
       },
       include: {
         messages: {
+          where: ACTIONABLE_CONVERSATION_WHERE,
           orderBy: { createdAt: 'desc' },
           take: 1,
         },
@@ -152,7 +154,7 @@ class InterventionEngine {
     for (const lead of breachedLeads) {
       const lastMsg = lead.messages[0];
       // Only alert if last message was inbound (they're waiting for us)
-      if (!lastMsg || lastMsg.direction !== 'inbound') continue;
+      if (!lastMsg || !isHumanReply(lastMsg)) continue;
 
       const hoursSinceReply = Math.floor((Date.now() - new Date(lastMsg.createdAt).getTime()) / (1000 * 60 * 60));
 
@@ -187,6 +189,7 @@ class InterventionEngine {
       },
       include: {
         messages: {
+          where: ACTIONABLE_CONVERSATION_WHERE,
           orderBy: { createdAt: 'desc' },
           take: 3,
           select: { direction: true, content: true, channel: true, createdAt: true },
@@ -209,7 +212,7 @@ class InterventionEngine {
 
       // Recency of last message
       const lastMsg = lead.messages[0];
-      if (lastMsg?.direction === 'inbound') {
+      if (isHumanReply(lastMsg)) {
         const hoursSince = (Date.now() - new Date(lastMsg.createdAt).getTime()) / (1000 * 60 * 60);
         if (hoursSince < 1) urgency += 3;
         else if (hoursSince < 4) urgency += 2;
@@ -227,7 +230,7 @@ class InterventionEngine {
         alerts: leadAlerts.slice(0, 5),
         lastMessagePreview: lastMsg?.content?.substring(0, 120),
         lastMessageChannel: lastMsg?.channel || 'whatsapp',
-        waitingForResponse: lastMsg?.direction === 'inbound',
+        waitingForResponse: isHumanReply(lastMsg),
       };
     }).sort((a, b) => b.urgency - a.urgency);
   }
