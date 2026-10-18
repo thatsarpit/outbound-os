@@ -2519,3 +2519,18 @@ test('lead scoring and priority triage ignore machine mail and retain the last u
     assert.equal(priority.messages[0].content, content);
   } finally { await prisma.lead.delete({ where: { id: lead.id } }); }
 });
+
+
+test('Clerk team membership route is mounted and keeps local sign-in behavior explicit', async () => {
+  // Use a distinct documented fixture client so this small route check does
+  // not consume the main suite's 100-request production rate-limit bucket.
+  const headers = { ...authHeader(), 'X-Forwarded-For': '198.51.100.113' };
+  const denied = await request('GET', '/api/team/members', {headers: { 'X-Forwarded-For': '198.51.100.113' }});
+  assert.equal(denied.status, 401);
+  const members = await request('GET', '/api/team/members', {headers});
+  assert.equal(members.status, 409);
+  assert.match(members.body.error, /local user management/);
+  const invitations = await request('GET', '/api/team/invitations', {headers});
+  assert.equal(invitations.status, 200);
+  assert.deepEqual(invitations.body, []);
+});

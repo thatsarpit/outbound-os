@@ -12,6 +12,7 @@ import { randomUUID, randomBytes } from 'crypto';
 
 
 import prisma from './utils/prismaClient.js';
+import { createClerkTeamRouter } from './routes/clerkTeam.js';
 import { ACTIONABLE_CONVERSATION_WHERE, HUMAN_REPLY_WHERE, isActionableConversationMessage, isHumanReply } from './utils/emailInbound.js';
 import salesRoutes from './routes/sales.js';
 import analyticsViewRoutes from './routes/analyticsViews.js';
@@ -906,6 +907,7 @@ app.get('/api/users', requireRole('admin'), async (req, res) => {
 });
 
 app.post('/api/users', requireRole('admin'), async (req, res) => {
+  if (clerkClient) return res.status(409).json({ error: 'This workspace uses Clerk. Manage members through Team invitations and the Clerk dashboard.' });
   try {
     const { name, email, password, role = 'agent', phone } = req.body;
     if (!name || !email || !password) return res.status(400).json({ error: 'name, email, password required' });
@@ -938,6 +940,7 @@ app.post('/api/users', requireRole('admin'), async (req, res) => {
 });
 
 app.patch('/api/users/:id', requireRole('admin'), async (req, res) => {
+  if (clerkClient) return res.status(409).json({ error: 'This workspace uses Clerk. Manage members through Team invitations and the Clerk dashboard.' });
   try {
     const { name, role, enabled, password, phone } = req.body;
     const data = {};
@@ -974,6 +977,7 @@ app.patch('/api/users/:id', requireRole('admin'), async (req, res) => {
 });
 
 app.delete('/api/users/:id', requireRole('admin'), async (req, res) => {
+  if (clerkClient) return res.status(409).json({ error: 'This workspace uses Clerk. Manage members through Team invitations and the Clerk dashboard.' });
   try {
     const id = parseInt(req.params.id);
     if (req.user?.sub === id) return res.status(400).json({ error: 'Cannot delete your own account' });
@@ -5633,86 +5637,11 @@ const notImplemented = (feature) => (req, res) => {
 
 // Team management (still stubbed for the group-level routes not yet in scope)
 app.get('/api/team/summary', requireRole('manager'), notImplemented('Team summary'));
-app.get('/api/team/members', requireRole('manager'), notImplemented('Team members'));
 app.post('/api/team/members', requireRole('admin'), notImplemented('Invite team member'));
 app.patch('/api/team/members/:id', requireRole('admin'), notImplemented('Update team member'));
 app.delete('/api/team/members/:id', requireRole('admin'), notImplemented('Remove team member'));
 
-// ── Team Invitations ────────────────────────────────────────────────────────
-
-// GET /api/team/invitations — list pending (not yet accepted, not expired) invitations
-app.get('/api/team/invitations', requireRole('manager'), async (req, res) => {
-  // Email invitations are a Clerk feature. With built-in sign-in an admin adds
-  // teammates directly (POST /api/users), so there is never anything pending.
-  if (!clerkClient) return res.json([]);
-  try {
-    const result = await clerkClient.organizations.getOrganizationInvitationList({
-      organizationId: req.user.orgId,
-      status: ['pending'],
-    });
-    res.json(result.data.map((inv) => ({
-      id: inv.id,
-      email: inv.emailAddress,
-      role: String(inv.role).replace(/^org:/, ''),
-      createdAt: new Date(inv.createdAt).toISOString(),
-      expiresAt: new Date(inv.expiresAt).toISOString(),
-      // Clerk's list already excludes expired/accepted/revoked via status: ['pending'].
-      expired: false,
-    })));
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// POST /api/team/invitations — invite someone into the caller's Clerk organization.
-// Clerk sends and hosts the whole email + accept flow; nothing local to track.
-app.post('/api/team/invitations', requireRole('admin'), async (req, res) => {
-  if (!clerkClient) {
-    return res.status(409).json({
-      error: 'Email invitations need Clerk sign-in. Add the teammate under Team → Users with a starting password instead.',
-      code: 'INVITES_REQUIRE_CLERK',
-    });
-  }
-  try {
-    const { email, role = 'agent' } = req.body;
-    if (!email) return res.status(400).json({ error: 'email is required' });
-    const orgRole = role.startsWith('org:') ? role : `org:${role}`;
-
-    const invitation = await clerkClient.organizations.createOrganizationInvitation({
-      organizationId: req.user.orgId,
-      emailAddress: email.toLowerCase(),
-      role: orgRole,
-      inviterUserId: req.user.id,
-    });
-
-    res.status(201).json({
-      invitation: { id: invitation.id, email: invitation.emailAddress, role, createdAt: new Date(invitation.createdAt).toISOString(), expired: false },
-      emailSent: true,
-    });
-  } catch (e) {
-    // Clerk's Backend API errors carry { errors: [{ longMessage }] }, e.g. "already a member".
-    const msg = e?.errors?.[0]?.longMessage || e.message;
-    res.status(e?.status && e.status >= 400 && e.status < 600 ? e.status : 500).json({ error: msg });
-  }
-});
-
-// DELETE /api/team/invitations/:id — revoke a pending Clerk invitation
-app.delete('/api/team/invitations/:id', requireRole('admin'), async (req, res) => {
-  if (!clerkClient) return res.status(404).json({ error: 'Invitation not found' });
-  try {
-    await clerkClient.organizations.revokeOrganizationInvitation({
-      organizationId: req.user.orgId,
-      invitationId: req.params.id,
-      requestingUserId: req.user.id,
-    });
-    res.json({ ok: true });
-  } catch (e) {
-    if (e?.status === 404) return res.status(404).json({ error: 'Invitation not found' });
-    res.status(e?.status && e.status >= 400 && e.status < 600 ? e.status : 500).json({ error: e.message });
-  }
-});
-
-// Invitation acceptance is now Clerk's own hosted ticket-accept flow —
-// see the invitation `url` Clerk returns from POST /api/team/invitations.
-// No local route needed.
+app.use('/api/team', createClerkTeamRouter({ client: clerkClient, requireRole }));
 
 // Lead sync profiles
 app.get('/api/lead-sync/stats', notImplemented('Lead sync stats'));
