@@ -45,6 +45,9 @@ if (!fs.existsSync(envPath)) {
   if (clerkSecretKey && !clerkSecretKey.startsWith('sk_live_')) {
     problems.push('CLERK_SECRET_KEY must use a Clerk production key (sk_live_)');
   }
+  if (clerkSecretKey.startsWith('sk_live_') && !/^org_[A-Za-z0-9]+$/.test(env.CLERK_ORGANIZATION_ID || '')) {
+    problems.push('CLERK_ORGANIZATION_ID must identify the single production workspace');
+  }
   if (clerkPublishableKey && !clerkPublishableKey.startsWith('pk_live_')) {
     problems.push('CLERK_PUBLISHABLE_KEY must use a Clerk production key (pk_live_)');
   }
@@ -81,8 +84,8 @@ if (!fs.existsSync(envPath)) {
   if (!brand) warnings.push('DASHBOARD_BRAND_NAME not set (using runtime defaults)');
 }
 
-const favicon = path.join(root, 'web', 'public', 'favicon-app.svg');
-if (!fs.existsSync(favicon)) problems.push('Missing frontend asset: web/public/favicon-app.svg');
+const favicon = path.join(root, 'web', 'public', 'favicon-outbound-os.svg');
+if (!fs.existsSync(favicon)) problems.push('Missing frontend asset: web/public/favicon-outbound-os.svg');
 
 if (problems.length === 0) {
   console.log('Preflight OK');
