@@ -65,7 +65,7 @@
     "prettier": "^3.8.4",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.11.0",
-    "vite": "^8.3.0"
+    "vite": "^8.3.4"
   },
   "overrides": {
     "@tailwindcss/typography": {
