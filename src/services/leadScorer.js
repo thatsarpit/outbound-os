@@ -1,3 +1,4 @@
+import { isHumanReply } from '../utils/emailInbound.js';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
 import { computeLeadTier } from '../domain/leadTier.js';
@@ -102,7 +103,7 @@ class LeadScorer {
     let conversionWeights = null;
     try { conversionWeights = await this.getConversionWeights(); } catch {};
 
-    const inboundMessages = lead.messages.filter(m => m.direction === 'inbound');
+    const inboundMessages = lead.messages.filter(isHumanReply);
     const outboundSent = lead.messages.filter(m => m.direction === 'outbound' && m.status === 'sent');
     const outboundFailed = lead.messages.filter(m => m.direction === 'outbound' && m.status === 'permanently_failed');
 

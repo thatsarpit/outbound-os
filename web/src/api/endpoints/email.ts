@@ -63,6 +63,14 @@ export interface DailyEmailStatus {
   batchSize: number
   senderIds: number[]
   perSenderQuota: number
+  countries: string[]
+  templateId: number | null
+  templateName: string | null
+  templateError: string | null
+  templates: Array<{ id: number; name: string }>
+  policyReady: boolean
+  launchMode: 'manual'
+  canLaunchToday: boolean
   deliveryMode?: string
   marketing?: {
     enabled: boolean
@@ -87,6 +95,7 @@ export interface DailyEmailStatus {
     id: number
     email: string
     provider: string
+    enabled: boolean
     status: string
     lastError: string | null
     dailyLimit: number
@@ -97,24 +106,45 @@ export interface DailyEmailStatus {
 export interface DailyEmailPreview {
   dryRun: boolean
   count: number
+  skipped?: boolean
+  reason?: string
+  previewHash?: string
+  template?: { id: number; name: string; hash: string }
+  sample?: { subject: string; htmlBody: string; textBody: string }
+  countries?: string[]
   items: Array<{
     leadId: number
     email: string
     accountId: number
     sender: string
-    scheduledAt: string
+    country: string
   }>
 }
 
+async function batchResponse<T>(request: Promise<T | void>): Promise<T> {
+  const response = await request
+  if (!response) throw new Error('Email batch response was empty')
+  return response
+}
+
 export const dailyEmailApi = {
-  status: () => api.get<DailyEmailStatus>('/email/daily/status'),
+  status: () => batchResponse(api.get<DailyEmailStatus>('/email/daily/status')),
   update: (data: {
     enabled?: boolean
     marketingEnabled?: boolean
     batchSize?: number
     brevoFolderId?: number | null
-  }) => api.patch<DailyEmailStatus>('/email/daily/settings', data),
-  preview: (limit?: number) => api.post<DailyEmailPreview>('/email/daily/preview', { limit }),
-  queue: () =>
-    api.post<{ queued?: number; skipped?: boolean; reason?: string }>('/email/daily/queue'),
+    countries?: string[]
+    templateId?: number | null
+    senderIds?: number[]
+    perSenderQuota?: number
+  }) => batchResponse(api.patch<DailyEmailStatus>('/email/daily/settings', data)),
+  preview: (limit?: number) =>
+    batchResponse(api.post<DailyEmailPreview>('/email/daily/preview', { limit })),
+  queue: (previewHash: string) =>
+    batchResponse(
+      api.post<{ queued?: number; skipped?: boolean; reason?: string }>('/email/daily/queue', {
+        previewHash,
+      }),
+    ),
 }
