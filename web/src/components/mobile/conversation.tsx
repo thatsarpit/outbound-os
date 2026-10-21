@@ -23,6 +23,7 @@ import { useOnlineStatus } from '@/hooks/use-online-status'
 import { CHANNELS, CHANNEL_ORDER } from '@/lib/channels'
 import { buildReplySubject, getRenderedTemplateText } from '@/lib/email-compose'
 import { clearSubmittedDraft, loadDraft, saveDraft, type EmailDraft } from '@/lib/email-drafts'
+import { describeEmailDelivery, isReplyableEmail } from '@/lib/email-delivery'
 import { IS_DEMO } from '@/demo/demo-chrome'
 import { toast } from '@/stores/toast-store'
 
@@ -192,18 +193,34 @@ export function MobileConversation({
               No messages yet. Start the conversation below.
             </p>
           ) : (
-            thread.messages.map((message, index, all) =>
-              message.channel === 'email' ? (
+            thread.messages.map((message, index, all) => {
+              const delivery = describeEmailDelivery(message)
+              return message.channel === 'email' ? (
                 <article
                   key={message.id}
                   className={`max-w-[95%] rounded-xl border border-border p-3 ${message.direction === 'inbound' ? 'mr-auto bg-surface' : 'ml-auto bg-surface-raised'}`}
                 >
                   <div className="flex items-center justify-between gap-2 text-[11px] text-text-muted">
-                    <span>
-                      {message.direction === 'inbound' ? 'Received email' : 'Sent email'} ·{' '}
-                      {message.status}
+                    <span
+                      className={
+                        delivery.failed
+                          ? 'text-danger'
+                          : delivery.temporary
+                            ? 'text-warning'
+                            : undefined
+                      }
+                    >
+                      {message.direction === 'inbound' ? 'Received email' : 'Outbound email'} ·{' '}
+                      {delivery.label}
                     </span>
                   </div>
+                  {delivery.detail && (
+                    <p
+                      className={`mt-2 text-xs leading-5 ${delivery.failed ? 'text-danger' : delivery.temporary ? 'text-warning' : 'text-text-muted'}`}
+                    >
+                      {delivery.detail}
+                    </p>
+                  )}
                   <p className="mt-2 break-words text-sm font-medium">
                     {message.subject || 'Email reply'}
                   </p>
@@ -229,8 +246,8 @@ export function MobileConversation({
                   message={message}
                   showChannel={index === 0 || all[index - 1].channel !== message.channel}
                 />
-              ),
-            )
+              )
+            })
           )}
         </div>
       </div>
@@ -303,7 +320,7 @@ function MobileReplyComposer({
   const { dashboardScope, user } = useAuthStore()
   const online = useOnlineStatus()
   const client = useQueryClient()
-  const latestEmail = [...thread.messages].reverse().find((message) => message.channel === 'email')
+  const latestEmail = [...thread.messages].reverse().find(isReplyableEmail)
   const empty = (): Omit<EmailDraft, 'savedAt'> => ({
     subject: buildReplySubject(latestEmail?.subject || thread.subject),
     plainBody: '',
@@ -383,7 +400,7 @@ function MobileReplyComposer({
                 htmlBody: draft.htmlBody || undefined,
                 subject: draft.subject.trim(),
                 accountId,
-                replyToMessageId: latestEmail?.id,
+                replyToMessageId: latestEmail?.emailMessageId ? latestEmail.id : undefined,
                 cc: draft.cc.trim() || undefined,
                 bcc: draft.bcc.trim() || undefined,
               }

@@ -26,4 +26,4 @@ RUST_LOG=debug npx prisma migrate deploy
 
 INTEGRATION_DB_READY=1 \
 INTEGRATION_TEST_DB_PATH="${TEST_DB_PATH}" \
-node --test test/integration.test.js
+node --test test/integration.test.js test/clerkTeam.test.js
