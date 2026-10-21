@@ -394,13 +394,21 @@ router.post('/webhook/brevo', async (req, res) => {
     logger.warn('Brevo webhook rejected — configure and supply BREVO_WEBHOOK_SECRET');
     return res.sendStatus(401);
   }
-  // Brevo retries a non-2xx response. Acknowledge quickly and reconcile the
-  // event idempotently against local leads/messages in the background.
-  res.sendStatus(200);
+  const rawAccountId = req.query.accountId;
+  const accountId = rawAccountId === undefined ? null : Number(rawAccountId);
+  if (rawAccountId !== undefined && (typeof rawAccountId !== 'string' || !/^[1-9]\d*$/.test(rawAccountId) || !Number.isSafeInteger(accountId))) {
+    return res.status(400).json({ error: 'Invalid Brevo email account' });
+  }
   try {
-    await brevoMarketingCampaigns.reconcileWebhook(req.body || {});
+    await brevoMarketingCampaigns.reconcileWebhook(req.body || {}, { accountId });
+    return res.sendStatus(200);
   } catch (error) {
     logger.error(`Brevo webhook reconciliation failed: ${error.message}`);
+    // A success response means every fact and its local changes committed.
+    // Leave transient failures retryable instead of silently losing receipts.
+    return res.status(error.status === 400 ? 400 : 503).json({
+      error: error.status === 400 ? error.message : 'Brevo event processing failed; retry this delivery',
+    });
   }
 });
 

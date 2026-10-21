@@ -104,7 +104,8 @@ export const integrations: Integration[] = [
     description:
       'Already on AiSensy? Connect it to Outbound OS, an open-source CRM: send AiSensy campaigns to new leads instantly and handle replies in one inbox.',
     h1: 'Keep AiSensy. Add a CRM that follows up for you.',
-    summary: 'Use an existing AiSensy number: API campaigns for templates, Project API for replies.',
+    summary:
+      'Use an existing AiSensy number: API campaigns for templates, Project API for replies.',
     intro: [
       'If your WhatsApp number already runs through AiSensy, you do not have to move it. Choose AiSensy as the provider for that number and Outbound OS sends through AiSensy’s API Campaigns for templates and its Project API for free-text replies.',
       'Leads from your website, ads and marketplaces get their first AiSensy campaign within seconds of arriving, and a reply stops every scheduled follow-up. Other numbers in the same install can use Meta’s Cloud API directly.',
@@ -202,30 +203,37 @@ export const integrations: Integration[] = [
     kind: 'Channel',
     title: 'Brevo integration — consent-based email campaigns',
     description:
-      'Send email through Brevo and run a daily marketing email to leads who opted in, with bounces and unsubscribes synced back. Open-source CRM.',
+      'Send email through Brevo and review country-scoped marketing batches before a manual launch. Open-source CRM with recorded consent.',
     h1: 'Brevo for email, with consent tracked on every lead.',
-    summary: 'Transactional sending and a daily consented marketing email, with events synced back.',
+    summary:
+      'Email sending and reviewed marketing batches with a saved template, selected senders and an explicit country audience.',
     intro: [
-      'Outbound OS can send through Brevo instead of a plain mailbox, and can run a once-a-day marketing email to leads who ticked “email me” on your form — only those leads, with the time and source of their consent recorded.',
+      'Outbound OS can send through Brevo instead of a plain mailbox. Administrators choose countries, a saved template and senders, preview the exact audience, then explicitly launch each marketing batch. Restarts do not select new marketing recipients.',
       'Brevo’s webhook reports deliveries, bounces and unsubscribes back to the lead, so an unsubscribe in Brevo is an opt-out in the CRM.',
     ],
     capabilities: [
       'Brevo as an email sender alongside SMTP mailboxes',
-      'Daily marketing campaign to consented leads only, off by default',
+      'Reviewed manual marketing batches to eligible consented leads, off by default',
       'One or more sending domains, rotated',
       'Bounces, complaints and unsubscribes synced back through a secret-protected webhook',
     ],
     steps: [
-      { title: 'Add Brevo as a sender', body: 'Settings → Email → Add account → Brevo, with your API key and a verified sender.' },
+      {
+        title: 'Add Brevo as a sender',
+        body: 'Settings → Email → Add account → Brevo, with your API key and a verified sender.',
+      },
       {
         title: 'Set the webhook',
         body: 'Set BREVO_WEBHOOK_PUBLIC_URL and BREVO_WEBHOOK_SECRET, then add https://your-host/webhook/brevo in Brevo.',
       },
-      { title: 'Turn on the daily email', body: 'It is off on new installs. Enable it once consent, senders and the webhook are in place.' },
+      {
+        title: 'Review and launch a batch',
+        body: 'In Automation, save the country audience, template, senders and quotas. Once delivery is configured, preview the recipients and explicitly launch the reviewed batch.',
+      },
     ],
     faq: [
       {
-        q: 'Who receives the daily marketing email?',
+        q: 'Who receives a marketing batch?',
         a: 'Only leads with recorded marketing consent — for example a ticked email_consent box on your form — who have not opted out or bounced.',
       },
     ],
@@ -251,8 +259,14 @@ export const integrations: Integration[] = [
       'Daily limits per account',
     ],
     steps: [
-      { title: 'Connect an account', body: 'Integrations → Telegram → Connect, then confirm the login code Telegram sends you.' },
-      { title: 'Add a Telegram handle to a lead', body: 'Enter the lead’s @username or number; the inbox then offers Telegram as a channel.' },
+      {
+        title: 'Connect an account',
+        body: 'Integrations → Telegram → Connect, then confirm the login code Telegram sends you.',
+      },
+      {
+        title: 'Add a Telegram handle to a lead',
+        body: 'Enter the lead’s @username or number; the inbox then offers Telegram as a channel.',
+      },
     ],
     faq: [
       {
@@ -280,8 +294,14 @@ export const integrations: Integration[] = [
       'A secret-protected webhook for inbound messages',
     ],
     steps: [
-      { title: 'Set up BlueBubbles', body: 'Install BlueBubbles Server on an always-on Mac and expose it over a Cloudflare Tunnel.' },
-      { title: 'Add the server', body: 'Settings → iMessage → Add server, with its URL and password.' },
+      {
+        title: 'Set up BlueBubbles',
+        body: 'Install BlueBubbles Server on an always-on Mac and expose it over a Cloudflare Tunnel.',
+      },
+      {
+        title: 'Add the server',
+        body: 'Settings → iMessage → Add server, with its URL and password.',
+      },
       {
         title: 'Secure the webhook',
         body: 'Set IMESSAGE_WEBHOOK_SECRET and point BlueBubbles at https://your-host/webhook/imessage?token=<secret>.',
@@ -373,12 +393,18 @@ export const integrations: Integration[] = [
       'Consent checkboxes recorded as marketing consent',
     ],
     steps: [
-      { title: 'Create a Facebook source', body: 'Integrations → Webhooks → Quick add from presets → Facebook Lead Ads. Copy the address and key.' },
+      {
+        title: 'Create a Facebook source',
+        body: 'Integrations → Webhooks → Quick add from presets → Facebook Lead Ads. Copy the address and key.',
+      },
       {
         title: 'Build the automation',
         body: 'Trigger: Facebook Lead Ads → New lead. Action: Webhooks → POST JSON to the address, with the key in an x-api-key header.',
       },
-      { title: 'Send a test lead', body: 'Use Meta’s Lead Ads Testing Tool; the lead appears in Outbound OS within seconds.' },
+      {
+        title: 'Send a test lead',
+        body: 'Use Meta’s Lead Ads Testing Tool; the lead appears in Outbound OS within seconds.',
+      },
     ],
     faq: [
       {
@@ -407,12 +433,18 @@ export const integrations: Integration[] = [
       'A test mode that shows what would be created without creating it',
     ],
     steps: [
-      { title: 'Create a source', body: 'Integrations → Webhooks → Add webhook source. Copy the address and the key — the key is shown once.' },
+      {
+        title: 'Create a source',
+        body: 'Integrations → Webhooks → Add webhook source. Copy the address and the key — the key is shown once.',
+      },
       {
         title: 'Add a webhook step',
         body: 'POST JSON with name, phone, email, company, product and country, and the key in an x-api-key header.',
       },
-      { title: 'Test first', body: 'Add "test": true to the body to see the mapped lead without creating it.' },
+      {
+        title: 'Test first',
+        body: 'Add "test": true to the body to see the mapped lead without creating it.',
+      },
     ],
     code: {
       label: 'POST /api/webhooks/inbound/<source>',
@@ -445,8 +477,14 @@ export const integrations: Integration[] = [
       'Engyne’s Test button is honoured: nothing is created or sent',
     ],
     steps: [
-      { title: 'Create an Engyne source', body: 'Integrations → Webhooks → Quick add from presets → Engyne Cloud.' },
-      { title: 'Paste it into Engyne', body: 'Engyne Cloud → Admin → Webhooks: add the address and key, then press Test.' },
+      {
+        title: 'Create an Engyne source',
+        body: 'Integrations → Webhooks → Quick add from presets → Engyne Cloud.',
+      },
+      {
+        title: 'Paste it into Engyne',
+        body: 'Engyne Cloud → Admin → Webhooks: add the address and key, then press Test.',
+      },
     ],
     faq: [
       {
@@ -475,9 +513,18 @@ export const integrations: Integration[] = [
       'No Google OAuth or third-party add-on',
     ],
     steps: [
-      { title: 'Add the script', body: 'In your sheet: Extensions → Apps Script. Paste the script below and save.' },
-      { title: 'Deploy it as a web app', body: 'Deploy → New deployment → Web app, executing as you, with access for anyone who has the link.' },
-      { title: 'Paste the URL', body: 'Copy the deployment URL into Integrations → Google Sheets, press Test, then Save.' },
+      {
+        title: 'Add the script',
+        body: 'In your sheet: Extensions → Apps Script. Paste the script below and save.',
+      },
+      {
+        title: 'Deploy it as a web app',
+        body: 'Deploy → New deployment → Web app, executing as you, with access for anyone who has the link.',
+      },
+      {
+        title: 'Paste the URL',
+        body: 'Copy the deployment URL into Integrations → Google Sheets, press Test, then Save.',
+      },
     ],
     code: {
       label: 'Apps Script (Code.gs)',
@@ -509,8 +556,14 @@ export const integrations: Integration[] = [
       'Works with Zapier, Make, n8n or your own endpoint',
     ],
     steps: [
-      { title: 'Add a subscription', body: 'Integrations → Webhooks → Outgoing: URL, events and a secret.' },
-      { title: 'Verify the signature', body: 'Compute HMAC-SHA256 of the raw body with the secret and compare it with X-Webhook-Signature.' },
+      {
+        title: 'Add a subscription',
+        body: 'Integrations → Webhooks → Outgoing: URL, events and a secret.',
+      },
+      {
+        title: 'Verify the signature',
+        body: 'Compute HMAC-SHA256 of the raw body with the secret and compare it with X-Webhook-Signature.',
+      },
     ],
     code: {
       label: 'Verify a delivery (Node.js)',
@@ -541,9 +594,18 @@ export const integrations: Integration[] = [
       'Imports never trigger outreach on their own',
     ],
     steps: [
-      { title: 'Export from where the leads are now', body: 'Any CSV with a header row works; the columns above are recognised by name.' },
-      { title: 'Upload', body: 'Import → choose the file. The summary shows how many leads were created, merged or skipped.' },
-      { title: 'Start a campaign when ready', body: 'Campaigns → New, filtered to the leads you just imported.' },
+      {
+        title: 'Export from where the leads are now',
+        body: 'Any CSV with a header row works; the columns above are recognised by name.',
+      },
+      {
+        title: 'Upload',
+        body: 'Import → choose the file. The summary shows how many leads were created, merged or skipped.',
+      },
+      {
+        title: 'Start a campaign when ready',
+        body: 'Campaigns → New, filtered to the leads you just imported.',
+      },
     ],
     faq: [
       {
@@ -566,7 +628,8 @@ export const directoryExtras = [
     href: '/form-backend',
     name: 'Website forms',
     kind: 'Lead source' as IntegrationKind,
-    summary: 'Plain HTML, Webflow, WordPress or Framer forms, with a spam trap and a thank-you page.',
+    summary:
+      'Plain HTML, Webflow, WordPress or Framer forms, with a spam trap and a thank-you page.',
   },
   {
     slug: 'mcp',
@@ -583,11 +646,17 @@ export function integrationHref(slug: string) {
 }
 
 export function integrationName(slug: string) {
-  return integrations.find((i) => i.slug === slug)?.name ?? directoryExtras.find((e) => e.slug === slug)?.name ?? slug
+  return (
+    integrations.find((i) => i.slug === slug)?.name ??
+    directoryExtras.find((e) => e.slug === slug)?.name ??
+    slug
+  )
 }
 
 export function integrationSummary(slug: string) {
   return (
-    integrations.find((i) => i.slug === slug)?.summary ?? directoryExtras.find((e) => e.slug === slug)?.summary ?? ''
+    integrations.find((i) => i.slug === slug)?.summary ??
+    directoryExtras.find((e) => e.slug === slug)?.summary ??
+    ''
   )
 }

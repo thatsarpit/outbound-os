@@ -4,12 +4,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { usersApi } from '@/api/endpoints/users'
 import { toast } from '@/stores/toast-store'
-import { cn, formatRelativeTime } from '@/lib/utils'
+import { cn, formatDate, formatRelativeTime } from '@/lib/utils'
 import {
   Loader2,
   Mail,
-  Plus,
   Send,
+  Plus,
   Shield,
   ShieldCheck,
   Eye,
@@ -20,7 +20,6 @@ import {
   ToggleLeft,
   ToggleRight,
   Users,
-  Clock,
 } from 'lucide-react'
 import { Badge, Button, ConfirmDialog, Input, SelectField as UISelectField } from '@/components/ui'
 
@@ -46,7 +45,7 @@ interface TeamUser {
 interface Invitation {
   id: string
   email: string
-  role: string
+  role: string | null
   expiresAt: string
   createdAt: string
   expired: boolean
@@ -60,13 +59,15 @@ const ROLE_ICONS: Record<string, React.ElementType> = {
 }
 
 export default function TeamPage() {
+  const authProvider = useAuthStore((state) => state.provider)
+  return authProvider === 'clerk' ? <ClerkTeamPanel /> : <LocalTeamPanel />
+}
+
+function LocalTeamPanel() {
   const queryClient = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
-  const [showInvite, setShowInvite] = useState(false)
-  const authProvider = useAuthStore((state) => state.provider)
   const [editUser, setEditUser] = useState<TeamUser | null>(null)
   const [deleteUser, setDeleteUser] = useState<TeamUser | null>(null)
-  const [revokeInvite, setRevokeInvite] = useState<Invitation | null>(null)
 
   const { data: rawUsers, isLoading } = useQuery({
     queryKey: ['users'],
@@ -76,17 +77,6 @@ export default function TeamPage() {
       return res
     },
   })
-
-  const { data: rawInvitations } = useQuery({
-    queryKey: ['invitations'],
-    queryFn: async () => {
-      const res = await api.get<Invitation[]>('/team/invitations')
-      if (!res) return []
-      return res
-    },
-  })
-  const invitations: Invitation[] = Array.isArray(rawInvitations) ? rawInvitations : []
-  const pendingInvitations = invitations.filter((inv) => !inv.expired)
 
   const users: TeamUser[] = Array.isArray(rawUsers) ? rawUsers : []
   const stats = {
@@ -118,16 +108,6 @@ export default function TeamPage() {
     onError: (e: Error) => toast.error(`Update failed: ${e.message}`),
   })
 
-  const revokeInviteMutation = useMutation({
-    mutationFn: (id: string) => api.delete(`/team/invitations/${id}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invitations'] })
-      setRevokeInvite(null)
-      toast.success('Invitation revoked')
-    },
-    onError: (e: Error) => toast.error(`Revoke failed: ${e.message}`),
-  })
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-[60vh]">
@@ -148,17 +128,6 @@ export default function TeamPage() {
               </p>
             </div>
             <div className="flex gap-2">
-              {/* Email invitations are a Clerk feature; with built-in sign-in
-                  an admin adds people directly with a starting password. */}
-              {authProvider === 'clerk' && (
-                <Button
-                  variant="secondary"
-                  onClick={() => setShowInvite(true)}
-                  leftIcon={<Mail className="w-4 h-4" />}
-                >
-                  Invite
-                </Button>
-              )}
               <Button onClick={() => setShowCreate(true)} leftIcon={<Plus className="w-4 h-4" />}>
                 Add User
               </Button>
@@ -436,88 +405,6 @@ export default function TeamPage() {
         }}
       />
 
-      {/* Pending Invitations */}
-      {pendingInvitations.length > 0 && (
-        <section className="glass overflow-hidden rounded-lg">
-          <div className="border-b border-border bg-surface/80 px-5 py-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-semibold">Pending invitations</p>
-                <p className="mt-0.5 text-xs text-text-muted">
-                  {pendingInvitations.length} invite{pendingInvitations.length !== 1 ? 's' : ''}{' '}
-                  waiting to be accepted
-                </p>
-              </div>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setShowInvite(true)}
-                leftIcon={<Send className="w-3.5 h-3.5" />}
-              >
-                Send another
-              </Button>
-            </div>
-          </div>
-          <div className="divide-y divide-border-subtle">
-            {pendingInvitations.map((inv) => (
-              <div key={inv.id} className="flex items-center justify-between gap-4 px-5 py-3">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-accent-muted/60 shrink-0">
-                    <Mail className="h-3.5 w-3.5 text-accent" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium truncate">{inv.email}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <Badge
-                        variant={ROLE_VARIANTS[inv.role as TeamUser['role']] ?? 'neutral'}
-                        size="sm"
-                        className="capitalize"
-                      >
-                        {inv.role}
-                      </Badge>
-                      <span className="flex items-center gap-1 text-[11px] text-text-muted">
-                        <Clock className="h-3 w-3" />
-                        expires {formatRelativeTime(inv.expiresAt)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="hover:text-danger hover:bg-danger-muted shrink-0"
-                  onClick={() => setRevokeInvite(inv)}
-                  aria-label="Revoke invitation"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* Invite User Modal */}
-      {showInvite && <InviteUserModal onClose={() => setShowInvite(false)} />}
-
-      <ConfirmDialog
-        open={!!revokeInvite}
-        onOpenChange={(open) => {
-          if (!open) setRevokeInvite(null)
-        }}
-        title="Revoke invitation?"
-        description={
-          revokeInvite
-            ? `The invite sent to ${revokeInvite.email} will be cancelled and the link will stop working.`
-            : ''
-        }
-        confirmLabel="Revoke"
-        destructive
-        isLoading={revokeInviteMutation.isPending}
-        onConfirm={() => {
-          if (revokeInvite) revokeInviteMutation.mutate(revokeInvite.id)
-        }}
-      />
     </div>
   )
 }
@@ -661,6 +548,87 @@ function UserFormModal({ user, onClose }: { user: TeamUser | null; onClose: () =
   )
 }
 
+interface ClerkMember {
+  id: string
+  name: string
+  email: string
+  role: 'admin' | 'manager' | 'agent' | 'viewer' | null
+}
+
+function ClerkTeamPanel() {
+  const queryClient = useQueryClient()
+  const [showInvite, setShowInvite] = useState(false)
+  const [revoke, setRevoke] = useState<Invitation | null>(null)
+  const members = useQuery({
+    queryKey: ['clerk-team-members'],
+    queryFn: () => api.get<ClerkMember[]>('/team/members'),
+  })
+  const invitations = useQuery({
+    queryKey: ['invitations'],
+    queryFn: () => api.get<Invitation[]>('/team/invitations'),
+  })
+  const revokeMutation = useMutation({
+    mutationFn: (id: string) => api.delete(`/team/invitations/${id}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['invitations'] })
+      setRevoke(null)
+      toast.success('Invitation revoked')
+    },
+    onError: (error: Error) => toast.error(error.message),
+  })
+  const error = members.error || invitations.error
+  return (
+    <div className="space-y-5 animate-fade-in">
+      <section className="rounded-lg border border-border bg-surface">
+        <div className="flex items-start justify-between gap-4 border-b border-border p-5 sm:p-6">
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight">Team</h1>
+            <p className="mt-1 text-sm text-text-secondary">Admins and sales agents in your Clerk workspace.</p>
+          </div>
+          <Button onClick={() => setShowInvite(true)} leftIcon={<Mail className="h-4 w-4" />}>Invite</Button>
+        </div>
+        <div className="p-5 sm:p-6">
+          <p className="mb-4 text-sm text-text-secondary">Sales agents work leads, conversations and orders. Admins also manage campaigns and workspace settings. Existing custom roles keep their current permissions. Manage existing memberships in your Clerk dashboard.</p>
+          {error ? (
+            <div role="alert" className="space-y-3 rounded-md border border-danger/20 bg-danger-muted p-4 text-sm">
+              <p>{error instanceof Error ? error.message : 'Could not load your team.'}</p>
+              <Button variant="secondary" onClick={() => { void members.refetch(); void invitations.refetch() }}>Try again</Button>
+            </div>
+          ) : members.isLoading ? (
+            <p role="status" className="text-sm text-text-muted">Loading members…</p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {(members.data || []).map(member => (
+                <li key={member.id} className="flex flex-wrap items-center justify-between gap-3 py-4">
+                  <div className="min-w-0"><p className="font-medium">{member.name}</p><p className="break-all text-sm text-text-muted">{member.email}</p></div>
+                  <Badge variant={member.role ? ROLE_VARIANTS[member.role] : 'neutral'}>{member.role === 'agent' ? 'Sales agent' : member.role || 'Unrecognized role'}</Badge>
+                </li>
+              ))}
+              {!members.data?.length && <li className="py-6 text-sm text-text-muted">No members returned for this organization.</li>}
+            </ul>
+          )}
+        </div>
+      </section>
+      <section className="rounded-lg border border-border bg-surface p-5 sm:p-6">
+        <h2 className="font-semibold">Pending invitations</h2>
+        {invitations.isLoading ? <p role="status" className="mt-3 text-sm text-text-muted">Loading invitations…</p> : !invitations.error && (
+          <ul className="mt-3 divide-y divide-border">
+            {(invitations.data || []).map(invitation => (
+              <li key={invitation.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                <div className="min-w-0"><p className="break-all text-sm">{invitation.email}</p><p className="mt-1 text-xs text-text-muted">{invitation.role === 'agent' ? 'Sales agent' : invitation.role || 'Unrecognized role'} · Expires {formatDate(invitation.expiresAt, 'long')}</p></div>
+                <Button variant="ghost" onClick={() => setRevoke(invitation)}>Revoke</Button>
+              </li>
+            ))}
+            {!invitations.data?.length && <li className="py-3 text-sm text-text-muted">No pending invitations.</li>}
+          </ul>
+        )}
+      </section>
+      {showInvite && <InviteUserModal onClose={() => setShowInvite(false)} />}
+      <ConfirmDialog open={Boolean(revoke)} onOpenChange={(open) => { if (!open && !revokeMutation.isPending) setRevoke(null) }} onConfirm={() => { if (revoke) revokeMutation.mutate(revoke.id) }} title="Revoke invitation?" description={`The invitation for ${revoke?.email || 'this teammate'} will stop working.`} confirmLabel="Revoke" isLoading={revokeMutation.isPending} />
+    </div>
+  )
+}
+
 /* ── Invite User Modal ── */
 interface InviteResult {
   invitation: Invitation
@@ -710,7 +678,7 @@ function InviteUserModal({ onClose }: { onClose: () => void }) {
             <div className="rounded-md border border-success/20 bg-success-muted/40 px-4 py-3 text-sm text-success">
               Email sent to <strong>{result.invitation.email}</strong>
             </div>
-            <p className="text-xs text-text-muted">The invite expires in 30 days.</p>
+            <p className="text-xs text-text-muted">Expires {formatDate(result.invitation.expiresAt, 'long')}.</p>
           </div>
           <div className="border-t border-border bg-surface/70 px-6 py-4 flex justify-end">
             <Button onClick={onClose}>Done</Button>
@@ -737,7 +705,7 @@ function InviteUserModal({ onClose }: { onClose: () => void }) {
               </p>
               <h2 className="mt-2 text-lg font-semibold tracking-tight">Invite teammate</h2>
               <p className="mt-1 text-sm text-text-secondary">
-                A magic link will be emailed to them. The link expires after 7 days.
+                They will receive an email link to join this workspace.
               </p>
             </div>
             <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close">
@@ -760,9 +728,7 @@ function InviteUserModal({ onClose }: { onClose: () => void }) {
             onValueChange={(v) => setForm({ ...form, role: v })}
             options={[
               { value: 'admin', label: 'Admin — full workspace control' },
-              { value: 'manager', label: 'Manager — oversight and review' },
-              { value: 'agent', label: 'Agent — leads and inbox' },
-              { value: 'viewer', label: 'Viewer — read-only' },
+              { value: 'agent', label: 'Sales agent — leads and inbox' },
             ]}
           />
           {mutation.isError && (
