@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import { rateLimit } from 'express-rate-limit';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import log from './logger.js';
@@ -39,35 +40,6 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true })); // OAuth consent form posts
 
-// ── Simple rate limiter (in-memory, per-IP) ──
-const hits = new Map();
-const RATE_WINDOW = 60_000;
-const RATE_MAX = 120;
-
-function rateLimiter(req, res, next) {
-  const ip = req.ip || req.socket.remoteAddress || 'unknown';
-  const now = Date.now();
-  let entry = hits.get(ip);
-  if (!entry || now - entry.start > RATE_WINDOW) {
-    entry = { start: now, count: 0 };
-    hits.set(ip, entry);
-    if (hits.size > 10_000) hits.delete(hits.keys().next().value);
-  }
-  entry.count++;
-  if (entry.count > RATE_MAX) {
-    return res.status(429).json({ error: 'Rate limit exceeded' });
-  }
-  next();
-}
-
-// Cleanup stale rate entries every 5 min
-setInterval(() => {
-  const cutoff = Date.now() - RATE_WINDOW;
-  for (const [ip, entry] of hits) {
-    if (entry.start < cutoff) hits.delete(ip);
-  }
-}, 300_000).unref();
-
 // ── Health check (no auth) ──
 app.get('/healthz', (req, res) => {
   res.json({ status: 'ok', service: 'outbound-os-mcp', uptime: process.uptime() });
@@ -79,8 +51,7 @@ app.get('/healthz', (req, res) => {
 // for headless clients (Claude Code).
 // Limit unauthenticated discovery, registration, token attempts and bearer
 // checks as well as successful tool requests.
-app.use('/oauth', rateLimiter);
-app.use('/mcp', rateLimiter);
+app.use(rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }));
 mountOAuth(app);
 
 // ── Bearer auth middleware ──
