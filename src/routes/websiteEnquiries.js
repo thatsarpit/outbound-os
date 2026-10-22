@@ -35,7 +35,12 @@ router.post('/', async (req, res) => {
     if (body[key] !== undefined && (typeof body[key] !== 'string' || body[key].length > max)) return res.status(422).json({ error: `Check the ${key} field.` });
     fields[key] = (body[key] || '').trim();
   }
-  if (!fields.name || !fields.company || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(fields.workEmail)) return res.status(422).json({ error: 'Enter your name, company and a valid work email.' });
+  // Delimiter checks avoid overlapping regex repetitions on public input.
+  const at = fields.workEmail.indexOf('@');
+  const dot = fields.workEmail.lastIndexOf('.');
+  const validEmail = at > 0 && at === fields.workEmail.lastIndexOf('@')
+    && dot > at + 1 && dot < fields.workEmail.length - 1 && !/\s/u.test(fields.workEmail);
+  if (!fields.name || !fields.company || !validEmail) return res.status(422).json({ error: 'Enter your name, company and a valid work email.' });
   const email = fields.workEmail.toLowerCase();
   const summary = ['Website service enquiry', ...Object.entries(fields).filter(([, value]) => value).map(([key, value]) => `${key}: ${value}`)].join('\n');
   try {

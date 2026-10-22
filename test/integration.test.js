@@ -2618,7 +2618,10 @@ describe('Website service enquiries', () => {
     process.env.WEBSITE_ENQUIRY_ENABLED = 'true';
   });
   test('validates input and ignores honeypot submissions', async () => {
-    assert.equal((await request('POST', endpoint, { headers: headers(), body: { ...body, workEmail: 'invalid' } })).status, 422);
+    const invalidEmails = ['invalid', 'person@@example.test', 'person@example', 'person@.test', 'person@example.', 'person@exam ple.test', `!@!${'!.'.repeat(120)}`];
+    for (const [i, workEmail] of invalidEmails.entries()) {
+      assert.equal((await request('POST', endpoint, { headers: headers(`192.0.2.${140 + i}`), body: { ...body, workEmail } })).status, 422);
+    }
     assert.equal((await request('POST', endpoint, { headers: headers(), body: { ...body, notes: 'x'.repeat(4001) } })).status, 422);
     assert.equal((await request('POST', endpoint, { headers: headers(), body: { ...body, companyWebsite: 'bot.test' } })).status, 200);
   });
