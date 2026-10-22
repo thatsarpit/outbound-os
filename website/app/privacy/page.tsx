@@ -4,13 +4,13 @@ import { contentUpdated, site } from '@/lib/site-content'
 
 export const metadata = buildMetadata(
   'Privacy',
-  'What personal data this website and the Outbound OS project handle: no cookies or trackers on the site, no telemetry in the software, and what happens to form messages.',
+  'What personal data this website and the Outbound OS project handle: optional website Analytics, no telemetry in the software, and what happens to form messages.',
   '/privacy',
 )
 
 /**
  * Privacy, in plain words. Every statement here is checkable: the site is a
- * static export with no cookies or analytics, the software has no telemetry,
+ * static export with optional consent-based Analytics, the software has no telemetry,
  * and the one form posts to the maintainers' own Outbound OS instance.
  */
 export default function PrivacyPage() {
@@ -32,9 +32,17 @@ export default function PrivacyPage() {
           <section>
             <h2>This website</h2>
             <p>
-              outboundos.space is a static website. It sets no cookies of its
-              own and uses no analytics, advertising or tracking scripts. Fonts
-              and images are served from this domain.
+              outboundos.space is a static website. Google Analytics loads only
+              after you choose “Allow analytics”. It measures public page views
+              with cookies, without query strings, fragments, search text or
+              form contents. Referrers include only the website origin and
+              advertising personalization is disabled. Fonts and images are
+              served from this domain.
+            </p>
+            <p>
+              Your choice is saved in your browser. Use “Analytics preferences”
+              at the bottom of any page to change it. Declining stops measurement
+              and removes Analytics cookies on this domain.
             </p>
             <p>
               The site is served by Cloudflare, which processes technical
