@@ -4,6 +4,8 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { createHash, randomUUID } from 'crypto';
+import 'dotenv/config';
+import { sqliteDatabaseUrl } from '../prisma/database-url.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,7 +33,7 @@ function fail(message) {
 function runCommand(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: APP_DIR,
-    env: process.env,
+    env: { ...process.env, ...options.env },
     encoding: 'utf8',
     stdio: options.capture ? ['ignore', 'pipe', 'pipe'] : 'inherit',
   });
@@ -170,12 +172,11 @@ function detectSchemaDiff(dbUrl, schemaPath) {
     'prisma',
     'migrate',
     'diff',
-    '--from-url',
-    dbUrl,
-    '--to-schema-datamodel',
+    '--from-config-datasource',
+    '--to-schema',
     schemaPath,
     '--exit-code',
-  ], { capture: true });
+  ], { capture: true, env: { DATABASE_URL: dbUrl } });
 
   if (result.status === 0) return 'none';
   if (result.status === 2) return 'diff';
@@ -243,7 +244,7 @@ function main() {
     return;
   }
 
-  const dbUrl = process.env.DATABASE_URL || urlLiteral;
+  const dbUrl = sqliteDatabaseUrl(process.env.DATABASE_URL || urlLiteral);
   const dbPath = resolveSqliteDbPath(schema, dbUrl);
   if (!dbPath || !fs.existsSync(dbPath)) {
     if (!dbPath) {

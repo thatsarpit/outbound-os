@@ -74,9 +74,9 @@ before(async () => {
     // Remove old test DB if it exists
     if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
 
-    // Push schema to test DB. The package script performs this outside the
+    // Apply committed migrations. The package script performs this outside the
     // Node test runner on macOS, where Prisma's schema engine is more reliable.
-    execSync('npx prisma db push --skip-generate --accept-data-loss', {
+    execSync('npx prisma migrate deploy', {
       cwd: path.join(__dirname, '..'),
       env: { ...process.env, DATABASE_URL: TEST_DB_URL },
       stdio: 'pipe',
