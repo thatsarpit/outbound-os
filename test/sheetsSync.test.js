@@ -107,3 +107,33 @@ describe('SheetsSync', () => {
     assert.equal(calls.length, 0);
   });
 });
+
+describe('Sheets webhook destination validation', () => {
+  afterEach(() => { globalThis.fetch = realFetch; });
+
+  test('rejects private, arbitrary and deceptive destinations before any request', async () => {
+    const calls = stubFetch([200]);
+    for (const url of ['http://127.0.0.1/admin', 'http://169.254.169.254/latest/meta-data',
+      'https://example.test/hook', 'https://script.google.com.evil.test/macros/s/TEST/exec',
+      'https://script.google.com@127.0.0.1/macros/s/TEST/exec', 'https://script.google.com:444/macros/s/TEST/exec']) {
+      await assert.rejects(sheetsSync.test(url), /Google Apps Script/);
+    }
+    assert.equal(calls.length, 0);
+  });
+
+  test('follows the Apps Script result redirect as GET and rejects external redirect targets', async () => {
+    const calls = [];
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url, init });
+      return calls.length === 1
+        ? new Response(null, { status: 302, headers: { location: 'https://script.googleusercontent.com/macros/echo?fixture=1' } })
+        : new Response('{}', { status: 200 });
+    };
+    await sheetsSync.test('https://script.google.com/macros/s/TEST/exec');
+    assert.equal(calls[0].init.redirect, 'manual');
+    assert.equal(calls[1].init.method, 'GET');
+    assert.equal(calls[1].init.body, undefined);
+    globalThis.fetch = async () => new Response(null, { status: 307, headers: { location: 'http://127.0.0.1/admin' } });
+    await assert.rejects(sheetsSync.test('https://script.google.com/macros/s/TEST/exec'), /unsafe redirect/);
+  });
+});

@@ -144,7 +144,8 @@ export async function loadWorkspaceProfile() {
     return getWorkspaceProfile();
   }
   for (const row of rows) {
-    const field = FIELDS[row.key.slice(KEY_PREFIX.length)];
+    const key = row.key.slice(KEY_PREFIX.length);
+    const field = Object.hasOwn(FIELDS, key) ? FIELDS[key] : undefined;
     if (!field) continue;
     try {
       field.apply(field.clean(row.value));
@@ -160,10 +161,10 @@ export async function loadWorkspaceProfile() {
  * is rejected if any value is invalid, so nothing is half-applied.
  */
 export async function saveWorkspaceProfile(values = {}) {
-  const cleaned = {};
-  const errors = {};
+  const cleaned = Object.create(null);
+  const errors = Object.create(null);
   for (const [key, raw] of Object.entries(values || {})) {
-    const field = FIELDS[key];
+    const field = Object.hasOwn(FIELDS, key) ? FIELDS[key] : undefined;
     if (!field) continue;
     try {
       cleaned[key] = field.clean(raw);

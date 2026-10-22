@@ -7,7 +7,7 @@ const logger = winston.createLogger({
     winston.format.errors({ stack: true }),
     winston.format.printf(({ timestamp, level, message, ...meta }) => {
       const metaStr = Object.keys(meta).length ? ` ${JSON.stringify(meta)}` : '';
-      return `[${timestamp}] ${level.toUpperCase().padEnd(5)} ${message}${metaStr}`;
+      return `[${timestamp}] ${level.toUpperCase().padEnd(5)} ${JSON.stringify(message)}${metaStr}`;
     })
   ),
   transports: [
@@ -16,7 +16,7 @@ const logger = winston.createLogger({
         winston.format.colorize(),
         winston.format.timestamp({ format: 'HH:mm:ss' }),
         winston.format.printf(({ timestamp, level, message }) => {
-          return `[${timestamp}] ${level} ${message}`;
+          return `[${timestamp}] ${level} ${JSON.stringify(message)}`;
         })
       ),
     }),

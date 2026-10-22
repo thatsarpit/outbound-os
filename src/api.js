@@ -56,6 +56,8 @@ import { mapInboundLead, isSendableMobile, formSubmissionMetadata } from './util
 import { FORM_SOURCE_PRESETS } from './utils/formSourcePresets.js';
 import { secretsMatch } from './utils/secretsMatch.js';
 import sheetsSync from './services/sheetsSync.js';
+import { sheetsWebhookUrl } from './utils/sheetsWebhook.js';
+import { browserMutationGuard } from './utils/browserMutation.js';
 import whatsappCloudApi from './services/whatsappCloudApi.js';
 import { WHATSAPP_PROVIDERS, credentialState, publicCredentialSummary } from './services/whatsappProviders.js';
 import {
@@ -125,7 +127,7 @@ const mediaUpload = multer({
 
 // ── Input validation helpers ──
 function validateEmail(email) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  return typeof email === 'string' && email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 function validatePhone(mobile) {
   const clean = String(mobile).replace(/[^0-9+]/g, '');
@@ -566,6 +568,7 @@ app.use(cors({
   credentials: true,
 }));
 app.use(cookieParser());
+app.use('/api', browserMutationGuard(ALLOWED_ORIGINS));
 // Populates req.auth() / getAuth(req) for every request below. requireRole()
 // reads from it; nothing else in the chain does the verification itself.
 app.use(authMiddleware());
@@ -4693,7 +4696,7 @@ app.post('/api/settings/sheets-webhook', requireRole('admin'), async (req, res) 
   try {
     const { url, enabled = true, events } = req.body;
     if (!url) return res.status(400).json({ error: 'url required' });
-
+    try { sheetsWebhookUrl(url); } catch (error) { return res.status(400).json({ error: error.message }); }
     const upsert = async (key, value) => prisma.systemConfig.upsert({
       where: { key }, update: { value }, create: { key, value },
     });

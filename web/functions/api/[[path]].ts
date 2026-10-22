@@ -56,13 +56,12 @@ export const onRequest: PagesFunction<Env> = async (context) => {
       statusText: response.statusText,
       headers: out,
     })
-  } catch (error) {
+  } catch {
     // Return a stable JSON error when the AWS API is temporarily unavailable
     // rather than surfacing an opaque Pages Function failure.
     return new Response(
       JSON.stringify({
         error: 'Backend unreachable',
-        detail: error instanceof Error ? error.message : String(error),
       }),
       { status: 502, headers: { 'content-type': 'application/json' } },
     )
