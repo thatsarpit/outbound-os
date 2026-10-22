@@ -45,6 +45,7 @@ class CSVImporter {
    * Parse CSV text into rows
    */
   parseCSV(csvText) {
+    if (typeof csvText !== 'string') throw new TypeError('CSV input must be text');
     const lines = csvText.split('\n').filter(l => l.trim().replace(/,/g, '').trim());
     if (lines.length < 2) return { headers: [], rows: [] };
 
@@ -56,7 +57,7 @@ class CSVImporter {
     for (let i = 1; i < lines.length; i++) {
       const values = this._parseLine(lines[i]);
       if (values.length > 0) {
-        const row = {};
+        const row = Object.create(null);
         headers.forEach((header, idx) => {
           row[header] = (values[idx] || '').trim();
         });
@@ -71,6 +72,7 @@ class CSVImporter {
    * Parse a single CSV line, handling quoted fields
    */
   _parseLine(line) {
+    if (typeof line !== 'string') throw new TypeError('CSV lines must be text');
     const values = [];
     let current = '';
     let inQuotes = false;

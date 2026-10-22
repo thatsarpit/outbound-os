@@ -34,14 +34,14 @@ const SPAM_TOKENS = [
  * @returns {string} Normalized, clamped subject (always non-empty)
  */
 export function normalizeEmailSubject(rawSubject, { lead = {}, isFollowup = false, previousSubject = null } = {}) {
-  let subject = String(rawSubject ?? '').trim();
+  let subject = String(rawSubject ?? '').slice(0, 1000).trim();
 
   // Strip leading "Subject:" label LLM may leak
   subject = subject.replace(/^subject\s*:\s*/i, '').trim();
   // Strip control chars
   subject = subject.replace(/[\u0000-\u001f]+/g, ' ').trim();
   // Strip surrounding straight or curly quotes
-  subject = subject.replace(/^[\u0022\u0027\u201c\u201d\u2018\u2019]+|[\u0022\u0027\u201c\u201d\u2018\u2019]+$/g, '').trim();
+  subject = subject.replace(/^[\u0022\u0027\u201c\u201d\u2018\u2019]+/, '').replace(/[\u0022\u0027\u201c\u201d\u2018\u2019]+$/, '').trim();
   // Collapse whitespace
   subject = subject.replace(/\s+/g, ' ').trim();
   // Strip spam tokens
@@ -53,9 +53,10 @@ export function normalizeEmailSubject(rawSubject, { lead = {}, isFollowup = fals
 
   if (isFollowup) {
     // Pick the canonical thread subject: previousSubject preferred, else current.
-    const baseSource = (previousSubject && String(previousSubject).trim()) || subject;
+    const baseSource = (previousSubject && String(previousSubject).slice(0, 1000).trim()) || subject;
     // Strip any existing Re:/RE:/re: prefixes (recursive) so we end up with one.
-    const stripped = baseSource.replace(/^(\s*re\s*:\s*)+/i, '').trim();
+    let stripped = baseSource.trim();
+    while (/^re\s*:/i.test(stripped)) stripped = stripped.replace(/^re\s*:/i, '').trimStart();
     const fallback = stripped || (lead.product ? String(lead.product) : 'your inquiry');
     subject = `Re: ${fallback}`;
   } else if (!subject) {

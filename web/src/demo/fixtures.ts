@@ -1968,7 +1968,7 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
   // Honours ?status= so the Pipeline board (one request per stage) does not
   // show the same rows in every column.
   [
-    /\/leads\?|\/leads$/,
+    /\/leads(?:\?|$)/,
     (url: string) => {
       const params = new URL(url, location.origin).searchParams
       const status = params.get('status')

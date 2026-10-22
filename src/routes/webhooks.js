@@ -292,7 +292,7 @@ async function storeMetaInboundMedia(msg, accountId) {
 router.get('/webhook/meta', (req, res) => {
   const expected = process.env.META_WEBHOOK_VERIFY_TOKEN;
   if (req.query['hub.mode'] === 'subscribe' && expected && secretsEqual(req.query['hub.verify_token'], expected)) {
-    return res.status(200).send(String(req.query['hub.challenge'] || ''));
+    return res.status(200).type('text/plain').send(String(req.query['hub.challenge'] || ''));
   }
   return res.sendStatus(403);
 });

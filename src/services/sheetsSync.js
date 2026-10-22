@@ -59,6 +59,7 @@
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
 import { isSendableMobile } from '../utils/inboundLead.js';
+import { postSheetsWebhook } from '../utils/sheetsWebhook.js';
 
 const CONFIG_KEY = 'sheets.webhook_url';
 const ENABLED_KEY = 'sheets.enabled';
@@ -142,12 +143,7 @@ class SheetsSyncService {
   async _post(row, label, attempt = 1) {
     const MAX_ATTEMPTS = 3;
     try {
-      const res = await fetch(this._url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(row),
-        signal: AbortSignal.timeout(10000),
-      });
+      const res = await postSheetsWebhook(this._url, row);
       if (res.ok) {
         logger.info(`📊 SheetsSync: pushed ${label}`);
         return true;
@@ -187,12 +183,7 @@ class SheetsSyncService {
       dealValue: null,
       createdAt: new Date().toISOString(),
     };
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(row),
-      signal: AbortSignal.timeout(10000),
-    });
+    const res = await postSheetsWebhook(url, row);
     if (!res.ok) throw new Error(`Google Apps Script returned ${res.status}`);
     return { ok: true };
   }

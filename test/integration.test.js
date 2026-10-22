@@ -707,6 +707,11 @@ describe('Meta WhatsApp webhook', () => {
     const ok = await request('GET', '/webhook/meta?hub.mode=subscribe&hub.verify_token=test-meta-verify-token&hub.challenge=12345');
     assert.equal(ok.status, 200);
     assert.equal(String(ok.body), '12345');
+    assert.match(ok.headers['content-type'], /^text\/plain/);
+    const challenge = '<img src=x onerror=alert(1)>';
+    const escaped = await request('GET', '/webhook/meta?hub.mode=subscribe&hub.verify_token=test-meta-verify-token&hub.challenge=' + encodeURIComponent(challenge));
+    assert.equal(escaped.body, challenge);
+    assert.match(escaped.headers['content-type'], /^text\/plain/);
     const bad = await request('GET', '/webhook/meta?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=12345');
     assert.equal(bad.status, 403);
   });
@@ -1178,12 +1183,14 @@ describe('Workspace profile and onboarding', () => {
         DEFAULT_COUNTRY_CODE: '+44',
         BUSINESS_WEBSITE: 'https://harbor.example',
         NOT_A_FIELD: 'ignored',
+        ...JSON.parse('{"__proto__":"ignored","constructor":"ignored","toString":"ignored"}'),
       },
     });
     assert.equal(save.status, 200);
     assert.equal(save.body.BUSINESS_NAME, 'Harbor Supply Co.');
     assert.equal(save.body.DEFAULT_COUNTRY_CODE, '44');
     assert.equal(save.body.NOT_A_FIELD, undefined);
+    assert.equal(Object.hasOwn(save.body, '__proto__'), false);
 
     const { default: prisma } = await import('../src/utils/prismaClient.js');
     const row = await prisma.systemConfig.findUnique({ where: { key: 'workspace.BUSINESS_TIMEZONE' } });
