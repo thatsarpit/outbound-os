@@ -51,6 +51,7 @@ function rateLimiter(req, res, next) {
   if (!entry || now - entry.start > RATE_WINDOW) {
     entry = { start: now, count: 0 };
     hits.set(ip, entry);
+    if (hits.size > 10_000) hits.delete(hits.keys().next().value);
   }
   entry.count++;
   if (entry.count > RATE_MAX) {
@@ -76,6 +77,10 @@ app.get('/healthz', (req, res) => {
 // Mounted before the bearer guard so its metadata/authorize/token routes are
 // reachable without a token. The static MCP_BEARER_TOKEN path below is kept
 // for headless clients (Claude Code).
+// Limit unauthenticated discovery, registration, token attempts and bearer
+// checks as well as successful tool requests.
+app.use('/oauth', rateLimiter);
+app.use('/mcp', rateLimiter);
 mountOAuth(app);
 
 // ── Bearer auth middleware ──
@@ -114,7 +119,7 @@ function createMcpServer() {
 }
 
 // POST /mcp — main MCP endpoint (Streamable HTTP)
-app.post('/mcp', requireBearer, rateLimiter, async (req, res) => {
+app.post('/mcp', requireBearer, async (req, res) => {
   try {
     const server = createMcpServer();
     const transport = new StreamableHTTPServerTransport({
