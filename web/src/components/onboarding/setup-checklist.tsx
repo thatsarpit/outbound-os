@@ -29,7 +29,7 @@ export function SetupChecklist() {
 
   useEffect(() => {
     if (!status?.steps || status.dismissed || status.steps.profile) return
-    let prompted = false
+    let prompted: boolean
     try {
       prompted = sessionStorage.getItem(FIRST_RUN_KEY) === '1'
       sessionStorage.setItem(FIRST_RUN_KEY, '1')
