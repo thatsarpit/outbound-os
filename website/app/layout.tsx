@@ -10,15 +10,7 @@ import { buildMetadata } from '@/lib/metadata'
 import { site } from '@/lib/site-content'
 import { graph, organizationLd, softwareLd, sourceCodeLd, websiteLd } from '@/lib/structured-data'
 
-/**
- * One typeface.
- *
- * The site previously loaded Outfit for headings, Inter for body and
- * JetBrains Mono alongside. The product dashboard deliberately dropped its
- * display face — a second family used only for headings decorates rather than
- * organises, and is the most reliable tell of a generated design. Weight,
- * size and space carry the hierarchy instead.
- */
+/** Keep the local typeface consistent across every marketing page. */
 const inter = localFont({
   src: './fonts/inter-latin.woff2',
   display: 'swap',

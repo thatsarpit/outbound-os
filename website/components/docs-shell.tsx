@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import type { ReactNode } from 'react'
-import { ArrowLeft, ArrowRight } from 'lucide-react'
+import { ArrowLeft, ArrowRight, ChevronDown } from 'lucide-react'
 import { Breadcrumbs } from './content'
 import { JsonLd } from './json-ld'
 import { buildMetadata } from '@/lib/metadata'
@@ -13,12 +13,14 @@ import { articleLd, graph } from '@/lib/structured-data'
 export function docMetadata(slug: string) {
   const doc = docBySlug(slug)
   if (!doc) throw new Error(`Unknown doc: ${slug}`)
-  return buildMetadata(doc.title, doc.description, `/docs/${slug}`, { type: 'article' })
+  return buildMetadata(doc.title, doc.description, `/docs/${slug}`, {
+    type: 'article',
+  })
 }
 
-function DocsNav({ current }: { current?: string }) {
+function DocsNavLinks({ current }: { current?: string }) {
   return (
-    <nav className="docs-nav" aria-label="Documentation">
+    <>
       {docSections.map((section) => (
         <div key={section} className="docs-nav__group">
           <h2>{section}</h2>
@@ -27,7 +29,10 @@ function DocsNav({ current }: { current?: string }) {
               .filter((doc) => doc.section === section)
               .map((doc) => (
                 <li key={doc.slug}>
-                  <Link href={`/docs/${doc.slug}`} aria-current={doc.slug === current ? 'page' : undefined}>
+                  <Link
+                    href={`/docs/${doc.slug}`}
+                    aria-current={doc.slug === current ? 'page' : undefined}
+                  >
                     {doc.label}
                   </Link>
                 </li>
@@ -35,11 +40,35 @@ function DocsNav({ current }: { current?: string }) {
           </ul>
         </div>
       ))}
-    </nav>
+    </>
   )
 }
 
-export function DocsShell({ slug, children }: { slug: string; children: ReactNode }) {
+function DocsNav({ current }: { current?: string }) {
+  return (
+    <>
+      <nav className="docs-nav docs-nav--desktop" aria-label="Documentation">
+        <DocsNavLinks current={current} />
+      </nav>
+      <details className="docs-nav--mobile">
+        <summary>
+          Browse documentation <ChevronDown size={16} aria-hidden="true" />
+        </summary>
+        <nav className="docs-nav" aria-label="Documentation">
+          <DocsNavLinks current={current} />
+        </nav>
+      </details>
+    </>
+  )
+}
+
+export function DocsShell({
+  slug,
+  children,
+}: {
+  slug: string
+  children: ReactNode
+}) {
   const doc = docBySlug(slug)
   if (!doc) throw new Error(`Unknown doc: ${slug}`)
   const index = docs.indexOf(doc)
@@ -60,9 +89,22 @@ export function DocsShell({ slug, children }: { slug: string; children: ReactNod
           />
           <h1 className="docs-title">{doc.title}</h1>
           <p className="doc-meta">
-            Updated {new Date(`${contentUpdated}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' })}{' '}
+            Updated{' '}
+            {new Date(`${contentUpdated}T00:00:00Z`).toLocaleDateString(
+              'en-GB',
+              {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+                timeZone: 'UTC',
+              },
+            )}{' '}
             · For version {site.version} ·{' '}
-            <a href={`${site.githubUrl}/blob/main/website/app/docs/${slug}/page.tsx`}>Edit on GitHub</a>
+            <a
+              href={`${site.githubUrl}/blob/main/website/app/docs/${slug}/page.tsx`}
+            >
+              Edit on GitHub
+            </a>
           </p>
           <div className="prose docs-prose">{children}</div>
 
@@ -78,7 +120,10 @@ export function DocsShell({ slug, children }: { slug: string; children: ReactNod
               <span />
             )}
             {next && (
-              <Link href={`/docs/${next.slug}`} className="docs-pager__link docs-pager__link--next">
+              <Link
+                href={`/docs/${next.slug}`}
+                className="docs-pager__link docs-pager__link--next"
+              >
                 <span>
                   Next <ArrowRight size={13} aria-hidden="true" />
                 </span>
@@ -90,7 +135,12 @@ export function DocsShell({ slug, children }: { slug: string; children: ReactNod
       </div>
       <JsonLd
         data={graph(
-          articleLd({ title: doc.title, description: doc.description, path, dateModified: contentUpdated }),
+          articleLd({
+            title: doc.title,
+            description: doc.description,
+            path,
+            dateModified: contentUpdated,
+          }),
         )}
       />
     </section>

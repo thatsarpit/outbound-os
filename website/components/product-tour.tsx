@@ -1,11 +1,18 @@
 'use client'
 
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react'
-import { Inbox, LayoutDashboard, Plug, Sparkles, MessageCircle } from 'lucide-react'
+import { useId, useState, type KeyboardEvent } from 'react'
+import {
+  Inbox,
+  LayoutDashboard,
+  Plug,
+  Sparkles,
+  MessageCircle,
+  Smartphone,
+} from 'lucide-react'
 import { site } from '@/lib/site-content'
 
 /**
- * The real dashboard, one screen at a time, in a browser frame.
+ * Desktop and mobile product screens, with manual keyboard-accessible tabs.
  *
  * Tabs follow the WAI-ARIA tabs pattern (arrow keys move between them). All
  * panels are in the HTML so every screenshot and caption is crawlable; the
@@ -18,7 +25,8 @@ const SHOTS = [
     label: 'Overview',
     Icon: LayoutDashboard,
     path: 'overview',
-    caption: 'New leads, messages sent, reply rate, the pipeline — and who needs a person today.',
+    caption:
+      'New leads, messages sent, reply rate, the pipeline — and who needs a person today.',
     alt: 'Outbound OS overview dashboard with lead counts, messages sent, reply rate, pipeline and items needing attention',
   },
   {
@@ -26,7 +34,8 @@ const SHOTS = [
     label: 'Inbox',
     Icon: Inbox,
     path: 'inbox',
-    caption: 'WhatsApp, email, Telegram and iMessage threads on the lead they belong to.',
+    caption:
+      'WhatsApp, email, Telegram and iMessage threads on the lead they belong to.',
     alt: 'Outbound OS shared inbox with conversations from several channels',
   },
   {
@@ -42,47 +51,33 @@ const SHOTS = [
     label: 'Setup wizard',
     Icon: Sparkles,
     path: 'setup',
-    caption: 'First sign-in asks a few questions instead of handing you a config file.',
+    caption:
+      'First sign-in asks a few questions instead of handing you a config file.',
     alt: 'Outbound OS setup wizard asking which lead sources to connect',
+  },
+  {
+    id: 'mobile',
+    label: 'Mobile',
+    Icon: Smartphone,
+    path: 'mobile-conversation',
+    caption:
+      'Reply from your phone. The same conversation, customer context and delivery status.',
+    alt: 'Outbound OS mobile WhatsApp conversation with a customer, an attached document and a reply composer',
   },
   {
     id: 'whatsapp',
     label: 'WhatsApp',
     Icon: MessageCircle,
     path: 'whatsapp-settings',
-    caption: 'Connect directly to Meta. Manage your number, approved templates and sending limits.',
+    caption:
+      'Connect directly to Meta. Manage your number, approved templates and sending limits.',
     alt: 'Outbound OS direct Meta Cloud API connection and approved template settings',
   },
 ] as const
 
-const DWELL_MS = 6000
-
 export function ProductTour() {
   const [active, setActive] = useState(0)
-  const [auto, setAuto] = useState(true)
-  const [inView, setInView] = useState(false)
-  const [hover, setHover] = useState(false)
-  const root = useRef<HTMLDivElement>(null)
   const base = useId()
-
-  // Plays through the screens while it is on screen and not being looked at
-  // closely; any click or key press hands control to the visitor.
-  useEffect(() => {
-    const el = root.current
-    if (!el) return
-    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), {
-      threshold: 0.35,
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
-
-  const playing = auto && inView && !hover
-  useEffect(() => {
-    if (!playing || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    const timer = window.setTimeout(() => setActive((a) => (a + 1) % SHOTS.length), DWELL_MS)
-    return () => window.clearTimeout(timer)
-  }, [playing, active])
 
   const onKey = (event: KeyboardEvent<HTMLButtonElement>) => {
     const last = SHOTS.length - 1
@@ -102,19 +97,12 @@ export function ProductTour() {
               : null
     if (next === null) return
     event.preventDefault()
-    setAuto(false)
     setActive(next)
     document.getElementById(`${base}-tab-${next}`)?.focus()
   }
 
   return (
-    <div
-      className="tour"
-      ref={root}
-      data-playing={playing ? 'true' : undefined}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-    >
+    <div className="tour">
       <div className="tour__tabs" role="tablist" aria-label="Product screens">
         {SHOTS.map((shot, index) => (
           <button
@@ -126,17 +114,11 @@ export function ProductTour() {
             aria-controls={`${base}-panel-${index}`}
             tabIndex={index === active ? 0 : -1}
             className="tour__tab"
-            onClick={() => {
-              setAuto(false)
-              setActive(index)
-            }}
+            onClick={() => setActive(index)}
             onKeyDown={onKey}
           >
             <shot.Icon size={15} aria-hidden="true" />
             {shot.label}
-            {index === active && auto && (
-              <span className="tour__progress" key={active} aria-hidden="true" />
-            )}
           </button>
         ))}
       </div>
@@ -144,14 +126,8 @@ export function ProductTour() {
       <div className="tour__stage">
         <div className="tour__frame">
           <div className="tour__chrome" aria-hidden="true">
-            <span className="ui__dots">
-              <i />
-              <i />
-              <i />
-            </span>
-            <span className="tour__url">
-              your-server.com/{SHOTS[active].id === 'overview' ? '' : SHOTS[active].id}
-            </span>
+            <span>OUTBOUND OS / PRODUCT PREVIEW</span>
+            <span>{SHOTS[active].label}</span>
           </div>
           {SHOTS.map((shot, index) => (
             <div
@@ -160,15 +136,19 @@ export function ProductTour() {
               role="tabpanel"
               aria-labelledby={`${base}-tab-${index}`}
               hidden={index !== active}
-              className="tour__panel"
+              className={`tour__panel ${shot.id === 'mobile' ? 'tour__panel--mobile' : ''}`}
             >
               <img
                 src={`/screenshots/${shot.path}.webp?v=${site.screenshotVersion}`}
-                srcSet={`/screenshots/${shot.path}-800.webp?v=${site.screenshotVersion} 800w, /screenshots/${shot.path}.webp?v=${site.screenshotVersion} 1600w`}
+                srcSet={
+                  shot.id === 'mobile'
+                    ? undefined
+                    : `/screenshots/${shot.path}-800.webp?v=${site.screenshotVersion} 800w, /screenshots/${shot.path}.webp?v=${site.screenshotVersion} 1600w`
+                }
                 sizes="(min-width: 1200px) 1130px, 100vw"
                 alt={shot.alt}
-                width={1600}
-                height={1000}
+                width={shot.id === 'mobile' ? 390 : 1600}
+                height={shot.id === 'mobile' ? 844 : 1000}
                 loading={index === active ? 'eager' : 'lazy'}
                 decoding="async"
               />

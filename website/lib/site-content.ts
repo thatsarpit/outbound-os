@@ -9,7 +9,7 @@ export const siteUrl = 'https://outboundos.space'
 
 /** When the site's product copy was last checked against the code. Shown on
     docs pages and used as dateModified in structured data. */
-export const contentUpdated = '2026-10-22'
+export const contentUpdated = '2026-10-23'
 
 export const site = {
   name: 'Outbound OS',
@@ -36,7 +36,7 @@ export const site = {
    * Bump when the files in public/screenshots change. They are cached for a
    * week (public/_headers), so an unchanged URL keeps serving the old image.
    */
-  screenshotVersion: '2026-10-22',
+  screenshotVersion: '2026-10-23',
   /** The hosted instance the Outbound OS team runs for managed customers. */
   appUrl: 'https://app.outboundos.space',
   /**
@@ -182,9 +182,7 @@ export const navGroups = [
 ] as const
 
 export const directNav = [
-  { label: 'Docs', href: '/docs' },
   { label: 'Pricing', href: '/pricing' },
-  { label: 'Setup & hosting', href: '/managed-hosting' },
 ] as const
 
 export const footerNav = [
