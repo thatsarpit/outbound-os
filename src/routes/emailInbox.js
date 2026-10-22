@@ -16,7 +16,7 @@ router.post('/email/accounts/:id/gmail-inbox', requireRole('admin'), async (req,
     || ids.some(value => !Number.isSafeInteger(value) || value < 1)) {
     return res.status(400).json({ error: 'Choose valid email accounts' });
   }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user) || !/^[a-zA-Z]{16}$/.test(password)) {
+  if (user.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user) || !/^[a-zA-Z]{16}$/.test(password)) {
     return res.status(400).json({ error: 'Enter your Gmail address and its 16-letter app password' });
   }
   try {

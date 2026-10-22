@@ -74,9 +74,9 @@ before(async () => {
     // Remove old test DB if it exists
     if (fs.existsSync(TEST_DB_PATH)) fs.unlinkSync(TEST_DB_PATH);
 
-    // Push schema to test DB. The package script performs this outside the
+    // Apply committed migrations. The package script performs this outside the
     // Node test runner on macOS, where Prisma's schema engine is more reliable.
-    execSync('npx prisma db push --skip-generate --accept-data-loss', {
+    execSync('npx prisma migrate deploy', {
       cwd: path.join(__dirname, '..'),
       env: { ...process.env, DATABASE_URL: TEST_DB_URL },
       stdio: 'pipe',
@@ -707,6 +707,11 @@ describe('Meta WhatsApp webhook', () => {
     const ok = await request('GET', '/webhook/meta?hub.mode=subscribe&hub.verify_token=test-meta-verify-token&hub.challenge=12345');
     assert.equal(ok.status, 200);
     assert.equal(String(ok.body), '12345');
+    assert.match(ok.headers['content-type'], /^text\/plain/);
+    const challenge = '<img src=x onerror=alert(1)>';
+    const escaped = await request('GET', '/webhook/meta?hub.mode=subscribe&hub.verify_token=test-meta-verify-token&hub.challenge=' + encodeURIComponent(challenge));
+    assert.equal(escaped.body, challenge);
+    assert.match(escaped.headers['content-type'], /^text\/plain/);
     const bad = await request('GET', '/webhook/meta?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=12345');
     assert.equal(bad.status, 403);
   });
@@ -1161,6 +1166,13 @@ describe('Lead webhook from a plain HTML form', () => {
 // ── Workspace profile and onboarding ─────────────────────────────────────────
 
 describe('Workspace profile and onboarding', () => {
+  test('untrusted cookie requests cannot trigger administrative webhook actions', async () => {
+    const res = await request('POST', '/api/webhooks/subscriptions/123/test', {
+      headers: { Cookie: '__session=fixture', Origin: 'https://untrusted.example.test' },
+    });
+    assert.equal(res.status, 403);
+    assert.match(res.body.error, /trusted origin/);
+  });
   test('a new workspace reports what is left to set up', async () => {
     const res = await request('GET', '/api/onboarding/status', { headers: authHeader() });
     assert.equal(res.status, 200);
@@ -1178,12 +1190,14 @@ describe('Workspace profile and onboarding', () => {
         DEFAULT_COUNTRY_CODE: '+44',
         BUSINESS_WEBSITE: 'https://harbor.example',
         NOT_A_FIELD: 'ignored',
+        ...JSON.parse('{"__proto__":"ignored","constructor":"ignored","toString":"ignored"}'),
       },
     });
     assert.equal(save.status, 200);
     assert.equal(save.body.BUSINESS_NAME, 'Harbor Supply Co.');
     assert.equal(save.body.DEFAULT_COUNTRY_CODE, '44');
     assert.equal(save.body.NOT_A_FIELD, undefined);
+    assert.equal(Object.hasOwn(save.body, '__proto__'), false);
 
     const { default: prisma } = await import('../src/utils/prismaClient.js');
     const row = await prisma.systemConfig.findUnique({ where: { key: 'workspace.BUSINESS_TIMEZONE' } });

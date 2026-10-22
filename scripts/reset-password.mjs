@@ -8,7 +8,7 @@
  *   node scripts/reset-password.mjs admin@example.com
  */
 import 'dotenv/config';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../src/utils/prismaClient.js';
 import { hashPassword } from './../src/auth/rbac.js';
 import readline from 'node:readline';
 
@@ -18,7 +18,6 @@ if (!email) {
   process.exit(1);
 }
 
-const prisma = new PrismaClient();
 const user = await prisma.user.findFirst({ where: { email } });
 if (!user) {
   console.error(`No user with email ${email}`);

@@ -1,6 +1,4 @@
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../src/utils/prismaClient.js';
 
 async function main() {
   console.log('🔄 Starting normalization of existing mobile numbers...');

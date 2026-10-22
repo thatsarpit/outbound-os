@@ -47,7 +47,7 @@ export function createClerkTeamRouter({ client, requireRole }) {
   router.post('/invitations', requireRole('admin'), async (req, res) => {
     if (!client) return res.status(409).json({ error: 'Email invitations need Clerk sign-in. Add the teammate under Team → Users instead.', code: 'INVITES_REQUIRE_CLERK' });
     const { email, role = 'agent' } = req.body || {};
-    if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return res.status(400).json({ error: 'A valid email is required.' });
+    if (typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return res.status(400).json({ error: 'A valid email is required.' });
     const orgRole = clerkInvitationRole(role);
     if (!orgRole) return res.status(400).json({ error: 'Clerk invitations support Admin or Sales agent. Choose admin or agent.' });
     try {

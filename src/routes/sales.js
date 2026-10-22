@@ -39,7 +39,8 @@ const CARRIER_URLS = {
 
 export function trackingUrlFor(carrier, trackingNumber) {
   if (!carrier || !trackingNumber) return null;
-  const build = CARRIER_URLS[String(carrier).toLowerCase()];
+  const key = String(carrier).toLowerCase();
+  const build = Object.hasOwn(CARRIER_URLS, key) ? CARRIER_URLS[key] : undefined;
   return build ? build(trackingNumber) : null;
 }
 
