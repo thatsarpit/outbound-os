@@ -6,7 +6,7 @@ export function sheetsWebhookUrl(value) {
     || url.username || url.password || url.hash || !/^\/macros\/s\/[A-Za-z0-9_-]+\/(exec|dev)$/.test(url.pathname)) {
     throw new Error('Use an HTTPS Google Apps Script web app URL');
   }
-  return url.href;
+  return `https://script.google.com${url.pathname}${url.search}`;
 }
 
 export async function postSheetsWebhook(value, row) {
@@ -30,7 +30,8 @@ export async function postSheetsWebhook(value, row) {
     }
     await response.body?.cancel();
     if ([301, 302, 303].includes(response.status)) method = 'GET';
-    target = next.href;
+    const origin = next.hostname === 'script.google.com' ? 'https://script.google.com' : 'https://script.googleusercontent.com';
+    target = `${origin}${next.pathname}${next.search}`;
   }
   throw new Error('Google Apps Script returned too many redirects');
 }
