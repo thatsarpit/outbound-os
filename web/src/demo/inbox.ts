@@ -464,7 +464,7 @@ export async function handleInboxRequest(
   }
 
   const detail = path.pathname.match(
-    /\/api\/inbox\/threads\/(\d+)(\/(resolve|reopen|assign-self))?$/,
+    /\/api\/inbox\/threads\/(\d+)(\/(resolve|reopen|assign-self|read))?$/,
   )
   if (detail) {
     const thread = THREADS.find((t) => t.leadId === Number(detail[1]))
@@ -479,7 +479,7 @@ export async function handleInboxRequest(
       thread.assignedToId = 1
       thread.assignmentState = 'assigned_to_me'
       if (thread.threadState === 'needs_reply') thread.threadState = 'assigned'
-    } else {
+    } else if (action === 'read') {
       thread.unread = false
     }
     if (action) refresh(thread.leadId)
@@ -499,9 +499,14 @@ export async function handleInboxRequest(
     const search = (path.searchParams.get('search') || '').toLowerCase()
     const threads = THREADS.map(summary)
       .filter((t) => !channel || t.channel === channel)
+      .filter(
+        (t) => path.searchParams.get('assigned') !== 'false' || t.assignmentState === 'unassigned',
+      )
+      .filter((t) => path.searchParams.get('assignedToMe') !== 'true' || t.assignedToId === 1)
       .filter((t) => {
         if (!state || state === 'all') return true
         if (state === 'needs_reply') return t.replyNeeded
+        if (state === 'waiting') return !t.replyNeeded && t.threadState !== 'resolved'
         if (state === 'assigned') return t.assignmentState !== 'unassigned'
         if (state === 'unassigned') return t.assignmentState === 'unassigned'
         return t.threadState === state

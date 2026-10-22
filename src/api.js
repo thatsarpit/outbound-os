@@ -26,6 +26,9 @@ import settlementRoutes from './routes/settlement.js';
 import productRoutes from './routes/products.js';
 import telegramRoutes from './routes/telegram.js';
 import emailInboxRoutes from './routes/emailInbox.js';
+import webPushRoutes from './routes/webPush.js';
+import inboxReadStateRoutes from './routes/inboxReadState.js';
+import { inboxViewerKey, inboxThreadState, inboxMessagePreview } from './utils/inboxState.js';
 import config from './config.js';
 import logger from './utils/logger.js';
 import activityLog, { EVENT_TYPES } from './utils/activityLog.js';
@@ -172,11 +175,8 @@ function isRoleAtLeast(role, minRole) {
   return (levels[role] ?? -1) >= (levels[minRole] ?? 0);
 }
 
-function normalizeInboxThreadState({ lead, lastMessage, assignedToId }) {
-  if (lead.status === 'closed') return 'resolved';
-  if (isHumanReply(lastMessage)) return 'needs_reply';
-  if (assignedToId) return 'assigned';
-  return 'unassigned';
+function normalizeInboxThreadState(input) {
+  return inboxThreadState(input);
 }
 
 function buildInboxMessage(message, emailAccountsById = {}, telegramAccountsById = {}) {
@@ -187,12 +187,12 @@ function buildInboxMessage(message, emailAccountsById = {}, telegramAccountsById
     channel: message.channel || 'whatsapp',
     subject: message.emailSubject || null,
     senderAccountId: message.emailAccountId || message.imessageAccountId || message.telegramAccountId || message.waAccount || null,
-    senderDisplay: telegramAccount?.displayName || telegramAccount?.name || senderAccount?.senderName || senderAccount?.name || senderAccount?.email || null,
+    senderDisplay: message.direction === 'inbound' ? null : telegramAccount?.displayName || telegramAccount?.name || senderAccount?.senderName || senderAccount?.name || senderAccount?.email || null,
     replyToMessageId: null,
   };
 }
 
-function buildInboxThreadSummary(lead, emailAccountsById = {}, telegramAccountsById = {}, lastActionableMessage = undefined) {
+function buildInboxThreadSummary(lead, emailAccountsById = {}, telegramAccountsById = {}, lastActionableMessage = undefined, readState = {}) {
   const lastMessageRaw = Array.isArray(lead.messages) ? lead.messages[0] || null : null;
   const lastMessage = lastMessageRaw ? buildInboxMessage(lastMessageRaw, emailAccountsById, telegramAccountsById) : null;
   const actionable = lastActionableMessage === undefined ? lastMessage : lastActionableMessage;
@@ -218,11 +218,11 @@ function buildInboxThreadSummary(lead, emailAccountsById = {}, telegramAccountsB
     senderAccountId: lastMessage?.senderAccountId || null,
     assignedEmailAccountId: lead.assignedEmailAccountId || null,
     lastMessage: lastMessage?.content || '',
-    lastMessagePreview: lastMessage?.content || '',
+    lastMessagePreview: inboxMessagePreview(lastMessage),
     lastMessageAt: lastMessage?.createdAt || lead.lastMessageAt || lead.updatedAt,
     lastInboundAt: isHumanReply(actionable) ? actionable.createdAt : null,
     lastOutboundAt: actionable?.direction === 'outbound' ? actionable.createdAt : null,
-    unread: threadState === 'needs_reply',
+    unread: (readState.latestInboundMessageId || 0) > (readState.lastReadMessageId || 0),
     replyNeeded: threadState === 'needs_reply',
     assignmentState: lead.assignedToId ? 'assigned' : 'unassigned',
     threadState,
@@ -890,6 +890,8 @@ app.use('/api', emailInboxRoutes);
 // Pool scoping runs after auth — platform admins bypass, every other user is
 // 403'd if they reference a poolId they don't have a UserPool row for.
 app.use('/api', requirePoolAccess());
+app.use('/api', inboxReadStateRoutes);
+app.use('/api', webPushRoutes);
 app.use('/api', analyticsViewRoutes);
 // Per-lead authorization: every /api/leads/<numeric>/... request resolves
 // the lead's poolId once and 403s if the user can't access it. This covers
@@ -3165,8 +3167,9 @@ app.get('/api/inbox/threads', async (req, res) => {
       if (accessiblePools !== null) where.poolId = { in: accessiblePools };
     }
     if (leadId) where.id = leadId;
-    if (assignedToMe && req.user?.sub) {
-      where.assignedToId = Number(req.user.sub);
+    if (assignedToMe) {
+      const assigneeId = Number(req.user?.sub);
+      where.assignedToId = Number.isSafeInteger(assigneeId) && assigneeId > 0 ? assigneeId : -1;
     } else if (assigned === true) {
       where.assignedToId = { not: null };
     } else if (assigned === false) {
@@ -3208,7 +3211,7 @@ app.get('/api/inbox/threads', async (req, res) => {
         orderBy: { id: 'asc' },
         take: scanSize,
         select: {
-          id: true, status: true, assignedToId: true, lastMessageAt: true, updatedAt: true,
+          id: true, status: true, inboxResolvedAt: true, assignedToId: true, lastMessageAt: true, updatedAt: true,
           messages: { where: visibleMessageWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
             select: { direction: true, channel: true, emailInboundKind: true, status: true, createdAt: true } },
         },
@@ -3232,11 +3235,13 @@ app.get('/api/inbox/threads', async (req, res) => {
       if (batch.length < scanSize) break;
       afterId = batch[batch.length - 1].id;
     }
-    const queue = candidates.map((lead) => ({
+    const scopedQueue = candidates.map((lead) => ({
       ...lead,
       threadState: normalizeInboxThreadState({ lead, lastMessage: lead.lastActionableMessage, assignedToId: lead.assignedToId }),
       latestAt: lead.messages[0]?.createdAt || lead.lastMessageAt || lead.updatedAt,
-    })).filter((lead) => {
+    }));
+    const queue = scopedQueue.filter((lead) => {
+      if (state === 'waiting') return lead.threadState !== 'resolved' && lead.lastActionableMessage?.direction === 'outbound';
       if (state === 'needs_reply') return lead.threadState === 'needs_reply';
       if (state === 'assigned') return Boolean(lead.assignedToId);
       if (state === 'unassigned') return !lead.assignedToId;
@@ -3246,7 +3251,8 @@ app.get('/api/inbox/threads', async (req, res) => {
     }).sort((a, b) => new Date(b.latestAt) - new Date(a.latestAt) || b.id - a.id);
     const total = queue.length;
     const ids = queue.slice((page - 1) * limit, page * limit).map((lead) => lead.id);
-    const [leads, emailAccounts, telegramSenderAccounts] = await Promise.all([
+    const viewerKey = inboxViewerKey(req.user);
+    const [leads, emailAccounts, telegramSenderAccounts, readStates, inboundHeads] = await Promise.all([
       prisma.lead.findMany({
         where: { id: { in: ids } },
         include: {
@@ -3256,14 +3262,18 @@ app.get('/api/inbox/threads', async (req, res) => {
       }),
       prisma.emailAccount.findMany({ where: { enabled: true }, orderBy: { id: 'asc' } }),
       prisma.telegramAccount.findMany({ where: { enabled: true }, select: { id: true, name: true, displayName: true }, orderBy: { id: 'asc' } }),
+      viewerKey ? prisma.inboxReadState.findMany({ where: { viewerKey, leadId: { in: ids } }, select: { leadId: true, lastReadMessageId: true } }) : [],
+      viewerKey ? prisma.message.groupBy({ by: ['leadId'], where: { leadId: { in: ids }, AND: [visibleMessageWhere, HUMAN_REPLY_WHERE] }, _max: { id: true } }) : [],
     ]);
     const emailAccountsById = Object.fromEntries(emailAccounts.map((account) => [account.id, account]));
     const telegramAccountsById = Object.fromEntries(telegramSenderAccounts.map((account) => [account.id, account]));
     const byId = new Map(leads.map((lead) => [lead.id, lead]));
     const actionableById = new Map(queue.map(lead => [lead.id, lead.lastActionableMessage]));
-    const threads = ids.filter((id) => byId.has(id)).map((id) => buildInboxThreadSummary(byId.get(id), emailAccountsById, telegramAccountsById, actionableById.get(id)));
-    const needsReply = queue.filter((lead) => lead.threadState === 'needs_reply').length;
-    res.json({ threads, total, page, pages: Math.ceil(total / limit), unread: needsReply, needsReply });
+    const readByLead = new Map(readStates.map(row => [row.leadId, row.lastReadMessageId]));
+    const inboundByLead = new Map(inboundHeads.map(row => [row.leadId, row._max.id]));
+    const threads = ids.filter((id) => byId.has(id)).map((id) => buildInboxThreadSummary(byId.get(id), emailAccountsById, telegramAccountsById, actionableById.get(id), { lastReadMessageId: readByLead.get(id), latestInboundMessageId: inboundByLead.get(id) }));
+    const counts = { all: scopedQueue.length, needsReply: scopedQueue.filter(lead => lead.threadState === 'needs_reply').length, waiting: scopedQueue.filter(lead => lead.threadState !== 'resolved' && lead.lastActionableMessage?.direction === 'outbound').length, resolved: scopedQueue.filter(lead => lead.threadState === 'resolved').length };
+    res.json({ threads, total, page, pages: Math.ceil(total / limit), counts, needsReply: counts.needsReply });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -3315,10 +3325,13 @@ async function sendInboxThreadDetail(req, res) {
     const telegramAccountsById = Object.fromEntries(telegramSenderAccounts.map((account) => [account.id, account]));
     const mappedMessages = lead.messages.map((message) => buildInboxMessage(message, emailAccountsById, telegramAccountsById));
     const lastMessage = lead.messages[lead.messages.length - 1] || null;
+    const viewerKey = inboxViewerKey(req.user);
+    const readState = viewerKey ? await prisma.inboxReadState.findUnique({ where: { leadId_viewerKey: { leadId, viewerKey } }, select: { lastReadMessageId: true } }) : null;
+    const latestInboundMessageId = viewerKey ? lead.messages.reduce((latest, message) => isHumanReply(message) ? Math.max(latest, message.id) : latest, 0) : 0;
     const summary = buildInboxThreadSummary({
       ...lead,
       messages: lastMessage ? [lastMessage] : [],
-    }, emailAccountsById, telegramAccountsById, lead.messages.findLast(isActionableConversationMessage) || null);
+    }, emailAccountsById, telegramAccountsById, lead.messages.findLast(isActionableConversationMessage) || null, { lastReadMessageId: readState?.lastReadMessageId, latestInboundMessageId });
 
     res.json({
       ...summary,
@@ -3367,46 +3380,30 @@ app.get('/api/inbox/threads/:leadId/messages', async (req, res) => {
 
 // ==================== INBOX THREAD-STATE OPERATIONS ====================
 
-// POST /api/inbox/threads/:leadId/resolve — mark thread as resolved (sets lead status to closed)
+// Resolving an inbox conversation is independent of the sales pipeline.
 app.post('/api/inbox/threads/:leadId/resolve', requireRole('agent'), async (req, res) => {
   try {
-    const leadId = parseInt(req.params.leadId);
+    const leadId = parsePositiveInt(req.params.leadId);
     if (!leadId) return res.status(400).json({ error: 'Valid lead ID required' });
-
     const lead = await prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
-    if (lead.status === 'closed') return res.json({ id: leadId, status: 'closed', threadState: 'resolved', message: 'Already resolved' });
-
-    await prisma.lead.update({ where: { id: leadId }, data: { status: 'closed' } });
-    webhookDispatcher.dispatch('lead.status_changed', {
-      leadId, name: lead.name, oldStatus: lead.status, newStatus: 'closed',
-    }).catch(() => {});
-
-    res.json({ id: leadId, status: 'closed', threadState: 'resolved' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+    await prisma.lead.update({ where: { id: leadId }, data: { inboxResolvedAt: new Date() } });
+    broadcastEvent('inbox_resolved', { leadId });
+    res.json({ id: leadId, status: lead.status, threadState: 'resolved' });
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// POST /api/inbox/threads/:leadId/reopen — reopen a resolved thread (sets lead status to engaged)
 app.post('/api/inbox/threads/:leadId/reopen', requireRole('agent'), async (req, res) => {
   try {
-    const leadId = parseInt(req.params.leadId);
+    const leadId = parsePositiveInt(req.params.leadId);
     if (!leadId) return res.status(400).json({ error: 'Valid lead ID required' });
-
     const lead = await prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
-    if (lead.status !== 'closed') return res.json({ id: leadId, status: lead.status, message: 'Thread is not resolved' });
-
-    await prisma.lead.update({ where: { id: leadId }, data: { status: 'engaged' } });
-    webhookDispatcher.dispatch('lead.status_changed', {
-      leadId, name: lead.name, oldStatus: 'closed', newStatus: 'engaged',
-    }).catch(() => {});
-
-    res.json({ id: leadId, status: 'engaged', threadState: 'unassigned' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+    const updated = await prisma.lead.update({ where: { id: leadId }, data: { inboxResolvedAt: null } });
+    const lastMessage = await prisma.message.findFirst({ where: { leadId, AND: [INBOX_VISIBLE_MESSAGE_WHERE, ACTIONABLE_CONVERSATION_WHERE] }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+    broadcastEvent('inbox_reopened', { leadId });
+    res.json({ id: leadId, status: lead.status, threadState: normalizeInboxThreadState({ lead: updated, lastMessage, assignedToId: lead.assignedToId }) });
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
 // POST /api/inbox/threads/:leadId/assign-self — assign thread to the current user

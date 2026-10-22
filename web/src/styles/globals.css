@@ -713,3 +713,33 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* The installed iPhone app shares the dashboard tokens, with touch-sized controls. */
+.mobile-sales {
+  -webkit-tap-highlight-color: transparent;
+}
+.mobile-sales input,
+.mobile-sales textarea,
+.mobile-sales select {
+  font-size: 16px;
+}
+.mobile-sales button,
+.mobile-sales [role='menuitem'] {
+  touch-action: manipulation;
+}
+.mobile-sales main {
+  scroll-padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
+}
+.mobile-sales form input {
+  min-height: 44px;
+}
+.mobile-sales nav[aria-label='Sales navigation'] {
+  backdrop-filter: blur(16px);
+}
+.mobile-sales .animate-fade-in {
+  animation: none;
+}
+
+.mobile-account button {
+  min-height: 44px;
+}

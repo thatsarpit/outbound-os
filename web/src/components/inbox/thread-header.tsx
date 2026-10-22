@@ -22,7 +22,7 @@ export function ThreadHeader({
   onAssignSelf?: () => void
   isMutating?: boolean
 }) {
-  const isResolved = thread?.threadState === 'resolved' || thread?.status === 'closed'
+  const isResolved = thread?.threadState === 'resolved'
   const isUnassigned = thread?.assignmentState === 'unassigned'
 
   return (
@@ -61,7 +61,10 @@ export function ThreadHeader({
           </div>
           {activeChannel === 'email' && thread?.subject && (
             <p title={thread.subject} className="mt-2 truncate text-xs text-text-secondary">
-              Subject: <span className="text-text-primary">{thread.subject}</span>
+              Subject:{' '}
+              <span className="text-text-primary">
+                {/\{\{\s*contact\./i.test(thread.subject) ? 'Campaign email' : thread.subject}
+              </span>
             </p>
           )}
         </div>
@@ -76,7 +79,7 @@ export function ThreadHeader({
                     onClick={onResolve}
                     disabled={isMutating}
                     className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-raised px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-success-muted hover:text-success disabled:opacity-50"
-                    title="Mark as resolved"
+                    title="Mark this conversation done. Sales stage and automation stay unchanged."
                   >
                     {isMutating ? (
                       <Loader2 className="h-3 w-3 animate-spin" />

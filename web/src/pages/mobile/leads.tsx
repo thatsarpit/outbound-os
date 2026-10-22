@@ -49,9 +49,6 @@ export default function MobileLeadsPage() {
     )
   return (
     <div className="space-y-4">
-      <p className="text-sm text-text-secondary">
-        Shared workspace contacts. Open a lead to reply, call, or add a follow-up.
-      </p>
       <MobileRefresh
         updatedAt={result.dataUpdatedAt}
         refreshing={result.isFetching}

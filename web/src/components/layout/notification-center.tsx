@@ -46,7 +46,8 @@ function buildInboxHref(item: DashboardNotification) {
   if (item.channel) params.set('channel', item.channel)
   if (item.threadKey) params.set('threadKey', item.threadKey)
   const query = params.toString()
-  return query ? `/inbox?${query}` : '/inbox'
+  const base = location.pathname.startsWith('/m') ? '/m/inbox' : '/inbox'
+  return query ? `${base}?${query}` : base
 }
 
 function getNotificationDestination(item: DashboardNotification) {
@@ -83,7 +84,7 @@ function getNotificationDestination(item: DashboardNotification) {
     normalized.includes('task') ||
     normalized.includes('intervention')
   ) {
-    return { href: '/leads', cta: 'Open leads' }
+    return { href: location.pathname.startsWith('/m') ? '/m/leads' : '/leads', cta: 'Open leads' }
   }
   if (normalized.includes('campaign')) {
     return { href: '/campaigns', cta: 'Open campaigns' }
@@ -279,7 +280,7 @@ export function NotificationCenter() {
         aria-haspopup="dialog"
         aria-expanded={isOpen}
         className={cn(
-          'relative inline-flex h-8 w-8 items-center justify-center rounded-md text-text-muted transition-colors',
+          'relative inline-flex h-11 w-11 sm:h-8 sm:w-8 items-center justify-center rounded-md text-text-muted transition-colors',
           'hover:bg-surface-raised hover:text-text-primary',
           isOpen && 'bg-surface-raised text-text-primary',
         )}
@@ -297,9 +298,9 @@ export function NotificationCenter() {
           role="dialog"
           aria-label="Notifications"
           className={cn(
-            'absolute right-0 top-[calc(100%+0.375rem)] z-[120] overflow-hidden rounded-lg',
+            'fixed left-3 right-3 top-[calc(env(safe-area-inset-top)+4.25rem)] sm:absolute sm:left-auto sm:right-0 sm:top-[calc(100%+0.375rem)] z-[120] overflow-hidden rounded-lg',
             'border border-border bg-surface-overlay shadow-md animate-fade-in',
-            'w-[360px] max-w-[calc(100vw-1.5rem)]',
+            'sm:w-[360px] max-w-[calc(100vw-1.5rem)]',
           )}
         >
           <div className="flex h-9 items-center gap-2 border-b border-border px-3">
@@ -319,7 +320,7 @@ export function NotificationCenter() {
             </button>
           </div>
 
-          <div className="max-h-[26rem] overflow-y-auto">
+          <div className="max-h-[min(26rem,60dvh)] overflow-y-auto">
             {items.length === 0 ? (
               <p className="px-3 py-8 text-center text-xs text-text-muted">
                 {isLoading ? 'Loading notifications…' : 'No notifications yet.'}

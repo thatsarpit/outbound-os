@@ -19,6 +19,7 @@ import { ChannelHealthStrip } from '@/components/inbox/channel-health-strip'
 import { ComposeEmailDrawer } from '@/components/inbox/compose-email-drawer'
 import { ThreadListItem } from '@/components/inbox/thread-list-item'
 import { LeadContextPanel } from '@/components/inbox/lead-context-panel'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { DrawerShell, SkeletonCard, Button } from '@/components/ui'
 import { buildReplySubject, getRenderedTemplateText } from '@/lib/email-compose'
 import { saveDraft, loadDraft, clearDraft, clearSubmittedDraft } from '@/lib/email-drafts'
@@ -29,7 +30,7 @@ import { useOnlineStatus } from '@/hooks/use-online-status'
 import { useUIStore } from '@/stores/ui-store'
 import { useAuthStore } from '@/stores/auth-store'
 import { toast } from '@/stores/toast-store'
-import { AlertCircle, MessageSquare, PenSquare, Search } from 'lucide-react'
+import { AlertCircle, MessageSquare, PenSquare, Search, PanelRight } from 'lucide-react'
 import { ConversationSurface } from '@/components/inbox/conversation-surface'
 
 class InboxErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -60,11 +61,10 @@ class InboxErrorBoundary extends Component<{ children: ReactNode }, { error: Err
 }
 
 const STATE_FILTERS: Array<{ value: InboxThreadState; label: string }> = [
+  { value: 'needs_reply', label: 'Needs reply' },
   { value: 'all', label: 'All' },
-  { value: 'needs_reply', label: 'Needs Reply' },
-  { value: 'assigned', label: 'Assigned' },
-  { value: 'unassigned', label: 'Unassigned' },
-  { value: 'resolved', label: 'Resolved' },
+  { value: 'waiting', label: 'Waiting' },
+  { value: 'resolved', label: 'Done' },
 ]
 
 function parseLeadId(value: string | null) {
@@ -86,7 +86,16 @@ function InboxInner() {
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearchQuery = useDeferredValue(searchQuery.trim())
   const [channelFilter, setChannelFilter] = useState<'all' | InboxChannel>('all')
-  const [threadStateFilter, setThreadStateFilter] = useState<InboxThreadState>('all')
+  const [threadStateFilter, setThreadStateFilter] = useState<InboxThreadState>('needs_reply')
+  const [assignment, setAssignment] = useState('all')
+  const [showContext, setShowContext] = useState(false)
+  const [wideContext, setWideContext] = useState(() => matchMedia('(min-width: 1400px)').matches)
+  useEffect(() => {
+    const media = matchMedia('(min-width: 1400px)')
+    const sync = () => setWideContext(media.matches)
+    media.addEventListener('change', sync)
+    return () => media.removeEventListener('change', sync)
+  }, [])
   const [replyText, setReplyText] = useState('')
   const [htmlBody, setHtmlBody] = useState('')
   const [attachments, setAttachments] = useState<MediaFile[]>([])
@@ -151,12 +160,21 @@ function InboxInner() {
     isLoading: threadsLoading,
     error: threadsError,
   } = useQuery({
-    queryKey: ['inbox-threads', channelFilter, threadStateFilter, deferredSearchQuery, page],
+    queryKey: [
+      'inbox-threads',
+      channelFilter,
+      threadStateFilter,
+      assignment,
+      deferredSearchQuery,
+      page,
+    ],
     queryFn: () =>
       inboxApi.listThreads({
         channel: channelFilter === 'all' ? undefined : channelFilter,
         state: threadStateFilter === 'all' ? undefined : threadStateFilter,
         search: deferredSearchQuery || undefined,
+        assignedToMe: assignment === 'me' || undefined,
+        assigned: assignment === 'unassigned' ? false : undefined,
         page,
       }),
     refetchInterval: 15_000,
@@ -164,25 +182,12 @@ function InboxInner() {
 
   useEffect(() => {
     setPage(1)
-  }, [channelFilter, threadStateFilter, deferredSearchQuery])
+  }, [channelFilter, threadStateFilter, assignment, deferredSearchQuery])
   useEffect(() => {
     if (threadListData) setPage((current) => Math.min(current, Math.max(1, threadListData.pages)))
   }, [threadListData])
 
   const threads = useMemo(() => threadListData?.threads ?? [], [threadListData?.threads])
-
-  /* Per-channel counts for the filter row. The threads query is itself filtered
-     by channel, so a count is only truthful while the filter is "all" — the
-     rest of the time the loaded set is one channel and the others are unknown.
-     Showing nothing beats showing a wrong number, so counts appear only then. */
-  const channelCounts = useMemo(() => {
-    const counts: Partial<Record<InboxChannel, number>> = {}
-    if (channelFilter !== 'all') return counts
-    for (const thread of threads) {
-      counts[thread.channel] = (counts[thread.channel] ?? 0) + 1
-    }
-    return counts
-  }, [threads, channelFilter])
 
   const {
     data: activeThread,
@@ -221,6 +226,8 @@ function InboxInner() {
 
   const draftAccountId = composerChannel === 'email' ? senderAccountId : null
   const draftContext = `${dashboardScope}:${selectedLeadId}:${composerChannel}:${draftAccountId}`
+  const currentDraftContext = useRef(draftContext)
+  currentDraftContext.current = draftContext
   useEffect(() => {
     if (!activeThread || activeThread.leadId !== selectedLeadId || hydratedContext === draftContext)
       return
@@ -310,6 +317,7 @@ function InboxInner() {
         submitted,
         leadId: selectedLeadId,
         channel: composerChannel,
+        context: draftContext,
       })
       const messageBody = replyText.trim()
 
@@ -352,13 +360,16 @@ function InboxInner() {
         text: messageBody,
       })
     },
-    onSuccess: ({ submitted, leadId }) => {
+    onSuccess: ({ submitted, leadId, context }) => {
       clearSubmittedDraft(dashboardScope, leadId, submitted)
-      setReplyText('')
-      setHtmlBody('')
-      setAttachments([])
-      setCc('')
-      setBcc('')
+      // A reply completing after navigation must not clear another lead's editor.
+      if (currentDraftContext.current === context) {
+        setReplyText('')
+        setHtmlBody('')
+        setAttachments([])
+        setCc('')
+        setBcc('')
+      }
       toast.success(
         composerChannel === 'email'
           ? 'Email sent from Inbox'
@@ -368,7 +379,7 @@ function InboxInner() {
               ? 'Telegram message sent'
               : 'WhatsApp reply sent',
       )
-      queryClient.invalidateQueries({ queryKey: ['inbox-thread', selectedLeadId] })
+      queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
       queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
     },
     onError: (error: Error) => toast.error(`Reply failed: ${error.message}`),
@@ -532,17 +543,25 @@ function InboxInner() {
           bcc: bcc.trim() || undefined,
           scheduledAt,
         })
-        .then((response) => ({ response, submitted, leadId: selectedLeadId }))
+        .then((response) => ({
+          response,
+          submitted,
+          leadId: selectedLeadId,
+          context: draftContext,
+        }))
     },
-    onSuccess: ({ submitted, leadId }) => {
+    onSuccess: ({ submitted, leadId, context }) => {
       clearSubmittedDraft(dashboardScope, leadId, submitted)
-      setReplyText('')
-      setHtmlBody('')
-      setAttachments([])
-      setCc('')
-      setBcc('')
+      // A reply completing after navigation must not clear another lead's editor.
+      if (currentDraftContext.current === context) {
+        setReplyText('')
+        setHtmlBody('')
+        setAttachments([])
+        setCc('')
+        setBcc('')
+      }
       toast.success('Email scheduled successfully')
-      queryClient.invalidateQueries({ queryKey: ['inbox-thread', selectedLeadId] })
+      queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
       queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
     },
     onError: (error: Error) => toast.error(`Schedule failed: ${error.message}`),
@@ -551,12 +570,12 @@ function InboxInner() {
   return (
     <div className="animate-fade-in space-y-3">
       <ChannelHealthStrip health={channelHealth} />
-      <div className="flex min-h-[calc(100vh-11rem)] flex-col gap-4 lg:h-[calc(100vh-11rem)] lg:flex-row">
-        <div className="glass flex w-full shrink-0 flex-col overflow-hidden rounded-lg border border-border lg:w-72 xl:w-80 lg:min-h-0">
+      <div className="flex min-h-[calc(100vh-11rem)] flex-col gap-4 lg:h-[calc(100dvh-9.5rem)] lg:flex-row">
+        <div className="glass flex w-full shrink-0 flex-col overflow-hidden rounded-lg border border-border lg:w-80 xl:w-[22rem] lg:min-h-0">
           <div className="border-b border-border px-3 py-3">
             <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
-                <h1 className="truncate text-sm font-semibold tracking-tight">Conversations</h1>
+                <h1 className="truncate text-base font-semibold tracking-tight">Inbox</h1>
                 <p className="mt-0.5 text-[11px] text-text-muted">
                   <span className="tabular-nums">{threadListData?.needsReply ?? 0}</span> need reply
                 </p>
@@ -578,8 +597,9 @@ function InboxInner() {
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
                 placeholder="Search conversations"
+                aria-label="Search conversations"
                 className={cn(
-                  'h-8 w-full rounded-md border border-border bg-surface pl-8 pr-3 text-[13px] text-text-primary',
+                  'h-9 w-full rounded-lg border border-border bg-surface pl-8 pr-3 text-[13px] text-text-primary',
                   'placeholder:text-text-muted focus:border-focus focus:outline-none focus:ring-3 focus:ring-focus-muted',
                 )}
               />
@@ -606,7 +626,6 @@ function InboxInner() {
                 const meta = CHANNELS[id]
                 const Icon = meta.icon
                 const active = channelFilter === id
-                const count = channelCounts[id] ?? 0
                 return (
                   <button
                     key={id}
@@ -623,13 +642,15 @@ function InboxInner() {
                   >
                     <Icon className={cn('h-3 w-3', active ? meta.text : 'text-text-muted')} />
                     {meta.shortLabel}
-                    {count > 0 && <span className="tabular-nums opacity-70">{count}</span>}
                   </button>
                 )
               })}
             </div>
 
-            <div className="mt-1.5 flex items-center gap-1 overflow-x-auto scrollbar-hide">
+            <div
+              aria-label="Conversation status"
+              className="mt-3 flex items-center gap-1 rounded-lg border border-border bg-background p-1"
+            >
               {STATE_FILTERS.map((filter) => (
                 <button
                   key={filter.value}
@@ -637,7 +658,7 @@ function InboxInner() {
                   onClick={() => setThreadStateFilter(filter.value)}
                   aria-pressed={threadStateFilter === filter.value}
                   className={cn(
-                    'shrink-0 rounded-md px-2 py-1 text-[11px] transition-colors',
+                    'min-h-9 flex-1 whitespace-nowrap rounded-md px-2 py-1 text-xs transition-colors',
                     threadStateFilter === filter.value
                       ? 'bg-surface-raised font-medium text-text-primary'
                       : 'text-text-muted hover:text-text-primary',
@@ -647,6 +668,19 @@ function InboxInner() {
                 </button>
               ))}
             </div>
+            <label className="mt-3 flex items-center justify-between gap-2 text-xs text-text-muted">
+              <span>{threadListData?.total ?? 0} conversations</span>
+              <select
+                aria-label="Conversation assignment"
+                value={assignment}
+                onChange={(event) => setAssignment(event.target.value)}
+                className="min-h-8 rounded-md bg-surface px-2 text-text-secondary"
+              >
+                <option value="all">Everyone</option>
+                <option value="me">Assigned to me</option>
+                <option value="unassigned">Unassigned</option>
+              </select>
+            </label>
           </div>
 
           <div className="max-h-[32vh] overflow-y-auto lg:flex-1 lg:min-h-0 lg:max-h-none">
@@ -665,14 +699,18 @@ function InboxInner() {
               </div>
             ) : threads.length === 0 ? (
               <div className="px-5 py-12 text-center">
-                <MessageSquare className="mx-auto h-10 w-10 animate-pulse text-text-muted/50" />
+                <MessageSquare className="mx-auto h-10 w-10 text-text-muted/50" />
                 <p className="mt-4 text-sm font-medium text-text-primary">
-                  {deferredSearchQuery ? 'No matching conversations' : 'No conversations yet'}
+                  {deferredSearchQuery
+                    ? 'No matching conversations'
+                    : threadStateFilter === 'needs_reply'
+                      ? 'All caught up'
+                      : 'No conversations here'}
                 </p>
                 <p className="mt-2 text-xs leading-5 text-text-secondary">
                   {deferredSearchQuery
                     ? 'Try a broader keyword or clear the search term to bring more threads back.'
-                    : 'Inbound replies and active lead conversations will appear here as message traffic starts flowing.'}
+                    : 'Choose All to review history, or change the channel and assignment filters.'}
                 </p>
               </div>
             ) : (
@@ -753,49 +791,79 @@ function InboxInner() {
               </div>
             ) : (
               <>
-                <ConversationSurface
-                  activeThread={activeThread ?? null}
-                  threadLoading={threadLoading}
-                  threadError={resolvedThreadError}
-                  replyText={replyText}
-                  setReplyText={setReplyText}
-                  htmlBody={htmlBody}
-                  setHtmlBody={setHtmlBody}
-                  composerChannel={composerChannel}
-                  setComposerChannel={setComposerChannel}
-                  composerSubject={composerSubject}
-                  setComposerSubject={setComposerSubject}
-                  senderAccountId={senderAccountId}
-                  setSenderAccountId={setSenderAccountId}
-                  templates={templates}
-                  selectedTemplateId={selectedTemplateId}
-                  setSelectedTemplateId={setSelectedTemplateId}
-                  onApplyTemplate={() => {
-                    if (!selectedTemplateId) return
-                    applyTemplateMutation.mutate(selectedTemplateId)
-                  }}
-                  templatesLoading={templatesLoading}
-                  templateApplyPending={applyTemplateMutation.isPending}
-                  onSend={() => sendMutation.mutate()}
-                  replyPending={sendMutation.isPending || scheduleSendMutation.isPending}
-                  replyError={resolvedReplyError}
-                  replyDisabledReason={replyDisabledReason}
-                  onResolve={() => resolveThreadMutation.mutate()}
-                  onReopen={() => reopenThreadMutation.mutate()}
-                  onAssignSelf={() => assignSelfMutation.mutate()}
-                  threadActionPending={threadActionPending}
-                  attachments={attachments}
-                  onAddAttachment={handleAddAttachment}
-                  onRemoveAttachment={handleRemoveAttachment}
-                  cc={cc}
-                  onCcChange={setCc}
-                  bcc={bcc}
-                  onBccChange={setBcc}
-                  onScheduleSend={(scheduledAt) => scheduleSendMutation.mutate(scheduledAt)}
-                />
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <div className="mb-2 flex justify-end">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      aria-expanded={showContext}
+                      onClick={() => setShowContext(!showContext)}
+                      leftIcon={<PanelRight className="h-4 w-4" />}
+                    >
+                      {showContext ? 'Hide details' : 'Lead details'}
+                    </Button>
+                  </div>
+                  <ConversationSurface
+                    activeThread={activeThread ?? null}
+                    threadLoading={threadLoading}
+                    threadError={resolvedThreadError}
+                    replyText={replyText}
+                    setReplyText={setReplyText}
+                    htmlBody={htmlBody}
+                    setHtmlBody={setHtmlBody}
+                    composerChannel={composerChannel}
+                    setComposerChannel={setComposerChannel}
+                    composerSubject={composerSubject}
+                    setComposerSubject={setComposerSubject}
+                    senderAccountId={senderAccountId}
+                    setSenderAccountId={setSenderAccountId}
+                    templates={templates}
+                    selectedTemplateId={selectedTemplateId}
+                    setSelectedTemplateId={setSelectedTemplateId}
+                    onApplyTemplate={() => {
+                      if (!selectedTemplateId) return
+                      applyTemplateMutation.mutate(selectedTemplateId)
+                    }}
+                    templatesLoading={templatesLoading}
+                    templateApplyPending={applyTemplateMutation.isPending}
+                    onSend={() => sendMutation.mutate()}
+                    replyPending={sendMutation.isPending || scheduleSendMutation.isPending}
+                    replyError={resolvedReplyError}
+                    replyDisabledReason={replyDisabledReason}
+                    onResolve={() => resolveThreadMutation.mutate()}
+                    onReopen={() => reopenThreadMutation.mutate()}
+                    onAssignSelf={() => assignSelfMutation.mutate()}
+                    threadActionPending={threadActionPending}
+                    attachments={attachments}
+                    onAddAttachment={handleAddAttachment}
+                    onRemoveAttachment={handleRemoveAttachment}
+                    cc={cc}
+                    onCcChange={setCc}
+                    bcc={bcc}
+                    onBccChange={setBcc}
+                    onScheduleSend={(scheduledAt) => scheduleSendMutation.mutate(scheduledAt)}
+                  />
+                </div>
                 {/* Third pane: who this is, what is outstanding, what was agreed.
                 Hidden below xl, where the conversation needs the width more. */}
-                {activeThread && <LeadContextPanel thread={activeThread} />}
+                {activeThread &&
+                  showContext &&
+                  (wideContext ? (
+                    <LeadContextPanel key={activeThread.leadId} thread={activeThread} />
+                  ) : (
+                    <Dialog open onOpenChange={setShowContext}>
+                      <DialogContent className="flex max-h-[90dvh] max-w-sm flex-col overflow-hidden p-0">
+                        <DialogTitle className="border-b border-border px-4 py-4 text-sm">
+                          Lead details
+                        </DialogTitle>
+                        <LeadContextPanel
+                          key={activeThread.leadId}
+                          thread={activeThread}
+                          className="w-full min-h-0 border-0 rounded-none"
+                        />
+                      </DialogContent>
+                    </Dialog>
+                  ))}
               </>
             )}
           </div>
@@ -864,11 +932,10 @@ function InboxInner() {
 }
 
 export default function InboxPage() {
-  const [params] = useSearchParams()
   const scope = useAuthStore((state) => state.dashboardScope)
   return (
     <InboxErrorBoundary>
-      <InboxInner key={`${scope}:${params.get('leadId') || 'queue'}`} />
+      <InboxInner key={scope} />
     </InboxErrorBoundary>
   )
 }

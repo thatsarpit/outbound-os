@@ -6,11 +6,11 @@
  * cleanly while the rest of that file could not.
  */
 import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useConversationRead } from '@/hooks/use-conversation-read'
 import { type EmailTemplate } from '@/api/endpoints/templates'
 import type { InboxChannel, InboxThreadDetail, MediaFile } from '@/api/types'
 import { ComposerBar } from '@/components/inbox/composer-bar'
 import { EmailMessageCard } from '@/components/inbox/email-message-card'
-import { SenderHealthCard } from '@/components/inbox/sender-health-card'
 import { ThreadHeader } from '@/components/inbox/thread-header'
 import { MessageBubble } from '@/components/inbox/whatsapp-message-bubble'
 import { SkeletonLine } from '@/components/ui'
@@ -27,7 +27,11 @@ import { AlertCircle, Mail } from 'lucide-react'
  * the phone drawer, and the drawer — mounted but hidden on desktop — held it,
  * so the desktop timeline never scrolled.
  */
-function useStickToBottom(conversationKey: unknown, sending: boolean) {
+function useStickToBottom(conversationKey: unknown, sending: boolean, onRead: () => void) {
+  const onReadRef = useRef(onRead)
+  useEffect(() => {
+    onReadRef.current = onRead
+  }, [onRead])
   const timelineRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
@@ -56,6 +60,15 @@ function useStickToBottom(conversationKey: unknown, sending: boolean) {
     return () => observer.disconnect()
   }, [])
 
+  useEffect(() => {
+    const readVisible = () => {
+      if (stick.current) onRead()
+    }
+    readVisible()
+    document.addEventListener('visibilitychange', readVisible)
+    return () => document.removeEventListener('visibilitychange', readVisible)
+  }, [onRead])
+
   // Only a person scrolling can let go. The browser scrolls too — it keeps
   // the view steady while previews load above it — and those events would
   // otherwise look like someone scrolling up.
@@ -67,8 +80,10 @@ function useStickToBottom(conversationKey: unknown, sending: boolean) {
     const el = timelineRef.current
     if (!el) return
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48
-    if (atBottom) stick.current = true
-    else if (Date.now() - lastTouch.current < 400) stick.current = false
+    if (atBottom) {
+      stick.current = true
+      onReadRef.current()
+    } else if (Date.now() - lastTouch.current < 400) stick.current = false
   }
   const timelineProps = {
     onScroll: onTimelineScroll,
@@ -160,9 +175,11 @@ export function ConversationSurface({
   onBccChange,
   onScheduleSend,
 }: ConversationSurfaceProps) {
+  const markRead = useConversationRead(activeThread)
   const { timelineRef, contentRef, timelineProps } = useStickToBottom(
     activeThread?.leadId,
     replyPending,
+    markRead,
   )
   const availableSenderAccounts = activeThread?.availableSenderAccounts ?? []
   const sendDisabled =
@@ -189,16 +206,6 @@ export function ConversationSurface({
         onAssignSelf={onAssignSelf}
         isMutating={threadActionPending}
       />
-
-      {composerChannel === 'email' && (
-        <SenderHealthCard
-          leadEmail={activeThread?.leadEmail}
-          accounts={availableSenderAccounts}
-          selectedAccountId={senderAccountId}
-          assignedAccountId={activeThread?.assignedEmailAccountId}
-          className="mx-4 mt-3 shrink-0 sm:mx-5"
-        />
-      )}
 
       <div
         ref={timelineRef}

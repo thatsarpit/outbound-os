@@ -14,3 +14,7 @@
   Cache-Control: public, max-age=3600, must-revalidate
 /app-icon-512.png
   Cache-Control: public, max-age=3600, must-revalidate
+
+/push-sw.js
+  Cache-Control: no-cache
+  Service-Worker-Allowed: /

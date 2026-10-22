@@ -148,7 +148,7 @@ export function LeadContextPanel({
         // Appears from 1400px, not xl (1280). At 1280 three panes leave the
         // conversation about 330px and the composer starts wrapping; the
         // conversation needs the width more than the context does.
-        'hidden w-72 shrink-0 flex-col overflow-y-auto rounded-lg border border-border bg-surface min-[1400px]:flex',
+        'flex w-64 shrink-0 flex-col overflow-y-auto rounded-lg border border-border bg-surface',
         className,
       )}
     >

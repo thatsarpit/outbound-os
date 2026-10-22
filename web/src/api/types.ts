@@ -108,13 +108,7 @@ export interface LeadEnrichmentResponse {
 }
 
 export type LeadStatus =
-  | 'new'
-  | 'wa_unavailable'
-  | 'contacted'
-  | 'replied'
-  | 'engaged'
-  | 'closed'
-  | 'paused'
+  'new' | 'wa_unavailable' | 'contacted' | 'replied' | 'engaged' | 'closed' | 'paused'
 
 export type LeadTier = 'HOT' | 'WARM' | 'COLD'
 
@@ -465,12 +459,7 @@ export interface InboxChannelHealth {
 }
 
 export type InboxThreadState =
-  | 'all'
-  | 'needs_reply'
-  | 'assigned'
-  | 'unassigned'
-  | 'resolved'
-  | 'open'
+  'waiting' | 'all' | 'needs_reply' | 'assigned' | 'unassigned' | 'resolved' | 'open'
 
 export type InboxMessageStatus =
   | 'queued'
@@ -577,6 +566,7 @@ export interface InboxThreadDetail extends InboxThreadSummary {
 }
 
 export interface InboxThreadListResponse {
+  counts?: { all: number; needsReply: number; waiting: number; resolved: number }
   threads: InboxThreadSummary[]
   total: number
   page: number

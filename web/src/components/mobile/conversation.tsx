@@ -4,9 +4,9 @@ import { ArrowDown, ArrowLeft, ChevronDown, Info, Send } from 'lucide-react'
 import { inboxApi } from '@/api/endpoints/inbox'
 import { EMAIL_TEMPLATE_LIST_QUERY_KEY, templatesApi } from '@/api/endpoints/templates'
 import type { InboxChannel, InboxThreadDetail, MediaFile } from '@/api/types'
+import { EmailMessageCard } from '@/components/inbox/email-message-card'
 import { EmailEditor } from '@/components/inbox/email-editor'
 import { AttachmentPicker } from '@/components/inbox/attachment-picker'
-import { MessageMedia } from '@/components/inbox/message-media'
 import { MessageBubble } from '@/components/inbox/whatsapp-message-bubble'
 import {
   Dialog,
@@ -16,15 +16,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { MobileLeadPanel } from './lead-panel'
-import { MobileError, mobileInput, mobileButton, mobileDueDate } from './mobile-shared'
-import { useWorkspaceTimezone } from '@/hooks/use-workspace-timezone'
+import { MobileError, mobileInput, mobileButton } from './mobile-shared'
 import { useAuthStore } from '@/stores/auth-store'
 import { useOnlineStatus } from '@/hooks/use-online-status'
 import { CHANNELS, CHANNEL_ORDER } from '@/lib/channels'
 import { buildReplySubject, getRenderedTemplateText } from '@/lib/email-compose'
 import { clearSubmittedDraft, loadDraft, saveDraft, type EmailDraft } from '@/lib/email-drafts'
-import { describeEmailDelivery, isReplyableEmail } from '@/lib/email-delivery'
+import { isReplyableEmail } from '@/lib/email-delivery'
 import { IS_DEMO } from '@/demo/demo-chrome'
+import { useConversationRead } from '@/hooks/use-conversation-read'
 import { toast } from '@/stores/toast-store'
 
 // visualViewport follows Safari's keyboard and browser chrome. The timeline
@@ -80,11 +80,11 @@ export function MobileConversation({
   onChannelNavigate: (channel: InboxChannel) => void
 }) {
   const { dashboardScope } = useAuthStore()
-  const { timezone } = useWorkspaceTimezone()
   const frame = useConversationViewport()
   const timeline = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
+  const lastInteraction = useRef(0)
   const [showLatest, setShowLatest] = useState(false)
   const [details, setDetails] = useState(false)
   const [channelChoice, setChannel] = useState<InboxChannel | null>(
@@ -102,6 +102,7 @@ export function MobileConversation({
     refetchInterval: 10_000,
   })
   const thread = result.data
+  const markRead = useConversationRead(thread || null)
   const channel =
     channelChoice ??
     (thread?.messages.length
@@ -118,6 +119,14 @@ export function MobileConversation({
     accounts[0]?.id ??
     null
   const hasThread = Boolean(thread)
+  useEffect(() => {
+    const readVisible = () => {
+      if (stick.current) markRead()
+    }
+    readVisible()
+    document.addEventListener('visibilitychange', readVisible)
+    return () => document.removeEventListener('visibilitychange', readVisible)
+  }, [markRead])
   useEffect(() => {
     const node = timeline.current
     if (!node || !content.current) return
@@ -170,10 +179,23 @@ export function MobileConversation({
       <div
         ref={timeline}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3"
+        onTouchMove={() => {
+          lastInteraction.current = Date.now()
+        }}
+        onWheel={() => {
+          lastInteraction.current = Date.now()
+        }}
+        onPointerDown={() => {
+          lastInteraction.current = Date.now()
+        }}
         onScroll={() => {
           const node = timeline.current
           if (node) {
-            stick.current = node.scrollHeight - node.scrollTop - node.clientHeight < 64
+            const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 64
+            if (atBottom) {
+              stick.current = true
+              markRead()
+            } else if (Date.now() - lastInteraction.current < 400) stick.current = false
             setShowLatest(!stick.current)
           }
         }}
@@ -194,52 +216,12 @@ export function MobileConversation({
             </p>
           ) : (
             thread.messages.map((message, index, all) => {
-              const delivery = describeEmailDelivery(message)
               return message.channel === 'email' ? (
-                <article
+                <EmailMessageCard
                   key={message.id}
-                  className={`max-w-[95%] rounded-xl border border-border p-3 ${message.direction === 'inbound' ? 'mr-auto bg-surface' : 'ml-auto bg-surface-raised'}`}
-                >
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-text-muted">
-                    <span
-                      className={
-                        delivery.failed
-                          ? 'text-danger'
-                          : delivery.temporary
-                            ? 'text-warning'
-                            : undefined
-                      }
-                    >
-                      {message.direction === 'inbound' ? 'Received email' : 'Outbound email'} ·{' '}
-                      {delivery.label}
-                    </span>
-                  </div>
-                  {delivery.detail && (
-                    <p
-                      className={`mt-2 text-xs leading-5 ${delivery.failed ? 'text-danger' : delivery.temporary ? 'text-warning' : 'text-text-muted'}`}
-                    >
-                      {delivery.detail}
-                    </p>
-                  )}
-                  <p className="mt-2 break-words text-sm font-medium">
-                    {message.subject || 'Email reply'}
-                  </p>
-                  <p className="mt-1 break-all text-xs text-text-muted">{message.senderDisplay}</p>
-                  <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6">
-                    {message.content}
-                  </p>
-                  {message.mediaUrl && (
-                    <MessageMedia
-                      messageId={message.id}
-                      mediaType={message.mediaType}
-                      filename={message.mediaFilename}
-                      className="min-h-11"
-                    />
-                  )}
-                  <p className="mt-3 text-[11px] text-text-muted">
-                    {mobileDueDate(message.sentAt || message.createdAt, timezone)}
-                  </p>
-                </article>
+                  message={message}
+                  className={`max-w-[95%] p-3 ${message.direction === 'inbound' ? 'mr-auto' : 'ml-auto'}`}
+                />
               ) : (
                 <MessageBubble
                   key={message.id}
@@ -259,6 +241,7 @@ export function MobileConversation({
             stick.current = true
             if (timeline.current) timeline.current.scrollTop = timeline.current.scrollHeight
             setShowLatest(false)
+            markRead()
           }}
         >
           <ArrowDown className="h-4 w-4" />

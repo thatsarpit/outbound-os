@@ -204,6 +204,7 @@ export default function App() {
                   <Route path="tasks" element={<MobileTasksPage />} />
                   <Route path="leads" element={<MobileLeadsPage />} />
                   <Route path="install" element={<MobileInstallPage />} />
+                  <Route path="account" element={<AccountPage />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </Route>
                 {/* Protected */}

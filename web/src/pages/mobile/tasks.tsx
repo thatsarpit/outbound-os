@@ -47,9 +47,6 @@ export default function MobileTasksPage() {
   const rows = Array.isArray(result.data?.tasks) ? result.data.tasks : []
   return (
     <div className="space-y-4">
-      <p className="text-sm text-text-secondary">
-        Workspace follow-ups. Open a lead to add or review its tasks.
-      </p>
       <div className="flex rounded-lg border border-border bg-surface p-1">
         {[false, true].map((all) => (
           <button

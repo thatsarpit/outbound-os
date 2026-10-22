@@ -29,7 +29,7 @@ export function MobileRefresh({
       </p>
       <button
         type="button"
-        className={`${mobileButton} shrink-0`}
+        className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs text-text-secondary disabled:opacity-40"
         aria-label="Refresh results"
         disabled={!online || refreshing}
         onClick={onRefresh}

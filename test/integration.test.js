@@ -2548,3 +2548,103 @@ test('Clerk team membership route is mounted and keeps local sign-in behavior ex
   assert.equal(invitations.status, 200);
   assert.deepEqual(invitations.body, []);
 });
+
+test('personal read cursors and resolution stay independent of sales status and other viewers', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const users = await Promise.all([1, 2].map(i => prisma.user.create({ data: { name: `Read Viewer ${i}`, email: `read-viewer-${i}@example.test`, passwordHash: 'fixture', role: 'agent' } })));
+  const lead = await prisma.lead.create({ data: { name: 'Personal Read Fixture', mobile: 'no-phone:personal-read', status: 'paused', source: 'manual', messages: { create: { channel: 'whatsapp', direction: 'inbound', content: 'Please send a quote', status: 'delivered' } } }, include: { messages: true } });
+  const other = await prisma.lead.create({ data: { name: 'Other Read Fixture', mobile: 'no-phone:other-read', messages: { create: { channel: 'email', direction: 'inbound', content: 'Other conversation', status: 'delivered' } } }, include: { messages: true } });
+  const headers = i => ({ Authorization: `Bearer ${signToken(users[i])}`, 'X-Forwarded-For': `192.0.2.${120 + i}` });
+  const detail = i => request('GET', `/api/inbox/threads/${lead.id}`, { headers: headers(i) });
+  const read = (i, messageId) => request('POST', `/api/inbox/threads/${lead.id}/read`, { headers: headers(i), body: { messageId } });
+  try {
+    assert.equal((await detail(0)).body.unread, true);
+    assert.equal((await read(0, other.messages[0].id)).status, 400);
+    assert.equal((await read(0, -1)).status, 400);
+    assert.equal((await request('POST', `/api/inbox/threads/${lead.id}/read`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.122' }, body: { messageId: lead.messages[0].id } })).status, 403);
+    assert.equal((await read(0, lead.messages[0].id)).status, 200);
+    assert.equal((await detail(0)).body.unread, false);
+    assert.equal((await detail(0)).body.replyNeeded, true);
+    assert.equal((await detail(1)).body.unread, true);
+    const resolved = await request('POST', `/api/inbox/threads/${lead.id}/resolve`, { headers: headers(0) });
+    assert.equal(resolved.status, 200);
+    assert.equal((await detail(0)).body.threadState, 'resolved');
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'paused');
+    const fresh = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'inbound', content: 'Another question', status: 'delivered', createdAt: new Date(Date.now() + 1000) } });
+    assert.equal((await detail(0)).body.threadState, 'needs_reply');
+    assert.equal((await detail(0)).body.unread, true);
+    await read(0, fresh.id);
+    const stale = await read(0, lead.messages[0].id);
+    assert.equal(stale.body.lastReadMessageId, fresh.id);
+    assert.equal((await detail(0)).body.unread, false);
+    const reopened = await request('POST', `/api/inbox/threads/${lead.id}/reopen`, { headers: headers(0) });
+    assert.equal(reopened.status, 200);
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'paused');
+  } finally {
+    await prisma.lead.deleteMany({ where: { id: { in: [lead.id, other.id] } } });
+    await prisma.user.deleteMany({ where: { id: { in: users.map(user => user.id) } } });
+  }
+});
+
+test('Web Push enforces personal device ownership and retries durable reply cursors without exposing content', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { default: webpush } = await import('web-push');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const { deliverDeviceReplies, pollWebPush } = await import('../src/services/webPush.js');
+  const keys = webpush.generateVAPIDKeys();
+  const env = Object.fromEntries(['WEB_PUSH_PUBLIC_KEY', 'WEB_PUSH_PRIVATE_KEY', 'WEB_PUSH_SUBJECT'].map(key => [key, process.env[key]]));
+  process.env.WEB_PUSH_PUBLIC_KEY = keys.publicKey; process.env.WEB_PUSH_PRIVATE_KEY = keys.privateKey; process.env.WEB_PUSH_SUBJECT = 'mailto:admin@example.test';
+  const users = await Promise.all([1, 2].map(i => prisma.user.create({ data: { name: `Push Viewer ${i}`, email: `push-viewer-${i}@example.test`, passwordHash: 'fixture', role: 'agent' } })));
+  const headers = i => ({ Authorization: `Bearer ${signToken(users[i])}`, 'X-Forwarded-For': `192.0.2.${150 + i}` });
+  const device = { endpoint: 'https://web.push.apple.com/fixture-device', keys: { p256dh: keys.publicKey, auth: Buffer.alloc(16, 1).toString('base64url') } };
+  let lead;
+  try {
+    assert.equal((await request('POST', '/api/push/subscriptions', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.152' }, body: device })).status, 403);
+    assert.equal((await request('POST', '/api/push/subscriptions', { headers: headers(0), body: { ...device, endpoint: 'https://127.0.0.1/test' } })).status, 400);
+    assert.equal((await request('POST', '/api/push/subscriptions', { headers: headers(0), body: device })).status, 200);
+    assert.equal((await request('POST', '/api/push/subscriptions', { headers: headers(1), body: device })).status, 409);
+    assert.equal((await request('POST', '/api/push/test', { headers: headers(1), body: { endpoint: device.endpoint } })).status, 404);
+    await request('DELETE', '/api/push/subscriptions', { headers: headers(1), body: { endpoint: device.endpoint } });
+    let subscription = await prisma.webPushSubscription.findFirst({ where: { userId: String(users[0].id) } });
+    assert.ok(subscription);
+    assert.ok(!subscription.encryptedData.includes('apple.com'));
+    lead = await prisma.lead.create({ data: { name: 'Push Reply Fixture', mobile: 'no-phone:push-reply-fixture' } });
+    const human = await prisma.message.create({ data: { leadId: lead.id, direction: 'inbound', channel: 'email', emailInboundKind: 'human', content: 'Private customer details', status: 'delivered' } });
+    await prisma.message.create({ data: { leadId: lead.id, direction: 'inbound', channel: 'email', emailInboundKind: 'automatic_reply', content: 'Vacation notice', status: 'delivered' } });
+    await deliverDeviceReplies(subscription, async () => { throw { statusCode: 503 }; });
+    assert.equal((await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } })).lastMessageId, subscription.lastMessageId);
+    const sent = [];
+    await deliverDeviceReplies(subscription, async (_device, payload) => { sent.push(payload); });
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].tag, `message-${human.id}`);
+    assert.ok(!JSON.stringify(sent).includes('Private customer'));
+    subscription = await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } });
+    assert.equal(subscription.lastMessageId, human.id);
+    await deliverDeviceReplies(subscription, async () => assert.fail('Already delivered messages must not send again'));
+    const newer = await prisma.message.create({ data: { leadId: lead.id, direction: 'inbound', channel: 'whatsapp', content: 'Another question', status: 'delivered' } });
+    await prisma.inboxReadState.create({ data: { leadId: lead.id, viewerKey: subscription.viewerKey, lastReadMessageId: newer.id } });
+    await deliverDeviceReplies(subscription, async () => assert.fail('Messages read in the foreground must not alert again'));
+    const last = await prisma.message.create({ data: { leadId: lead.id, direction: 'inbound', channel: 'whatsapp', content: 'Last question', status: 'delivered' } });
+    subscription = await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } });
+    await deliverDeviceReplies(subscription, async () => { throw { statusCode: 410 }; });
+    assert.equal(await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } }), null);
+    assert.ok(last.id > subscription.lastMessageId);
+    const original = prisma.webPushSubscription.findFirst;
+    prisma.webPushSubscription.findFirst = async () => { throw new Error('Fictional private database failure'); };
+    try {
+      const unavailable = await request('POST', '/api/push/status', { headers: { ...headers(0), 'X-Forwarded-For': '192.0.2.153' }, body: { endpoint: device.endpoint } });
+      assert.equal(unavailable.status, 500);
+      assert.ok(!JSON.stringify(unavailable.body).includes('private database'));
+    } finally { prisma.webPushSubscription.findFirst = original; }
+    await request('POST', '/api/push/subscriptions', { headers: { ...headers(0), 'X-Forwarded-For': '192.0.2.154' }, body: device });
+    await prisma.user.update({ where: { id: users[0].id }, data: { enabled: false } });
+    await pollWebPush();
+    assert.equal(await prisma.webPushSubscription.count({ where: { userId: String(users[0].id) } }), 0, 'disabled users lose device access before delivery');
+  } finally {
+    await prisma.webPushSubscription.deleteMany({ where: { userId: { in: users.map(user => String(user.id)) } } });
+    if (lead) await prisma.lead.delete({ where: { id: lead.id } });
+    await prisma.user.deleteMany({ where: { id: { in: users.map(user => user.id) } } });
+    for (const [key, value] of Object.entries(env)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  }
+});
