@@ -79,11 +79,11 @@ export const integrations: Integration[] = [
     faq: [
       {
         q: 'Is the WhatsApp Cloud API free?',
-        a: 'Meta hosts the Cloud API at no cost, and Outbound OS is free. Meta charges per message: templates by category and the recipient’s country, and — from 1 October 2026 — replies inside the 24-hour customer-service window as well. Check Meta’s current rate card before budgeting.',
+        a: 'Outbound OS has no software licence fee. Meta messaging charges depend on category, destination and applicable service-window rules. Check the current Meta rate card before budgeting.',
       },
       {
         q: 'Do I need a WhatsApp Business Solution Provider (BSP)?',
-        a: 'No. The Cloud API is Meta’s own, so you can connect your number directly. If you already use AiSensy, Outbound OS supports that too, chosen per number.',
+        a: 'No. The Cloud API is Meta’s own, so you can connect your number directly. No Business Solution Provider is required.',
       },
       {
         q: 'Why must the first message be a template?',
@@ -94,62 +94,7 @@ export const integrations: Integration[] = [
         a: 'Yes. Each number is its own account in Outbound OS with its own provider, daily limit and first-contact template, and new leads are spread across the numbers that are ready.',
       },
     ],
-    related: ['aisensy', 'indiamart', 'facebook-lead-ads'],
-  },
-  {
-    slug: 'aisensy',
-    name: 'AiSensy',
-    kind: 'Channel',
-    title: 'AiSensy CRM integration — open-source and self-hosted',
-    description:
-      'Already on AiSensy? Connect it to Outbound OS, an open-source CRM: send AiSensy campaigns to new leads instantly and handle replies in one inbox.',
-    h1: 'Keep AiSensy. Add a CRM that follows up for you.',
-    summary:
-      'Use an existing AiSensy number: API campaigns for templates, Project API for replies.',
-    intro: [
-      'If your WhatsApp number already runs through AiSensy, you do not have to move it. Choose AiSensy as the provider for that number and Outbound OS sends through AiSensy’s API Campaigns for templates and its Project API for free-text replies.',
-      'Leads from your website, ads and marketplaces get their first AiSensy campaign within seconds of arriving, and a reply stops every scheduled follow-up. Other numbers in the same install can use Meta’s Cloud API directly.',
-    ],
-    capabilities: [
-      'Approved-template outreach through AiSensy API Campaigns',
-      'Free-text replies through the AiSensy Project API (Pro plan)',
-      'Inbound replies and delivery receipts through a signed webhook',
-      'Per-number choice between AiSensy and Meta’s Cloud API',
-      'Campaign names used directly as first-contact and campaign templates',
-    ],
-    steps: [
-      {
-        title: 'Copy your API Campaign key',
-        body: 'In AiSensy: Manage → API Key. Paste it in Outbound OS under Settings → WhatsApp → AiSensy.',
-      },
-      {
-        title: 'Name a first-contact campaign',
-        body: 'Create an API campaign in AiSensy that wraps an approved template, and enter its name as the number’s first-contact campaign.',
-      },
-      {
-        title: 'Add Project API credentials for replies',
-        body: 'Optional, on AiSensy’s Pro plan: the Project ID and Project API password enable free-text replies from the inbox.',
-      },
-      {
-        title: 'Secure the webhook',
-        body: 'Set AISENSY_WEBHOOK_SECRET and configure https://your-host/webhook/whatsapp-cloud?token=<secret> in AiSensy. Deliveries without it are rejected.',
-      },
-    ],
-    faq: [
-      {
-        q: 'Do I have to leave AiSensy to use Outbound OS?',
-        a: 'No. AiSensy is a supported provider. You can keep every number on AiSensy, move some to Meta’s Cloud API, or mix the two.',
-      },
-      {
-        q: 'Why does AiSensy need a campaign name instead of a template name?',
-        a: 'AiSensy’s API addresses a campaign, which wraps the approved template. Sending a template name returns “Campaign does not exist”.',
-      },
-      {
-        q: 'What does Outbound OS add on top of AiSensy?',
-        a: 'Lead capture from every source, instant first contact, follow-up sequences that stop on reply, email, Telegram and iMessage alongside WhatsApp, a pipeline, and an MCP server for AI agents — on your own server.',
-      },
-    ],
-    related: ['whatsapp-cloud-api', 'indiamart', 'email'],
+    related: ['email', 'indiamart', 'facebook-lead-ads'],
   },
   {
     slug: 'email',

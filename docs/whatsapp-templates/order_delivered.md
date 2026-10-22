@@ -42,7 +42,4 @@ for one.
 
 ### After approval
 
-Set `WA_CAMPAIGN_ORDER_DELIVERED` in `.env` to what your provider expects
-(default `Order Delivered`): the template's name on the Meta Cloud API, or on
-AiSensy the name of a Campaign wrapping the template (a template name there
-returns `Campaign does not exist`).
+Set `WA_CAMPAIGN_ORDER_DELIVERED` in `.env` to the exact approved Meta template name (default `order_delivered`).

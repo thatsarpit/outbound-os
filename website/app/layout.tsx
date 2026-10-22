@@ -1,4 +1,4 @@
-import Script from "next/script"
+import Script from 'next/script'
 import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
 import localFont from 'next/font/local'
@@ -26,7 +26,7 @@ const inter = localFont({
   variable: '--font-inter',
 })
 
-const HOME_TITLE = 'Outbound OS — open-source WhatsApp CRM you host yourself'
+const HOME_TITLE = 'Outbound OS — Open-source WhatsApp CRM & expert setup'
 
 export const metadata: Metadata = {
   ...buildMetadata(HOME_TITLE, site.description, '/', { absoluteTitle: true }),
@@ -42,7 +42,7 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  themeColor: '#fafafb',
+  themeColor: '#fbfcfa',
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -54,9 +54,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <JsonLd data={graph(organizationLd(), websiteLd(), softwareLd(), sourceCodeLd())} />
         <MarketingLayout>{children}</MarketingLayout>
         <RevealRoot />
-        <Script src="/site-analytics.js" data-ga-id="G-GS1BKVLCM0"
+        <Script
+          src="/site-analytics.js"
+          data-ga-id="G-GS1BKVLCM0"
           data-ga-hosts="outboundos.space,www.outboundos.space"
-          data-ga-name="Outbound OS" strategy="afterInteractive" />
+          data-ga-name="Outbound OS"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   )

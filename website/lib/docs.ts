@@ -21,7 +21,7 @@ export const docs: Doc[] = [
     label: 'Install with Docker',
     title: 'Install Outbound OS with Docker',
     description:
-      'Install Outbound OS, the open-source WhatsApp CRM, with Docker Compose: clone, set an admin email, start, then put it behind HTTPS. About five minutes.',
+      'Install Outbound OS, the open-source WhatsApp CRM, with Docker Compose: clone, set an admin email, start, then put it behind HTTPS. Includes HTTPS and channel setup guidance.',
     section: 'Get started',
   },
   {
@@ -37,7 +37,7 @@ export const docs: Doc[] = [
     label: 'WhatsApp Cloud API',
     title: 'Connect the WhatsApp Cloud API',
     description:
-      "Step-by-step: create a Meta app, get a permanent System User token, connect your number to Outbound OS, receive replies by webhook and set a first-contact template.",
+      'Step-by-step: create a Meta app, get a permanent System User token, connect your number to Outbound OS, receive replies by webhook and set a first-contact template.',
     section: 'Connect',
   },
   {

@@ -898,7 +898,7 @@ describe('Meta WhatsApp webhook', () => {
 
     try {
       const account = await prisma.whatsAppAccount.create({
-        data: { name: 'Media number', provider: 'meta', cloudApiPhoneId: 'PNID-MEDIA', enabled: true },
+        data: { name: 'Media number', provider: 'meta', cloudApiPhoneId: 'PNID-MEDIA', cloudApiToken: 'test-meta-token', enabled: true },
       });
       const lead = await prisma.lead.create({
         data: { name: 'Photo Buyer', mobile: '15551230099', source: 'manual', assignedAccount: account.id },
@@ -1263,10 +1263,11 @@ describe('View-only users cannot change or export data', () => {
 });
 
 describe('Provider webhooks refuse unauthenticated deliveries', () => {
-  test('AiSensy webhook is closed until a secret is set', async () => {
-    const fake = { topic: 'message.sender.user', data: { message: { phone_number: '15550002222', message_content: { text: 'fake reply' } } } };
-    const res = await request('POST', '/webhook/whatsapp-cloud', { body: fake });
-    assert.equal(res.status, 401);
+  test('retired WhatsApp webhook is not registered', async () => {
+    for (const method of ['GET', 'POST']) {
+      const res = await request(method, '/webhook/whatsapp-cloud', { body: method === 'POST' ? {} : undefined });
+      assert.equal(res.status, 404);
+    }
   });
 
   test('iMessage webhook needs its secret', async () => {
@@ -1481,7 +1482,7 @@ describe('Approved WhatsApp template discovery', () => {
     process.env.META_GRAPH_API_BASE = `http://127.0.0.1:${graph.address().port}`;
     const account = await prisma.whatsAppAccount.create({ data: {
       name: 'Template test', provider: 'meta', metaWabaId: 'TEST-WABA',
-      cloudApiToken: cloudApi.encryptToken('test-template-account-token'),
+      cloudApiPhoneId: 'TEST-PHONE', cloudApiToken: cloudApi.encryptToken('test-template-account-token'),
     } });
     try {
       const endpoint = `/api/whatsapp/accounts/${account.id}/templates`;
@@ -1509,22 +1510,18 @@ describe('Approved WhatsApp template discovery', () => {
     }
   });
 
-  test('reports invalid IDs, unknown accounts, AiSensy and missing WABA clearly', async () => {
+  test('reports invalid IDs, unknown accounts and missing WABA clearly', async () => {
     const { default: prisma } = await import('../src/utils/prismaClient.js');
-    const aisensy = await prisma.whatsAppAccount.create({ data: { name: 'AiSensy template test', provider: 'aisensy' } });
     const meta = await prisma.whatsAppAccount.create({ data: { name: 'Missing WABA template test', provider: 'meta' } });
     try {
       const get = (id) => request('GET', `/api/whatsapp/accounts/${id}/templates`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.60' } });
       assert.equal((await get('1abc')).status, 400);
       assert.equal((await get(999999999)).status, 404);
-      const unsupported = await get(aisensy.id);
-      assert.equal(unsupported.status, 422);
-      assert.match(unsupported.body.error, /AiSensy/);
       const missing = await get(meta.id);
       assert.equal(missing.status, 422);
       assert.match(missing.body.error, /Business Account ID/);
     } finally {
-      await prisma.whatsAppAccount.deleteMany({ where: { id: { in: [aisensy.id, meta.id] } } });
+      await prisma.whatsAppAccount.deleteMany({ where: { id: { in: [meta.id] } } });
     }
   });
 });
@@ -2547,4 +2544,104 @@ test('Clerk team membership route is mounted and keeps local sign-in behavior ex
   const invitations = await request('GET', '/api/team/invitations', {headers});
   assert.equal(invitations.status, 200);
   assert.deepEqual(invitations.body, []);
+});
+
+
+describe('Direct Meta transport', () => {
+  test('checks credentials with GET and sends templates through the same Meta account', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const { default: cloud } = await import('../src/services/whatsappCloudApi.js');
+    const calls = [];
+    const graph = http.createServer(async (req, res) => {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      calls.push({ method: req.method, url: req.url, authorization: req.headers.authorization, body: chunks.length ? JSON.parse(Buffer.concat(chunks)) : null });
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify(req.method === 'GET'
+        ? { display_phone_number: '+1 555 000 0001', verified_name: 'Example', quality_rating: 'GREEN' }
+        : { messages: [{ id: 'wamid.test-template-1' }] }));
+    });
+    await new Promise((resolve) => graph.listen(0, '127.0.0.1', resolve));
+    const previous = process.env.META_GRAPH_API_BASE;
+    process.env.META_GRAPH_API_BASE = `http://127.0.0.1:${graph.address().port}`;
+    const account = await prisma.whatsAppAccount.create({ data: {
+      name: 'Direct transport fixture', provider: 'meta', cloudApiPhoneId: 'phone-fixture',
+      cloudApiToken: cloud.encryptToken('fixture-token'), templateLanguage: 'en_US',
+    } });
+    try {
+      assert.equal((await cloud.testCredentials(account.id)).ok, true);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].method, 'GET');
+      const sent = await cloud.sendCampaignTemplate({ phone: '15550000001', campaignName: 'approved_enquiry', templateParams: ['Taylor', 'Canada'], accountId: account.id });
+      assert.equal(sent.success, true);
+      assert.equal(sent.messageId, 'wamid.test-template-1');
+      assert.equal(calls[1].url, '/phone-fixture/messages');
+      assert.equal(calls[1].authorization, 'Bearer fixture-token');
+      assert.equal(calls[1].body.template.name, 'approved_enquiry');
+      assert.equal(calls[1].body.template.language.code, 'en_US');
+      assert.deepEqual(calls[1].body.template.components[0].parameters, [{ type: 'text', text: 'Taylor' }, { type: 'text', text: 'Canada' }]);
+      assert.equal((await request('PATCH', `/api/whatsapp/accounts/${account.id}/cloud-credentials`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.91' }, body: { provider: 'retired-provider' } })).status, 400);
+      assert.equal((await request('PATCH', `/api/whatsapp/accounts/${account.id}/cloud-credentials`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.91' }, body: { defaultCampaignName: 'Old Campaign Label' } })).status, 400);
+      assert.equal((await prisma.whatsAppAccount.findUnique({ where: { id: account.id } })).defaultCampaignName, '');
+    } finally {
+      if (previous === undefined) delete process.env.META_GRAPH_API_BASE; else process.env.META_GRAPH_API_BASE = previous;
+      await new Promise((resolve) => graph.close(resolve));
+      await prisma.whatsAppAccount.delete({ where: { id: account.id } });
+    }
+  });
+});
+
+describe('Website service enquiries', () => {
+  const origin = 'https://website.example.test';
+  const endpoint = '/api/public/request-access';
+  const headers = (ip = '192.0.2.130') => ({ Origin: origin, 'X-Forwarded-For': ip });
+  const body = { name: 'Example Owner', workEmail: 'owner@example.test', company: 'Example Studio', notes: 'Help with Meta and hosting' };
+  let previous;
+  before(() => {
+    previous = { enabled: process.env.WEBSITE_ENQUIRY_ENABLED, origins: process.env.WEBSITE_ENQUIRY_ORIGINS };
+    process.env.WEBSITE_ENQUIRY_ENABLED = 'true';
+    process.env.WEBSITE_ENQUIRY_ORIGINS = origin;
+  });
+  after(() => {
+    for (const [key, value] of [['WEBSITE_ENQUIRY_ENABLED', previous.enabled], ['WEBSITE_ENQUIRY_ORIGINS', previous.origins]]) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+  test('is opt-in and only accepts configured browser origins', async () => {
+    assert.equal((await request('POST', endpoint, { headers: { 'X-Forwarded-For': '192.0.2.129' }, body })).status, 403);
+    assert.equal((await request('POST', endpoint, { headers: { Origin: 'https://untrusted.example.test', 'X-Forwarded-For': '192.0.2.129' }, body })).status, 403);
+    const preflight = await request('OPTIONS', endpoint, { headers: headers() });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers['access-control-allow-origin'], origin);
+    process.env.WEBSITE_ENQUIRY_ENABLED = 'false';
+    assert.equal((await request('POST', endpoint, { headers: headers(), body })).status, 503);
+    process.env.WEBSITE_ENQUIRY_ENABLED = 'true';
+  });
+  test('validates input and ignores honeypot submissions', async () => {
+    assert.equal((await request('POST', endpoint, { headers: headers(), body: { ...body, workEmail: 'invalid' } })).status, 422);
+    assert.equal((await request('POST', endpoint, { headers: headers(), body: { ...body, notes: 'x'.repeat(4001) } })).status, 422);
+    assert.equal((await request('POST', endpoint, { headers: headers(), body: { ...body, companyWebsite: 'bot.test' } })).status, 200);
+  });
+  test('persists a paused enquiry without changing an existing contact or queueing outreach', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const existing = await prisma.lead.create({ data: { name: 'Existing contact', mobile: '15550000130', email: body.workEmail, status: 'replied' } });
+    try {
+      const result = await request('POST', endpoint, { headers: headers('192.0.2.131'), body });
+      assert.equal(result.status, 201);
+      assert.deepEqual(result.body, { success: true });
+      assert.equal(result.headers['access-control-allow-origin'], origin);
+      const saved = await prisma.lead.findFirst({ where: { source: 'website_service_enquiry', email: body.workEmail } });
+      assert.equal(saved.status, 'paused');
+      assert.equal(saved.emailMarketingConsent, false);
+      assert.match(saved.mobile, /^no-phone:website-enquiry:/);
+      assert.match(saved.notes, /Help with Meta and hosting/);
+      assert.equal(await prisma.message.count({ where: { leadId: saved.id } }), 0);
+      assert.equal((await prisma.lead.findUnique({ where: { id: existing.id } })).status, 'replied');
+      await prisma.lead.delete({ where: { id: saved.id } });
+    } finally { await prisma.lead.delete({ where: { id: existing.id } }); }
+  });
+  test('limits public submissions', async () => {
+    for (let i = 0; i < 5; i++) assert.equal((await request('POST', endpoint, { headers: headers('192.0.2.132'), body: { ...body, companyWebsite: 'bot.test' } })).status, 200);
+    assert.equal((await request('POST', endpoint, { headers: headers('192.0.2.132'), body })).status, 429);
+  });
 });

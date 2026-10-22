@@ -108,13 +108,7 @@ export interface LeadEnrichmentResponse {
 }
 
 export type LeadStatus =
-  | 'new'
-  | 'wa_unavailable'
-  | 'contacted'
-  | 'replied'
-  | 'engaged'
-  | 'closed'
-  | 'paused'
+  'new' | 'wa_unavailable' | 'contacted' | 'replied' | 'engaged' | 'closed' | 'paused'
 
 export type LeadTier = 'HOT' | 'WARM' | 'COLD'
 
@@ -214,15 +208,12 @@ export interface WhatsAppAccount {
   metaWabaId: string
   metaPhoneNumberId?: string
   metaConfigured?: boolean
-  aisensyProjectId: string
-  projectApiConfigured: boolean
-  campaignApiConfigured: boolean
   defaultCampaignName: string
   lastResetAt: string
   createdAt: string
 }
 
-export type WhatsAppProvider = 'meta' | 'aisensy'
+export type WhatsAppProvider = 'meta'
 
 export interface EmailAccount {
   id: number
@@ -465,12 +456,7 @@ export interface InboxChannelHealth {
 }
 
 export type InboxThreadState =
-  | 'all'
-  | 'needs_reply'
-  | 'assigned'
-  | 'unassigned'
-  | 'resolved'
-  | 'open'
+  'all' | 'needs_reply' | 'assigned' | 'unassigned' | 'resolved' | 'open'
 
 export type InboxMessageStatus =
   | 'queued'

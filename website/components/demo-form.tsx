@@ -14,7 +14,7 @@ import { site } from '@/lib/site-content'
  *
  * This asks the four things that decide whether a demo is worth booking and
  * what to show in it: role, team size, where enquiries come from now, and
- * monthly volume. Only work email and company are required — the API rejects
+ * monthly volume. Name, work email and company are required — the API rejects
  * a submission without them, and a form that demands everything gets
  * abandoned.
  *
@@ -26,13 +26,18 @@ import { site } from '@/lib/site-content'
  * than a form that swallows enquiries.
  */
 
-const SOURCES = ['WhatsApp', 'Email', 'Website form', 'IndiaMART', 'Other marketplaces', 'Referrals / manual', 'Other'] as const
+const SOURCES = [
+  'WhatsApp',
+  'Email',
+  'Website form',
+  'IndiaMART',
+  'Other marketplaces',
+  'Referrals / manual',
+  'Other',
+] as const
 
 type Status =
-  | { state: 'idle' }
-  | { state: 'sending' }
-  | { state: 'sent' }
-  | { state: 'error'; message: string }
+  { state: 'idle' } | { state: 'sending' } | { state: 'sent' } | { state: 'error'; message: string }
 
 export function DemoForm({ toEmail }: { toEmail: string }) {
   const [sources, setSources] = useState<string[]>([])
@@ -48,7 +53,7 @@ export function DemoForm({ toEmail }: { toEmail: string }) {
 
     const summary = [
       `Name: ${get('name')}`,
-      `Work email: ${get('email')}`,
+      `Work email: ${get('workEmail')}`,
       `Company: ${get('company')}`,
       `Role: ${get('role') || '—'}`,
       `Team size: ${get('teamSize') || '—'}`,
@@ -61,19 +66,28 @@ export function DemoForm({ toEmail }: { toEmail: string }) {
     ].join('\n')
 
     const openMailto = () => {
+      setStatus({
+        state: 'error',
+        message:
+          'We could not submit the form. Opening an email draft with your details. You can also email us directly using the address below.',
+      })
       window.location.href = `mailto:${toEmail}?subject=${encodeURIComponent(
         `Outbound OS enquiry — ${get('company') || get('name')}`,
       )}&body=${encodeURIComponent(summary)}`
     }
 
     setStatus({ state: 'sending' })
+    const controller = new AbortController()
+    const timeout = window.setTimeout(() => controller.abort(), 12_000)
     try {
       const response = await fetch(`${site.apiUrl}/api/public/request-access`, {
         method: 'POST',
+        signal: controller.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: get('name'),
-          workEmail: get('email'),
+          companyWebsite: get('companyWebsite'),
+          workEmail: get('workEmail'),
           company: get('company'),
           role: get('role'),
           teamSize: get('teamSize'),
@@ -97,7 +111,8 @@ export function DemoForm({ toEmail }: { toEmail: string }) {
         const payload = await response.json().catch(() => null)
         setStatus({
           state: 'error',
-          message: payload?.error || 'That submission was rejected. Please check the form and try again.',
+          message:
+            payload?.error || 'That submission was rejected. Please check the form and try again.',
         })
         return
       }
@@ -105,6 +120,8 @@ export function DemoForm({ toEmail }: { toEmail: string }) {
     } catch {
       // Network failure, CORS rejection, API down. Never drop the enquiry.
       openMailto()
+    } finally {
+      window.clearTimeout(timeout)
     }
   }
 
@@ -112,25 +129,37 @@ export function DemoForm({ toEmail }: { toEmail: string }) {
     return (
       <div className="form" role="status" aria-live="polite">
         <p className="form__note">
-          <strong>Request received.</strong> We will come back to you at the address you
-          gave, usually within one working day.
+          <strong>Request received.</strong> We will reply by email with the next steps for your
+          setup.
         </p>
       </div>
     )
   }
 
   return (
-    <form className="form" onSubmit={handleSubmit}>
+    <form
+      className="form"
+      method="post"
+      action={`${site.apiUrl}/api/public/request-access`}
+      onSubmit={handleSubmit}
+    >
+      <div hidden aria-hidden="true">
+        <label>
+          Leave empty
+          <input name="companyWebsite" tabIndex={-1} autoComplete="off" />
+        </label>
+      </div>
       <div className="form__row">
         <label className="field">
           <span className="field__label">Name</span>
-          <input className="field__input" name="name" required autoComplete="name" />
+          <input className="field__input" name="name" required maxLength={100} autoComplete="name" />
         </label>
         <label className="field">
           <span className="field__label">Work email</span>
           <input
             className="field__input"
-            name="email"
+            name="workEmail"
+            maxLength={254}
             type="email"
             required
             autoComplete="email"
@@ -141,7 +170,7 @@ export function DemoForm({ toEmail }: { toEmail: string }) {
       <div className="form__row">
         <label className="field">
           <span className="field__label">Company</span>
-          <input className="field__input" name="company" required autoComplete="organization" />
+          <input className="field__input" name="company" required maxLength={160} autoComplete="organization" />
         </label>
         <label className="field">
           <span className="field__label">Your role</span>
@@ -187,7 +216,8 @@ export function DemoForm({ toEmail }: { toEmail: string }) {
         <select className="field__input" name="plan" defaultValue="">
           <option value="">Not sure yet</option>
           <option>Managed hosting</option>
-          <option>Help setting up my own install</option>
+          <option>Setup and launch on my own server</option>
+          <option>Ongoing support and assistance</option>
           <option>A walkthrough of the product</option>
         </select>
       </label>
@@ -215,11 +245,15 @@ export function DemoForm({ toEmail }: { toEmail: string }) {
         <span className="field__label">
           What would you want it to fix first? <span className="field__optional">Optional</span>
         </span>
-        <textarea className="field__input" name="context" rows={4} />
+        <textarea className="field__input" name="context" rows={4} maxLength={3500} />
       </label>
 
       <div className="form__footer">
-        <button type="submit" className="btn btn--primary btn--lg" disabled={status.state === 'sending'}>
+        <button
+          type="submit"
+          className="btn btn--primary btn--lg"
+          disabled={status.state === 'sending'}
+        >
           {status.state === 'sending' ? 'Sending…' : 'Send'}
         </button>
         {status.state === 'error' ? (
@@ -228,7 +262,7 @@ export function DemoForm({ toEmail }: { toEmail: string }) {
           </p>
         ) : (
           <p className="form__note">
-            Goes straight to our team. We reply from a person, usually within one working day.
+            Saved for our team to review. We will reply by email.
           </p>
         )}
       </div>

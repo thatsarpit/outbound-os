@@ -60,11 +60,11 @@ is open source, so any team can run their own.
   </tr>
   <tr>
     <td><img alt="Setup wizard: choosing lead sources" src="docs/screenshots/setup.png"></td>
-    <td><img alt="WhatsApp settings: Meta Cloud API or AiSensy per number" src="docs/screenshots/whatsapp-settings.png"></td>
+    <td><img alt="WhatsApp settings: Meta Cloud API connection settings" src="docs/screenshots/whatsapp-settings.png"></td>
   </tr>
   <tr>
     <td align="center"><sub>Guided setup on first sign-in</sub></td>
-    <td align="center"><sub>Meta Cloud API or AiSensy, per number</sub></td>
+    <td align="center"><sub>Connect directly to Meta Cloud API</sub></td>
   </tr>
 </table>
 
@@ -105,7 +105,7 @@ is open source, so any team can run their own.
 
 | Bring leads in | Reach out | Send data out |
 |---|---|---|
-| Any website form (HTML, Formspree-style POST, Webflow, WordPress) | **WhatsApp** — Meta Cloud API, or AiSensy | Outgoing webhooks on lead and message events |
+| Any website form (HTML, Formspree-style POST, Webflow, WordPress) | **WhatsApp** — Meta Cloud API | Outgoing webhooks on lead and message events |
 | Facebook Lead Ads | **Email** — any SMTP/IMAP inbox, Brevo | Google Sheets (live row sync) |
 | IndiaMART, TradeIndia, JustDial (their CRM webhooks) | **Telegram** — your own account | CSV export |
 | Engyne Cloud | **iMessage** — via a Mac running BlueBubbles | MCP server for AI clients |
@@ -226,7 +226,6 @@ First contact must use an **approved template**. Put its name on a campaign
 (or as a number's default) and Outbound OS fills `{{1}}` with the lead's first
 name and `{{2}}` with their country.
 
-Already on AiSensy? Pick **AiSensy** instead and paste your API Campaign key.
 
 ---
 

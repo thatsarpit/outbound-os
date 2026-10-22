@@ -9,7 +9,7 @@ import { graph } from '@/lib/structured-data'
 
 export const metadata = buildMetadata(
   'Integrations — WhatsApp, email, IndiaMART, Facebook Lead Ads',
-  'Every Outbound OS integration: WhatsApp Cloud API, AiSensy, email, Telegram, iMessage, IndiaMART, Facebook Lead Ads, Zapier, Google Sheets and signed webhooks.',
+  'Every Outbound OS integration: WhatsApp Cloud API, email, Telegram, iMessage, IndiaMART, Facebook Lead Ads, Zapier, Google Sheets and signed webhooks.',
   '/integrations',
 )
 
@@ -32,7 +32,13 @@ const groups: { kind: IntegrationKind; heading: string; body: string }[] = [
 ]
 
 const all = [
-  ...integrations.map((i) => ({ slug: i.slug, name: i.name, kind: i.kind, summary: i.summary, href: `/integrations/${i.slug}` })),
+  ...integrations.map((i) => ({
+    slug: i.slug,
+    name: i.name,
+    kind: i.kind,
+    summary: i.summary,
+    href: `/integrations/${i.slug}`,
+  })),
   ...directoryExtras,
 ]
 
@@ -45,10 +51,9 @@ export default function IntegrationsPage() {
           <p className="eyebrow">Integrations</p>
           <h1>Everything Outbound OS connects to.</h1>
           <p className="lede">
-            WhatsApp, email, Telegram and iMessage to reach people; forms, ads
-            and marketplaces to bring them in; sheets, webhooks and AI agents
-            to use what happens. All of it ships in the open-source release —
-            nothing here is a paid add-on.
+            WhatsApp, email, Telegram and iMessage to reach people; forms, ads and marketplaces to
+            bring them in; sheets, webhooks and AI agents to use what happens. All of it ships in
+            the open-source release — nothing here is a paid add-on.
           </p>
         </div>
       </section>

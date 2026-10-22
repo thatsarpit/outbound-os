@@ -55,7 +55,7 @@ Everything is off until you connect it; an empty credential means disabled,
 never simulated success.
 
 - **WhatsApp** — Settings → WhatsApp. Choose Meta Cloud API (recommended) or
-  AiSensy. The README has the step-by-step for Meta.
+  Meta's Cloud API. The README has the step-by-step setup.
 - **Email** — Settings → Email. Any SMTP/IMAP mailbox, or Brevo.
 - **Telegram** — Integrations → Telegram.
 - **iMessage** — Settings → iMessage; needs a Mac running BlueBubbles, see

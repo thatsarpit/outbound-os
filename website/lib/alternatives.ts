@@ -76,52 +76,6 @@ export const alternatives: Alternative[] = [
     ],
   },
   {
-    slug: 'aisensy',
-    name: 'AiSensy',
-    title: 'AiSensy alternative — or use AiSensy inside an open-source CRM',
-    description:
-      'Outbound OS vs AiSensy: an open-source, self-hosted WhatsApp CRM compared fairly with AiSensy — and how to keep your AiSensy number and use both together.',
-    h1: 'An AiSensy alternative — that also works with AiSensy.',
-    intro:
-      'AiSensy is a hosted WhatsApp marketing platform and an official WhatsApp Business Solution Provider, with broadcasts, a chatbot flow builder and click-to-WhatsApp ads. Outbound OS is an open-source CRM you host yourself. Unusually for a comparison, you do not have to pick one: Outbound OS can send through your AiSensy number.',
-    theyAre: 'Hosted WhatsApp platform (SaaS) and official WhatsApp Business Solution Provider',
-    theirChannels: 'WhatsApp-focused, with WhatsApp forms, catalog and payments, per their website',
-    theirStrengths: [
-      'Drag-and-drop chatbot flow builder',
-      'Click-to-WhatsApp ads for Facebook and Instagram',
-      'WhatsApp catalog and payments',
-      'Onboarding to the WhatsApp Business API as a BSP',
-    ],
-    extraRows: [['Works with the other', 'Yes — AiSensy is a built-in provider', 'Not applicable']],
-    chooseThem: [
-      'Broadcasts and chatbot flows are most of what you need',
-      'You want WhatsApp catalog and payments',
-      'You would rather not run a server',
-    ],
-    chooseUs: [
-      'You want a CRM around your WhatsApp: pipeline, owners, notes, tasks and orders',
-      'Leads from websites, ads and IndiaMART should be contacted in seconds, automatically',
-      'You want email, Telegram and iMessage on the same lead',
-      'Your leads should live in your own database',
-    ],
-    together:
-      'Keep your number on AiSensy and choose AiSensy as its provider in Outbound OS. Templates go out through AiSensy’s API campaigns, free-text replies through its Project API, and replies come back through a signed webhook.',
-    faq: [
-      {
-        q: 'Can I use AiSensy and Outbound OS together?',
-        a: 'Yes. AiSensy is a supported WhatsApp provider in Outbound OS, chosen per number. You keep your AiSensy account and templates; Outbound OS adds lead capture, instant first contact, follow-ups that stop on reply, and a CRM.',
-      },
-      {
-        q: 'What do I need from AiSensy?',
-        a: 'Your API Campaign key for template messages, an API campaign for each template you want to send, and — for free-text replies from the inbox — the Project API credentials, which AiSensy offers on its Pro plan.',
-      },
-      {
-        q: 'Is Outbound OS an AiSensy alternative in India?',
-        a: 'Yes. It was first built for an Indian export business, connects to IndiaMART, TradeIndia and JustDial lead webhooks, and supports INR as the home currency.',
-      },
-    ],
-  },
-  {
     slug: 'interakt',
     name: 'Interakt',
     title: 'Interakt alternative — open-source WhatsApp CRM',

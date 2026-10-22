@@ -25,7 +25,7 @@ const EVENTS = {
   order_confirmed: {
     subject: (o) => `Order ${o.orderNumber} confirmed`,
     template: 'order_confirmed',
-    campaign: () => process.env.WA_CAMPAIGN_ORDER_CONFIRMED || 'Order Confirmed',
+    campaign: () => process.env.WA_CAMPAIGN_ORDER_CONFIRMED || 'order_confirmed',
     params: (o) => [firstName(o), o.orderNumber, money(o.total, o.currency)],
     text: (o) =>
       `Hi ${firstName(o)},\n\n` +
@@ -37,7 +37,7 @@ const EVENTS = {
   order_shipped: {
     subject: (o) => `Order ${o.orderNumber} has shipped`,
     template: 'order_shipped',
-    campaign: () => process.env.WA_CAMPAIGN_ORDER_SHIPPED || 'Order Shipped',
+    campaign: () => process.env.WA_CAMPAIGN_ORDER_SHIPPED || 'order_shipped',
     // Must match docs/whatsapp-templates/order_shipped.md exactly: WhatsApp
     // rejects a send whose parameter count differs from the approved template.
     params: (o, ctx) => [
@@ -59,7 +59,7 @@ const EVENTS = {
   order_delivered: {
     subject: (o) => `Order ${o.orderNumber} delivered`,
     template: 'order_delivered',
-    campaign: () => process.env.WA_CAMPAIGN_ORDER_DELIVERED || 'Order Delivered',
+    campaign: () => process.env.WA_CAMPAIGN_ORDER_DELIVERED || 'order_delivered',
     params: (o) => [firstName(o), o.orderNumber],
     text: (o) =>
       `Hi ${firstName(o)},\n\n` +
@@ -175,9 +175,7 @@ class OrderNotifier {
           });
         } else {
           // Utility template — free text would not deliver outside the 24h window.
-          // On Meta this is the approved template's name; on AiSensy it must be
-          // the *campaign* that wraps the template (a template name there
-          // returns "Campaign does not exist").
+          // Use the exact approved Meta template name and ordered variables.
           const res = await whatsappManager.sendCampaignTemplate(
             recipient,
             spec.campaign(),

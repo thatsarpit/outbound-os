@@ -2,3 +2,7 @@
 # The live demo, a separate Pages project. 302 so the target can move.
 /demo              https://outboundos-demo.pages.dev/  302
 /demo/             https://outboundos-demo.pages.dev/  302
+
+# Retired provider pages resolve to the current direct Meta setup.
+/integrations/aisensy /integrations/whatsapp-cloud-api 301
+/alternatives/aisensy /whatsapp-crm 301

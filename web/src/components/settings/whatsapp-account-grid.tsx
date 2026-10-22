@@ -48,9 +48,7 @@ export function WhatsAppAccountGrid({
               </span>
             </div>
             <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-text-muted">
-              <span className="rounded-full bg-surface-raised px-2 py-1">
-                {account.provider === 'aisensy' ? 'AiSensy' : 'Meta Cloud API'}
-              </span>
+              <span className="rounded-full bg-surface-raised px-2 py-1">{'Meta Cloud API'}</span>
               <span className="rounded-full bg-surface-raised px-2 py-1">{account.status}</span>
               <span className="rounded-full bg-surface-raised px-2 py-1">
                 {account.messagesSentToday} sent today

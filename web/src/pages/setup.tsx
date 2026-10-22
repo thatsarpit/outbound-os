@@ -45,7 +45,10 @@ type StepId = (typeof STEPS)[number]['id']
 export default function SetupPage() {
   const [params, setParams] = useSearchParams()
   const requested = params.get('step') as StepId | null
-  const stepIndex = Math.max(0, STEPS.findIndex((s) => s.id === requested))
+  const stepIndex = Math.max(
+    0,
+    STEPS.findIndex((s) => s.id === requested),
+  )
   const step = STEPS[stepIndex]
 
   const { data: status } = useQuery({
@@ -121,7 +124,11 @@ export default function SetupPage() {
       <section className="rounded-lg border border-border bg-surface p-5 sm:p-6">
         {step.id === 'business' && <BusinessStep onDone={() => goTo(stepIndex + 1)} />}
         {step.id === 'channels' && (
-          <ChannelsStep channels={status?.channels} onBack={() => goTo(stepIndex - 1)} onNext={() => goTo(stepIndex + 1)} />
+          <ChannelsStep
+            channels={status?.channels}
+            onBack={() => goTo(stepIndex - 1)}
+            onNext={() => goTo(stepIndex + 1)}
+          />
         )}
         {step.id === 'sources' && (
           <SourcesStep onBack={() => goTo(stepIndex - 1)} onNext={() => goTo(stepIndex + 1)} />
@@ -174,7 +181,8 @@ function BusinessStep({ onDone }: { onDone: () => void }) {
   useEffect(() => {
     if (!saved) return
     setForm({
-      BUSINESS_NAME: saved.BUSINESS_NAME && saved.BUSINESS_NAME !== 'Outbound OS' ? saved.BUSINESS_NAME : '',
+      BUSINESS_NAME:
+        saved.BUSINESS_NAME && saved.BUSINESS_NAME !== 'Outbound OS' ? saved.BUSINESS_NAME : '',
       BUSINESS_WEBSITE: saved.BUSINESS_WEBSITE || '',
       // A fresh install says UTC; the person setting it up almost certainly
       // is not, so start from their browser's zone.
@@ -211,7 +219,8 @@ function BusinessStep({ onDone }: { onDone: () => void }) {
     if (Object.keys(next).length === 0) save.mutate()
   }
 
-  const set = (key: keyof typeof form) => (value: string) => setForm((f) => ({ ...f, [key]: value }))
+  const set = (key: keyof typeof form) => (value: string) =>
+    setForm((f) => ({ ...f, [key]: value }))
 
   return (
     <form onSubmit={onSubmit} className="grid gap-5" noValidate>
@@ -280,7 +289,12 @@ function BusinessStep({ onDone }: { onDone: () => void }) {
       </div>
       <StepFooter>
         <span />
-        <Button type="submit" pending={save.isPending} pendingLabel="Saving…" rightIcon={<ArrowRight className="h-4 w-4" />}>
+        <Button
+          type="submit"
+          pending={save.isPending}
+          pendingLabel="Saving…"
+          rightIcon={<ArrowRight className="h-4 w-4" />}
+        >
           Save and continue
         </Button>
       </StepFooter>
@@ -295,7 +309,8 @@ const CHANNEL_CARDS = [
     id: 'whatsapp' as const,
     name: 'WhatsApp',
     icon: MessageSquare,
-    detail: 'Official Meta Cloud API (free to set up) or AiSensy. Where most B2B buyers reply fastest.',
+    detail:
+      'Direct Meta Cloud API. Your number, templates and customer conversations. Where most B2B buyers reply fastest.',
     to: '/integrations/whatsapp/configure',
   },
   {
@@ -377,13 +392,39 @@ function ChannelsStep({
 /* ── Step 3: lead sources ─────────────────────────────────────────────────── */
 
 const SOURCE_CARDS = [
-  { preset: 'website', name: 'Website form', icon: Globe, detail: 'Any HTML form, Webflow, WordPress or Framer form posts straight in.' },
-  { preset: 'website', name: 'Zapier, Make or n8n', label: 'Automation', icon: Webhook, detail: 'Send leads from any app those tools connect to.' },
-  { preset: 'facebook', name: 'Facebook Lead Ads', icon: Globe, detail: 'Instant forms from your Meta ads, via Zapier or Make.' },
-  { preset: 'indiamart', name: 'IndiaMART', icon: Globe, detail: 'Lead Manager → CRM Integration → Webhook URL.' },
+  {
+    preset: 'website',
+    name: 'Website form',
+    icon: Globe,
+    detail: 'Any HTML form, Webflow, WordPress or Framer form posts straight in.',
+  },
+  {
+    preset: 'website',
+    name: 'Zapier, Make or n8n',
+    label: 'Automation',
+    icon: Webhook,
+    detail: 'Send leads from any app those tools connect to.',
+  },
+  {
+    preset: 'facebook',
+    name: 'Facebook Lead Ads',
+    icon: Globe,
+    detail: 'Instant forms from your Meta ads, via Zapier or Make.',
+  },
+  {
+    preset: 'indiamart',
+    name: 'IndiaMART',
+    icon: Globe,
+    detail: 'Lead Manager → CRM Integration → Webhook URL.',
+  },
   { preset: 'tradeindia', name: 'TradeIndia', icon: Globe, detail: 'Seller dashboard webhook.' },
   { preset: 'justdial', name: 'JustDial', icon: Globe, detail: 'JustDial lead push.' },
-  { preset: 'engyne', name: 'Engyne Cloud', icon: Globe, detail: 'Admin → Webhooks. Leads arrive with phone and email.' },
+  {
+    preset: 'engyne',
+    name: 'Engyne Cloud',
+    icon: Globe,
+    detail: 'Admin → Webhooks. Leads arrive with phone and email.',
+  },
 ] as const
 
 function copy(text: string, what: string) {
@@ -395,10 +436,14 @@ function copy(text: string, what: string) {
 
 function SourcesStep({ onBack, onNext }: { onBack: () => void; onNext: () => void }) {
   const queryClient = useQueryClient()
-  const [created, setCreated] = useState<{ card: (typeof SOURCE_CARDS)[number]; source: CreatedLeadSource } | null>(null)
+  const [created, setCreated] = useState<{
+    card: (typeof SOURCE_CARDS)[number]
+    source: CreatedLeadSource
+  } | null>(null)
 
   const create = useMutation({
-    mutationFn: (card: (typeof SOURCE_CARDS)[number]) => onboardingApi.createSource(card.preset, card.name),
+    mutationFn: (card: (typeof SOURCE_CARDS)[number]) =>
+      onboardingApi.createSource(card.preset, card.name),
     onSuccess: (source, card) => {
       if (source) setCreated({ card, source })
       queryClient.invalidateQueries({ queryKey: ['onboarding-status'] })
@@ -413,8 +458,8 @@ function SourcesStep({ onBack, onNext }: { onBack: () => void; onNext: () => voi
   return (
     <div className="grid gap-5">
       <p className="text-[13px] leading-5 text-text-secondary">
-        Each source gets its own web address to send leads to. Pick one to create it; you can
-        add more any time under Integrations → Webhooks.
+        Each source gets its own web address to send leads to. Pick one to create it; you can add
+        more any time under Integrations → Webhooks.
       </p>
 
       {created ? (
@@ -499,7 +544,11 @@ function CreatedSource({
       </p>
 
       <CopyRow label="Send leads to (POST, JSON or form)" value={url} what="Address" />
-      <CopyRow label="Secret key — send as the x-api-key header" value={created.source.apiKey} what="Key" />
+      <CopyRow
+        label="Secret key — send as the x-api-key header"
+        value={created.source.apiKey}
+        what="Key"
+      />
       <p className="text-[12px] leading-5 text-text-secondary">
         The key is shown only now; you can make a new one later under Integrations → Webhooks. It
         only allows sending leads into this source.
@@ -515,7 +564,12 @@ function CreatedSource({
             <pre className="p-3 text-[12px] leading-5 text-text-primary">{formSnippet}</pre>
           </div>
           <div>
-            <Button size="sm" variant="secondary" leftIcon={<Copy className="h-3.5 w-3.5" />} onClick={() => copy(formSnippet, 'Form')}>
+            <Button
+              size="sm"
+              variant="secondary"
+              leftIcon={<Copy className="h-3.5 w-3.5" />}
+              onClick={() => copy(formSnippet, 'Form')}
+            >
               Copy form
             </Button>
           </div>
@@ -539,7 +593,12 @@ function CopyRow({ label, value, what }: { label: string; value: string; what: s
         <code className="min-w-0 flex-1 overflow-x-auto whitespace-nowrap rounded-md border border-border bg-surface px-2.5 py-2 text-[12px] text-text-primary">
           {value}
         </code>
-        <Button size="sm" variant="secondary" aria-label={`Copy ${what.toLowerCase()}`} onClick={() => copy(value, what)}>
+        <Button
+          size="sm"
+          variant="secondary"
+          aria-label={`Copy ${what.toLowerCase()}`}
+          onClick={() => copy(value, what)}
+        >
           <Copy className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -566,9 +625,9 @@ function TeamStep({ onBack }: { onBack: () => void }) {
   return (
     <div className="grid gap-5">
       <p className="text-[13px] leading-5 text-text-secondary">
-        Add the people who will reply to leads. Agents see the inbox and their leads; managers
-        also run campaigns and imports; admins manage settings. Everyone signs in with their
-        email and a password you set — they can change it under Account.
+        Add the people who will reply to leads. Agents see the inbox and their leads; managers also
+        run campaigns and imports; admins manage settings. Everyone signs in with their email and a
+        password you set — they can change it under Account.
       </p>
       <div>
         <Button asChild variant="secondary">
@@ -582,7 +641,11 @@ function TeamStep({ onBack }: { onBack: () => void }) {
         <Button variant="ghost" onClick={onBack} leftIcon={<ArrowLeft className="h-4 w-4" />}>
           Back
         </Button>
-        <Button onClick={() => finish.mutate()} pending={finish.isPending} pendingLabel="Finishing…">
+        <Button
+          onClick={() => finish.mutate()}
+          pending={finish.isPending}
+          pendingLabel="Finishing…"
+        >
           Finish setup
         </Button>
       </StepFooter>
@@ -591,5 +654,9 @@ function TeamStep({ onBack }: { onBack: () => void }) {
 }
 
 function StepFooter({ children }: { children: ReactNode }) {
-  return <div className="flex items-center justify-between gap-3 border-t border-border-subtle pt-4">{children}</div>
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-border-subtle pt-4">
+      {children}
+    </div>
+  )
 }

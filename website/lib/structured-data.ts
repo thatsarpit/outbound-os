@@ -57,7 +57,7 @@ export function softwareLd(): Json {
     installUrl: `${siteUrl}/docs/install`,
     screenshot: `${siteUrl}/screenshots/overview.png?v=${site.screenshotVersion}`,
     featureList: [
-      'WhatsApp Cloud API and AiSensy',
+      'Direct Meta WhatsApp Cloud API',
       'Email over SMTP/IMAP and Brevo',
       'Telegram and iMessage',
       'Lead webhooks for website forms, Facebook Lead Ads, IndiaMART, Zapier',
@@ -132,4 +132,27 @@ export function articleLd({
 /** Wraps nodes in one @graph so a page emits a single, linked JSON-LD block. */
 export function graph(...nodes: Json[]): Json {
   return { '@context': 'https://schema.org', '@graph': nodes }
+}
+
+/** Paid services are separate from the free software offer. No invented prices or ratings. */
+export function managedServiceLd(): Json {
+  return {
+    '@type': 'Service',
+    '@id': `${siteUrl}/managed-hosting#service`,
+    name: 'Outbound OS setup, managed hosting and support',
+    serviceType: 'WhatsApp CRM implementation and hosting',
+    description:
+      'Installation, direct Meta WhatsApp integration, lead-source configuration, managed hosting and ongoing assistance, with scope and pricing agreed per team.',
+    url: `${siteUrl}/managed-hosting`,
+    provider: { '@id': ORG_ID },
+    hasOfferCatalog: {
+      '@type': 'OfferCatalog',
+      name: 'Outbound OS services',
+      itemListElement: ['Setup & launch', 'Managed hosting', 'Ongoing assistance'].map((name) => ({
+        '@type': 'Offer',
+        url: `${siteUrl}/managed-hosting#request`,
+        itemOffered: { '@type': 'Service', name },
+      })),
+    },
+  }
 }

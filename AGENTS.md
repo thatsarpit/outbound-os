@@ -56,7 +56,7 @@ from an untouched `.env.example`.
   (hand-written SQL is fine) and update `schema.prisma` to match. Check with
   `DATABASE_URL=file:<db> npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script`
   — it must print an empty migration. Never rely on `prisma db push`.
-- **WhatsApp goes through official APIs only**: Meta's Cloud API or AiSensy.
+- **WhatsApp goes through official APIs only**: Meta's Cloud API.
   Never automate the WhatsApp or WhatsApp Business phone apps.
 - **Leads can lack a phone number.** `Lead.mobile` is required and unique, so
   email-only leads and WhatsApp username users carry a `no-phone:` placeholder.

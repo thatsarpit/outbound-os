@@ -46,7 +46,7 @@ const GROUPS: Group[] = [
     items: [
       {
         name: 'WhatsApp',
-        detail: "Meta's official Cloud API, or AiSensy. Approved templates for first contact.",
+        detail: "Meta's official Cloud API. Approved templates for first contact.",
         icon: MessageSquare,
         to: '/integrations/whatsapp',
         channel: 'whatsapp',

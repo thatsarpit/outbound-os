@@ -8,6 +8,11 @@ include breaking changes, and they are called out here.
 
 ### Added
 
+- A refreshed website with paid setup, managed hosting and support enquiries,
+  current dashboard screenshots and checks for exported SEO metadata and links.
+- An opt-in, rate-limited website enquiry endpoint that records paused leads
+  without granting marketing consent or scheduling outreach.
+
 - **WhatsApp files in both directions** (Meta Cloud API numbers). Photos,
   PDFs, documents, voice notes and videos a lead sends are downloaded from
   Meta, kept in the data volume and shown in the inbox; they are served only
@@ -22,6 +27,12 @@ include breaking changes, and they are called out here.
   `npm run build:demo --prefix web`.
 
 ### Changed
+
+- **Breaking:** WhatsApp now connects only through Meta's official Cloud API.
+  The old provider transport, webhook, credential fields and dashboard controls
+  are removed. The upgrade retains conversations and account IDs, disables
+  retired-provider accounts and clears incompatible default template labels.
+  See `docs/meta-only-upgrade.md` before upgrading an existing installation.
 
 - Incoming media placeholders read `[Photo]`, `[Voice message]` or
   `[Document] name.pdf` instead of `[image]`.
@@ -70,7 +81,7 @@ include breaking changes, and they are called out here.
 
 - Meta's per-message pricing is recorded from status webhooks, and
   Settings → WhatsApp shows this month's billable messages by category.
-  Meta charges for service replies from 1 October 2026.
+  Counts follow the billable flag and category in Meta delivery receipts.
 - Opt-outs in Hindi and Hinglish, Spanish, Portuguese, French, German,
   Italian, Indonesian/Malay, Turkish, Russian and Arabic, plus one-word
   replies such as `PARAR` or `Стоп`.
@@ -113,8 +124,7 @@ The first release as a self-hostable, open-source product.
   (`AUTH_PROVIDER=clerk`).
 - First-run setup wizard (business details, channels, lead sources, team) and a
   "finish setting up" checklist.
-- WhatsApp through Meta's Cloud API directly, with AiSensy as an option, chosen
-  per number. Meta webhooks at `/webhook/meta`, signature-checked.
+- WhatsApp through official API connections, configured per number. Meta webhooks at `/webhook/meta`, signature-checked.
 - Integrations catalogue in the dashboard.
 - Website forms: spam trap (`_gotcha`), return page (`_next`), email-consent
   checkbox, and a thank-you page for plain HTML posts.
@@ -143,7 +153,7 @@ The first release as a self-hostable, open-source product.
 
 - Viewers can no longer change or export data; every write route checks the
   role it needs.
-- Provider webhooks (Meta, AiSensy, iMessage, Brevo) reject deliveries until
+- Provider webhooks (Meta, iMessage, Brevo) reject deliveries until
   their secret is set.
 - No fixed default admin password or signing key; login rate limits count
   failed attempts only and cannot be reset with a forged `X-Forwarded-For`.

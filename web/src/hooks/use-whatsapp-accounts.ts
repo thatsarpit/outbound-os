@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toast-store'
-import type { WhatsAppAccount, WhatsAppProvider } from '@/api/types'
+import type { WhatsAppAccount } from '@/api/types'
 import {
   toAccountForm,
   toDelayJson,
@@ -10,26 +10,18 @@ import {
 } from '@/components/settings/settings-format'
 
 export type CloudFormState = {
-  provider: WhatsAppProvider
   metaPhoneNumberId: string
   metaAccessToken: string
   metaWabaId: string
   templateLanguage: string
-  aisensyProjectId: string
-  aisensyApiKey: string
-  aisensyCampaignApiKey: string
   defaultCampaignName: string
 }
 
 const EMPTY_CLOUD_FORM: CloudFormState = {
-  provider: 'meta',
   metaPhoneNumberId: '',
   metaAccessToken: '',
   metaWabaId: '',
   templateLanguage: 'en',
-  aisensyProjectId: '',
-  aisensyApiKey: '',
-  aisensyCampaignApiKey: '',
   defaultCampaignName: '',
 }
 
@@ -69,11 +61,9 @@ export function useWhatsAppAccounts(timezoneOffset: number) {
       setAccountForm(toAccountForm(selectedAccount))
       setCloudForm({
         ...EMPTY_CLOUD_FORM,
-        provider: selectedAccount.provider === 'aisensy' ? 'aisensy' : 'meta',
         metaPhoneNumberId: selectedAccount.metaPhoneNumberId || '',
         metaWabaId: selectedAccount.metaWabaId || '',
         templateLanguage: selectedAccount.templateLanguage || 'en',
-        aisensyProjectId: selectedAccount.aisensyProjectId || '',
         defaultCampaignName: selectedAccount.defaultCampaignName || '',
       })
     }
@@ -99,21 +89,15 @@ export function useWhatsAppAccounts(timezoneOffset: number) {
       if (!selectedAccount) throw new Error('No WhatsApp account selected')
       // Secrets are only sent when typed, so saving other fields never
       // requires pasting a token again.
-      const payload: Record<string, string> = { provider: cloudForm.provider }
-      if (cloudForm.provider === 'meta') {
-        payload.metaPhoneNumberId = cloudForm.metaPhoneNumberId.trim()
-        payload.metaWabaId = cloudForm.metaWabaId.trim()
-        payload.templateLanguage = cloudForm.templateLanguage.trim() || 'en'
-        payload.defaultCampaignName = cloudForm.defaultCampaignName.trim()
-        if (cloudForm.metaAccessToken.trim()) payload.metaAccessToken = cloudForm.metaAccessToken.trim()
-      } else {
-        if (cloudForm.aisensyProjectId.trim())
-          payload.aisensyProjectId = cloudForm.aisensyProjectId.trim()
-        if (cloudForm.aisensyApiKey.trim()) payload.aisensyApiKey = cloudForm.aisensyApiKey.trim()
-        if (cloudForm.aisensyCampaignApiKey.trim())
-          payload.aisensyCampaignApiKey = cloudForm.aisensyCampaignApiKey.trim()
-        payload.defaultCampaignName = cloudForm.defaultCampaignName.trim()
+      const payload: Record<string, string> = {
+        provider: 'meta',
+        metaPhoneNumberId: cloudForm.metaPhoneNumberId.trim(),
+        metaWabaId: cloudForm.metaWabaId.trim(),
+        templateLanguage: cloudForm.templateLanguage.trim() || 'en',
+        defaultCampaignName: cloudForm.defaultCampaignName.trim(),
       }
+      if (cloudForm.metaAccessToken.trim())
+        payload.metaAccessToken = cloudForm.metaAccessToken.trim()
       return api.patch(`/whatsapp/accounts/${selectedAccount.id}/cloud-credentials`, payload)
     },
     onSuccess: () => {
@@ -121,8 +105,6 @@ export function useWhatsAppAccounts(timezoneOffset: number) {
       setCloudForm((prev) => ({
         ...prev,
         metaAccessToken: '',
-        aisensyApiKey: '',
-        aisensyCampaignApiKey: '',
       }))
       toast.success('WhatsApp connection saved')
     },

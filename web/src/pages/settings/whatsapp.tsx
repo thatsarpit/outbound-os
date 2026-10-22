@@ -51,9 +51,7 @@ export default function WhatsAppSettingsPage() {
 
   const totalAccounts = accounts.length
   const enabledAccounts = accounts.filter((a) => a.enabled).length
-  const cloudAccounts = accounts.filter(
-    (a) => a.metaConfigured || a.projectApiConfigured || a.campaignApiConfigured,
-  ).length
+  const cloudAccounts = accounts.filter((a) => a.metaConfigured).length
 
   return (
     <div className="space-y-6">
@@ -73,6 +71,16 @@ export default function WhatsAppSettingsPage() {
           onSelect={setSelectedAccountId}
         />
       </SettingsPanel>
+
+      {selectedAccount && (
+        <WhatsAppConnectionPanel
+          account={selectedAccount}
+          form={cloudForm}
+          setForm={setCloudForm}
+          saveMutation={cloudMutation}
+          testMutation={testConnectionMutation}
+        />
+      )}
 
       <WhatsAppPricingPanel />
 
@@ -147,11 +155,7 @@ export default function WhatsAppSettingsPage() {
                 label="Connected Phone"
                 value={selectedAccount.phone || 'Pending'}
               />
-              <StatCard
-                icon={CheckCircle2}
-                label="Provider"
-                value={selectedAccount.provider === 'aisensy' ? 'AiSensy' : 'Meta Cloud API'}
-              />
+              <StatCard icon={CheckCircle2} label="Provider" value={'Meta Cloud API'} />
               <StatCard icon={Clock} label="Status" value={selectedAccount.status || 'Unknown'} />
               <StatCard
                 icon={Power}
@@ -278,16 +282,6 @@ export default function WhatsAppSettingsPage() {
                 </p>
               </div>
             </SettingsPanel>
-          </div>
-
-          <div>
-            <WhatsAppConnectionPanel
-              account={selectedAccount}
-              form={cloudForm}
-              setForm={setCloudForm}
-              saveMutation={cloudMutation}
-              testMutation={testConnectionMutation}
-            />
           </div>
         </>
       )}

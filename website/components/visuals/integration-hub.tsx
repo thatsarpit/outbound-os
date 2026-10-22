@@ -20,7 +20,6 @@ const SOURCES: Node[] = [
 
 const CHANNELS: Node[] = [
   { brand: 'whatsapp', href: '/integrations/whatsapp-cloud-api', label: 'WhatsApp Cloud API' },
-  { brand: 'aisensy', href: '/integrations/aisensy' },
   { brand: 'email', href: '/integrations/email', label: 'Email (SMTP/IMAP)' },
   { brand: 'brevo', href: '/integrations/brevo' },
   { brand: 'telegram', href: '/integrations/telegram' },

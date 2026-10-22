@@ -134,8 +134,8 @@ export function SiteHeader() {
             <GitHubMark />
             GitHub
           </a>
-          <Link className="btn btn--primary btn--sm" href="/docs/install">
-            Get started
+          <Link className="btn btn--primary btn--sm" href="/managed-hosting">
+            Get setup help
           </Link>
         </div>
 
@@ -189,8 +189,8 @@ export function SiteHeader() {
                 <GitHubMark />
                 GitHub
               </a>
-              <Link className="btn btn--primary" href="/docs/install">
-                Get started
+              <Link className="btn btn--primary" href="/managed-hosting">
+                Get setup help
               </Link>
             </div>
           </div>

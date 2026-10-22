@@ -50,8 +50,8 @@ const SHOTS = [
     label: 'WhatsApp',
     Icon: MessageCircle,
     path: 'whatsapp-settings',
-    caption: 'Meta’s Cloud API or AiSensy, chosen per number.',
-    alt: 'Outbound OS WhatsApp settings with Meta Cloud API and AiSensy provider options',
+    caption: 'Connect directly to Meta. Manage your number, approved templates and sending limits.',
+    alt: 'Outbound OS direct Meta Cloud API connection and approved template settings',
   },
 ] as const
 
@@ -70,7 +70,9 @@ export function ProductTour() {
   useEffect(() => {
     const el = root.current
     if (!el) return
-    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { threshold: 0.35 })
+    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), {
+      threshold: 0.35,
+    })
     observer.observe(el)
     return () => observer.disconnect()
   }, [])
@@ -85,11 +87,19 @@ export function ProductTour() {
   const onKey = (event: KeyboardEvent<HTMLButtonElement>) => {
     const last = SHOTS.length - 1
     const next =
-      event.key === 'ArrowRight' ? (active === last ? 0 : active + 1)
-      : event.key === 'ArrowLeft' ? (active === 0 ? last : active - 1)
-      : event.key === 'Home' ? 0
-      : event.key === 'End' ? last
-      : null
+      event.key === 'ArrowRight'
+        ? active === last
+          ? 0
+          : active + 1
+        : event.key === 'ArrowLeft'
+          ? active === 0
+            ? last
+            : active - 1
+          : event.key === 'Home'
+            ? 0
+            : event.key === 'End'
+              ? last
+              : null
     if (next === null) return
     event.preventDefault()
     setAuto(false)
@@ -124,43 +134,47 @@ export function ProductTour() {
           >
             <shot.Icon size={15} aria-hidden="true" />
             {shot.label}
-            {index === active && auto && <span className="tour__progress" key={active} aria-hidden="true" />}
+            {index === active && auto && (
+              <span className="tour__progress" key={active} aria-hidden="true" />
+            )}
           </button>
         ))}
       </div>
 
       <div className="tour__stage">
-      <div className="tour__frame">
-        <div className="tour__chrome" aria-hidden="true">
-          <span className="ui__dots">
-            <i />
-            <i />
-            <i />
-          </span>
-          <span className="tour__url">your-server.com/{SHOTS[active].id === 'overview' ? '' : SHOTS[active].id}</span>
-        </div>
-        {SHOTS.map((shot, index) => (
-          <div
-            key={shot.id}
-            id={`${base}-panel-${index}`}
-            role="tabpanel"
-            aria-labelledby={`${base}-tab-${index}`}
-            hidden={index !== active}
-            className="tour__panel"
-          >
-            <img
-              src={`/screenshots/${shot.path}.webp?v=${site.screenshotVersion}`}
-              srcSet={`/screenshots/${shot.path}-800.webp?v=${site.screenshotVersion} 800w, /screenshots/${shot.path}.webp?v=${site.screenshotVersion} 1600w`}
-              sizes="(min-width: 1200px) 1130px, 100vw"
-              alt={shot.alt}
-              width={1600}
-              height={1000}
-              loading="lazy"
-              decoding="async"
-            />
+        <div className="tour__frame">
+          <div className="tour__chrome" aria-hidden="true">
+            <span className="ui__dots">
+              <i />
+              <i />
+              <i />
+            </span>
+            <span className="tour__url">
+              your-server.com/{SHOTS[active].id === 'overview' ? '' : SHOTS[active].id}
+            </span>
           </div>
-        ))}
-      </div>
+          {SHOTS.map((shot, index) => (
+            <div
+              key={shot.id}
+              id={`${base}-panel-${index}`}
+              role="tabpanel"
+              aria-labelledby={`${base}-tab-${index}`}
+              hidden={index !== active}
+              className="tour__panel"
+            >
+              <img
+                src={`/screenshots/${shot.path}.webp?v=${site.screenshotVersion}`}
+                srcSet={`/screenshots/${shot.path}-800.webp?v=${site.screenshotVersion} 800w, /screenshots/${shot.path}.webp?v=${site.screenshotVersion} 1600w`}
+                sizes="(min-width: 1200px) 1130px, 100vw"
+                alt={shot.alt}
+                width={1600}
+                height={1000}
+                loading={index === active ? 'eager' : 'lazy'}
+                decoding="async"
+              />
+            </div>
+          ))}
+        </div>
       </div>
       <p className="tour__caption" aria-live="polite">
         {SHOTS[active].caption} <span>Sample data.</span>

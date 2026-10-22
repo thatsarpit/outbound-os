@@ -15,59 +15,22 @@ function parsePositiveInt(value) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
-// ── AiSensy webhook ─────────────────────────────────────────────────────────
-// AiSensy POSTs notifications here for the topics subscribed in their dashboard.
-// Envelope: { id, created_at, topic, delivery_attempt, project_id, data }
-// Headers:  X-AiSensy-Signature, X-AiSensy-API-Version, X-AiSensy-Project-Id
-// Docs:     https://aisensy.stoplight.io/docs/project-api/
-
-// AiSensy retries until it gets a 2xx, so the same notification id can arrive
-// several times. Remember recent ids to keep replies from double-processing —
-// a duplicate inbound would re-trigger reply classification and can cause a
-// duplicate outbound send.
-const AISENSY_SEEN_MAX = 2000;
-const aisensySeenNotifications = new Map(); // notification id → expiry ms
-
-function aisensyAlreadyHandled(notificationId) {
+// Meta retries notifications; keep a short-lived message ID cache in addition
+// to durable message deduplication in replyDetector.
+const META_SEEN_MAX = 2000;
+const metaSeenNotifications = new Map();
+function metaAlreadyHandled(notificationId) {
   if (!notificationId) return false;
   const now = Date.now();
-  for (const [id, expiry] of aisensySeenNotifications) {
-    if (expiry <= now) aisensySeenNotifications.delete(id);
-  }
-  if (aisensySeenNotifications.has(notificationId)) return true;
-  if (aisensySeenNotifications.size >= AISENSY_SEEN_MAX) {
-    aisensySeenNotifications.delete(aisensySeenNotifications.keys().next().value);
-  }
-  aisensySeenNotifications.set(notificationId, now + 6 * 60 * 60 * 1000);
+  for (const [id, expiry] of metaSeenNotifications) if (expiry <= now) metaSeenNotifications.delete(id);
+  if (metaSeenNotifications.has(notificationId)) return true;
+  if (metaSeenNotifications.size >= META_SEEN_MAX) metaSeenNotifications.delete(metaSeenNotifications.keys().next().value);
+  metaSeenNotifications.set(notificationId, now + 6 * 60 * 60 * 1000);
   return false;
 }
 
-/**
- * Authenticate an AiSensy webhook delivery. Accepted when either:
- *   - X-AiSensy-Signature is HMAC-SHA256 (hex) of the raw body with
- *     AISENSY_WEBHOOK_SECRET, or
- *   - the webhook URL carries ?token=<AISENSY_WEBHOOK_SECRET>, for accounts
- *     where AiSensy does not sign deliveries (set the URL in their dashboard
- *     as https://<host>/webhook/whatsapp-cloud?token=<secret>).
- *
- * With no secret configured every delivery is rejected. An open endpoint here
- * would let anyone who learns the URL inject fake replies, which stop
- * follow-ups and can mark leads as interested.
- */
-function aisensySignatureValid(req) {
-  const secret = process.env.AISENSY_WEBHOOK_SECRET;
-  if (!secret) return false;
-
-  const provided = String(req.get('X-AiSensy-Signature') || '').replace(/^sha256=/, '');
-  if (provided && req.rawBody) {
-    const expected = crypto.createHmac('sha256', secret).update(req.rawBody).digest('hex');
-    if (secretsEqual(provided, expected)) return true;
-  }
-  return secretsEqual(req.query.token, secret);
-}
-
-/** Map an AiSensy message status onto our Message.ackStatus scale. */
-function aisensyAckStatus(status) {
+/** Map a Meta message status onto our Message.ackStatus scale. */
+function metaAckStatus(status) {
   switch (String(status || '').toLowerCase()) {
     case 'sent': return 1;
     case 'delivered': return 2;
@@ -82,7 +45,7 @@ function aisensyAckStatus(status) {
  */
 async function applyWhatsAppDeliveryStatus({ provider, waMessageId, status: rawStatus, phone: rawPhone, failureCode, failureReason, pricing }) {
   const status = String(rawStatus || '').toLowerCase();
-  const ack = aisensyAckStatus(status);
+  const ack = metaAckStatus(status);
   const failed = status === 'failed';
 
   // Only ever move status forward — a late 'sent' must not downgrade a
@@ -110,16 +73,8 @@ async function applyWhatsAppDeliveryStatus({ provider, waMessageId, status: rawS
     });
   }
 
-  // Fall back to matching on the recipient's number.
-  //
-  // AiSensy's Campaign API returns HTTP 200 with no provider id, so every
-  // message sent through a campaign stores waMessageId as null and can never
-  // be matched by id. Without this fallback every such delivery receipt is
-  // discarded and the system cannot tell whether a message ever arrived.
-  //
-  // Matching the most recent un-acked outbound message to that number is
-  // safe in practice: outreach sends one message per lead, and the seven
-  // day window stops a receipt attaching to an unrelated older send.
+  // Older imported rows and manual sends may lack a provider ID. Match the
+  // recent unacknowledged recipient row, then retain the ID for later receipts.
   if (updated.count === 0) {
     const phone = String(rawPhone || '').replace(/\D/g, '');
     if (phone) {
@@ -158,91 +113,6 @@ async function applyWhatsAppDeliveryStatus({ provider, waMessageId, status: rawS
     logger.info(`${provider} status '${status}' for ${waMessageId || 'no-id'} — no matching row`);
   }
 }
-
-// Reachability check — AiSensy configures webhooks in their dashboard rather
-// than through a hub.challenge handshake, so there is nothing to echo back.
-router.get('/webhook/whatsapp-cloud', (_req, res) => res.status(200).send('ok'));
-
-router.post('/webhook/whatsapp-cloud', async (req, res) => {
-  if (!aisensySignatureValid(req)) {
-    logger.warn(process.env.AISENSY_WEBHOOK_SECRET
-      ? 'AiSensy webhook rejected — bad signature or token'
-      : 'AiSensy webhook rejected — set AISENSY_WEBHOOK_SECRET to accept AiSensy webhooks');
-    return res.sendStatus(401);
-  }
-  // Ack before doing any work; AiSensy retries anything that is not 2xx.
-  res.sendStatus(200);
-
-  try {
-    const { id: notificationId, topic, data, project_id: projectId, delivery_attempt: attempt } = req.body || {};
-    if (!topic) return;
-
-    if (aisensyAlreadyHandled(notificationId)) {
-      logger.info(`AiSensy webhook ${topic} ${notificationId} already handled (attempt ${attempt}) — skipping`);
-      return;
-    }
-
-    const account = projectId
-      ? await prisma.whatsAppAccount.findFirst({ where: { aisensyProjectId: String(projectId) } })
-      : null;
-    const accountId = account?.id || 0;
-    const message = data?.message;
-
-    switch (topic) {
-      // ── Inbound message from a lead ──
-      case 'message.sender.user': {
-        const from = message?.phone_number;
-        if (!from) return;
-
-        // message_content shape varies by message_type; cover the common ones
-        // and fall back to a placeholder so a media-only reply still registers
-        // as a reply rather than vanishing.
-        const content = message.message_content || {};
-        const type = String(message.message_type || '').toLowerCase();
-        const text =
-          content.text?.body ||
-          content.body ||
-          content.caption ||
-          (typeof content === 'string' ? content : '') ||
-          (type && type !== 'text' ? `[${type.toLowerCase()}]` : '');
-
-        if (!text) {
-          logger.info(`AiSensy inbound from *${String(from).slice(-4)} had no readable content (type=${type})`);
-          return;
-        }
-
-        logger.info(`📥 AiSensy inbound from *${String(from).slice(-4)} (type=${type || 'text'})`);
-        await replyDetector.handleReply(String(from), text, accountId, {
-          source: 'aisensy',
-          messageId: message.messageId || message.id,
-          timestamp: message.sent_at,
-          messageType: type,
-        });
-        return;
-      }
-
-      // ── Delivery status for something we sent ──
-      case 'message.status.updated': {
-        await applyWhatsAppDeliveryStatus({
-          provider: 'AiSensy',
-          waMessageId: message?.messageId || message?.id,
-          status: message?.status,
-          phone: message?.phone_number || message?.phoneNumber,
-          failureCode: message?.failureResponse?.code,
-          failureReason: message?.failureResponse?.reason,
-        });
-        return;
-      }
-
-      default:
-        // Subscribed-but-unhandled topics are expected; the webhook API is in
-        // beta and new topics get added. Log rather than throw.
-        logger.info(`AiSensy webhook topic '${topic}' received (not handled)`);
-    }
-  } catch (err) {
-    logger.error(`AiSensy webhook error: ${err.message}`);
-  }
-});
 
 // ======================== META WHATSAPP WEBHOOK ========================
 // Meta's Cloud API delivers inbound messages and delivery receipts here.
@@ -332,7 +202,7 @@ router.post('/webhook/meta', async (req, res) => {
         }
 
         for (const msg of value.messages || []) {
-          if (aisensyAlreadyHandled(`meta:${msg?.id}`)) continue;
+          if (metaAlreadyHandled(`meta:${msg?.id}`)) continue;
           const contact = (msg?.from_user_id && contactsByUserId.get(String(msg.from_user_id)))
             || (msg?.from && contactsByPhone.get(String(msg.from)))
             || (value.contacts?.length === 1 ? value.contacts[0] : null);

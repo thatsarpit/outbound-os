@@ -45,14 +45,11 @@ export const whatsappApi = {
   updateCloudCredentials: (
     id: number,
     data: {
-      provider?: 'meta' | 'aisensy'
+      provider?: 'meta'
       metaPhoneNumberId?: string
       metaAccessToken?: string
       metaWabaId?: string
       templateLanguage?: string
-      aisensyProjectId?: string
-      aisensyApiKey?: string
-      aisensyCampaignApiKey?: string
       defaultCampaignName?: string
     },
   ) => api.patch(`/whatsapp/accounts/${id}/cloud-credentials`, data),

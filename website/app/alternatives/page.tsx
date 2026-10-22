@@ -4,8 +4,8 @@ import { buildMetadata } from '@/lib/metadata'
 import { alternatives } from '@/lib/alternatives'
 
 export const metadata = buildMetadata(
-  'Alternatives — Wati, AiSensy, Interakt, Formspree compared',
-  'How Outbound OS, an open-source self-hosted WhatsApp CRM, compares with Wati, AiSensy, Interakt and Formspree — fairly, including when they are the better choice.',
+  'Alternatives — Wati and Interakt, Formspree compared',
+  'How Outbound OS, an open-source self-hosted WhatsApp CRM, compares with Wati and Interakt and Formspree — fairly, including when they are the better choice.',
   '/alternatives',
 )
 
@@ -18,10 +18,9 @@ export default function AlternativesIndex() {
           <p className="eyebrow">Comparisons</p>
           <h1>How Outbound OS compares, stated fairly.</h1>
           <p className="lede">
-            Most WhatsApp platforms are hosted services you rent. Outbound OS
-            is open-source software you run. That one difference decides most
-            of the rest — and each page below says plainly when the other
-            product is the better fit.
+            Most WhatsApp platforms are hosted services you rent. Outbound OS is open-source
+            software you run. That one difference decides most of the rest — and each page below
+            says plainly when the other product is the better fit.
           </p>
         </div>
       </section>
