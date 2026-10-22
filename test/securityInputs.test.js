@@ -16,10 +16,14 @@ test('cookie mutations require a trusted origin while bearer clients remain supp
     { origin: 'https://app.example.test', expected: 200 },
     { origin: 'https://api.example.test', expected: 200 },
     { authorization: 'Bearer fixture', origin: 'https://client.example.test', expected: 200 },
+    { path: '/webhooks/subscriptions/123/test', origin: 'https://evil.example.test', expected: 403 },
+    { path: '/webhooks/sources/from-preset', origin: 'https://evil.example.test', expected: 403 },
+    { path: '/webhooks/inbound/fixture', origin: 'https://forms.example.test', expected: 200 },
+    { method: 'DELETE', path: '/webhooks/inbound/fixture', origin: 'https://evil.example.test', expected: 403 },
   ]) {
     let status = 200;
     const headers = { cookie: '__session=fixture', ...fixture };
-    const req = { method: 'POST', path: '/settings', headers, protocol: 'https',
+    const req = { method: fixture.method || 'POST', path: fixture.path || '/settings', headers, protocol: 'https',
       get: key => key === 'host' ? 'api.example.test' : headers[key] };
     const res = { status: code => { status = code; return res; }, json: () => {} };
     guard(req, res, () => {});

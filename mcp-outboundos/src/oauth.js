@@ -17,6 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import log from './logger.js';
 import { requestOrigin } from './requestOrigin.js';
+import { ClientRegistry } from './clientRegistry.js';
 
 const CODE_TTL_MS = 10 * 60 * 1000;            // authorization codes: 10 min
 const ACCESS_TTL_MS = 30 * 24 * 60 * 60 * 1000; // access tokens: 30 days
@@ -25,7 +26,7 @@ const STORE_PATH = process.env.OAUTH_STORE_PATH || path.join(process.cwd(), 'oau
 const OAUTH_PASSWORD = process.env.OAUTH_PASSWORD || process.env.MCP_BEARER_TOKEN;
 
 // ── In-memory state ──
-const clients = new Map();  // client_id -> { redirect_uris, client_name }
+const clients = new ClientRegistry();
 const codes = new Map();    // code -> { client_id, redirect_uri, code_challenge, expires }
 
 // ── Token store (file-backed so tokens survive restarts) ──
@@ -195,7 +196,6 @@ export function mountOAuth(app) {
         error_description: 'redirect_uris must be https, or http on localhost',
       });
     }
-    if (clients.size >= 1000) return res.status(429).json({ error: 'registration_limit_exceeded' });
     clients.set(clientId, {
       redirect_uris: redirectUris,
       client_name: typeof req.body?.client_name === 'string' ? req.body.client_name.slice(0, 120) : 'MCP Client',

@@ -1166,6 +1166,13 @@ describe('Lead webhook from a plain HTML form', () => {
 // ── Workspace profile and onboarding ─────────────────────────────────────────
 
 describe('Workspace profile and onboarding', () => {
+  test('untrusted cookie requests cannot trigger administrative webhook actions', async () => {
+    const res = await request('POST', '/api/webhooks/subscriptions/123/test', {
+      headers: { Cookie: '__session=fixture', Origin: 'https://untrusted.example.test' },
+    });
+    assert.equal(res.status, 403);
+    assert.match(res.body.error, /trusted origin/);
+  });
   test('a new workspace reports what is left to set up', async () => {
     const res = await request('GET', '/api/onboarding/status', { headers: authHeader() });
     assert.equal(res.status, 200);
