@@ -125,11 +125,6 @@ export const navGroups = [
         heading: 'Where leads come from',
         links: [
           {
-            label: 'IndiaMART automation',
-            href: '/integrations/indiamart',
-            description: 'Reply to every IndiaMART enquiry in seconds.',
-          },
-          {
             label: 'Facebook Lead Ads',
             href: '/integrations/facebook-lead-ads',
             description: 'Contact ad leads before they forget you.',
@@ -203,7 +198,6 @@ export const footerNav = [
       { label: 'WhatsApp CRM', href: '/whatsapp-crm' },
       { label: 'Self-hosted CRM', href: '/self-hosted-crm' },
       { label: 'Form backend', href: '/form-backend' },
-      { label: 'IndiaMART automation', href: '/integrations/indiamart' },
       { label: 'Use cases', href: '/use-cases' },
     ],
   },

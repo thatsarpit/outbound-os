@@ -67,7 +67,7 @@ export default function CapabilitiesPage() {
             <article>
               <h3>Connected intake</h3>
               <p>
-                Website forms, Facebook Lead Ads, IndiaMART, TradeIndia, JustDial, Zapier and any
+                Website forms, Facebook Lead Ads, marketplace, TradeIndia, JustDial, Zapier and any
                 other webhook, plus the conversations arriving on WhatsApp or email. Duplicates
                 merge into the existing lead.
               </p>

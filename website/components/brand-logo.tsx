@@ -17,7 +17,7 @@ import { BrandMark } from './brand-mark'
  * Full-colour marks come from Gil Barbara's "logos" set (CC0). Brands that set
  * does not carry use their official glyph from Simple Icons (CC0) in their own
  * colour — Google Sheets, Make, Brevo, Webflow — or, for iMessage, the app
- * icon's own green square. IndiaMART and TradeIndia use the site
+ * icon's own green square. TradeIndia uses the site
  * icons they publish themselves (public/logos/). A brand with no square mark
  * of its own gets a lettered tile, never a hand-drawn imitation. Generic
  * ideas (email, webhooks, CSV) get an icon. Trademarks belong to their owners
@@ -77,7 +77,6 @@ export const brands = {
   brevo: glyph(siBrevo),
   webflow: glyph(siWebflow),
   imessage: { kind: 'app', title: 'iMessage', hex: '#34DA50', path: siImessage.path },
-  indiamart: { kind: 'image', title: 'IndiaMART', src: '/logos/indiamart.png' },
   tradeindia: { kind: 'image', title: 'TradeIndia', src: '/logos/tradeindia.png' },
   justdial: { kind: 'mono', title: 'JustDial', hex: '#c2410c', letters: 'JD' },
   engyne: { kind: 'mono', title: 'Engyne Cloud', hex: '#4338ca', letters: 'En' },
@@ -97,7 +96,6 @@ export const integrationBrand: Record<string, BrandName> = {
   brevo: 'brevo',
   telegram: 'telegram',
   imessage: 'imessage',
-  indiamart: 'indiamart',
   'facebook-lead-ads': 'facebook',
   zapier: 'zapier',
   'engyne-cloud': 'engyne',

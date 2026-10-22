@@ -313,7 +313,7 @@ describe("Overview reporting provenance", () => {
       data: {
         name: "Current source lead",
         mobile: "919999991002",
-        source: "indiamart",
+        source: "marketplace",
         consumedAt: new Date(),
       },
     });
@@ -2646,5 +2646,71 @@ describe('Website service enquiries', () => {
   test('limits public submissions', async () => {
     for (let i = 0; i < 5; i++) assert.equal((await request('POST', endpoint, { headers: headers('192.0.2.132'), body: { ...body, companyWebsite: 'bot.test' } })).status, 200);
     assert.equal((await request('POST', endpoint, { headers: headers('192.0.2.132'), body })).status, 429);
+  });
+});
+
+describe('Generic connector intake and supplier attribution', () => {
+  let db, source, supplier, otherSupplier;
+  const created = [];
+  const endpoint = '/api/webhooks/connector/fixture-connector';
+  const headers = { 'x-api-key': 'fixture-connector-key', 'X-Forwarded-For': '192.0.2.170' };
+  const record = (externalId, extra = {}) => ({ externalId, name: 'Connector fixture', mobile: '+1 (555) 000-0171', email: 'connector@example.test', acquiredAt: '2026-01-02T12:00:00Z', ...extra });
+  before(async () => {
+    db = (await import('../src/utils/prismaClient.js')).default;
+    supplier = await db.supplier.create({ data: { name: 'Fixture origin partner', matchTag: 'fixture-partner' } });
+    otherSupplier = await db.supplier.create({ data: { name: 'Fixture other partner', matchTag: 'other-partner' } });
+    source = await db.webhookSource.create({ data: { name: 'Fixture connector', source: 'fixture-connector', apiKey: 'fixture-connector-key', importSupplierId: supplier.id, importTags: 'fixture-import' } });
+  });
+  after(async () => {
+    await db.connectorReceipt.deleteMany({ where: { sourceId: source.id } });
+    await db.salesOrder.deleteMany({ where: { originSupplierId: supplier.id } });
+    await db.lead.deleteMany({ where: { OR: [{ source: source.source }, { id: { in: created } }] } });
+    await db.webhookSource.delete({ where: { id: source.id } });
+    await db.supplier.deleteMany({ where: { id: { in: [supplier.id, otherSupplier.id] } } });
+  });
+  test('requires the source key and validates the whole batch before writes', async () => {
+    assert.equal((await request('POST', endpoint, { headers: { ...headers, 'x-api-key': 'wrong' }, body: { records: [record('bad-key')] } })).status, 401);
+    assert.equal((await request('POST', endpoint, { headers, body: { records: [record('valid-before-invalid'), { name: 'Missing ID' }] } })).status, 422);
+    assert.equal(await db.connectorReceipt.count({ where: { sourceId: source.id } }), 0);
+  });
+  test('persists a paused historical contact, source receipt and replay without outreach', async () => {
+    const first = await request('POST', endpoint, { headers, body: { records: [record('fixture-1')] } });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.outreachQueued, false);
+    assert.equal(first.body.results[0].state, 'created');
+    const id = first.body.results[0].leadId;
+    const lead = await db.lead.findUnique({ where: { id } });
+    assert.equal(lead.mobile, '15550000171'); assert.equal(lead.status, 'paused');
+    assert.equal(lead.emailMarketingConsent, false); assert.equal(lead.originSupplierId, supplier.id);
+    assert.match(lead.tags, /fixture-partner/); assert.equal(lead.consumedAt.toISOString(), '2026-01-02T12:00:00.000Z');
+    assert.equal(await db.message.count({ where: { leadId: id } }), 0);
+    const replay = await request('POST', endpoint, { headers, body: { records: [record('fixture-1')] } });
+    assert.equal(replay.body.results[0].replay, true); assert.equal(replay.body.results[0].leadId, id);
+    assert.equal(await db.connectorReceipt.count({ where: { sourceId: source.id } }), 1);
+  });
+  test('matches formatted phones and case-insensitive emails while preserving status and consent', async () => {
+    const lead = await db.lead.create({ data: { name: 'Existing', mobile: '+44-7700-900171', email: 'EXISTING@example.test', status: 'replied', emailMarketingConsent: true, emailOptOut: true } }); created.push(lead.id);
+    const response = await request('POST', endpoint, { headers, body: { records: [record('fixture-2', { mobile: '0044 7700 900171', email: 'existing@example.test', company: 'Filled company' })] } });
+    assert.equal(response.body.results[0].state, 'matched'); assert.equal(response.body.results[0].leadId, lead.id);
+    const saved = await db.lead.findUnique({ where: { id: lead.id } });
+    assert.equal(saved.status, 'replied'); assert.equal(saved.emailMarketingConsent, true); assert.equal(saved.emailOptOut, true); assert.equal(saved.company, 'Filled company');
+  });
+  test('holds different owners and split identities for review without changing contacts', async () => {
+    const owner = await db.lead.create({ data: { name: 'Other owner', mobile: '15550000173', tags: 'other-partner', originSupplierId: otherSupplier.id } }); created.push(owner.id);
+    const second = await db.lead.create({ data: { name: 'Split identity', mobile: '15550000174', email: 'split@example.test' } }); created.push(second.id);
+    const response = await request('POST', endpoint, { headers, body: { records: [record('owner-conflict', { mobile: '+1 555 000 0173', email: '' }), record('identity-conflict', { mobile: '+1 555 000 0171', email: 'split@example.test' })] } });
+    assert.deepEqual(response.body.results.map((r) => r.state), ['conflict', 'conflict']);
+    assert.equal((await db.lead.findUnique({ where: { id: owner.id } })).tags, 'other-partner');
+    assert.equal(await db.connectorReceipt.count({ where: { sourceId: source.id, state: 'conflict' } }), 2);
+  });
+  test('snapshots lead origin onto a new order independently of fulfilment supplier', async () => {
+    const lead = await db.lead.findFirst({ where: { source: source.source } });
+    const result = await request('POST', '/api/orders', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.175' }, body: { customerName: 'Fixture customer', leadId: lead.id, supplierId: otherSupplier.id, items: [] } });
+    assert.equal(result.status, 201);
+    assert.equal(result.body.originSupplierId, supplier.id); assert.equal(result.body.supplierId, otherSupplier.id);
+    await db.lead.update({ where: { id: lead.id }, data: { tags: 'changed-later' } });
+    assert.equal((await db.salesOrder.findUnique({ where: { id: result.body.id } })).originSupplierId, supplier.id);
+    const list = await request('GET', `/api/orders?originSupplierId=${supplier.id}`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.175' } });
+    assert.ok(list.body.data.some((order) => order.id === result.body.id));
   });
 });

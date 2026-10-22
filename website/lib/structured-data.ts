@@ -60,7 +60,7 @@ export function softwareLd(): Json {
       'Direct Meta WhatsApp Cloud API',
       'Email over SMTP/IMAP and Brevo',
       'Telegram and iMessage',
-      'Lead webhooks for website forms, Facebook Lead Ads, IndiaMART, Zapier',
+      'Lead webhooks for website forms, Facebook Lead Ads, marketplace, Zapier',
       'Follow-up sequences that stop on reply',
       'Campaigns with approved WhatsApp templates',
       'Pipeline, orders and reporting',

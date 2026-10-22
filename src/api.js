@@ -1,4 +1,6 @@
 import websiteEnquiries from './routes/websiteEnquiries.js';
+import connectorIntake from './routes/connectorIntake.js';
+import connectorAdmin from './routes/connectorAdmin.js';
 import { withDefaultCountryCode } from './utils/phoneDefaults.js';
 import express from 'express';
 import cors from 'cors';
@@ -548,6 +550,7 @@ app.use('/api/config/env', bulkLimiter);
 
 // Public website intake has its own opt-in origin and rate-limit boundary.
 app.use('/api/public/request-access', websiteEnquiries);
+app.use('/api/webhooks/connector', connectorIntake);
 
 // Browsers only need CORS when the dashboard is served from a different origin
 // than this API (for example a CDN in front of a separate API host). The
@@ -874,6 +877,7 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
 app.use(providerWebhookRoutes);
 
 app.use('/api', requireRole('viewer'));
+app.use('/api', connectorAdmin);
 app.use('/api/whatsapp', whatsappTemplateRoutes);
 app.use('/api', dashboardPreferenceRoutes);
 app.use('/api', leadFollowupRoutes);
@@ -1595,7 +1599,7 @@ app.get('/api/leads', async (req, res) => {
       status, search, page = 1, limit = 25,
       sortBy = 'createdAt', sortOrder = 'desc',
       minScore, maxScore, source, tags, engagement,
-      dateFrom, dateTo, assignedToId, poolId,
+      dateFrom, dateTo, assignedToId, poolId, originSupplierId,
     } = req.query;
 
     // Build the where clause with AND composition so search and statusFilter can coexist
@@ -1624,6 +1628,11 @@ app.get('/api/leads', async (req, res) => {
       }
     }
     if (source) andClauses.push({ source });
+    if (originSupplierId) {
+      const supplierId = Number(originSupplierId);
+      if (!Number.isSafeInteger(supplierId) || supplierId < 1) return res.status(400).json({ error: 'Invalid supplier.' });
+      andClauses.push({ originSupplierId: supplierId });
+    }
     if (engagement) andClauses.push({ engagementLevel: engagement });
     if (assignedToId === 'unassigned') andClauses.push({ assignedToId: null });
     else if (assignedToId) andClauses.push({ assignedToId: parseInt(assignedToId) });
@@ -1666,6 +1675,7 @@ app.get('/api/leads', async (req, res) => {
         skip,
         take: parseInt(limit),
         include: {
+          originSupplier: { select: { id: true, name: true } },
           messages: {
             orderBy: { createdAt: 'desc' },
             take: 1,
@@ -5494,22 +5504,6 @@ app.get('/api/webhooks/sources/presets', requireRole('admin'), (req, res) => {
       notes: 'TradeIndia sends JSON POST. Configure webhook URL in TradeIndia Seller Dashboard.',
     },
     {
-      id: 'indiamart',
-      name: 'IndiaMART (Webhook)',
-      description: 'IndiaMART Lead Manager pushes each new enquiry to this URL',
-      // IndiaMART's Push API wraps the lead: {CODE, STATUS, RESPONSE: {...}}.
-      fieldMap: {
-        name: 'RESPONSE.SENDER_NAME',
-        mobile: 'RESPONSE.SENDER_MOBILE',
-        email: 'RESPONSE.SENDER_EMAIL',
-        company: 'RESPONSE.SENDER_COMPANY',
-        product: 'RESPONSE.QUERY_PRODUCT_NAME',
-        country: 'RESPONSE.SENDER_COUNTRY_ISO',
-      },
-      responseFormat: 'json',
-      notes: 'IndiaMART seller panel → Lead Manager → Import/Export Leads → Push API → Other. IndiaMART sends no auth header, so paste the webhook URL with ?apiKey=<key> on the end.',
-    },
-    {
       id: 'facebook',
       name: 'Facebook Lead Ads',
       description: 'Facebook Lead Ads via Zapier/Make webhook bridge',
@@ -5553,7 +5547,6 @@ app.post('/api/webhooks/sources/from-preset', requireRole('admin'), async (req, 
       ...Object.fromEntries(FORM_SOURCE_PRESETS.map((preset) => [preset.id, preset])),
       justdial:   { name: 'JustDial', fieldMap: { name:'sender_name', mobile:'sender_mobile', email:'sender_email', company:'company_name', product:'cat', country:'sender_country' } },
       tradeindia: { name: 'TradeIndia', fieldMap: { name:'Name', mobile:'Mobile', email:'Email', company:'CompanyName', product:'Subject', country:'Country', quantity:'Quantity' } },
-      indiamart:  { name: 'IndiaMART (Webhook)', fieldMap: { name:'RESPONSE.SENDER_NAME', mobile:'RESPONSE.SENDER_MOBILE', email:'RESPONSE.SENDER_EMAIL', company:'RESPONSE.SENDER_COMPANY', product:'RESPONSE.QUERY_PRODUCT_NAME', country:'RESPONSE.SENDER_COUNTRY_ISO' } },
       facebook:   { name: 'Facebook Lead Ads', fieldMap: { name:'full_name', mobile:'phone_number', email:'email', company:'company_name', product:'what_product', country:'country' } },
       website:    { name: 'Website Form', fieldMap: { name:'name', mobile:'phone', email:'email', company:'company', product:'message', country:'country' } },
       // Engyne Cloud posts an envelope, not a flat body: the buyer sits under

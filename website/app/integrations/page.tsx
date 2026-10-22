@@ -8,8 +8,8 @@ import { siteUrl } from '@/lib/site-content'
 import { graph } from '@/lib/structured-data'
 
 export const metadata = buildMetadata(
-  'Integrations — WhatsApp, email, IndiaMART, Facebook Lead Ads',
-  'Every Outbound OS integration: WhatsApp Cloud API, email, Telegram, iMessage, IndiaMART, Facebook Lead Ads, Zapier, Google Sheets and signed webhooks.',
+  'Integrations — WhatsApp, email, marketplace, Facebook Lead Ads',
+  'Every Outbound OS integration: WhatsApp Cloud API, email, Telegram, iMessage, marketplace, Facebook Lead Ads, Zapier, Google Sheets and signed webhooks.',
   '/integrations',
 )
 

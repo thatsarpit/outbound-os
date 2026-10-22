@@ -111,7 +111,7 @@ export function Bento() {
             </div>
           ))}
           <div className="b-kanban__card">
-            <LogoTile brand="indiamart" size={16} />
+            <LogoTile brand="webhooks" size={16} />
             Daniel O.
           </div>
         </div>

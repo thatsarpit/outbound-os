@@ -30,7 +30,7 @@ const SOURCES = [
   'WhatsApp',
   'Email',
   'Website form',
-  'IndiaMART',
+  'marketplace',
   'Other marketplaces',
   'Referrals / manual',
   'Other',

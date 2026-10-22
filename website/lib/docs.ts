@@ -45,7 +45,7 @@ export const docs: Doc[] = [
     label: 'Website forms and webhooks',
     title: 'Website forms and lead webhooks',
     description:
-      'Send leads to Outbound OS from HTML forms, Zapier, Make, n8n, IndiaMART or your own code: addresses, keys, field names, field maps, test mode and responses.',
+      'Send leads to Outbound OS from HTML forms, Zapier, Make, n8n, marketplace or your own code: addresses, keys, field names, field maps, test mode and responses.',
     section: 'Connect',
   },
   {

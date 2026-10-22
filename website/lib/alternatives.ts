@@ -56,7 +56,7 @@ export const alternatives: Alternative[] = [
     chooseUs: [
       'You want leads and conversations in your own database',
       'You do not want a per-seat or per-plan subscription',
-      'Leads arrive from forms, ads and marketplaces like IndiaMART and must be contacted in seconds',
+      'Leads arrive from forms, ads and marketplaces like marketplace and must be contacted in seconds',
       'Follow-ups should run across WhatsApp and email, and stop on reply',
       'You want to read and change the code, or let AI agents work the CRM over MCP',
     ],

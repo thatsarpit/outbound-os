@@ -1,6 +1,6 @@
 # Outbound OS
 
-> Outbound OS is a free, open-source (AGPL-3.0), self-hosted WhatsApp CRM and outreach platform. It captures leads from website forms, Facebook Lead Ads, IndiaMART and any webhook, contacts each lead on WhatsApp, email, Telegram or iMessage within seconds, runs follow-ups that stop when the lead replies, and keeps the conversation, pipeline, orders and invoices on one lead record. It runs with one Docker Compose command and includes an MCP server so Claude and other AI clients can work the CRM.
+> Outbound OS is a free, open-source (AGPL-3.0), self-hosted WhatsApp CRM and outreach platform. It captures leads from website forms, Facebook Lead Ads, marketplace and any webhook, contacts each lead on WhatsApp, email, Telegram or iMessage within seconds, runs follow-ups that stop when the lead replies, and keeps the conversation, pipeline, orders and invoices on one lead record. It runs with one Docker Compose command and includes an MCP server so Claude and other AI clients can work the CRM.
 
 Key facts:
 
@@ -38,7 +38,7 @@ The software is free to self-host under AGPL-3.0. Optional paid services include
 ## Integrations
 
 - [WhatsApp Cloud API](https://outboundos.space/integrations/whatsapp-cloud-api)
-- [IndiaMART Lead Manager Push API](https://outboundos.space/integrations/indiamart)
+- [Lead webhooks](https://outboundos.space/integrations/webhooks)
 - [Facebook Lead Ads](https://outboundos.space/integrations/facebook-lead-ads)
 - [Zapier, Make and n8n](https://outboundos.space/integrations/zapier)
 - [Google Sheets](https://outboundos.space/integrations/google-sheets)

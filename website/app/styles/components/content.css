@@ -302,3 +302,5 @@
 .docs-index { margin-top: 40px; }
 .docs-help p { color: var(--text-secondary); max-width: var(--measure); }
 .docs-help a { color: var(--focus); text-decoration: underline; text-underline-offset: 3px; }
+
+.comparison-wrap { overflow-x: auto; max-width: 100%; }

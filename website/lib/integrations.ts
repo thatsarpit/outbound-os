@@ -3,7 +3,7 @@
 
    One entry per integration page. Every claim here describes what the code in
    github.com/thatsarpit/outbound-os actually does; when a step depends on a
-   third party (Meta, IndiaMART, Zapier), it follows that party's own docs.
+   third party (Meta, marketplace, Zapier), it follows that party's own docs.
 ════════════════════════════════════════════════════════════════════════════ */
 
 export type IntegrationKind = 'Channel' | 'Lead source' | 'Data out'
@@ -94,7 +94,7 @@ export const integrations: Integration[] = [
         a: 'Yes. Each number is its own account in Outbound OS with its own provider, daily limit and first-contact template, and new leads are spread across the numbers that are ready.',
       },
     ],
-    related: ['email', 'indiamart', 'facebook-lead-ads'],
+    related: ['email', 'webhooks', 'facebook-lead-ads'],
   },
   {
     slug: 'email',
@@ -261,64 +261,6 @@ export const integrations: Integration[] = [
     related: ['telegram', 'whatsapp-cloud-api', 'email'],
   },
   {
-    slug: 'indiamart',
-    name: 'IndiaMART',
-    kind: 'Lead source',
-    title: 'IndiaMART CRM integration — reply to every lead in seconds',
-    description:
-      "Connect IndiaMART's Lead Manager Push API to Outbound OS and contact every buyer enquiry on WhatsApp and email within seconds. Free, open-source.",
-    h1: 'Every IndiaMART enquiry answered in seconds, not hours.',
-    summary: "IndiaMART's Lead Manager Push API, straight into the queue.",
-    intro: [
-      'On IndiaMART the first seller to reply usually wins the conversation. Outbound OS receives each enquiry through IndiaMART’s Lead Manager Push API the moment the buyer sends it, creates the lead with name, phone, email, company, product and country, and sends your first WhatsApp template and email straight away.',
-      'Duplicate enquiries from the same buyer merge into one lead instead of creating a second one, and a reply on any channel stops the follow-ups.',
-    ],
-    capabilities: [
-      'Real-time leads from IndiaMART’s official Push API',
-      'Name, mobile, email, company, product and country mapped automatically',
-      'Instant first contact on WhatsApp, email and any other connected channel',
-      'Duplicate enquiries merged into the existing lead',
-      'Every lead keeps its source, so IndiaMART leads can be filtered and reported on separately',
-    ],
-    steps: [
-      {
-        title: 'Create an IndiaMART source',
-        body: 'Integrations → Webhooks → Quick add from presets → IndiaMART. Copy the address and key it gives you, and join them as <address>?apiKey=<key>, because IndiaMART does not send a login header.',
-      },
-      {
-        title: 'Turn on the Push API in IndiaMART',
-        body: 'In the seller panel: Lead Manager → Import/Export Leads → Push API → choose “Other” and paste the address.',
-      },
-      {
-        title: 'Check it arrived',
-        body: 'The next enquiry appears in Leads within seconds, and the first-touch messages show in the inbox.',
-      },
-    ],
-    code: {
-      label: 'What IndiaMART sends (abridged)',
-      body: '{\n  "CODE": 200,\n  "STATUS": "SUCCESS",\n  "RESPONSE": {\n    "UNIQUE_QUERY_ID": "621654886",\n    "SENDER_NAME": "Prabhat",\n    "SENDER_MOBILE": "+91-9999999999",\n    "SENDER_EMAIL": "buyer@example.com",\n    "SENDER_COMPANY": "ABC Pvt Ltd.",\n    "QUERY_PRODUCT_NAME": "Mineral Water Bottle",\n    "SENDER_COUNTRY_ISO": "IN"\n  }\n}',
-    },
-    faq: [
-      {
-        q: 'Does this use IndiaMART’s official API?',
-        a: 'Yes — the Lead Manager Push API, which IndiaMART documents for third-party CRMs. Outbound OS does not log in to your seller account or scrape pages.',
-      },
-      {
-        q: 'What happens if my server is down when a lead arrives?',
-        a: 'IndiaMART retries a push until your server accepts it, and deactivates the Push API only after 48 hours of continuous failure.',
-      },
-      {
-        q: 'Can I also connect TradeIndia or JustDial?',
-        a: 'Yes. Both have presets under Integrations → Webhooks; check the field map against what your account sends on the first delivery.',
-      },
-      {
-        q: 'Will international IndiaMART buyers be contacted correctly?',
-        a: 'Yes. Numbers with a country code are used as sent. Set a home country code only for numbers that arrive without one.',
-      },
-    ],
-    related: ['whatsapp-cloud-api', 'engyne-cloud', 'csv-import'],
-  },
-  {
     slug: 'facebook-lead-ads',
     name: 'Facebook Lead Ads',
     kind: 'Lead source',
@@ -437,7 +379,7 @@ export const integrations: Integration[] = [
         a: 'No. A test delivery returns what would be created and sends nothing.',
       },
     ],
-    related: ['indiamart', 'whatsapp-cloud-api', 'zapier'],
+    related: ['webhooks', 'whatsapp-cloud-api', 'zapier'],
   },
   {
     slug: 'google-sheets',
@@ -562,7 +504,7 @@ export const integrations: Integration[] = [
         a: 'Yes. The MCP server has an import tool, so Claude or another MCP client can add a list you give it, with the same merging rules.',
       },
     ],
-    related: ['indiamart', 'google-sheets', 'email'],
+    related: ['webhooks', 'google-sheets', 'email'],
   },
 ]
 

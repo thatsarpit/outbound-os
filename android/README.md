@@ -36,7 +36,7 @@ The debug manifest permits cleartext HTTP for emulator/local development. Releas
 - Email/password and phone OTP authentication against the real `/api/auth/*` contracts.
 - JWT bearer injection from Preferences DataStore. A 401 clears the observed session and returns the UI to sign-in.
 - Needs-reply queue with search, channel filters, refresh, dense channel-aware cards and a one-thumb “open next” FAB.
-- Conversation detail with chronological WhatsApp, email and IndiaMART history, lead/contact context, call intent, assign, resolve/reopen, manual reply and a first-enabled-sender fallback.
+- Conversation detail with chronological WhatsApp and email history, plus neutral rendering for unsupported historical channels, lead/contact context, call intent, assign, resolve/reopen, manual reply and a first-enabled-sender fallback.
 - AI draft generation through `POST /api/leads/:id/ai-reply`, editable approval in a `ModalBottomSheet`, and send through `POST /api/inbox/send`. Nothing is sent by draft generation alone.
 - Stalled view for open conversations where the last activity was outbound and the buyer has been quiet for at least 24 hours. It also loads the real overview and system health endpoints for a compact manager glance.
 - Notification navigation contract: `NotificationDeepLinks.threadPendingIntent()` opens `outboundos://thread/{leadId}` directly into the conversation. If signed out, the pending destination survives authentication.
@@ -94,7 +94,7 @@ Unknown channels (including any legacy iMessage thread returned by the backend) 
 - Deep-link launch from a posted notification when signed in and signed out.
 - `tel:` handoff, notification permission behavior once push transport is added, and process-death restoration.
 - Foldable posture/hinge behavior. Width-based NavigationRail support is implemented, but no hinge-aware two-pane layout is claimed.
-- Live sends on all three providers using a test workspace, especially IndiaMART `conversationId` and email sender assignment.
+- Live WhatsApp and email sends using a test workspace, including email sender assignment. Unsupported historical channels are read-only.
 
 ## Project map
 

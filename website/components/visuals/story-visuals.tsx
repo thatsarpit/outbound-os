@@ -12,7 +12,7 @@ const o = (n: number) => ({ '--o': n }) as CSSProperties
 
 export function CaptureVisual() {
   const sources: { brand: BrandName; label: string; meta: string }[] = [
-    { brand: 'indiamart', label: 'IndiaMART', meta: 'Push API' },
+    { brand: 'webhooks', label: 'marketplace', meta: 'Push API' },
     { brand: 'facebook', label: 'Facebook Lead Ads', meta: 'via Zapier' },
     { brand: 'forms', label: 'Website form', meta: 'yoursite.com/contact' },
     { brand: 'zapier', label: 'Zapier · Make · n8n', meta: 'webhook' },
@@ -43,7 +43,7 @@ export function CaptureVisual() {
         <dl className="sv-fields">
           <div><dt>Wants</dt><dd>500 units, CIF Lagos</dd></div>
           <div><dt>Phone</dt><dd>+234 ••• ••• 4471</dd></div>
-          <div><dt>Source</dt><dd>IndiaMART</dd></div>
+          <div><dt>Source</dt><dd>marketplace</dd></div>
         </dl>
         <span className="sv-pill sv-pill--merge sv-in" style={o(7)}>
           <Check size={12} strokeWidth={3} /> Duplicate merged
@@ -64,7 +64,7 @@ export function ContactVisual() {
       <ul className="sv-log">
         <li className="sv-in" style={o(1)}>
           <span className="sv-log__time tabular">10:42:03</span>
-          <LogoTile brand="indiamart" size={26} />
+          <LogoTile brand="webhooks" size={26} />
           <span>Enquiry received</span>
         </li>
         <li className="sv-in" style={o(2)}>

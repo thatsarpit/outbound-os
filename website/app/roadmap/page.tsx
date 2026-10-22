@@ -125,7 +125,7 @@ export default function RoadmapPage() {
             <article>
               <h3>Lead capture and first contact</h3>
               <p>
-                Webhooks with presets for website forms, Facebook Lead Ads, IndiaMART, TradeIndia,
+                Webhooks with presets for website forms, Facebook Lead Ads, marketplace, TradeIndia,
                 JustDial and Engyne Cloud; CSV import and export. Live leads are contacted within
                 seconds.
               </p>

@@ -7,7 +7,7 @@ same rules in fewer words.
 ## What this is
 
 Outbound OS is a self-hosted, open-source WhatsApp CRM and outreach platform.
-Leads arrive by signed webhook (website forms, Facebook Lead Ads, IndiaMART,
+Leads arrive by signed webhook (website forms, Facebook Lead Ads, external marketplaces,
 Zapier, CSV), are contacted within seconds on WhatsApp, email, Telegram or
 iMessage, and get follow-ups until they reply. It runs as one Docker Compose
 app with a SQLite database. AGPL-3.0.

@@ -411,12 +411,6 @@ const SOURCE_CARDS = [
     icon: Globe,
     detail: 'Instant forms from your Meta ads, via Zapier or Make.',
   },
-  {
-    preset: 'indiamart',
-    name: 'IndiaMART',
-    icon: Globe,
-    detail: 'Lead Manager → CRM Integration → Webhook URL.',
-  },
   { preset: 'tradeindia', name: 'TradeIndia', icon: Globe, detail: 'Seller dashboard webhook.' },
   { preset: 'justdial', name: 'JustDial', icon: Globe, detail: 'JustDial lead push.' },
   {

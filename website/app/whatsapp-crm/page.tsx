@@ -278,8 +278,8 @@ export default function WhatsAppCrmPage() {
             body: 'A hosted WhatsApp platform compared with one you run yourself.',
           },
           {
-            href: '/integrations/indiamart',
-            title: 'IndiaMART to WhatsApp',
+            href: '/integrations/webhooks',
+            title: 'marketplace to WhatsApp',
             body: 'Reply to every marketplace enquiry within seconds.',
           },
         ]}

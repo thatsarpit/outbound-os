@@ -6,6 +6,12 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+### Source-neutral imports and attribution
+
+- Remove the dedicated marketplace preset, legacy Android channel, vendor aliases, public integration page and branding. External collectors now use a generic source contract.
+- Add a replay-safe connector receipt ledger, paused historical imports, conflict quarantine, and stable lead-origin supplier attribution independent of order fulfilment.
+- Add order filtering by the supplier who originated a lead, and preserve that origin on each new order.
+
 ### Added
 
 - A refreshed website with paid setup, managed hosting and support enquiries,
@@ -72,7 +78,7 @@ include breaking changes, and they are called out here.
   Meta identifies them by a business-scoped user id and omits the phone
   number; those webhooks were skipped. They now match or create a lead, and
   replies are addressed to the user id.
-- IndiaMART's Lead Manager Push API format (`{CODE, STATUS, RESPONSE}`) is
+- external marketplaces's Lead Manager Push API format (`{CODE, STATUS, RESPONSE}`) is
   read correctly; the preset maps its field names.
 - Manual inbox replies store the WhatsApp message id, so delivery receipts
   attach to them.
@@ -145,7 +151,7 @@ The first release as a self-hostable, open-source product.
 
 ### Removed
 
-- Live IndiaMART polling and the bundled headless browser. IndiaMART and other
+- Live external marketplaces polling and the bundled headless browser. external marketplaces and other
   marketplaces connect through their CRM webhooks instead.
 - Hosted-service scaffolding (billing, tenancy, access requests).
 

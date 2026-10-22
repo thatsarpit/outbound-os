@@ -82,7 +82,7 @@ export default function HomePage() {
                   'whatsapp',
                   'meta',
                   'gmail',
-                  'indiamart',
+                  'webhooks',
                   'facebook',
                   'mcp',
                 ] as const
@@ -95,7 +95,7 @@ export default function HomePage() {
                         whatsapp: 'WhatsApp',
                         meta: 'Meta Cloud API',
                         gmail: 'Email',
-                        indiamart: 'IndiaMART',
+                        webhooks: 'Webhooks',
                         facebook: 'Facebook Leads',
                         mcp: 'MCP agents',
                       } as const

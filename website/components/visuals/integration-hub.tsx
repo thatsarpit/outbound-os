@@ -12,7 +12,7 @@ type Node = { brand: BrandName; href: string; label?: string }
 const SOURCES: Node[] = [
   { brand: 'forms', href: '/form-backend' },
   { brand: 'facebook', href: '/integrations/facebook-lead-ads', label: 'Facebook Lead Ads' },
-  { brand: 'indiamart', href: '/integrations/indiamart' },
+  { brand: 'webhooks', href: '/integrations/webhooks' },
   { brand: 'zapier', href: '/integrations/zapier', label: 'Zapier · Make · n8n' },
   { brand: 'engyne', href: '/integrations/engyne-cloud' },
   { brand: 'csv', href: '/integrations/csv-import', label: 'CSV import' },

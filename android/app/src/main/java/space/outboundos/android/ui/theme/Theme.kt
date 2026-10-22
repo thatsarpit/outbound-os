@@ -15,7 +15,6 @@ import androidx.compose.ui.platform.LocalContext
 data class ChannelColors(
     val whatsapp: Color,
     val email: Color,
-    val indiaMart: Color,
 )
 
 data class StatusColors(
@@ -25,7 +24,7 @@ data class StatusColors(
 )
 
 val LocalChannelColors = staticCompositionLocalOf {
-    ChannelColors(WhatsApp, Email, IndiaMart)
+    ChannelColors(WhatsApp, Email)
 }
 
 val LocalStatusColors = staticCompositionLocalOf {
@@ -120,7 +119,7 @@ fun OutboundOsTheme(
             surfaceTint = Color.Transparent,
         )
     }
-    val channels = ChannelColors(WhatsApp, Email, IndiaMart)
+    val channels = ChannelColors(WhatsApp, Email)
     val statuses = if (darkTheme) {
         StatusColors(SuccessDark, WarningDark, DangerDark)
     } else {

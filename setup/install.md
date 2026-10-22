@@ -61,7 +61,7 @@ never simulated success.
 - **iMessage** — Settings → iMessage; needs a Mac running BlueBubbles, see
   [docs/imessage-mac-mini-setup.md](../docs/imessage-mac-mini-setup.md).
 - **Lead sources** — Integrations → Webhooks. Pick a preset (website form,
-  Facebook Lead Ads, IndiaMART, TradeIndia, JustDial, Engyne Cloud) or map
+  Facebook Lead Ads, external marketplaces, TradeIndia, JustDial, Engyne Cloud) or map
   your own fields.
 
 ## Check an install

@@ -103,7 +103,7 @@ const GROUPS: Group[] = [
       },
       {
         name: 'Marketplaces',
-        detail: 'IndiaMART, TradeIndia, JustDial and Engyne Cloud presets.',
+        detail: 'external marketplaces, TradeIndia, JustDial and Engyne Cloud presets.',
         icon: Store,
         to: '/integrations/webhooks',
       },

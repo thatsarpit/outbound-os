@@ -30,7 +30,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/demo.gif" width="860" alt="A lead from IndiaMART gets a WhatsApp message two seconds after enquiring; when they reply, the scheduled follow-ups are cancelled">
+  <img src="docs/screenshots/inbox.png" width="860" alt="Outbound OS shared inbox with customer context and WhatsApp conversations">
 </p>
 
 Leads come in from your website, marketplaces, ad forms and spreadsheets.
@@ -40,7 +40,7 @@ someone replies. It runs on your own server, and your leads never leave your
 database.
 
 **Why it exists.** It was built to run a real export sales desk: enquiries
-from IndiaMART and the web at all hours, buyers in dozens of time zones, and
+from external marketplaces and the web at all hours, buyers in dozens of time zones, and
 follow-ups that kept slipping. It still runs that desk in production. Now it
 is open source, so any team can run their own.
 
@@ -107,7 +107,7 @@ is open source, so any team can run their own.
 |---|---|---|
 | Any website form (HTML, Formspree-style POST, Webflow, WordPress) | **WhatsApp** — Meta Cloud API | Outgoing webhooks on lead and message events |
 | Facebook Lead Ads | **Email** — any SMTP/IMAP inbox, Brevo | Google Sheets (live row sync) |
-| IndiaMART, TradeIndia, JustDial (their CRM webhooks) | **Telegram** — your own account | CSV export |
+| Authenticated webhooks from forms and external systems | **Telegram** — your own account | CSV export |
 | Engyne Cloud | **iMessage** — via a Mac running BlueBubbles | MCP server for AI clients |
 | Zapier, Make, n8n, or your own code (signed webhook) | | |
 | CSV / JSON import | | |

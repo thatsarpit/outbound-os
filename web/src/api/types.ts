@@ -28,6 +28,8 @@ export interface Lead {
   strength: string | null
   brand: string | null
   source: string
+  originSupplierId?: number | null
+  originSupplier?: { id: number; name: string } | null
   importBatchId: number | null
   status: LeadStatus
   isOnWhatsApp: boolean | null

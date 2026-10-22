@@ -48,6 +48,9 @@ model Lead {
 
   // Source tracking
   source        String @default("manual") // webhook source slug | csv_import | manual | website | <channel>_inbound
+  originSupplierId Int?
+  originSupplier Supplier? @relation("LeadOriginSupplier", fields: [originSupplierId], references: [id], onDelete: Restrict)
+  importReceipts ConnectorReceipt[]
   importBatchId Int?
 
   // Pipeline state
@@ -151,6 +154,7 @@ model Lead {
   @@index([createdAt])
   @@index([convertedAt])
   @@index([source])
+  @@index([originSupplierId])
   @@index([assignedAccount])
   @@index([assignedToId])
   @@index([poolId])
@@ -511,9 +515,30 @@ model WebhookSource {
   // team's webhook can never accidentally feed leads into the team pool.
   poolId         Int?
   enabled        Boolean   @default(true)
+  importSupplierId Int?
+  importTags String @default("")
+  importReceipts ConnectorReceipt[]
   lastReceivedAt DateTime?
   totalReceived  Int       @default(0)
   createdAt      DateTime  @default(now())
+}
+
+// A source enquiry is distinct from a contact. Replays resolve to this ledger
+// even when the contact already existed or an identity conflict needs review.
+model ConnectorReceipt {
+  id Int @id @default(autoincrement())
+  sourceId Int
+  source WebhookSource @relation(fields: [sourceId], references: [id], onDelete: Restrict)
+  externalId String
+  leadId Int?
+  lead Lead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  state String
+  reason String?
+  recordJson String
+  createdAt DateTime @default(now())
+  @@unique([sourceId, externalId])
+  @@index([leadId])
+  @@index([state])
 }
 
 model LeadNote {
@@ -790,6 +815,9 @@ model SalesOrder {
   /// Who fulfils this order. Defaulted from the lead's tags, then stored.
   supplierId Int?
   supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  // Snapshot of who supplied the lead, independent of who fulfils the order.
+  originSupplierId Int?
+  originSupplier Supplier? @relation("OrderOriginSupplier", fields: [originSupplierId], references: [id], onDelete: Restrict)
 
   paymentMethodId Int?
   paymentMethod   PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
@@ -1172,6 +1200,8 @@ model Supplier {
 
   orders   SalesOrder[]
   products Product[]
+  originLeads Lead[] @relation("LeadOriginSupplier")
+  originatedOrders SalesOrder[] @relation("OrderOriginSupplier")
 
   @@unique([tenantId, name])
   @@index([enabled])

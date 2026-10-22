@@ -3,7 +3,6 @@ package space.outboundos.android.model
 enum class Channel(val wireName: String, val label: String, val sendVerb: String) {
     WhatsApp("whatsapp", "WhatsApp", "Send WhatsApp"),
     Email("email", "Email", "Send email"),
-    IndiaMart("indiamart", "IndiaMART", "Send message"),
     Other("other", "Other", "Send message");
 
     companion object {

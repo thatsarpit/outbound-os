@@ -293,7 +293,6 @@ private fun ReplyComposer(
     val channel = summary.channel
     val channelReady = when (channel) {
         Channel.Email -> conversation.availableSenders.any { it.channel == Channel.Email && it.enabled }
-        Channel.IndiaMart -> summary.conversationId != null
         Channel.Other -> false
         Channel.WhatsApp -> true
     }

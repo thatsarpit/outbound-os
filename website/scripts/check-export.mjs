@@ -44,10 +44,10 @@ for (const file of pages) {
     assert(resolves(match[1]), `${route}: broken internal link ${match[1]}`);
     internalLinks++;
   }
-  assert(!/aisensy/i.test(html), `${route}: retired provider remains in rendered content`);
+  assert(!/aisensy|indiamart/i.test(html), `${route}: retired provider remains in rendered content`);
 }
 const sitemap = fs.readFileSync(path.join(root, 'sitemap.xml'), 'utf8');
 assert.equal((sitemap.match(/<loc>/g) || []).length, pages.length, 'Sitemap and page registry differ');
 assert.equal(files.filter((file) => /\/og\/.*\.png$/.test(file)).length, pages.length, 'Share-card count differs');
-assert(!/aisensy/i.test(sitemap), 'Retired routes remain in sitemap');
+assert(!/aisensy|indiamart/i.test(sitemap), 'Retired routes remain in sitemap');
 console.log(JSON.stringify({ pages: pages.length, uniqueTitles: titles.size, structuredBlocks, internalLinks, sitemapAndCards: 'matched' }));

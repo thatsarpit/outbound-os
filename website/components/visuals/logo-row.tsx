@@ -7,7 +7,7 @@ import { brands, brandTitle, Logo, LogoTile, type BrandName } from '../brand-log
 const ROW: BrandName[] = [
   'whatsapp',
   'gmail',
-  'indiamart',
+  'webhooks',
   'facebook',
   'telegram',
   'imessage',
