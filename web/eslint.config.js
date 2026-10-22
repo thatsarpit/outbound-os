@@ -18,7 +18,10 @@ export default tseslint.config(
       'react-refresh': reactRefresh,
     },
     rules: {
-      ...reactHooks.configs.recommended.rules,
+      // Preserve the established Hooks checks during the tooling upgrade.
+      // Compiler-specific rules need an application-level review before adoption.
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'warn',
       // Shared UI modules intentionally co-locate components with variants and
       // formatting helpers. This rule is useful for template apps but noisy for
       // that module structure; production correctness is covered by build/tests.
