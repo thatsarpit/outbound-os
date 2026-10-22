@@ -23,3 +23,23 @@ test('campaign archive previews do not pass raw personalization markup off as se
   assert.equal(inboxMessagePreview({ channel: 'whatsapp', direction: 'outbound', content: ' Here are\n the details. ' }), 'You: Here are the details.');
   assert.equal(inboxMessagePreview({ channel: 'email', direction: 'inbound', content: 'What does {{name}} mean?' }), 'What does {{name}} mean?');
 });
+
+test('the inbox migration preserves sales stages and enforces read cursor ownership/cascade', async () => {
+  const { default: Database } = await import('better-sqlite3');
+  const { readFileSync } = await import('node:fs');
+  const db = new Database(':memory:');
+  try {
+    db.pragma('foreign_keys = ON');
+    db.exec(`CREATE TABLE Lead (id INTEGER PRIMARY KEY, status TEXT NOT NULL, updatedAt DATETIME NOT NULL);
+      INSERT INTO Lead VALUES (1, 'closed', 1792500000000), (2, 'paused', 1792500000000);`);
+    db.exec(readFileSync(new URL('../prisma/migrations/20261022180000_inbox_read_and_resolution/migration.sql', import.meta.url), 'utf8'));
+    assert.deepEqual(db.prepare('SELECT status, inboxResolvedAt FROM Lead WHERE id=1').get(), { status: 'closed', inboxResolvedAt: 1792500000000 });
+    assert.deepEqual(db.prepare('SELECT status, inboxResolvedAt FROM Lead WHERE id=2').get(), { status: 'paused', inboxResolvedAt: null });
+    const insert = db.prepare('INSERT INTO InboxReadState (leadId, viewerKey, lastReadMessageId) VALUES (?, ?, ?)');
+    insert.run(1, 'local:1', 5);
+    insert.run(1, 'local:2', 3);
+    assert.throws(() => insert.run(1, 'local:1', 7), /UNIQUE/);
+    db.prepare('DELETE FROM Lead WHERE id=1').run();
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM InboxReadState').get().n, 0);
+  } finally { db.close(); }
+});

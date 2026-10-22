@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { checkTrackedArtifacts } from '../scripts/check-repo-hygiene.mjs';
 
 test('hygiene rejects nested credentials, SQLite files and generated runtime artifacts', () => {
-  const files = ['.env', 'web/.env.production', 'instance-secrets.json', 'mcp-outboundos/oauth-store.json', 'work/clerk-production-instance-private.json', 'prisma/local.db-wal', 'snapshot.sqlite3', 'keys/server.pem', 'backups/a.txt', 'web/dist-demo/assets/app.js', 'data/uploads/a.png', 'web/node_modules/a.js', 'web/.DS_Store'];
+  const files = ['web/.wrangler/deploy/config.json', '.env', 'web/.env.production', 'instance-secrets.json', 'mcp-outboundos/oauth-store.json', 'work/clerk-production-instance-private.json', 'prisma/local.db-wal', 'snapshot.sqlite3', 'keys/server.pem', 'backups/a.txt', 'web/dist-demo/assets/app.js', 'data/uploads/a.png', 'web/node_modules/a.js', 'web/.DS_Store'];
   assert.equal(checkTrackedArtifacts(files).length, files.length);
 });
 
