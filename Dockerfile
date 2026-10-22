@@ -47,6 +47,7 @@ RUN npm ci --omit=dev
 
 # Generate Prisma client
 COPY prisma ./prisma
+COPY prisma.config.mjs ./
 RUN npx prisma generate
 
 # Copy source

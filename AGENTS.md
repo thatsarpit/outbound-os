@@ -54,7 +54,7 @@ from an untouched `.env.example`.
 
 - **Database changes need a migration.** Add `prisma/migrations/<timestamp>_<name>/migration.sql`
   (hand-written SQL is fine) and update `schema.prisma` to match. Check with
-  `npx prisma migrate diff --from-url file:<db> --to-schema-datamodel prisma/schema.prisma --script`
+  `DATABASE_URL=file:<db> npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script`
   — it must print an empty migration. Never rely on `prisma db push`.
 - **WhatsApp goes through official APIs only**: Meta's Cloud API or AiSensy.
   Never automate the WhatsApp or WhatsApp Business phone apps.
