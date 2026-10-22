@@ -16,15 +16,11 @@ import { installFixtureFetch, seedNotifications, seedStores } from '@/demo/fixtu
 // Seeded at module scope, not during render: calling store setters while
 // DevShellPage was rendering made React warn about updating another component
 // mid-render. This still runs before the shell mounts, which is what matters.
-let seeded = false
-if (!seeded) {
-  seeded = true
-  installFixtureFetch()
-  seedStores()
-  // `?empty=1` skips the notification seed, so the bell's empty state can be
-  // reviewed without editing this file.
-  if (!window.location.search.includes('empty')) seedNotifications()
-}
+installFixtureFetch()
+seedStores()
+// `?empty=1` skips the notification seed, so the bell's empty state can be
+// reviewed without editing this file.
+if (!window.location.search.includes('empty')) seedNotifications()
 
 export default function DevShellPage() {
   return <AppShell />
