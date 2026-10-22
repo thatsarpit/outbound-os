@@ -64,7 +64,8 @@ function rand(bytes = 32) {
 }
 
 function pkceMatches(verifier, challenge) {
-  if (!verifier || !challenge) return false;
+  if (typeof verifier !== 'string' || !/^[A-Za-z0-9._~-]{43,128}$/.test(verifier)
+    || typeof challenge !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(challenge)) return false;
   const hash = crypto.createHash('sha256').update(verifier).digest('base64url');
   return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(challenge));
 }
@@ -73,6 +74,7 @@ function pkceMatches(verifier, challenge) {
 // known Anthropic/Claude callback host (covers first-connect before DCR state
 // is remembered, and desktop localhost callbacks).
 function isTrustedRedirect(clientId, redirectUri) {
+  if (typeof clientId !== 'string' || !clientId || !acceptableRedirect(redirectUri)) return false;
   const client = clients.get(clientId);
   if (client && Array.isArray(client.redirect_uris) && client.redirect_uris.includes(redirectUri)) {
     return true;
@@ -117,8 +119,10 @@ function recordFailure(ip) {
 
 /** Registered redirects must be HTTPS, or loopback for desktop clients. */
 function acceptableRedirect(uri) {
+  if (typeof uri !== 'string' || uri.length > 2048) return false;
   try {
     const u = new URL(uri);
+    if (u.username || u.password || u.hash) return false;
     if (u.protocol === 'https:') return true;
     return u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1');
   } catch {
@@ -134,9 +138,12 @@ function escapeHtml(s = '') {
 
 // ── Public: token verification used by the /mcp bearer guard ──
 export function verifyOAuthToken(token) {
+  // Plain objects inherit names such as constructor and toString. None of
+  // those properties represents a credential actually issued by this server.
+  if (typeof token !== 'string' || !Object.hasOwn(store.access, token)) return false;
   const entry = store.access[token];
-  if (!entry) return false;
-  if (entry.expires && entry.expires < Date.now()) {
+  if (!entry || typeof entry !== 'object' || !Number.isFinite(entry.expires)) return false;
+  if (entry.expires <= Date.now()) {
     delete store.access[token];
     saveStore();
     return false;
@@ -182,15 +189,16 @@ export function mountOAuth(app) {
   app.post('/oauth/register', (req, res) => {
     const clientId = `mcp-${rand(16)}`;
     const redirectUris = Array.isArray(req.body?.redirect_uris) ? req.body.redirect_uris : [];
-    if (redirectUris.length === 0 || !redirectUris.every(acceptableRedirect)) {
+    if (redirectUris.length === 0 || redirectUris.length > 10 || !redirectUris.every(acceptableRedirect)) {
       return res.status(400).json({
         error: 'invalid_redirect_uri',
         error_description: 'redirect_uris must be https, or http on localhost',
       });
     }
+    if (clients.size >= 1000) return res.status(429).json({ error: 'registration_limit_exceeded' });
     clients.set(clientId, {
       redirect_uris: redirectUris,
-      client_name: req.body?.client_name || 'MCP Client',
+      client_name: typeof req.body?.client_name === 'string' ? req.body.client_name.slice(0, 120) : 'MCP Client',
     });
     log.info(`oauth: registered client ${clientId} (${redirectUris.length} redirect uri(s))`);
     res.status(201).json({
@@ -210,7 +218,7 @@ export function mountOAuth(app) {
     if (!redirect_uri || !isTrustedRedirect(client_id, redirect_uri)) {
       return res.status(400).send('Invalid or untrusted redirect_uri');
     }
-    if (code_challenge_method !== 'S256' || !code_challenge) {
+    if (code_challenge_method !== 'S256' || typeof code_challenge !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(code_challenge)) {
       return res.status(400).send('PKCE with code_challenge_method=S256 is required');
     }
 
@@ -258,6 +266,9 @@ export function mountOAuth(app) {
     if (!redirect_uri || !isTrustedRedirect(client_id, redirect_uri)) {
       return res.status(400).send('Invalid or untrusted redirect_uri');
     }
+    if (typeof code_challenge !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(code_challenge)) {
+      return res.status(400).send('A valid S256 PKCE challenge is required');
+    }
     const ip = req.ip || req.socket?.remoteAddress || 'unknown';
     if (tooManyFailures(ip)) {
       return res.status(429).send('Too many incorrect passwords. Try again in 15 minutes.');
@@ -292,33 +303,26 @@ export function mountOAuth(app) {
     const grant = req.body?.grant_type;
 
     if (grant === 'authorization_code') {
-      const { code, code_verifier, redirect_uri } = req.body;
+      const { code, code_verifier, redirect_uri, client_id } = req.body;
       const entry = codes.get(code);
       if (!entry) return res.status(400).json({ error: 'invalid_grant' });
       codes.delete(code); // single use
       if (entry.expires < Date.now()) return res.status(400).json({ error: 'invalid_grant', error_description: 'code expired' });
+      if (entry.client_id !== client_id) return res.status(400).json({ error: 'invalid_grant', error_description: 'client_id mismatch' });
       if (entry.redirect_uri !== redirect_uri) return res.status(400).json({ error: 'invalid_grant', error_description: 'redirect_uri mismatch' });
       if (!pkceMatches(code_verifier, entry.code_challenge)) return res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
 
-      return res.json(issueTokens());
+      return res.json(issueTokens(client_id));
     }
 
     if (grant === 'refresh_token') {
-      const { refresh_token } = req.body;
-      if (!refresh_token || !store.refresh[refresh_token]) {
+      const { refresh_token, client_id } = req.body;
+      if (typeof refresh_token !== 'string' || !Object.hasOwn(store.refresh, refresh_token)
+        || typeof client_id !== 'string' || store.refresh[refresh_token]?.client_id !== client_id) {
         return res.status(400).json({ error: 'invalid_grant' });
       }
-      // Rotate: keep the same refresh token, issue a fresh access token.
-      const access = rand(32);
-      store.access[access] = { expires: Date.now() + ACCESS_TTL_MS };
-      saveStore();
-      return res.json({
-        access_token: access,
-        token_type: 'Bearer',
-        expires_in: Math.floor(ACCESS_TTL_MS / 1000),
-        refresh_token,
-        scope: 'mcp',
-      });
+      delete store.refresh[refresh_token];
+      return res.json(issueTokens(client_id));
     }
 
     return res.status(400).json({ error: 'unsupported_grant_type' });
@@ -327,11 +331,11 @@ export function mountOAuth(app) {
   log.info('oauth: provider mounted (metadata, register, authorize, token)');
 }
 
-function issueTokens() {
+function issueTokens(clientId) {
   const access = rand(32);
   const refresh = rand(32);
   store.access[access] = { expires: Date.now() + ACCESS_TTL_MS };
-  store.refresh[refresh] = {};
+  store.refresh[refresh] = { client_id: clientId };
   saveStore();
   return {
     access_token: access,
