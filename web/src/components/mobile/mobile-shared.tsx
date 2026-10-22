@@ -9,11 +9,9 @@ export const mobileButton =
 export function MobileRefresh({
   updatedAt,
   refreshing,
-  onRefresh,
 }: {
   updatedAt: number
   refreshing: boolean
-  onRefresh: () => void
 }) {
   const online = useOnlineStatus()
   return (
@@ -22,21 +20,11 @@ export function MobileRefresh({
         {!online
           ? 'Offline · showing loaded data'
           : refreshing
-            ? 'Checking for updates…'
+            ? 'Syncing…'
             : updatedAt
-              ? `Updated ${new Date(updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+              ? `Synced ${new Date(updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
               : 'Waiting for updates'}
       </p>
-      <button
-        type="button"
-        className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg px-2 text-xs text-text-secondary disabled:opacity-40"
-        aria-label="Refresh results"
-        disabled={!online || refreshing}
-        onClick={onRefresh}
-      >
-        <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
-        Refresh
-      </button>
     </div>
   )
 }

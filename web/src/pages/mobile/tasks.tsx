@@ -63,11 +63,7 @@ export default function MobileTasksPage() {
           </button>
         ))}
       </div>
-      <MobileRefresh
-        updatedAt={result.dataUpdatedAt}
-        refreshing={result.isFetching}
-        onRefresh={() => void result.refetch()}
-      />
+      <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching} />
       {result.isPending ? (
         <p role="status" className="py-10 text-center text-sm text-text-muted">
           Loading follow-ups…

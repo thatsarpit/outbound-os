@@ -743,3 +743,11 @@
 .mobile-account button {
   min-height: 44px;
 }
+
+.mobile-sales {
+  overflow-x: clip;
+  overscroll-behavior-y: none;
+}
+.mobile-sales p {
+  overflow-wrap: anywhere;
+}

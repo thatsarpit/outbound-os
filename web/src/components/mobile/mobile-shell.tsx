@@ -1,3 +1,4 @@
+import { useInstalledViewport } from '@/hooks/use-installed-viewport'
 import { useEffect } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
@@ -39,6 +40,7 @@ const destinations = [
 ]
 
 export function MobileShell() {
+  useInstalledViewport()
   const location = useLocation()
   const { user, logout, hasCapability } = useAuthStore()
   const { toggleTheme, theme, setIsMobileViewport } = useUIStore()

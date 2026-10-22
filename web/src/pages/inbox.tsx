@@ -1,3 +1,4 @@
+import { ApiClientError } from '@/api/client'
 import { isReplyableEmail } from '@/lib/email-delivery'
 import {
   useCallback,
@@ -97,6 +98,8 @@ function InboxInner() {
     return () => media.removeEventListener('change', sync)
   }, [])
   const [replyText, setReplyText] = useState('')
+  const requestIds = useRef(new Map<string, string>())
+  const pendingFingerprint = useRef<string | null>(null)
   const [htmlBody, setHtmlBody] = useState('')
   const [attachments, setAttachments] = useState<MediaFile[]>([])
   const [cc, setCc] = useState('')
@@ -312,9 +315,18 @@ function InboxInner() {
       if (!selectedLeadId) throw new Error('No lead selected')
       if (replyDisabledReason) throw new Error(replyDisabledReason)
       const submitted = loadDraft(dashboardScope, selectedLeadId, composerChannel, draftAccountId)
+      const fingerprint = JSON.stringify([
+        draftContext,
+        replyText,
+        attachments.map((file) => file.id),
+      ])
+      pendingFingerprint.current = fingerprint
+      const requestId = requestIds.current.get(fingerprint) || crypto.randomUUID()
+      requestIds.current.set(fingerprint, requestId)
       const send = async (payload: Parameters<typeof inboxApi.send>[0]) => ({
-        response: await inboxApi.send(payload),
+        response: await inboxApi.send({ ...payload, clientMessageId: requestId }),
         submitted,
+        fingerprint,
         leadId: selectedLeadId,
         channel: composerChannel,
         context: draftContext,
@@ -360,7 +372,8 @@ function InboxInner() {
         text: messageBody,
       })
     },
-    onSuccess: ({ submitted, leadId, context }) => {
+    onSuccess: ({ submitted, leadId, context, fingerprint, channel }) => {
+      requestIds.current.delete(fingerprint)
       clearSubmittedDraft(dashboardScope, leadId, submitted)
       // A reply completing after navigation must not clear another lead's editor.
       if (currentDraftContext.current === context) {
@@ -371,18 +384,30 @@ function InboxInner() {
         setBcc('')
       }
       toast.success(
-        composerChannel === 'email'
+        channel === 'email'
           ? 'Email sent from Inbox'
-          : composerChannel === 'imessage'
+          : channel === 'imessage'
             ? 'iMessage sent'
-            : composerChannel === 'telegram'
+            : channel === 'telegram'
               ? 'Telegram message sent'
-              : 'WhatsApp reply sent',
+              : 'Accepted by Meta. Waiting for delivery confirmation.',
       )
       queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
       queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
     },
-    onError: (error: Error) => toast.error(`Reply failed: ${error.message}`),
+    onError: (error: Error) => {
+      if (
+        error instanceof ApiClientError &&
+        error.code === 'manual_send_failed' &&
+        pendingFingerprint.current
+      )
+        requestIds.current.delete(pendingFingerprint.current)
+      toast.error(`Reply failed: ${error.message}`)
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['inbox-thread'] })
+      void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
+    },
   })
 
   const applyTemplateMutation = useMutation({

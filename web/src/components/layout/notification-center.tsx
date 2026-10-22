@@ -4,7 +4,6 @@ import { Link, useLocation } from 'react-router-dom'
 import { Bell, CheckCircle2, Info, Loader2, Pause, TriangleAlert, XCircle } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { leadsApi } from '@/api/endpoints/leads'
-import { useDashboardNotifications } from '@/hooks/use-dashboard-notifications'
 import { getChannel } from '@/lib/channels'
 import { invalidateLeadSurfaceQueries } from '@/lib/lead-automation'
 import {
@@ -214,7 +213,6 @@ function NotificationRow({
 }
 
 export function NotificationCenter() {
-  useDashboardNotifications()
   const location = useLocation()
   const panelRef = useRef<HTMLDivElement | null>(null)
   const queryClient = useQueryClient()

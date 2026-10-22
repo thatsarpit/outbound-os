@@ -9,5 +9,6 @@ export function summarizeWhatsAppTemplate(template) {
     status: template.status,
     body,
     bodyVariables,
+    manualSupported: !(template.components || []).some(component => ['HEADER', 'BUTTONS', 'CAROUSEL'].includes(component.type)),
   };
 }

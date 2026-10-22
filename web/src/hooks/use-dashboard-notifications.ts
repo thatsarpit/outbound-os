@@ -236,7 +236,10 @@ export function useDashboardNotifications() {
         const leadId = getNumericMeta(data.leadId)
         void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
         if (leadId) void queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
-        if (payload.type.startsWith('inbox_')) return
+        if (payload.type.startsWith('inbox_')) {
+          void hydrate()
+          return
+        }
         const accountId = getNumericMeta(data.accountId)
         const channel = normalizeChannel(data.channel)
         const threadKey = deriveThreadKey(leadId, channel, data)
@@ -276,10 +279,23 @@ export function useDashboardNotifications() {
     }, 60_000)
 
     if (authenticated) void connect()
-
+    const resume = () => {
+      if (!authenticated || document.visibilityState !== 'visible' || !navigator.onLine) return
+      void queryClient.invalidateQueries({ queryKey: ['inbox-thread'] })
+      void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
+      void hydrate()
+      if (!source || source.readyState === EventSource.CLOSED) {
+        window.clearTimeout(retryTimer)
+        void connect()
+      }
+    }
+    window.addEventListener('online', resume)
+    document.addEventListener('visibilitychange', resume)
     return () => {
       mounted = false
       source?.close()
+      window.removeEventListener('online', resume)
+      document.removeEventListener('visibilitychange', resume)
       window.clearInterval(refreshInterval)
       window.clearTimeout(retryTimer)
     }

@@ -5,6 +5,7 @@
  * props and owns no cross-cutting state, which is why it could be lifted out
  * cleanly while the rest of that file could not.
  */
+import { WhatsAppReplyWindow, isWhatsAppWindowClosed } from './whatsapp-reply-window'
 import { useEffect, useLayoutEffect, useRef } from 'react'
 import { useConversationRead } from '@/hooks/use-conversation-read'
 import { type EmailTemplate } from '@/api/endpoints/templates'
@@ -184,6 +185,7 @@ export function ConversationSurface({
   const availableSenderAccounts = activeThread?.availableSenderAccounts ?? []
   const sendDisabled =
     replyPending ||
+    (composerChannel === 'whatsapp' && isWhatsAppWindowClosed(activeThread)) ||
     // On WhatsApp, files alone are a message; the text becomes their caption.
     (!replyText.trim() && !(composerChannel === 'whatsapp' && attachments.length > 0)) ||
     Boolean(replyDisabledReason) ||
@@ -207,6 +209,9 @@ export function ConversationSurface({
         isMutating={threadActionPending}
       />
 
+      {composerChannel === 'whatsapp' && activeThread && (
+        <WhatsAppReplyWindow key={activeThread.leadId} thread={activeThread} />
+      )}
       <div
         ref={timelineRef}
         {...timelineProps}

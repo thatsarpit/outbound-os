@@ -1,3 +1,8 @@
+import { ApiClientError } from '@/api/client'
+import {
+  WhatsAppReplyWindow,
+  isWhatsAppWindowClosed,
+} from '@/components/inbox/whatsapp-reply-window'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowLeft, ChevronDown, Info, Send } from 'lucide-react'
@@ -87,6 +92,19 @@ export function MobileConversation({
   const lastInteraction = useRef(0)
   const [showLatest, setShowLatest] = useState(false)
   const [details, setDetails] = useState(false)
+  const queryClient = useQueryClient()
+  const user = useAuthStore((state) => state.user)
+  const resolve = useMutation({
+    mutationFn: () =>
+      thread?.threadState === 'resolved'
+        ? inboxApi.reopenThread(leadId)
+        : inboxApi.resolveThread(leadId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
+      void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
+    },
+    onError: (error: Error) => toast.error(error.message),
+  })
   const [channelChoice, setChannel] = useState<InboxChannel | null>(
     CHANNEL_ORDER.includes(initialChannel as InboxChannel)
       ? (initialChannel as InboxChannel)
@@ -175,7 +193,16 @@ export function MobileConversation({
         >
           <Info className="h-5 w-5" />
         </button>
+        <button
+          type="button"
+          className="min-h-11 shrink-0 rounded-md px-2 text-xs text-text-secondary disabled:opacity-40"
+          disabled={!thread || resolve.isPending || user?.role === 'viewer'}
+          onClick={() => resolve.mutate()}
+        >
+          {thread?.threadState === 'resolved' ? 'Reopen' : 'Done'}
+        </button>
       </header>
+      {channel === 'whatsapp' && !!thread && <WhatsAppReplyWindow key={leadId} thread={thread} />}
       <div
         ref={timeline}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3"
@@ -321,8 +348,10 @@ function MobileReplyComposer({
   const [attachments, setAttachments] = useState<MediaFile[]>([])
   const [templateId, setTemplateId] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID())
   const updateDraft = (patch: Partial<typeof draft>) => {
     const next = { ...draft, ...patch }
+    setRequestId(crypto.randomUUID())
     setDraft(next)
     // Persist on each edit, including just before iOS backgrounds this tab.
     // No delayed callback can save one conversation's text into another.
@@ -376,6 +405,7 @@ function MobileReplyComposer({
         .send({
           leadId: thread.leadId,
           channel,
+          clientMessageId: requestId,
           text: draft.plainBody.trim(),
           ...(channel === 'email'
             ? {
@@ -398,10 +428,23 @@ function MobileReplyComposer({
       setAttachments([])
       client.invalidateQueries({ queryKey: ['inbox-thread', thread.leadId] })
       client.invalidateQueries({ queryKey: ['inbox-threads'] })
-      toast.success('Reply submitted')
+      setRequestId(crypto.randomUUID())
+      toast.success(
+        channel === 'whatsapp'
+          ? 'Accepted by Meta. Waiting for delivery confirmation.'
+          : 'Reply submitted',
+      )
       onSent()
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (err: Error) => {
+      if (err instanceof ApiClientError && err.code === 'manual_send_failed')
+        setRequestId(crypto.randomUUID())
+      toast.error(err.message)
+    },
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['inbox-thread', thread.leadId] })
+      void client.invalidateQueries({ queryKey: ['inbox-threads'] })
+    },
   })
   const apply = useMutation({
     networkMode: 'always',
@@ -430,6 +473,7 @@ function MobileReplyComposer({
   })
   const canSend =
     !disabledReason &&
+    !(channel === 'whatsapp' && isWhatsAppWindowClosed(thread)) &&
     !send.isPending &&
     !apply.isPending &&
     !uploading &&

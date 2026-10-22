@@ -462,6 +462,7 @@ export type InboxThreadState =
   'waiting' | 'all' | 'needs_reply' | 'assigned' | 'unassigned' | 'resolved' | 'open'
 
 export type InboxMessageStatus =
+  | 'unconfirmed'
   | 'queued'
   | 'sending'
   | 'sent'
@@ -557,6 +558,15 @@ export interface InboxMessage {
 }
 
 export interface InboxThreadDetail extends InboxThreadSummary {
+  whatsappSession?: {
+    accountId: number | null
+    senderName: string | null
+    senderPhone: string | null
+    isOpen: boolean
+    expiresAt: string | null
+    lastInboundAt: string | null
+    reason: string
+  }
   messages: InboxMessage[]
   senderAccount: InboxSenderAccount | null
   availableSenderAccounts?: InboxSenderAccount[]
@@ -571,11 +581,13 @@ export interface InboxThreadListResponse {
   total: number
   page: number
   pages: number
-  unread: number
+  unread?: number
   needsReply: number
 }
 
 export interface InboxSendPayload {
+  clientMessageId?: string
+  whatsappTemplate?: { name: string; language: string; parameters: string[] }
   leadId: number
   channel: InboxChannel
   text?: string

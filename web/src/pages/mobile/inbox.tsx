@@ -95,11 +95,7 @@ export default function MobileInboxPage() {
   const rows = result.data?.threads ?? []
   return (
     <div className="space-y-4">
-      <MobileRefresh
-        updatedAt={result.dataUpdatedAt}
-        refreshing={result.isFetching}
-        onRefresh={() => void result.refetch()}
-      />
+      <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching} />
       <label className="relative block">
         <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-text-muted" />
         <span className="sr-only">Search conversations</span>

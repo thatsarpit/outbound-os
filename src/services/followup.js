@@ -36,6 +36,11 @@ class FollowupEngine {
       // HTTP layer. Reconcile those rows against BlueBubbles history before a
       // generic crash recovery has a chance to requeue a duplicate.
       const imessage = await imessageService.recoverStuckMessages({ staleMinutes: 5 });
+      // A manual request may have reached Meta before the process stopped. Never turn it into automation.
+      const manual = await prisma.message.updateMany({
+        where: { status: 'sending', direction: 'outbound', channel: 'whatsapp', idempotencyKey: { startsWith: 'manual-wa:' }, updatedAt: { lt: fiveMinAgo } },
+        data: { status: 'unconfirmed', providerStatusReason: 'confirmation_unknown' },
+      });
       const result = await prisma.message.updateMany({
         where: {
           status: 'sending',
@@ -45,11 +50,11 @@ class FollowupEngine {
         },
         data: { status: 'queued' },
       });
-      const count = result.count + imessage.count;
+      const count = result.count + imessage.count + manual.count;
       if (count > 0) {
         logger.info(`🔧 Recovered ${count} stuck 'sending' message(s) (${imessage.confirmed} iMessage confirmed, ${result.count + imessage.requeued} requeued)`);
       }
-      return { count, requeued: result.count + imessage.requeued, imessage };
+      return { count, requeued: result.count + imessage.requeued, unconfirmed: manual.count, imessage };
     } catch (e) {
       logger.warn(`Failed to recover stuck messages: ${e.message}`);
       return { count: 0, error: e.message };

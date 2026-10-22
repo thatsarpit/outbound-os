@@ -232,6 +232,7 @@ model Message {
   providerDeliveryStatus String? // Accepted, temporary failure, delivery or tracked engagement; separate from send acceptance
   providerDeliveryAt   DateTime? // UTC occurrence time of the last applied delivery event
   emailDeliveryEvents  EmailDeliveryEvent[]
+  manualSendKey       String? @unique // Durable claim for manual WhatsApp sends; legacy inbound keys remain unchanged.
   idempotencyKey       String? // Client-supplied key preventing duplicate manual/API sends
   // Durable automation identity. Unlike provider/client idempotency keys this
   // is global across nullable account FKs, so a reboot can safely reconcile a
@@ -1297,4 +1298,20 @@ model WebPushSubscription {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   @@index([viewerKey])
+}
+
+model WhatsAppReceipt {
+  id            Int      @id @default(autoincrement())
+  eventKey      String   @unique
+  accountId     Int
+  waMessageId   String
+  status        String
+  failureCode   Int?
+  failureReason String?
+  pricing       String?
+  receivedAt    DateTime @default(now())
+  lastCheckedAt DateTime?
+  appliedAt     DateTime?
+  @@index([waMessageId, accountId])
+  @@index([appliedAt])
 }

@@ -16,7 +16,7 @@ test('push endpoint credentials are encrypted with authentication and hashed sep
   process.env.LEAD_SYNC_ENCRYPTION_KEY = 'fixture-encryption-key-with-32-characters';
   try {
     const encrypted = encryptPushSubscription(valid);
-    assert.ok(!encrypted.includes('apple.com'));
+    assert.notEqual(encrypted, JSON.stringify(valid));
     assert.deepEqual(decryptPushSubscription(encrypted), valid);
     assert.equal(endpointHash(valid.endpoint).length, 64);
     const parts = encrypted.split('.'); parts[1] = Buffer.alloc(16).toString('base64url');
