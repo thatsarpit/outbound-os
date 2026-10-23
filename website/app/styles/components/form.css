@@ -47,7 +47,7 @@
 textarea.field__input { resize: vertical; min-height: 96px; line-height: 1.55; }
 
 select.field__input {
-  color-scheme: light;
+  color-scheme: inherit;
 }
 
 /* ── Chips: a multi-select that reads as a set of answers, not a listbox. ── */
