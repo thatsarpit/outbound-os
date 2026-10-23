@@ -90,6 +90,18 @@ test('MCP transport authenticates, initializes and exposes tools without contact
     assert.ok(response.tools.length > 20, 'tool catalogue is populated');
     assert.equal(new Set(response.tools.map(tool => tool.name)).size, response.tools.length, 'tool names are unique');
     assert.ok(response.tools.every(tool => tool.inputSchema?.type === 'object'));
+    for (const name of ['send_whatsapp', 'send_whatsapp_file']) {
+      const tool = response.tools.find(tool => tool.name === name);
+      assert.equal(tool.inputSchema.properties.client_message_id.type, 'string');
+      assert.ok(!tool.inputSchema.required.includes('client_message_id'), 'existing MCP callers remain compatible');
+    }
+    for (const [name, args] of [['send_whatsapp', { lead_id: 1, message: 'Fixture reply' }], ['send_whatsapp_file', { lead_id: 1, media_file_id: 1 }]]) {
+      const prepared = await client.callTool({ name, arguments: args });
+      const data = JSON.parse(prepared.content[0].text);
+      assert.equal(prepared.isError, true);
+      assert.equal(data.reason, 'request_id_required', 'no-ID calls prepare an identity without contacting the unreachable backend');
+      assert.match(data.client_message_id, /^[\w-]{16,100}$/);
+    }
     let limited = false;
     for (let attempt = 0; attempt < 125; attempt++) {
       const response = await fetch(`${base}/mcp`, { headers: { Authorization: 'Bearer invalid' } });

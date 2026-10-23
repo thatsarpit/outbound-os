@@ -8,7 +8,7 @@ export function registerSystemTools(server) {
   // ── system_status ──
   server.tool(
     'system_status',
-    'Get system status — sending pause state, connected WhatsApp accounts, dashboard connections, LLM usage',
+    'Get connected/enabled WhatsApp account counts and active dashboard connections.',
     {},
     async () => {
       try {
@@ -43,7 +43,9 @@ export function registerSystemTools(server) {
         const { data } = await get('/api/whatsapp/accounts');
         return ok(data.map(a => ({
           id: a.id,
-          label: a.label,
+          label: a.name || a.label || `WhatsApp #${a.id}`,
+          status: a.status ?? null,
+          provider: a.provider ?? null,
           phone: a.phone,
           enabled: a.enabled,
           isReady: a.isReady,

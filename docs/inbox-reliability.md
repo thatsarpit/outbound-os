@@ -29,3 +29,10 @@ See [device notification setup](notifications/web-push.md). Server-side and simu
 ## Verification
 
 Unit and isolated API tests cover provider/import timestamps, per-number windows, template validation, failure visibility, concurrent request claims, uncertain sends, crash recovery, exact account matching, early/duplicate/out-of-order receipts and provider retry responses. The demo includes an expired conversation with a failed attempt, approved-template preview and a recent open conversation. No real customer messages are sent by these tests.
+
+
+## MCP delivery diagnostics
+
+The `list_messages` tool preserves failed/unconfirmed attempts and includes provider status reasons, sending-account/message IDs, delivery acknowledgements, media metadata and Meta's pricing flags. Acceptance remains distinct from delivery. Fields are explicitly selected; raw account credentials and push endpoints are not returned.
+
+`send_whatsapp` and `send_whatsapp_file` accept an optional `client_message_id`. If absent, the tool prepares and returns an ID without contacting the backend or sending. The caller supplies that known ID on the send call, so a lost result cannot also lose the retry identity. When a connection is interrupted, inspect message history first; reuse that exact ID if retrying the same request. A new intentional message needs a new ID. The tools do not automatically retry a failed network request. Failure results retain the backend reason/status and use MCP's error flag rather than implying success. Approved templates are still managed through the existing dashboard/campaign tools; this change does not send any message on its own.
