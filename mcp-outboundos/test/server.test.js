@@ -90,6 +90,11 @@ test('MCP transport authenticates, initializes and exposes tools without contact
     assert.ok(response.tools.length > 20, 'tool catalogue is populated');
     assert.equal(new Set(response.tools.map(tool => tool.name)).size, response.tools.length, 'tool names are unique');
     assert.ok(response.tools.every(tool => tool.inputSchema?.type === 'object'));
+    for (const name of ['send_whatsapp', 'send_whatsapp_file']) {
+      const tool = response.tools.find(tool => tool.name === name);
+      assert.equal(tool.inputSchema.properties.client_message_id.type, 'string');
+      assert.ok(!tool.inputSchema.required.includes('client_message_id'), 'existing MCP callers remain compatible');
+    }
     let limited = false;
     for (let attempt = 0; attempt < 125; attempt++) {
       const response = await fetch(`${base}/mcp`, { headers: { Authorization: 'Bearer invalid' } });
