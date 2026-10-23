@@ -318,6 +318,20 @@ class WhatsAppManager {
     };
   }
 
+  async sendApprovedTemplate(address, name, language, parameters, accountId) {
+    const account = await prisma.whatsAppAccount.findUnique({ where: { id: accountId } });
+    if (!account?.enabled || !this._hasCredentials(account)) return { success: false, reason: 'account_not_ready' };
+    if (this._isAccountPaused(accountId)) return { success: false, reason: 'account_paused' };
+    const result = await whatsappCloudApi.sendTemplate(address, name, language, parameters.map(text => ({ type: 'text', text })), accountId);
+    if (result.success) {
+      this.consecutiveErrors.set(accountId, 0);
+      this.hourlySent.set(accountId, (this.hourlySent.get(accountId) || 0) + 1);
+      this.lastSendAt.set(accountId, Date.now());
+      await prisma.whatsAppAccount.update({ where: { id: accountId }, data: { messagesSentToday: { increment: 1 } } });
+    }
+    return { ...result, waMessageId: result.messageId || null, accountId };
+  }
+
   /**
    * Trigger an approved AiSensy API Campaign while preserving the same account
    * selection, throttling, and counters used by normal WhatsApp sends.

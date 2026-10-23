@@ -32,6 +32,7 @@ export default function MobileLeadsPage() {
     queryKey: ['mobile-leads', dashboardScope, deferred, page],
     queryFn: () => leadsApi.getLeads({ search: deferred || undefined, page, limit: 25 }),
     enabled: !selected,
+    refetchInterval: 30_000,
   })
   useEffect(() => {
     if (result.data) setPage((current) => Math.min(current, Math.max(1, result.data?.pages ?? 1)))
@@ -49,14 +50,7 @@ export default function MobileLeadsPage() {
     )
   return (
     <div className="space-y-4">
-      <p className="text-sm text-text-secondary">
-        Shared workspace contacts. Open a lead to reply, call, or add a follow-up.
-      </p>
-      <MobileRefresh
-        updatedAt={result.dataUpdatedAt}
-        refreshing={result.isFetching}
-        onRefresh={() => void result.refetch()}
-      />
+      <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching} />
       <label className="relative block">
         <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-text-muted" />
         <span className="sr-only">Search leads</span>

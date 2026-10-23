@@ -28,4 +28,8 @@ for (const [path, size] of [['apple-touch-icon.png', 180], ['app-icon-192.png', 
   assert.equal(png.readUInt32BE(20), size, `${path}: height`);
   if (size !== 180) assert.ok(manifest.icons.some((icon) => icon.src === `/${path}` && icon.sizes === `${size}x${size}`));
 }
+const worker = (await read('push-sw.js', 'javascript')).toString();
+assert.ok(!worker.trimStart().startsWith('<'), 'Push worker must not be the SPA fallback');
+assert.match(worker, /addEventListener\('push'/);
+assert.match(worker, /showNotification/);
 console.log('Web manifest, Apple icon and 192/512px app icons verified.');

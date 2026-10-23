@@ -1,6 +1,7 @@
-import { ExternalLink, Mail, Reply, Send } from 'lucide-react'
+import { Mail, Reply, Send } from 'lucide-react'
 import type { InboxMessage } from '@/api/types'
 import { cn, formatRelativeTime } from '@/lib/utils'
+import { MessageMedia } from './message-media'
 import { ChannelBadge } from './channel-badge'
 import { describeEmailDelivery } from '@/lib/email-delivery'
 
@@ -17,10 +18,8 @@ export function EmailMessageCard({
   return (
     <article
       className={cn(
-        'w-full rounded-[24px] border p-4 shadow-sm animate-slide-up',
-        isInbound
-          ? 'border-info/15 bg-[linear-gradient(180deg,rgba(59,130,246,0.08),rgba(18,18,20,0.92))]'
-          : 'border-border bg-[linear-gradient(180deg,rgba(26,26,30,0.98),rgba(12,12,14,0.94))]',
+        'w-full overflow-hidden rounded-xl border p-4 shadow-sm',
+        isInbound ? 'border-border bg-surface' : 'border-border bg-surface-raised',
         className,
       )}
     >
@@ -53,11 +52,13 @@ export function EmailMessageCard({
             )}
           </div>
           <h3 className="mt-3 text-sm font-semibold text-text-primary">
-            {message.subject || 'Email reply'}
+            {/\{\{\s*contact\./i.test(message.subject || '')
+              ? 'Campaign email · archived subject'
+              : message.subject || 'Email reply'}
           </h3>
           <p className="mt-1 flex items-center gap-1 text-xs text-text-muted">
             <Mail className="h-3.5 w-3.5" />
-            {message.senderDisplay || 'Connected sender'}
+            {message.senderDisplay || (isInbound ? 'Customer email' : 'Connected sender')}
           </p>
         </div>
         <span className="shrink-0 text-[11px] text-text-muted">
@@ -80,20 +81,22 @@ export function EmailMessageCard({
         </p>
       )}
 
-      <div className="mt-4 rounded-md border border-border bg-black/10 px-4 py-3">
-        <p className="whitespace-pre-wrap text-sm leading-6 text-text-primary">
+      {message.direction === 'outbound' &&
+        /\{\{\s*(?:contact\.|unsubscribe\b)/i.test(message.content || '') && (
+          <p className="mt-3 rounded-lg bg-warning-muted px-3 py-2 text-xs leading-5 text-warning">
+            This is an archived campaign template. The provider's delivered copy is not stored here.
+          </p>
+        )}
+      <div className="mt-4 rounded-md border border-border bg-background/50 px-4 py-3">
+        <p className="whitespace-pre-wrap break-words text-sm leading-6 text-text-primary">
           {message.content || 'No preview available for this email yet.'}
         </p>
         {message.mediaUrl && (
-          <a
-            href={message.mediaUrl}
-            target="_blank"
-            rel="noreferrer"
-            className="mt-3 inline-flex items-center gap-1 text-xs text-info transition-colors hover:text-blue-300"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-            View attachment
-          </a>
+          <MessageMedia
+            messageId={message.id}
+            mediaType={message.mediaType}
+            filename={message.mediaFilename}
+          />
         )}
       </div>
     </article>

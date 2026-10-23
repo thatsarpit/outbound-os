@@ -128,6 +128,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
   getHomeRoute: () => getHomeRouteForRole(get().user?.role),
   logout: () => {
+    const token = get()._getToken?.()
+    void import('@/lib/device-push')
+      .then(async ({ detachDevicePush }) => {
+        await detachDevicePush((await token) ?? null)
+      })
+      .catch(() => {
+        /* Browser permission can also be disabled in device settings. */
+      })
     clearSessionDrafts(get().dashboardScope)
     get()._signOut?.()
     set({

@@ -1,3 +1,4 @@
+import { useDashboardNotifications } from '@/hooks/use-dashboard-notifications'
 import { Suspense, lazy, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -90,6 +91,7 @@ function RoleHomeRoute() {
 
 /* ── Auth initializer ── */
 function AuthInit({ children }: { children: React.ReactNode }) {
+  useDashboardNotifications()
   const { checkAuth } = useAuthStore()
 
   useEffect(() => {
@@ -204,6 +206,7 @@ export default function App() {
                   <Route path="tasks" element={<MobileTasksPage />} />
                   <Route path="leads" element={<MobileLeadsPage />} />
                   <Route path="install" element={<MobileInstallPage />} />
+                  <Route path="account" element={<AccountPage />} />
                   <Route path="*" element={<NotFoundPage />} />
                 </Route>
                 {/* Protected */}

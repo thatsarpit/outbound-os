@@ -1,3 +1,4 @@
+import { useInstalledViewport } from '@/hooks/use-installed-viewport'
 import { useEffect } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
@@ -28,15 +29,18 @@ import { useOnlineStatus } from '@/hooks/use-online-status'
 import { getFirstAccessibleRoute } from '@/lib/role-shell'
 import { cn } from '@/lib/utils'
 import { IS_DEMO } from '@/demo/demo-chrome'
+import { NotificationCenter } from '@/components/layout/notification-center'
 import { BrandMark } from '@/components/layout/brand-mark'
 
 const destinations = [
   { to: '/m/inbox', label: 'Inbox', icon: Inbox, capability: 'page.inbox' },
   { to: '/m/tasks', label: 'Tasks', icon: CheckSquare, capability: 'page.leads' },
   { to: '/m/leads', label: 'Leads', icon: Users, capability: 'page.leads' },
+  { to: '/m/account', label: 'More', icon: UserRound, capability: null },
 ]
 
 export function MobileShell() {
+  useInstalledViewport()
   const location = useLocation()
   const { user, logout, hasCapability } = useAuthStore()
   const { toggleTheme, theme, setIsMobileViewport } = useUIStore()
@@ -67,68 +71,76 @@ export function MobileShell() {
                   {IS_DEMO ? 'Outbound OS · sample workspace' : 'Outbound OS'}
                 </p>
                 <h1 className="text-xl font-semibold tracking-tight">
-                  {page?.label ?? 'Sales workspace'}
+                  {page?.label ??
+                    (location.pathname === '/m/account'
+                      ? 'Account'
+                      : location.pathname === '/m/install'
+                        ? 'Install app'
+                        : 'Sales workspace')}
                 </h1>
               </div>
             </div>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  type="button"
-                  aria-label="Sales workspace menu"
-                  className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface-raised text-text-secondary"
+            <div className="flex shrink-0 items-center gap-1">
+              <NotificationCenter />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Sales workspace menu"
+                    className="flex h-11 w-11 items-center justify-center rounded-full border border-border bg-surface-raised text-text-secondary"
+                  >
+                    <span className="text-sm font-semibold">
+                      {(user?.name || 'Sales')
+                        .trim()
+                        .split(/\s+/)
+                        .slice(0, 2)
+                        .map((part) => part[0])
+                        .join('')
+                        .toUpperCase()}
+                    </span>
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  align="end"
+                  className="mobile-sales w-64 [&_[role=menuitem]]:min-h-11"
                 >
-                  <span className="text-sm font-semibold">
-                    {(user?.name || 'Sales')
-                      .trim()
-                      .split(/\s+/)
-                      .slice(0, 2)
-                      .map((part) => part[0])
-                      .join('')
-                      .toUpperCase()}
-                  </span>
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="end"
-                className="mobile-sales w-64 [&_[role=menuitem]]:min-h-11"
-              >
-                <div className="px-3 py-2">
-                  <p className="truncate text-sm font-semibold">{user?.name}</p>
-                  <p className="text-xs text-text-muted">
-                    {user?.role === 'viewer' ? 'Read-only access' : 'Shared sales workspace'}
-                  </p>
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem asChild>
-                  <Link to="/account">
-                    <UserRound className="h-4 w-4" />
-                    Account
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={toggleTheme}>
-                  {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
-                  Change appearance
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/m/install">
-                    <Smartphone className="h-4 w-4" />
-                    Add to Home Screen
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to={`${getFirstAccessibleRoute(user?.role, hasCapability)}?view=desktop`}>
-                    <Monitor className="h-4 w-4" />
-                    Open full dashboard
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem destructive onSelect={() => logout()}>
-                  <LogOut className="h-4 w-4" />
-                  Sign out
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <div className="px-3 py-2">
+                    <p className="truncate text-sm font-semibold">{user?.name}</p>
+                    <p className="text-xs text-text-muted">
+                      {user?.role === 'viewer' ? 'Read-only access' : 'Shared sales workspace'}
+                    </p>
+                  </div>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link to="/m/account">
+                      <UserRound className="h-4 w-4" />
+                      Account
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={toggleTheme}>
+                    {theme === 'light' ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
+                    Change appearance
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/m/install">
+                      <Smartphone className="h-4 w-4" />
+                      Add to Home Screen
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to={`${getFirstAccessibleRoute(user?.role, hasCapability)}?view=desktop`}>
+                      <Monitor className="h-4 w-4" />
+                      Open full dashboard
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem destructive onSelect={() => logout()}>
+                    <LogOut className="h-4 w-4" />
+                    Sign out
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </header>
         )}
         {!online && !conversationOpen && (
@@ -143,7 +155,7 @@ export function MobileShell() {
         <main
           className={cn(
             'min-w-0 flex-1',
-            !conversationOpen && 'px-4 py-4 pb-[calc(6rem+env(safe-area-inset-bottom))]',
+            !conversationOpen && 'px-4 pt-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))]',
           )}
         >
           <ErrorBoundary key={location.pathname}>
@@ -153,10 +165,10 @@ export function MobileShell() {
         {!conversationOpen && (
           <nav
             aria-label="Sales navigation"
-            className="fixed inset-x-0 bottom-0 z-30 mx-auto flex max-w-2xl border-t border-border bg-surface px-3 pt-1 pb-[max(.5rem,env(safe-area-inset-bottom))]"
+            className="fixed inset-x-0 bottom-0 z-30 mx-auto flex max-w-2xl border-t border-border bg-surface/95 px-3 pt-1 pb-[env(safe-area-inset-bottom)]"
           >
             {destinations
-              .filter((item) => hasCapability(item.capability))
+              .filter((item) => !item.capability || hasCapability(item.capability))
               .map(({ to, label, icon: Icon }) => (
                 <NavLink
                   key={to}
@@ -164,7 +176,7 @@ export function MobileShell() {
                   className={({ isActive }) =>
                     cn(
                       'flex min-h-14 flex-1 flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-medium focus-visible:outline-2 focus-visible:outline-focus',
-                      isActive ? 'bg-accent-muted text-accent' : 'text-text-muted',
+                      isActive ? 'text-accent' : 'text-text-muted',
                     )
                   }
                 >

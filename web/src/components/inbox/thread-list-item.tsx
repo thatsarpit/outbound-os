@@ -46,7 +46,7 @@ export function ThreadListItem({
       aria-current={selected ? 'true' : undefined}
       className={cn(
         'relative flex w-full gap-2.5 border-b border-border-subtle py-2.5 pl-3 pr-3 text-left transition-colors',
-        mobile && 'min-h-24 py-4',
+        mobile && 'min-h-22 py-3',
         selected ? 'bg-surface-raised' : 'hover:bg-surface-raised/60',
       )}
     >
@@ -59,8 +59,8 @@ export function ThreadListItem({
         {thread.unread && (
           <span
             className="h-1.5 w-1.5 rounded-full bg-focus"
-            title="Needs reply"
-            aria-label="Needs reply"
+            title="Unread message"
+            aria-label="Unread message"
           />
         )}
       </span>

@@ -8,7 +8,7 @@ import path from 'path';
 import multer from 'multer';
 import { fileURLToPath } from 'url';
 import { createWriteStream, mkdirSync, existsSync, unlinkSync } from 'fs';
-import { randomUUID, randomBytes } from 'crypto';
+import { createHash, randomUUID, randomBytes } from 'crypto';
 
 
 import prisma from './utils/prismaClient.js';
@@ -26,6 +26,10 @@ import settlementRoutes from './routes/settlement.js';
 import productRoutes from './routes/products.js';
 import telegramRoutes from './routes/telegram.js';
 import emailInboxRoutes from './routes/emailInbox.js';
+import { sendManualWhatsApp, whatsappReplyContext } from './services/manualWhatsApp.js';
+import webPushRoutes from './routes/webPush.js';
+import inboxReadStateRoutes from './routes/inboxReadState.js';
+import { inboxViewerKey, inboxThreadState, inboxMessagePreview, localInboxAssigneeId } from './utils/inboxState.js';
 import config from './config.js';
 import logger from './utils/logger.js';
 import activityLog, { EVENT_TYPES } from './utils/activityLog.js';
@@ -50,7 +54,7 @@ import recoveryCoordinator from './services/recoveryCoordinator.js';
 import resourceMonitor from './utils/resourceMonitor.js';
 import webhookDispatcher from './services/webhookDispatcher.js';
 import { workspaceTimezone, zonedParts, zonedTimeToUtc } from './utils/workspaceTime.js';
-import { sendMediaFile, MEDIA_DIR as WHATSAPP_MEDIA_DIR } from './services/whatsappMedia.js';
+import { MEDIA_DIR as WHATSAPP_MEDIA_DIR } from './services/whatsappMedia.js';
 import { whatsappAddress } from './utils/whatsappAddress.js';
 import { mapInboundLead, isSendableMobile, formSubmissionMetadata } from './utils/inboundLead.js';
 import { FORM_SOURCE_PRESETS } from './utils/formSourcePresets.js';
@@ -141,6 +145,7 @@ const VALID_LEAD_STATUSES = ['new', 'contacted', 'replied', 'engaged', 'closed',
 const INBOX_HIDDEN_MESSAGE_STATUSES = ['queued', 'cancelled', 'failed', 'permanently_failed'];
 const INBOX_VISIBLE_MESSAGE_WHERE = { AND: [{ OR: [
   { status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES } },
+  { channel: 'whatsapp', direction: 'outbound', OR: [{ waMessageId: { not: null } }, { idempotencyKey: { startsWith: 'manual-wa:' } }] },
   // An email accepted by the provider stays in conversation history when a
   // subsequent receipt reports failure. It is not an unsent draft.
   { channel: 'email', direction: 'outbound', sentAt: { not: null },
@@ -172,11 +177,8 @@ function isRoleAtLeast(role, minRole) {
   return (levels[role] ?? -1) >= (levels[minRole] ?? 0);
 }
 
-function normalizeInboxThreadState({ lead, lastMessage, assignedToId }) {
-  if (lead.status === 'closed') return 'resolved';
-  if (isHumanReply(lastMessage)) return 'needs_reply';
-  if (assignedToId) return 'assigned';
-  return 'unassigned';
+function normalizeInboxThreadState(input) {
+  return inboxThreadState(input);
 }
 
 function buildInboxMessage(message, emailAccountsById = {}, telegramAccountsById = {}) {
@@ -187,12 +189,12 @@ function buildInboxMessage(message, emailAccountsById = {}, telegramAccountsById
     channel: message.channel || 'whatsapp',
     subject: message.emailSubject || null,
     senderAccountId: message.emailAccountId || message.imessageAccountId || message.telegramAccountId || message.waAccount || null,
-    senderDisplay: telegramAccount?.displayName || telegramAccount?.name || senderAccount?.senderName || senderAccount?.name || senderAccount?.email || null,
+    senderDisplay: message.direction === 'inbound' ? null : telegramAccount?.displayName || telegramAccount?.name || senderAccount?.senderName || senderAccount?.name || senderAccount?.email || null,
     replyToMessageId: null,
   };
 }
 
-function buildInboxThreadSummary(lead, emailAccountsById = {}, telegramAccountsById = {}, lastActionableMessage = undefined) {
+function buildInboxThreadSummary(lead, emailAccountsById = {}, telegramAccountsById = {}, lastActionableMessage = undefined, readState = {}) {
   const lastMessageRaw = Array.isArray(lead.messages) ? lead.messages[0] || null : null;
   const lastMessage = lastMessageRaw ? buildInboxMessage(lastMessageRaw, emailAccountsById, telegramAccountsById) : null;
   const actionable = lastActionableMessage === undefined ? lastMessage : lastActionableMessage;
@@ -218,11 +220,11 @@ function buildInboxThreadSummary(lead, emailAccountsById = {}, telegramAccountsB
     senderAccountId: lastMessage?.senderAccountId || null,
     assignedEmailAccountId: lead.assignedEmailAccountId || null,
     lastMessage: lastMessage?.content || '',
-    lastMessagePreview: lastMessage?.content || '',
+    lastMessagePreview: inboxMessagePreview(lastMessage),
     lastMessageAt: lastMessage?.createdAt || lead.lastMessageAt || lead.updatedAt,
     lastInboundAt: isHumanReply(actionable) ? actionable.createdAt : null,
     lastOutboundAt: actionable?.direction === 'outbound' ? actionable.createdAt : null,
-    unread: threadState === 'needs_reply',
+    unread: (readState.latestInboundMessageId || 0) > (readState.lastReadMessageId || 0),
     replyNeeded: threadState === 'needs_reply',
     assignmentState: lead.assignedToId ? 'assigned' : 'unassigned',
     threadState,
@@ -352,61 +354,14 @@ async function renderEmailTemplateForLead(templateId, leadId) {
   };
 }
 
-async function sendManualWhatsAppMessage({ leadId, text }) {
-  const lead = await prisma.lead.findUnique({ where: { id: leadId } });
-  if (!lead) {
-    const error = new Error('Lead not found');
-    error.statusCode = 404;
-    throw error;
-  }
-
-  const accountId = lead.assignedAccount || (await whatsappManager.getNextAccount());
-  if (!accountId) {
-    const error = new Error('No WhatsApp account is connected. Please connect an account first.');
-    error.statusCode = 503;
-    throw error;
-  }
-
-  // The lead's number, or — for someone Meta identifies only by their
-  // WhatsApp username — their business-scoped user id.
-  const address = whatsappAddress(lead);
-  if (!address) {
-    const error = new Error('This lead has no WhatsApp number or WhatsApp user id to reply to.');
-    error.statusCode = 400;
-    throw error;
-  }
-
-  const result = await whatsappManager.sendMessage(address, text.trim(), accountId);
+async function sendManualWhatsAppMessage(payload) {
+  const result = await sendManualWhatsApp(payload);
   if (!result.success) {
-    const error = new Error(`WhatsApp send failed: ${result.reason || 'unknown error'}`);
-    error.statusCode = 500;
-    error.reason = result.reason;
+    const error = new Error(result.reason === 're_engagement_required' ? 'The WhatsApp reply window is closed. Use an approved template.' : 'This message was not confirmed sent. Review its status in the conversation before retrying.');
+    Object.assign(error, { statusCode: 409, reason: result.reason, code: ['failed', 'permanently_failed'].includes(result.message?.status) ? 'manual_send_failed' : 'manual_send_unconfirmed' });
     throw error;
   }
-
-  const message = await prisma.message.create({
-    data: {
-      leadId: lead.id,
-      direction: 'outbound',
-      channel: 'whatsapp',
-      content: text.trim(),
-      waAccount: accountId,
-      // Without the provider id, delivery receipts and pricing for this
-      // message could only be matched by guessing from the number.
-      waMessageId: result.waMessageId || null,
-      status: 'sent',
-      sentAt: new Date(),
-    },
-  });
-
-  await prisma.lead.update({
-    where: { id: lead.id },
-    data: { status: 'engaged', engagementLevel: 'high', repliedAt: new Date() },
-  });
-
-  activityLog.add('reply', `Sent manual reply to ${lead.name}`, { leadId: lead.id });
-
-  return { lead, accountId, message };
+  return result;
 }
 
 /**
@@ -417,74 +372,30 @@ async function sendManualWhatsAppMessage({ leadId, text }) {
  * media id (services/whatsappMedia.js). Like any free-form message it is
  * only delivered within 24 hours of the lead's last message.
  */
-async function sendWhatsAppFiles({ leadId, mediaFileIds, caption = '', accountId: requestedAccountId = null }) {
-  const fail = (message, statusCode = 400, reason) => {
-    const error = new Error(message);
-    error.statusCode = statusCode;
-    if (reason) error.reason = reason;
-    return error;
-  };
-
-  const lead = await prisma.lead.findUnique({ where: { id: leadId } });
-  if (!lead) throw fail('Lead not found', 404);
-  const address = whatsappAddress(lead);
-  if (!address) throw fail('This lead has no WhatsApp number or WhatsApp user id.');
-  const accountId = requestedAccountId || lead.assignedAccount || (await whatsappManager.getNextAccount());
-  if (!accountId) throw fail('No WhatsApp account is connected. Please connect an account first.', 503);
-
-  const ids = [...new Set(mediaFileIds.map((id) => parseInt(id)).filter(Number.isInteger))].slice(0, 10);
+async function sendWhatsAppFiles({ leadId, mediaFileIds, caption = '', accountId = null, clientMessageId }) {
+  if (clientMessageId !== undefined && (typeof clientMessageId !== 'string' || !/^[\w-]{16,100}$/.test(clientMessageId))) throw Object.assign(new Error('Invalid message request ID.'), { statusCode: 400 });
+  const batchKey = clientMessageId || randomUUID();
+  const ids = [...new Set(mediaFileIds.map(id => parsePositiveInt(id)).filter(Boolean))];
+  if (!ids.length || ids.length > 10) throw Object.assign(new Error('Choose 1–10 files.'), { statusCode: 400 });
   const files = await prisma.mediaFile.findMany({ where: { id: { in: ids } } });
-  if (files.length === 0) throw fail('No files to send.');
-
-  const sent = [];
-  for (const [index, file] of files.entries()) {
+  if (files.length !== ids.length) throw Object.assign(new Error('One or more files are missing from the library.'), { statusCode: 404 });
+  const ordered = ids.map(id => files.find(file => file.id === id));
+  for (const file of ordered) {
     const absolute = path.resolve(__dirname, '..', file.path);
-    if (!absolute.startsWith(path.resolve(WHATSAPP_MEDIA_DIR) + path.sep) || !existsSync(absolute)) {
-      throw fail(`File ${file.originalName} is missing from storage.`, 404);
-    }
-    const fileCaption = index === 0 ? String(caption || '').trim() : '';
-    let result;
-    try {
-      result = await sendMediaFile({
-        address,
-        filePath: absolute,
-        mimeType: file.mimeType,
-        filename: file.originalName,
-        caption: fileCaption,
-        accountId,
-      });
-    } catch (error) {
-      if (error.code === 'provider_unsupported') {
-        throw fail('Sending files needs a number connected through Meta\'s Cloud API. On AiSensy numbers, send the file as a link.', 400, 'provider_unsupported');
-      }
-      throw fail(`Could not send ${file.originalName}: ${error.message}`, 502, error.code);
-    }
-    if (!result.success) {
-      throw fail(result.reason === 're_engagement_required'
-        ? 'WhatsApp only delivers files within 24 hours of the lead\'s last message. Send an approved template first.'
-        : `WhatsApp send failed: ${result.reason || 'unknown error'}`, 502, result.reason);
-    }
-    sent.push(await prisma.message.create({
-      data: {
-        leadId: lead.id,
-        direction: 'outbound',
-        channel: 'whatsapp',
-        content: fileCaption || `[${result.kind === 'pdf' ? 'Document' : result.kind[0].toUpperCase() + result.kind.slice(1)}] ${file.originalName}`,
-        waAccount: accountId,
-        waMessageId: result.messageId || null,
-        mediaUrl: file.path,
-        mediaType: result.kind,
-        mediaCaption: fileCaption || null,
-        mediaFilename: file.originalName,
-        status: 'sent',
-        sentAt: new Date(),
-      },
-    }));
+    if (!absolute.startsWith(path.resolve(WHATSAPP_MEDIA_DIR) + path.sep) || !existsSync(absolute)) throw Object.assign(new Error(`File ${file.originalName} is missing from storage.`), { statusCode: 404 });
   }
-
-  await prisma.lead.update({ where: { id: lead.id }, data: { lastMessageAt: new Date() } });
-  activityLog.add('reply', `Sent ${sent.length} file${sent.length === 1 ? '' : 's'} on WhatsApp to ${lead.name}`, { leadId: lead.id });
-  return { lead, accountId, messages: sent };
+  const messages = [];
+  let result;
+  for (const [index, file] of ordered.entries()) {
+    result = await sendManualWhatsApp({
+      leadId, accountId, text: index === 0 ? caption : '',
+      clientMessageId: createHash('sha256').update(`${batchKey}:${file.id}`).digest('hex'),
+      media: { absolutePath: path.resolve(__dirname, '..', file.path), path: file.path, filename: file.originalName, mimeType: file.mimeType },
+    });
+    if (!result.success) throw Object.assign(new Error(result.reason === 're_engagement_required' ? 'WhatsApp only delivers files within 24 hours of the customer’s last message. Send an approved template, then wait for their reply.' : 'This file was not confirmed sent. Review its status before retrying.'), { statusCode: 502, reason: result.reason, code: ['failed', 'permanently_failed'].includes(result.message?.status) ? 'manual_send_failed' : 'manual_send_unconfirmed' });
+    messages.push(result.message);
+  }
+  return { lead: result.lead, accountId: result.accountId, messages };
 }
 
 /** SSE clients for real-time activity feed */
@@ -495,6 +406,10 @@ export function broadcastEvent(type, data) {
 `;
   sseClients.forEach((res) => { try { res.write(payload); } catch(e) { sseClients.delete(res); } });
 }
+
+activityLog.subscribe((event) => {
+  if (['reply_received', 'email_reply', 'message_failed'].includes(event.type)) broadcastEvent('inbox_changed', { leadId: event.data?.leadId, channel: event.data?.channel });
+});
 
 /**
  * API Server for the Outbound OS Dashboard
@@ -890,6 +805,8 @@ app.use('/api', emailInboxRoutes);
 // Pool scoping runs after auth — platform admins bypass, every other user is
 // 403'd if they reference a poolId they don't have a UserPool row for.
 app.use('/api', requirePoolAccess());
+app.use('/api', inboxReadStateRoutes);
+app.use('/api', webPushRoutes);
 app.use('/api', analyticsViewRoutes);
 // Per-lead authorization: every /api/leads/<numeric>/... request resolves
 // the lead's poolId once and 403s if the user can't access it. This covers
@@ -2010,26 +1927,10 @@ app.post('/api/leads/:id/send', requireRole('agent'), async (req, res) => {
 
     // accountId (optional): forces a specific sender — used by AI outreach so the
     // message is sent from the same round-robin account whose persona drafted it.
-    const sendResult = await whatsappManager.sendMessage(
-      lead.mobile,
-      message,
-      accountId || lead.assignedAccount || undefined
-    );
-    const sent = sendResult.success;
-
-    const msg = await prisma.message.create({
-      data: {
-        leadId: lead.id,
-        direction: 'outbound',
-        channel: 'whatsapp',
-        content: message,
-        waAccount: sendResult.accountId || 0,
-        status: sent
-          ? 'sent'
-          : sendResult.reason === 'not_on_whatsapp' ? 'permanently_failed' : 'failed',
-        sentAt: sent ? new Date() : null,
-      },
-    });
+    const result = await sendManualWhatsApp({ leadId: lead.id, text: message, accountId: parsePositiveInt(accountId), clientMessageId: req.body.clientMessageId });
+    const sendResult = { ...result, accountId: result.accountId };
+    const sent = result.success;
+    const msg = result.message;
 
     if (sent) {
       const handoffStatus = leadStateService.computeManualTakeoverStatus(lead.status);
@@ -2070,7 +1971,7 @@ app.post('/api/leads/:id/send', requireRole('agent'), async (req, res) => {
 
     res.json({ success: !!sent, reason: sendResult.reason, message: msg });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message, ...(error.reason ? { reason: error.reason } : {}) });
   }
 });
 
@@ -3165,8 +3066,10 @@ app.get('/api/inbox/threads', async (req, res) => {
       if (accessiblePools !== null) where.poolId = { in: accessiblePools };
     }
     if (leadId) where.id = leadId;
-    if (assignedToMe && req.user?.sub) {
-      where.assignedToId = Number(req.user.sub);
+    if (assignedToMe) {
+      const assigneeId = localInboxAssigneeId(req.user);
+      if (!assigneeId) return res.status(409).json({ error: 'Personal assignment requires a local user. Clerk assignment identities are not mapped yet.', code: 'assignment_unavailable' });
+      where.assignedToId = assigneeId;
     } else if (assigned === true) {
       where.assignedToId = { not: null };
     } else if (assigned === false) {
@@ -3200,6 +3103,9 @@ app.get('/api/inbox/threads', async (req, res) => {
     // Bound each scan below SQLite's parameter limit; keep scanning the whole
     // queue so older replies and totals are still correct before pagination.
     const candidates = [];
+    const viewerKey = inboxViewerKey(req.user);
+    const readByLead = new Map();
+    const inboundByLead = new Map();
     const scanSize = 400;
     let afterId = 0;
     while (true) {
@@ -3208,7 +3114,7 @@ app.get('/api/inbox/threads', async (req, res) => {
         orderBy: { id: 'asc' },
         take: scanSize,
         select: {
-          id: true, status: true, assignedToId: true, lastMessageAt: true, updatedAt: true,
+          id: true, status: true, inboxResolvedAt: true, assignedToId: true, lastMessageAt: true, updatedAt: true,
           messages: { where: visibleMessageWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
             select: { direction: true, channel: true, emailInboundKind: true, status: true, createdAt: true } },
         },
@@ -3228,15 +3134,26 @@ app.get('/api/inbox/threads', async (req, res) => {
         ...batch.filter(lead => isActionableConversationMessage(lead.messages[0])).map(lead => [lead.id, lead.messages[0]]),
         ...actionableRows.map(lead => [lead.id, lead.messages[0] || null]),
       ]);
+      if (viewerKey && batch.length) {
+        const leadIds = batch.map(lead => lead.id);
+        const [readStates, inboundHeads] = await Promise.all([
+          prisma.inboxReadState.findMany({ where: { viewerKey, leadId: { in: leadIds } }, select: { leadId: true, lastReadMessageId: true } }),
+          prisma.message.groupBy({ by: ['leadId'], where: { leadId: { in: leadIds }, AND: [visibleMessageWhere, HUMAN_REPLY_WHERE] }, _max: { id: true } }),
+        ]);
+        for (const row of readStates) readByLead.set(row.leadId, row.lastReadMessageId);
+        for (const row of inboundHeads) inboundByLead.set(row.leadId, row._max.id);
+      }
       candidates.push(...batch.map(lead => ({ ...lead, lastActionableMessage: actionable.get(lead.id) || null })));
       if (batch.length < scanSize) break;
       afterId = batch[batch.length - 1].id;
     }
-    const queue = candidates.map((lead) => ({
+    const scopedQueue = candidates.map((lead) => ({
       ...lead,
       threadState: normalizeInboxThreadState({ lead, lastMessage: lead.lastActionableMessage, assignedToId: lead.assignedToId }),
       latestAt: lead.messages[0]?.createdAt || lead.lastMessageAt || lead.updatedAt,
-    })).filter((lead) => {
+    }));
+    const queue = scopedQueue.filter((lead) => {
+      if (state === 'waiting') return lead.threadState !== 'resolved' && lead.lastActionableMessage?.direction === 'outbound';
       if (state === 'needs_reply') return lead.threadState === 'needs_reply';
       if (state === 'assigned') return Boolean(lead.assignedToId);
       if (state === 'unassigned') return !lead.assignedToId;
@@ -3261,9 +3178,10 @@ app.get('/api/inbox/threads', async (req, res) => {
     const telegramAccountsById = Object.fromEntries(telegramSenderAccounts.map((account) => [account.id, account]));
     const byId = new Map(leads.map((lead) => [lead.id, lead]));
     const actionableById = new Map(queue.map(lead => [lead.id, lead.lastActionableMessage]));
-    const threads = ids.filter((id) => byId.has(id)).map((id) => buildInboxThreadSummary(byId.get(id), emailAccountsById, telegramAccountsById, actionableById.get(id)));
-    const needsReply = queue.filter((lead) => lead.threadState === 'needs_reply').length;
-    res.json({ threads, total, page, pages: Math.ceil(total / limit), unread: needsReply, needsReply });
+    const threads = ids.filter((id) => byId.has(id)).map((id) => buildInboxThreadSummary(byId.get(id), emailAccountsById, telegramAccountsById, actionableById.get(id), { lastReadMessageId: readByLead.get(id), latestInboundMessageId: inboundByLead.get(id) }));
+    const counts = { all: scopedQueue.length, needsReply: scopedQueue.filter(lead => lead.threadState === 'needs_reply').length, waiting: scopedQueue.filter(lead => lead.threadState !== 'resolved' && lead.lastActionableMessage?.direction === 'outbound').length, resolved: scopedQueue.filter(lead => lead.threadState === 'resolved').length };
+    const unread = scopedQueue.filter(lead => (inboundByLead.get(lead.id) || 0) > (readByLead.get(lead.id) || 0)).length;
+    res.json({ threads, total, page, pages: Math.ceil(total / limit), counts, needsReply: counts.needsReply, unread });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -3315,14 +3233,18 @@ async function sendInboxThreadDetail(req, res) {
     const telegramAccountsById = Object.fromEntries(telegramSenderAccounts.map((account) => [account.id, account]));
     const mappedMessages = lead.messages.map((message) => buildInboxMessage(message, emailAccountsById, telegramAccountsById));
     const lastMessage = lead.messages[lead.messages.length - 1] || null;
+    const viewerKey = inboxViewerKey(req.user);
+    const readState = viewerKey ? await prisma.inboxReadState.findUnique({ where: { leadId_viewerKey: { leadId, viewerKey } }, select: { lastReadMessageId: true } }) : null;
+    const latestInboundMessageId = viewerKey ? lead.messages.reduce((latest, message) => isHumanReply(message) ? Math.max(latest, message.id) : latest, 0) : 0;
     const summary = buildInboxThreadSummary({
       ...lead,
       messages: lastMessage ? [lastMessage] : [],
-    }, emailAccountsById, telegramAccountsById, lead.messages.findLast(isActionableConversationMessage) || null);
+    }, emailAccountsById, telegramAccountsById, lead.messages.findLast(isActionableConversationMessage) || null, { lastReadMessageId: readState?.lastReadMessageId, latestInboundMessageId });
 
     res.json({
       ...summary,
       messages: mappedMessages,
+      whatsappSession: await whatsappReplyContext(lead),
       senderAccount: lead.assignedEmailAccountId ? sanitizeSenderAccount(emailAccountsById[lead.assignedEmailAccountId]) : null,
       sender: lead.assignedEmailAccountId ? sanitizeSenderAccount(emailAccountsById[lead.assignedEmailAccountId]) : null,
       availableSenderAccounts: availableSenderAccounts.map(sanitizeSenderAccount),
@@ -3367,46 +3289,30 @@ app.get('/api/inbox/threads/:leadId/messages', async (req, res) => {
 
 // ==================== INBOX THREAD-STATE OPERATIONS ====================
 
-// POST /api/inbox/threads/:leadId/resolve — mark thread as resolved (sets lead status to closed)
+// Resolving an inbox conversation is independent of the sales pipeline.
 app.post('/api/inbox/threads/:leadId/resolve', requireRole('agent'), async (req, res) => {
   try {
-    const leadId = parseInt(req.params.leadId);
+    const leadId = parsePositiveInt(req.params.leadId);
     if (!leadId) return res.status(400).json({ error: 'Valid lead ID required' });
-
     const lead = await prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
-    if (lead.status === 'closed') return res.json({ id: leadId, status: 'closed', threadState: 'resolved', message: 'Already resolved' });
-
-    await prisma.lead.update({ where: { id: leadId }, data: { status: 'closed' } });
-    webhookDispatcher.dispatch('lead.status_changed', {
-      leadId, name: lead.name, oldStatus: lead.status, newStatus: 'closed',
-    }).catch(() => {});
-
-    res.json({ id: leadId, status: 'closed', threadState: 'resolved' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+    await prisma.lead.update({ where: { id: leadId }, data: { inboxResolvedAt: new Date() } });
+    broadcastEvent('inbox_resolved', { leadId });
+    res.json({ id: leadId, status: lead.status, threadState: 'resolved' });
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-// POST /api/inbox/threads/:leadId/reopen — reopen a resolved thread (sets lead status to engaged)
 app.post('/api/inbox/threads/:leadId/reopen', requireRole('agent'), async (req, res) => {
   try {
-    const leadId = parseInt(req.params.leadId);
+    const leadId = parsePositiveInt(req.params.leadId);
     if (!leadId) return res.status(400).json({ error: 'Valid lead ID required' });
-
     const lead = await prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
-    if (lead.status !== 'closed') return res.json({ id: leadId, status: lead.status, message: 'Thread is not resolved' });
-
-    await prisma.lead.update({ where: { id: leadId }, data: { status: 'engaged' } });
-    webhookDispatcher.dispatch('lead.status_changed', {
-      leadId, name: lead.name, oldStatus: 'closed', newStatus: 'engaged',
-    }).catch(() => {});
-
-    res.json({ id: leadId, status: 'engaged', threadState: 'unassigned' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
+    const updated = await prisma.lead.update({ where: { id: leadId }, data: { inboxResolvedAt: null } });
+    const lastMessage = await prisma.message.findFirst({ where: { leadId, AND: [INBOX_VISIBLE_MESSAGE_WHERE, ACTIONABLE_CONVERSATION_WHERE] }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+    broadcastEvent('inbox_reopened', { leadId });
+    res.json({ id: leadId, status: lead.status, threadState: normalizeInboxThreadState({ lead: updated, lastMessage, assignedToId: lead.assignedToId }) });
+  } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
 // POST /api/inbox/threads/:leadId/assign-self — assign thread to the current user
@@ -3415,8 +3321,8 @@ app.post('/api/inbox/threads/:leadId/assign-self', requireRole('agent'), async (
     const leadId = parseInt(req.params.leadId);
     if (!leadId) return res.status(400).json({ error: 'Valid lead ID required' });
 
-    const userId = req.user?.sub ? parseInt(req.user.sub) : null;
-    if (!userId) return res.status(400).json({ error: 'Could not determine current user' });
+    const userId = localInboxAssigneeId(req.user);
+    if (!userId) return res.status(409).json({ error: 'Personal assignment requires a local user. Clerk assignment identities are not mapped yet.', code: 'assignment_unavailable' });
 
     const lead = await prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
@@ -3767,7 +3673,7 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
 
       // Files, with the typed text as the first file's caption.
       if (attachmentIds.length > 0) {
-        const sent = await sendWhatsAppFiles({ leadId, mediaFileIds: attachmentIds, caption: text });
+        const sent = await sendWhatsAppFiles({ leadId, mediaFileIds: attachmentIds, caption: text, accountId: parsePositiveInt(req.body?.accountId), clientMessageId: req.body?.clientMessageId });
         broadcastEvent('manual_reply', {
           leadId: sent.lead.id,
           accountId: sent.accountId,
@@ -3777,9 +3683,9 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
         return res.json({ success: true, channel: 'whatsapp', message: sent.messages[0], messages: sent.messages });
       }
 
-      if (!text) return res.status(400).json({ error: 'text is required for WhatsApp sends' });
+      if (!text && !req.body?.whatsappTemplate) return res.status(400).json({ error: 'Write a reply or choose an approved template.' });
 
-      const result = await sendManualWhatsAppMessage({ leadId, text });
+      const result = await sendManualWhatsAppMessage({ leadId, text, accountId: parsePositiveInt(req.body?.accountId), template: req.body?.whatsappTemplate, clientMessageId: req.body?.clientMessageId });
       broadcastEvent('manual_reply', {
         leadId: result.lead.id,
         accountId: result.accountId,
@@ -3919,7 +3825,7 @@ app.post('/api/inbox/reply', requireRole('agent'), async (req, res) => {
     const text = String(req.body?.text || '').trim();
     if (!leadId || !text) return res.status(400).json({ error: 'leadId and text are required' });
 
-    const result = await sendManualWhatsAppMessage({ leadId, text });
+    const result = await sendManualWhatsAppMessage({ leadId, text, clientMessageId: req.body?.clientMessageId });
     broadcastEvent('manual_reply', {
       leadId: result.lead.id,
       accountId: result.accountId,
@@ -4951,6 +4857,7 @@ app.post('/api/leads/:id/send-media', requireRole('agent'), async (req, res) => 
       leadId: parseInt(req.params.id),
       mediaFileIds: ids,
       caption: req.body?.caption,
+      clientMessageId: req.body?.clientMessageId,
       accountId: parsePositiveInt(req.body?.accountId),
     });
     broadcastEvent('manual_reply', { leadId: sent.lead.id, accountId: sent.accountId, channel: 'whatsapp', threadKey: `whatsapp:${sent.lead.id}` });
@@ -5166,53 +5073,23 @@ app.post('/api/whatsapp/accounts/:id/test-connection', requireRole('admin'), asy
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// POST /api/leads/:id/send-cloud-text
+// Legacy Cloud API entry points share the same durable manual-send path as Inbox.
 app.post('/api/leads/:id/send-cloud-text', requireRole('agent'), async (req, res) => {
   try {
-    const lead = await prisma.lead.findUnique({ where: { id: parseInt(req.params.id) } });
-    if (!lead) return res.status(404).json({ error: 'Lead not found' });
-    if (!lead.mobile) return res.status(422).json({ error: 'Lead has no mobile number' });
-
-    const { text, accountId } = req.body;
-    if (!text?.trim()) return res.status(400).json({ error: 'text is required' });
-
-    const result = await whatsappCloudApi.sendTextMessage(lead.mobile, text.trim(), accountId ? parseInt(accountId) : null);
-
-    const message = await prisma.message.create({
-      data: {
-        leadId: lead.id,
-        direction: 'outbound',
-        channel: 'whatsapp',
-        content: text.trim(),
-        waAccount: accountId || 0,
-        status: result.success ? 'sent' : 'failed',
-        sentAt: result.success ? new Date() : null,
-      },
-    });
-
-    if (!result.success) return res.status(422).json({ error: result.reason, rawError: result.rawError });
-    res.json({ ok: true, messageId: result.messageId, dbId: message.id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const result = await sendManualWhatsAppMessage({ leadId: parsePositiveInt(req.params.id), text: req.body?.text, accountId: parsePositiveInt(req.body?.accountId), clientMessageId: req.body?.clientMessageId });
+    broadcastEvent('manual_reply', { leadId: result.lead.id, accountId: result.accountId, channel: 'whatsapp' });
+    res.json({ ok: true, messageId: result.message.waMessageId, dbId: result.message.id });
+  } catch (error) { res.status(error.statusCode || 500).json({ error: error.message, reason: error.reason }); }
 });
 
-// POST /api/leads/:id/send-cloud-template — send Meta HSM approved template
 app.post('/api/leads/:id/send-cloud-template', requireRole('agent'), async (req, res) => {
   try {
-    const lead = await prisma.lead.findUnique({ where: { id: parseInt(req.params.id) } });
-    if (!lead) return res.status(404).json({ error: 'Lead not found' });
-    if (!lead.mobile) return res.status(422).json({ error: 'Lead has no mobile number' });
-
-    const { templateName, languageCode = 'en', components = [], accountId } = req.body;
-    if (!templateName) return res.status(400).json({ error: 'templateName required' });
-
-    const result = await whatsappCloudApi.sendTemplate(
-      lead.mobile, templateName, languageCode, components,
-      accountId ? parseInt(accountId) : null
-    );
-
-    if (!result.success) return res.status(422).json({ error: result.reason, rawError: result.rawError });
-    res.json({ ok: true, messageId: result.messageId });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    const { templateName, languageCode = 'en', components = [], accountId, clientMessageId } = req.body;
+    if (!Array.isArray(components) || components.some(row => row.type !== 'text' || typeof row.text !== 'string')) return res.status(400).json({ error: 'This composer supports approved text-body templates.' });
+    const result = await sendManualWhatsAppMessage({ leadId: parsePositiveInt(req.params.id), accountId: parsePositiveInt(accountId), clientMessageId, template: { name: templateName, language: languageCode, parameters: components.map(row => row.text) } });
+    broadcastEvent('manual_reply', { leadId: result.lead.id, accountId: result.accountId, channel: 'whatsapp' });
+    res.json({ ok: true, messageId: result.message.waMessageId, dbId: result.message.id });
+  } catch (error) { res.status(error.statusCode || 500).json({ error: error.message, reason: error.reason }); }
 });
 
 // GET /api/imessage/accounts — list all iMessage accounts

@@ -101,9 +101,12 @@ export function AppShell() {
       /* Use the explicit URL choice when storage is blocked. */
     }
   }, [wantsDesktop])
-  const salesRoute = { '/overview': '/m/inbox', '/inbox': '/m/inbox', '/leads': '/m/leads' }[
-    location.pathname
-  ]
+  const salesRoute = {
+    '/overview': '/m/inbox',
+    '/inbox': '/m/inbox',
+    '/leads': '/m/leads',
+    '/account': '/m/account',
+  }[location.pathname]
   let desktopChosen = wantsDesktop
   try {
     desktopChosen ||= sessionStorage.getItem('oos_full_dashboard') === 'true'

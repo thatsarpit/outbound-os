@@ -1,3 +1,4 @@
+import { recordMetaReceipt } from '../services/whatsappDelivery.js';
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import prisma from '../utils/prismaClient.js';
@@ -305,8 +306,7 @@ router.post('/webhook/meta', async (req, res) => {
       : 'Meta webhook rejected — set META_APP_SECRET to accept Meta webhooks');
     return res.sendStatus(401);
   }
-  // Acknowledge first; Meta retries anything that is not a quick 2xx.
-  res.sendStatus(200);
+  // Acknowledge only after messages and receipt facts are durable. Failures must be retried by Meta.
 
   try {
     for (const entry of req.body?.entry || []) {
@@ -332,7 +332,7 @@ router.post('/webhook/meta', async (req, res) => {
         }
 
         for (const msg of value.messages || []) {
-          if (aisensyAlreadyHandled(`meta:${msg?.id}`)) continue;
+          if (msg?.id && await prisma.message.findFirst({ where: { waMessageId: msg.id, direction: 'inbound' }, select: { id: true } })) continue;
           const contact = (msg?.from_user_id && contactsByUserId.get(String(msg.from_user_id)))
             || (msg?.from && contactsByPhone.get(String(msg.from)))
             || (value.contacts?.length === 1 ? value.contacts[0] : null);
@@ -359,20 +359,23 @@ router.post('/webhook/meta', async (req, res) => {
 
         for (const receipt of value.statuses || []) {
           const error = receipt?.errors?.[0];
-          await applyWhatsAppDeliveryStatus({
-            provider: 'Meta',
+          await recordMetaReceipt({
+            accountId,
+            timestamp: receipt?.timestamp,
             waMessageId: receipt?.id,
             status: receipt?.status,
             phone: receipt?.recipient_id,
             failureCode: error?.code,
-            failureReason: error?.title || error?.message,
+            failureReason: error?.error_data?.details || error?.title || error?.message,
             pricing: receipt?.pricing,
           });
         }
       }
     }
-  } catch (err) {
-    logger.error(`Meta webhook error: ${err.message}`);
+    res.sendStatus(200);
+  } catch {
+    logger.error('Meta webhook persistence failed; requesting provider retry.');
+    res.sendStatus(503);
   }
 });
 

@@ -104,6 +104,7 @@ export function getThreadSubtitle(thread: {
 }): string | null {
   switch (thread.channel) {
     case 'email':
+      if (/\{\{\s*contact\./i.test(thread.subject || '')) return 'Campaign email'
       return thread.subject || thread.senderDisplay || thread.leadEmail || null
     case 'telegram':
       return thread.senderDisplay || thread.leadCompany || thread.leadMobile || null

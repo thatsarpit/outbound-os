@@ -1,3 +1,5 @@
+import { DeviceNotifications } from '@/components/notifications/device-notifications'
+import { useLocation } from 'react-router-dom'
 import { useState, type FormEvent } from 'react'
 import { useClerk } from '@clerk/react'
 import { Monitor, Moon, Sun } from 'lucide-react'
@@ -47,14 +49,17 @@ const inputClass =
   'h-9 w-full rounded-md border border-border bg-surface px-2.5 text-[13px] text-text-primary placeholder:text-text-muted focus:border-focus focus:outline-none focus:ring-3 focus:ring-focus-muted disabled:opacity-60'
 
 export default function AccountPage() {
+  const mobile = useLocation().pathname.startsWith('/m/')
   const { user } = useAuthStore()
   const { theme, setTheme } = useUIStore()
   const experience = ROLE_EXPERIENCE[user?.role || 'viewer']
   const provider = useAuthStore((state) => state.provider)
 
   return (
-    <div className="animate-fade-in space-y-6">
-      <PageHeader title="Account" description="Your profile, sign-in and appearance." />
+    <div className={cn('animate-fade-in space-y-6', mobile && 'mobile-account')}>
+      {!mobile && (
+        <PageHeader title="Account" description="Your profile, sign-in and appearance." />
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <SectionCard title="Profile" description="How you appear to the rest of the workspace.">
@@ -76,6 +81,7 @@ export default function AccountPage() {
         </SectionCard>
 
         <div className="space-y-4">
+          <DeviceNotifications />
           {provider === 'clerk' ? (
             <SectionCard title="Password & security" description="Managed by Clerk.">
               <p className="text-[13px] text-text-secondary">
@@ -173,7 +179,10 @@ function ChangePasswordForm() {
           onChange={(event) => setCurrentPassword(event.target.value)}
         />
       </Field>
-      <Field label="New password" hint={tooShort ? 'Use at least 10 characters.' : 'At least 10 characters.'}>
+      <Field
+        label="New password"
+        hint={tooShort ? 'Use at least 10 characters.' : 'At least 10 characters.'}
+      >
         <input
           className={inputClass}
           type="password"

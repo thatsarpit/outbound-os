@@ -1,6 +1,7 @@
 export function buildReplySubject(subject?: string | null) {
   const normalizedSubject = subject?.trim()
   if (!normalizedSubject) return 'Follow up from Outbound OS'
+  if (/\{\{\s*contact\./i.test(normalizedSubject)) return 'Re: Your enquiry'
   return /^re:/i.test(normalizedSubject) ? normalizedSubject : `Re: ${normalizedSubject}`
 }
 

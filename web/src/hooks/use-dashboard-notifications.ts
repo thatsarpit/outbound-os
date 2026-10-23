@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { overviewApi } from '@/api/endpoints/overview'
 import { api } from '@/api/client'
 import { useAuthStore, getSessionToken } from '@/stores/auth-store'
@@ -150,11 +151,13 @@ function normalizeStreamPayload(raw: string): StreamPayload | null {
 }
 
 export function useDashboardNotifications() {
-  const { user } = useAuthStore()
+  const { user, dashboardScope } = useAuthStore()
+  const queryClient = useQueryClient()
+  const authenticated = Boolean(user)
 
   useEffect(() => {
     let mounted = true
-    const scopeKey = user?.id ? `user-${user.id}` : 'global'
+    const scopeKey = dashboardScope
     notificationActions.resetSession()
     notificationActions.setScopeKey(scopeKey)
 
@@ -188,13 +191,26 @@ export function useDashboardNotifications() {
     // it is now async and has to happen before the connection opens rather
     // than as a synchronous read.
     let source: EventSource | null = null
-    let refreshInterval: number | null = null
+    let retryTimer: number | undefined
+    let retryDelay = 2000
 
     async function connect() {
-      const token = await getSessionToken()
+      let token: string | null
+      try {
+        token = await getSessionToken()
+      } catch {
+        if (mounted)
+          retryTimer = window.setTimeout(() => {
+            void connect()
+          }, 5000)
+        return
+      }
       if (!mounted) return
       if (!token) {
-        notificationActions.setConnectionState(false, 'Offline')
+        notificationActions.setConnectionState(false, 'Reconnecting')
+        retryTimer = window.setTimeout(() => {
+          void connect()
+        }, 5000)
         return
       }
 
@@ -204,6 +220,7 @@ export function useDashboardNotifications() {
       notificationActions.setConnectionState(false, 'Connecting...')
 
       source.onopen = () => {
+        retryDelay = 2000
         notificationActions.setConnectionState(true, 'Live updates')
       }
 
@@ -217,6 +234,12 @@ export function useDashboardNotifications() {
 
         const data = payload.data || {}
         const leadId = getNumericMeta(data.leadId)
+        void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
+        if (leadId) void queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
+        if (payload.type.startsWith('inbox_')) {
+          void hydrate()
+          return
+        }
         const accountId = getNumericMeta(data.accountId)
         const channel = normalizeChannel(data.channel)
         const threadKey = deriveThreadKey(leadId, channel, data)
@@ -241,22 +264,40 @@ export function useDashboardNotifications() {
         source?.close()
         if (mounted) {
           void hydrate()
+          retryTimer = window.setTimeout(() => {
+            void connect()
+          }, retryDelay)
+          retryDelay = Math.min(30_000, retryDelay * 2)
         }
       }
-
-      // Refresh persisted notifications every 60s to pick up events from
-      // other users / server-side automation that didn't emit SSE to this client.
-      refreshInterval = window.setInterval(() => {
-        void hydrate()
-      }, 60_000)
     }
 
-    void connect()
+    // Refresh persisted notifications every 60s to pick up events from
+    // other users / server-side automation that didn't emit SSE to this client.
+    const refreshInterval = window.setInterval(() => {
+      void hydrate()
+    }, 60_000)
 
+    if (authenticated) void connect()
+    const resume = () => {
+      if (!authenticated || document.visibilityState !== 'visible' || !navigator.onLine) return
+      void queryClient.invalidateQueries({ queryKey: ['inbox-thread'] })
+      void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
+      void hydrate()
+      if (!source || source.readyState === EventSource.CLOSED) {
+        window.clearTimeout(retryTimer)
+        void connect()
+      }
+    }
+    window.addEventListener('online', resume)
+    document.addEventListener('visibilitychange', resume)
     return () => {
       mounted = false
       source?.close()
-      if (refreshInterval !== null) window.clearInterval(refreshInterval)
+      window.removeEventListener('online', resume)
+      document.removeEventListener('visibilitychange', resume)
+      window.clearInterval(refreshInterval)
+      window.clearTimeout(retryTimer)
     }
-  }, [user?.id])
+  }, [authenticated, dashboardScope, queryClient])
 }

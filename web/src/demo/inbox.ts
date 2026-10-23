@@ -151,8 +151,8 @@ const THREADS: Thread[] = [
     senderAccountId: 1,
     assignedToId: 3,
     unread: false,
-    replyNeeded: false,
-    threadState: 'resolved',
+    replyNeeded: true,
+    threadState: 'needs_reply',
     assignmentState: 'assigned',
   },
   {
@@ -296,6 +296,10 @@ const MESSAGES: InboxMessage[] = [
     'Your order ACM-1042 is packed and ships tomorrow morning. Tracking follows once it is collected.',
   ),
   message(5, 'inbound', 1450, 'Order confirmed. Thanks for the quick turnaround.'),
+  message(5, 'outbound', 10, 'Do you need anything else for this order?', {
+    status: 'failed',
+    providerStatusReason: 're_engagement_required',
+  }),
   message(
     6,
     'outbound',
@@ -335,6 +339,33 @@ const REPLIES: Record<number, string> = {
   5: 'Received, thanks. We will reorder next month.',
 }
 const replied = new Set<number>()
+
+const APPROVED_TEMPLATES = [
+  {
+    name: 'sales_reconnect',
+    language: 'en_GB',
+    category: 'MARKETING',
+    body: 'Hi {{1}}, would you like us to follow up on your enquiry?',
+    bodyVariables: ['1'],
+    manualSupported: true,
+  },
+]
+function demoSession(leadId: number) {
+  const last = MESSAGES.filter(
+    (row) => row.leadId === leadId && row.channel === 'whatsapp' && row.direction === 'inbound',
+  ).slice(-1)[0]
+  const expiresAt = last
+    ? new Date(Date.parse(last.sentAt || last.createdAt) + 24 * 60 * 60_000).toISOString()
+    : null
+  return {
+    accountId: 1,
+    lastInboundAt: last?.sentAt || null,
+    expiresAt,
+    isOpen: Boolean(expiresAt && Date.parse(expiresAt) > Date.now()),
+    senderName: 'Acme Sales',
+    senderPhone: '+1 555 010 0000',
+  }
+}
 
 function summary(thread: Thread) {
   const own = MESSAGES.filter((m) => m.leadId === thread.leadId)
@@ -459,12 +490,15 @@ export async function handleInboxRequest(
     return new Response(null, { status: 204 })
   }
 
+  if (/\/api\/whatsapp\/accounts\/\d+\/templates$/.test(path.pathname))
+    return json({ ok: true, templates: APPROVED_TEMPLATES })
+
   if (path.pathname.endsWith('/api/inbox/senders')) {
     return json(Object.values(SENDERS))
   }
 
   const detail = path.pathname.match(
-    /\/api\/inbox\/threads\/(\d+)(\/(resolve|reopen|assign-self))?$/,
+    /\/api\/inbox\/threads\/(\d+)(\/(resolve|reopen|assign-self|read))?$/,
   )
   if (detail) {
     const thread = THREADS.find((t) => t.leadId === Number(detail[1]))
@@ -479,13 +513,14 @@ export async function handleInboxRequest(
       thread.assignedToId = 1
       thread.assignmentState = 'assigned_to_me'
       if (thread.threadState === 'needs_reply') thread.threadState = 'assigned'
-    } else {
+    } else if (action === 'read') {
       thread.unread = false
     }
     if (action) refresh(thread.leadId)
     return json({
       ...summary(thread),
       id: thread.leadId,
+      whatsappSession: demoSession(thread.leadId),
       status: thread.threadState,
       messages: MESSAGES.filter((m) => m.leadId === thread.leadId),
       senderAccount: SENDERS[thread.channel],
@@ -499,9 +534,14 @@ export async function handleInboxRequest(
     const search = (path.searchParams.get('search') || '').toLowerCase()
     const threads = THREADS.map(summary)
       .filter((t) => !channel || t.channel === channel)
+      .filter(
+        (t) => path.searchParams.get('assigned') !== 'false' || t.assignmentState === 'unassigned',
+      )
+      .filter((t) => path.searchParams.get('assignedToMe') !== 'true' || t.assignedToId === 1)
       .filter((t) => {
         if (!state || state === 'all') return true
         if (state === 'needs_reply') return t.replyNeeded
+        if (state === 'waiting') return !t.replyNeeded && t.threadState !== 'resolved'
         if (state === 'assigned') return t.assignmentState !== 'unassigned'
         if (state === 'unassigned') return t.assignmentState === 'unassigned'
         return t.threadState === state
@@ -526,7 +566,19 @@ export async function handleInboxRequest(
     const body = await readBody(init)
     const thread = THREADS.find((t) => t.leadId === Number(body.leadId))
     if (!thread) return json({ error: 'Conversation not found' }, 404)
-    const text = String(body.text ?? body.body ?? '').trim()
+    const chosen = body.whatsappTemplate as { name: string; parameters: string[] } | undefined
+    const approved = chosen && APPROVED_TEMPLATES.find((row) => row.name === chosen.name)
+    const text = approved
+      ? approved.body.replace(
+          /\{\{\s*(\d+)\s*\}\}/g,
+          (_match, index) => chosen?.parameters[Number(index) - 1] || '',
+        )
+      : String(body.text ?? body.body ?? '').trim()
+    if (body.channel === 'whatsapp' && !approved && !demoSession(thread.leadId).isOpen)
+      return json(
+        { error: 'The 24-hour reply window is closed. Choose an approved template.' },
+        409,
+      )
     if (text.includes('[demo-fail]'))
       return json({
         success: false,

@@ -47,9 +47,6 @@ export default function MobileTasksPage() {
   const rows = Array.isArray(result.data?.tasks) ? result.data.tasks : []
   return (
     <div className="space-y-4">
-      <p className="text-sm text-text-secondary">
-        Workspace follow-ups. Open a lead to add or review its tasks.
-      </p>
       <div className="flex rounded-lg border border-border bg-surface p-1">
         {[false, true].map((all) => (
           <button
@@ -66,11 +63,7 @@ export default function MobileTasksPage() {
           </button>
         ))}
       </div>
-      <MobileRefresh
-        updatedAt={result.dataUpdatedAt}
-        refreshing={result.isFetching}
-        onRefresh={() => void result.refetch()}
-      />
+      <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching} />
       {result.isPending ? (
         <p role="status" className="py-10 text-center text-sm text-text-muted">
           Loading follow-ups…
