@@ -1,12 +1,17 @@
+import { ApiClientError } from '@/api/client'
+import {
+  WhatsAppReplyWindow,
+  isWhatsAppWindowClosed,
+} from '@/components/inbox/whatsapp-reply-window'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowLeft, ChevronDown, Info, Send } from 'lucide-react'
 import { inboxApi } from '@/api/endpoints/inbox'
 import { EMAIL_TEMPLATE_LIST_QUERY_KEY, templatesApi } from '@/api/endpoints/templates'
 import type { InboxChannel, InboxThreadDetail, MediaFile } from '@/api/types'
+import { EmailMessageCard } from '@/components/inbox/email-message-card'
 import { EmailEditor } from '@/components/inbox/email-editor'
 import { AttachmentPicker } from '@/components/inbox/attachment-picker'
-import { MessageMedia } from '@/components/inbox/message-media'
 import { MessageBubble } from '@/components/inbox/whatsapp-message-bubble'
 import {
   Dialog,
@@ -16,15 +21,15 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { MobileLeadPanel } from './lead-panel'
-import { MobileError, mobileInput, mobileButton, mobileDueDate } from './mobile-shared'
-import { useWorkspaceTimezone } from '@/hooks/use-workspace-timezone'
+import { MobileError, mobileInput, mobileButton } from './mobile-shared'
 import { useAuthStore } from '@/stores/auth-store'
 import { useOnlineStatus } from '@/hooks/use-online-status'
 import { CHANNELS, CHANNEL_ORDER } from '@/lib/channels'
 import { buildReplySubject, getRenderedTemplateText } from '@/lib/email-compose'
 import { clearSubmittedDraft, loadDraft, saveDraft, type EmailDraft } from '@/lib/email-drafts'
-import { describeEmailDelivery, isReplyableEmail } from '@/lib/email-delivery'
+import { isReplyableEmail } from '@/lib/email-delivery'
 import { IS_DEMO } from '@/demo/demo-chrome'
+import { useConversationRead } from '@/hooks/use-conversation-read'
 import { toast } from '@/stores/toast-store'
 
 // visualViewport follows Safari's keyboard and browser chrome. The timeline
@@ -80,13 +85,26 @@ export function MobileConversation({
   onChannelNavigate: (channel: InboxChannel) => void
 }) {
   const { dashboardScope } = useAuthStore()
-  const { timezone } = useWorkspaceTimezone()
   const frame = useConversationViewport()
   const timeline = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
+  const lastInteraction = useRef(0)
   const [showLatest, setShowLatest] = useState(false)
   const [details, setDetails] = useState(false)
+  const queryClient = useQueryClient()
+  const user = useAuthStore((state) => state.user)
+  const resolve = useMutation({
+    mutationFn: () =>
+      thread?.threadState === 'resolved'
+        ? inboxApi.reopenThread(leadId)
+        : inboxApi.resolveThread(leadId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
+      void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
+    },
+    onError: (error: Error) => toast.error(error.message),
+  })
   const [channelChoice, setChannel] = useState<InboxChannel | null>(
     CHANNEL_ORDER.includes(initialChannel as InboxChannel)
       ? (initialChannel as InboxChannel)
@@ -102,6 +120,7 @@ export function MobileConversation({
     refetchInterval: 10_000,
   })
   const thread = result.data
+  const markRead = useConversationRead(thread || null)
   const channel =
     channelChoice ??
     (thread?.messages.length
@@ -118,6 +137,14 @@ export function MobileConversation({
     accounts[0]?.id ??
     null
   const hasThread = Boolean(thread)
+  useEffect(() => {
+    const readVisible = () => {
+      if (stick.current) markRead()
+    }
+    readVisible()
+    document.addEventListener('visibilitychange', readVisible)
+    return () => document.removeEventListener('visibilitychange', readVisible)
+  }, [markRead])
   useEffect(() => {
     const node = timeline.current
     if (!node || !content.current) return
@@ -166,14 +193,36 @@ export function MobileConversation({
         >
           <Info className="h-5 w-5" />
         </button>
+        <button
+          type="button"
+          className="min-h-11 shrink-0 rounded-md px-2 text-xs text-text-secondary disabled:opacity-40"
+          disabled={!thread || resolve.isPending || user?.role === 'viewer'}
+          onClick={() => resolve.mutate()}
+        >
+          {thread?.threadState === 'resolved' ? 'Reopen' : 'Done'}
+        </button>
       </header>
+      {channel === 'whatsapp' && !!thread && <WhatsAppReplyWindow key={leadId} thread={thread} />}
       <div
         ref={timeline}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3"
+        onTouchMove={() => {
+          lastInteraction.current = Date.now()
+        }}
+        onWheel={() => {
+          lastInteraction.current = Date.now()
+        }}
+        onPointerDown={() => {
+          lastInteraction.current = Date.now()
+        }}
         onScroll={() => {
           const node = timeline.current
           if (node) {
-            stick.current = node.scrollHeight - node.scrollTop - node.clientHeight < 64
+            const atBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 64
+            if (atBottom) {
+              stick.current = true
+              markRead()
+            } else if (Date.now() - lastInteraction.current < 400) stick.current = false
             setShowLatest(!stick.current)
           }
         }}
@@ -194,52 +243,12 @@ export function MobileConversation({
             </p>
           ) : (
             thread.messages.map((message, index, all) => {
-              const delivery = describeEmailDelivery(message)
               return message.channel === 'email' ? (
-                <article
+                <EmailMessageCard
                   key={message.id}
-                  className={`max-w-[95%] rounded-xl border border-border p-3 ${message.direction === 'inbound' ? 'mr-auto bg-surface' : 'ml-auto bg-surface-raised'}`}
-                >
-                  <div className="flex items-center justify-between gap-2 text-[11px] text-text-muted">
-                    <span
-                      className={
-                        delivery.failed
-                          ? 'text-danger'
-                          : delivery.temporary
-                            ? 'text-warning'
-                            : undefined
-                      }
-                    >
-                      {message.direction === 'inbound' ? 'Received email' : 'Outbound email'} ·{' '}
-                      {delivery.label}
-                    </span>
-                  </div>
-                  {delivery.detail && (
-                    <p
-                      className={`mt-2 text-xs leading-5 ${delivery.failed ? 'text-danger' : delivery.temporary ? 'text-warning' : 'text-text-muted'}`}
-                    >
-                      {delivery.detail}
-                    </p>
-                  )}
-                  <p className="mt-2 break-words text-sm font-medium">
-                    {message.subject || 'Email reply'}
-                  </p>
-                  <p className="mt-1 break-all text-xs text-text-muted">{message.senderDisplay}</p>
-                  <p className="mt-3 whitespace-pre-wrap break-words text-sm leading-6">
-                    {message.content}
-                  </p>
-                  {message.mediaUrl && (
-                    <MessageMedia
-                      messageId={message.id}
-                      mediaType={message.mediaType}
-                      filename={message.mediaFilename}
-                      className="min-h-11"
-                    />
-                  )}
-                  <p className="mt-3 text-[11px] text-text-muted">
-                    {mobileDueDate(message.sentAt || message.createdAt, timezone)}
-                  </p>
-                </article>
+                  message={message}
+                  className={`max-w-[95%] p-3 ${message.direction === 'inbound' ? 'mr-auto' : 'ml-auto'}`}
+                />
               ) : (
                 <MessageBubble
                   key={message.id}
@@ -259,6 +268,7 @@ export function MobileConversation({
             stick.current = true
             if (timeline.current) timeline.current.scrollTop = timeline.current.scrollHeight
             setShowLatest(false)
+            markRead()
           }}
         >
           <ArrowDown className="h-4 w-4" />
@@ -338,8 +348,10 @@ function MobileReplyComposer({
   const [attachments, setAttachments] = useState<MediaFile[]>([])
   const [templateId, setTemplateId] = useState('')
   const [uploading, setUploading] = useState(false)
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID())
   const updateDraft = (patch: Partial<typeof draft>) => {
     const next = { ...draft, ...patch }
+    setRequestId(crypto.randomUUID())
     setDraft(next)
     // Persist on each edit, including just before iOS backgrounds this tab.
     // No delayed callback can save one conversation's text into another.
@@ -393,6 +405,7 @@ function MobileReplyComposer({
         .send({
           leadId: thread.leadId,
           channel,
+          clientMessageId: requestId,
           text: draft.plainBody.trim(),
           ...(channel === 'email'
             ? {
@@ -415,10 +428,23 @@ function MobileReplyComposer({
       setAttachments([])
       client.invalidateQueries({ queryKey: ['inbox-thread', thread.leadId] })
       client.invalidateQueries({ queryKey: ['inbox-threads'] })
-      toast.success('Reply submitted')
+      setRequestId(crypto.randomUUID())
+      toast.success(
+        channel === 'whatsapp'
+          ? 'Accepted by Meta. Waiting for delivery confirmation.'
+          : 'Reply submitted',
+      )
       onSent()
     },
-    onError: (err: Error) => toast.error(err.message),
+    onError: (err: Error) => {
+      if (err instanceof ApiClientError && err.code === 'manual_send_failed')
+        setRequestId(crypto.randomUUID())
+      toast.error(err.message)
+    },
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: ['inbox-thread', thread.leadId] })
+      void client.invalidateQueries({ queryKey: ['inbox-threads'] })
+    },
   })
   const apply = useMutation({
     networkMode: 'always',
@@ -447,6 +473,7 @@ function MobileReplyComposer({
   })
   const canSend =
     !disabledReason &&
+    !(channel === 'whatsapp' && isWhatsAppWindowClosed(thread)) &&
     !send.isPending &&
     !apply.isPending &&
     !uploading &&

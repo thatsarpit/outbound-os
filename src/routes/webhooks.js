@@ -1,3 +1,4 @@
+import { recordMetaReceipt } from '../services/whatsappDelivery.js';
 import { Router } from 'express';
 import crypto from 'node:crypto';
 import prisma from '../utils/prismaClient.js';
@@ -13,105 +14,6 @@ const router = Router();
 function parsePositiveInt(value) {
   const parsed = Number.parseInt(String(value), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
-}
-
-// Meta retries notifications; keep a short-lived message ID cache in addition
-// to durable message deduplication in replyDetector.
-const META_SEEN_MAX = 2000;
-const metaSeenNotifications = new Map();
-function metaAlreadyHandled(notificationId) {
-  if (!notificationId) return false;
-  const now = Date.now();
-  for (const [id, expiry] of metaSeenNotifications) if (expiry <= now) metaSeenNotifications.delete(id);
-  if (metaSeenNotifications.has(notificationId)) return true;
-  if (metaSeenNotifications.size >= META_SEEN_MAX) metaSeenNotifications.delete(metaSeenNotifications.keys().next().value);
-  metaSeenNotifications.set(notificationId, now + 6 * 60 * 60 * 1000);
-  return false;
-}
-
-/** Map a Meta message status onto our Message.ackStatus scale. */
-function metaAckStatus(status) {
-  switch (String(status || '').toLowerCase()) {
-    case 'sent': return 1;
-    case 'delivered': return 2;
-    case 'read': return 3;
-    default: return 0;
-  }
-}
-
-/**
- * Record a delivery receipt (sent / delivered / read / failed) from either
- * WhatsApp provider against the outbound message it belongs to.
- */
-async function applyWhatsAppDeliveryStatus({ provider, waMessageId, status: rawStatus, phone: rawPhone, failureCode, failureReason, pricing }) {
-  const status = String(rawStatus || '').toLowerCase();
-  const ack = metaAckStatus(status);
-  const failed = status === 'failed';
-
-  // Only ever move status forward — a late 'sent' must not downgrade a
-  // message we already know was read.
-  const forward = failed ? { status: 'failed' }
-    : ack >= 3 ? { status: 'read' }
-      : ack >= 2 ? { status: 'delivered' } : {};
-  // Meta's per-message pricing: what the message will be billed as. There is
-  // no amount in the webhook — rates are on Meta's rate card — but the
-  // category and whether it is billable are enough to count spend by type.
-  const priced = pricing && typeof pricing === 'object'
-    ? {
-        ...(pricing.category ? { pricingCategory: String(pricing.category).slice(0, 40) } : {}),
-        ...(pricing.type ? { pricingType: String(pricing.type).slice(0, 40) } : {}),
-        ...(typeof pricing.billable === 'boolean' ? { billable: pricing.billable } : {}),
-      }
-    : {};
-  const data = { ackStatus: ack, ackUpdatedAt: new Date(), ...forward, ...priced };
-
-  let updated = { count: 0 };
-  if (waMessageId) {
-    updated = await prisma.message.updateMany({
-      where: { waMessageId: String(waMessageId), direction: 'outbound' },
-      data,
-    });
-  }
-
-  // Older imported rows and manual sends may lack a provider ID. Match the
-  // recent unacknowledged recipient row, then retain the ID for later receipts.
-  if (updated.count === 0) {
-    const phone = String(rawPhone || '').replace(/\D/g, '');
-    if (phone) {
-      // Stored numbers keep their formatting (+61-491570156), so the suffix
-      // has to be short enough to survive a country code and a separator.
-      // Nine digits stays specific enough to identify one lead, and the
-      // channel and seven day window narrow it further.
-      const last9 = phone.slice(-9);
-      const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      const candidate = await prisma.message.findFirst({
-        where: {
-          direction: 'outbound',
-          channel: 'whatsapp',
-          createdAt: { gte: since },
-          ackStatus: { lt: ack || 1 },
-          lead: { mobile: { endsWith: last9 } },
-        },
-        orderBy: { id: 'desc' },
-        select: { id: true },
-      });
-      if (candidate) {
-        await prisma.message.update({
-          where: { id: candidate.id },
-          // Backfill the id so a later receipt for the same message matches
-          // directly instead of guessing again.
-          data: { ...data, ...(waMessageId ? { waMessageId: String(waMessageId) } : {}) },
-        });
-        updated = { count: 1 };
-      }
-    }
-  }
-
-  if (failed) {
-    logger.error(`${provider} delivery FAILED for ${waMessageId || 'no-id'} [${failureCode ?? '?'}] ${failureReason ?? 'no reason given'}`);
-  } else if (updated.count === 0) {
-    logger.info(`${provider} status '${status}' for ${waMessageId || 'no-id'} — no matching row`);
-  }
 }
 
 // ======================== META WHATSAPP WEBHOOK ========================
@@ -175,8 +77,7 @@ router.post('/webhook/meta', async (req, res) => {
       : 'Meta webhook rejected — set META_APP_SECRET to accept Meta webhooks');
     return res.sendStatus(401);
   }
-  // Acknowledge first; Meta retries anything that is not a quick 2xx.
-  res.sendStatus(200);
+  // Acknowledge only after messages and receipt facts are durable. Failures must be retried by Meta.
 
   try {
     for (const entry of req.body?.entry || []) {
@@ -202,7 +103,7 @@ router.post('/webhook/meta', async (req, res) => {
         }
 
         for (const msg of value.messages || []) {
-          if (metaAlreadyHandled(`meta:${msg?.id}`)) continue;
+          if (msg?.id && await prisma.message.findFirst({ where: { waMessageId: msg.id, direction: 'inbound' }, select: { id: true } })) continue;
           const contact = (msg?.from_user_id && contactsByUserId.get(String(msg.from_user_id)))
             || (msg?.from && contactsByPhone.get(String(msg.from)))
             || (value.contacts?.length === 1 ? value.contacts[0] : null);
@@ -229,20 +130,23 @@ router.post('/webhook/meta', async (req, res) => {
 
         for (const receipt of value.statuses || []) {
           const error = receipt?.errors?.[0];
-          await applyWhatsAppDeliveryStatus({
-            provider: 'Meta',
+          await recordMetaReceipt({
+            accountId,
+            timestamp: receipt?.timestamp,
             waMessageId: receipt?.id,
             status: receipt?.status,
             phone: receipt?.recipient_id,
             failureCode: error?.code,
-            failureReason: error?.title || error?.message,
+            failureReason: error?.error_data?.details || error?.title || error?.message,
             pricing: receipt?.pricing,
           });
         }
       }
     }
-  } catch (err) {
-    logger.error(`Meta webhook error: ${err.message}`);
+    res.sendStatus(200);
+  } catch {
+    logger.error('Meta webhook persistence failed; requesting provider retry.');
+    res.sendStatus(503);
   }
 });
 

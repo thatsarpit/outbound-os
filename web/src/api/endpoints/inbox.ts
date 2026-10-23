@@ -15,6 +15,8 @@ export interface InboxThreadFilters {
   channel?: InboxChannel
   state?: Exclude<InboxThreadState, 'all'>
   search?: string
+  assignedToMe?: boolean
+  assigned?: boolean
   poolId?: number | null
   page?: number
   limit?: number
@@ -28,6 +30,8 @@ export const inboxApi = {
     if (filters.channel) params.set('channel', filters.channel)
     if (filters.state) params.set('state', filters.state)
     if (filters.search) params.set('search', filters.search)
+    if (filters.assignedToMe) params.set('assignedToMe', 'true')
+    if (filters.assigned !== undefined) params.set('assigned', String(filters.assigned))
     if (filters.poolId) params.set('poolId', String(filters.poolId))
     if (filters.page) params.set('page', String(filters.page))
     if (filters.limit) params.set('limit', String(filters.limit))
@@ -37,6 +41,11 @@ export const inboxApi = {
 
   getThread: (leadId: number) =>
     api.get<InboxThreadDetail>(`/inbox/threads/${encodeURIComponent(String(leadId))}`),
+
+  markRead: (leadId: number, messageId: number) =>
+    api.post<{ success: boolean; lastReadMessageId: number }>(`/inbox/threads/${leadId}/read`, {
+      messageId,
+    }),
 
   listSenderAccounts: (leadId?: number) =>
     api.get<InboxSenderAccount[]>(

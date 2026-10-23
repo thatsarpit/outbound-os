@@ -46,9 +46,9 @@ export function isHumanReply(message) {
 }
 
 export const ACTIONABLE_CONVERSATION_WHERE = { OR: [
-  { direction: 'outbound' }, HUMAN_REPLY_WHERE,
+  { direction: 'outbound', status: { in: ['sent', 'delivered', 'read'] } }, HUMAN_REPLY_WHERE,
 ] };
 
 export function isActionableConversationMessage(message) {
-  return message?.direction === 'outbound' || isHumanReply(message);
+  return (message?.direction === 'outbound' && ['sent', 'delivered', 'read'].includes(message.status)) || isHumanReply(message);
 }

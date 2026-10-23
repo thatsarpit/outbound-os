@@ -61,6 +61,10 @@ model Lead {
   assignedToId Int? // FK to User.id — null = unassigned
   assignedTo   User? @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
 
+  // Resolving a conversation does not close the sales lead or change opt-outs.
+  inboxResolvedAt DateTime?
+  inboxReadStates InboxReadState[]
+
   // WhatsApp info
   isOnWhatsApp    Boolean?
   assignedAccount Int      @default(0) // 0 = unassigned, 1 or 2
@@ -161,6 +165,18 @@ model Lead {
   @@index([assignedTelegramAccountId])
 }
 
+model InboxReadState {
+  id                Int      @id @default(autoincrement())
+  leadId            Int
+  lead              Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  viewerKey         String
+  lastReadMessageId Int
+  readAt            DateTime @default(now())
+
+  @@unique([leadId, viewerKey])
+  @@index([viewerKey])
+}
+
 model Message {
   /// Reserved for a future multi-workspace mode; always null today.
   tenantId          Int?
@@ -219,6 +235,7 @@ model Message {
   providerDeliveryStatus String? // Accepted, temporary failure, delivery or tracked engagement; separate from send acceptance
   providerDeliveryAt   DateTime? // UTC occurrence time of the last applied delivery event
   emailDeliveryEvents  EmailDeliveryEvent[]
+  manualSendKey       String? @unique // Durable claim for manual WhatsApp sends; legacy inbound keys remain unchanged.
   idempotencyKey       String? // Client-supplied key preventing duplicate manual/API sends
   // Durable automation identity. Unlike provider/client idempotency keys this
   // is global across nullable account FKs, so a reboot can safely reconcile a
@@ -1275,4 +1292,36 @@ model DashboardPreference {
   updatedAt DateTime @updatedAt
 
   @@unique([ownerKey, page])
+}
+
+// Endpoints and encryption keys are stored as one encrypted subscription.
+model WebPushSubscription {
+  id              Int      @id @default(autoincrement())
+  viewerKey       String
+  userId          String
+  orgId           String
+  endpointHash    String   @unique
+  encryptedData   String
+  lastMessageId   Int
+  vapidKey        String
+  enabled         Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  @@index([viewerKey])
+}
+
+model WhatsAppReceipt {
+  id            Int      @id @default(autoincrement())
+  eventKey      String   @unique
+  accountId     Int
+  waMessageId   String
+  status        String
+  failureCode   Int?
+  failureReason String?
+  pricing       String?
+  receivedAt    DateTime @default(now())
+  lastCheckedAt DateTime?
+  appliedAt     DateTime?
+  @@index([waMessageId, accountId])
+  @@index([appliedAt])
 }

@@ -26,10 +26,14 @@ export function MessageBubble({
   showChannel?: boolean
   className?: string
 }) {
+  const failed = ['failed', 'permanently_failed'].includes(message.status)
+  const reason = message.providerStatusReason
   const isInbound = message.direction === 'inbound'
   const meta = getChannel(message.channel)
-  const showPricing = !isInbound && message.channel === 'whatsapp'
-    && (Boolean(message.pricingCategory) || typeof message.billable === 'boolean')
+  const showPricing =
+    !isInbound &&
+    message.channel === 'whatsapp' &&
+    (Boolean(message.pricingCategory) || typeof message.billable === 'boolean')
   const pricingCategory = message.pricingCategory
     ? message.pricingCategory.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase())
     : 'WhatsApp'
@@ -53,12 +57,19 @@ export function MessageBubble({
               : cn('rounded-tr-sm text-text-primary', meta.bg, meta.border),
           )}
         >
-          {!(message.mediaUrl && /^\[(Photo|Video|Audio|Voice message|Sticker|Image|Document|Pdf)\]/.test(message.content || '')) && (
-            <p className="whitespace-pre-wrap">{message.content}</p>
-          )}
+          {!(
+            message.mediaUrl &&
+            /^\[(Photo|Video|Audio|Voice message|Sticker|Image|Document|Pdf)\]/.test(
+              message.content || '',
+            )
+          ) && <p className="whitespace-pre-wrap break-words">{message.content}</p>}
 
           {message.mediaUrl && (
-            <MessageMedia messageId={message.id} mediaType={message.mediaType} filename={message.mediaFilename} />
+            <MessageMedia
+              messageId={message.id}
+              mediaType={message.mediaType}
+              filename={message.mediaFilename}
+            />
           )}
         </div>
 
@@ -69,15 +80,31 @@ export function MessageBubble({
           )}
         >
           {formatRelativeTime(message.sentAt || message.createdAt)}
-          {!isInbound && message.status ? ` · ${message.status}` : ''}
+          {!isInbound && message.status
+            ? ` · ${message.status === 'sent' && message.channel === 'whatsapp' ? 'Accepted · awaiting delivery' : message.status === 'unconfirmed' ? 'Confirmation unknown' : message.status}`
+            : ''}
         </span>
+        {(failed || message.status === 'unconfirmed' || message.status === 'sending') && (
+          <p
+            role="status"
+            className="rounded-md bg-warning-muted px-3 py-2 text-xs leading-5 text-warning"
+          >
+            {reason === 're_engagement_required'
+              ? 'Not delivered: the 24-hour reply window closed. Use an approved template and wait for a customer reply.'
+              : message.status === 'unconfirmed' || message.status === 'sending'
+                ? 'Delivery is unconfirmed. Check this attempt before sending again; it may already have reached Meta.'
+                : `Not delivered${reason ? `: ${reason.replace(/_/g, ' ')}` : '. The provider did not supply a stored reason.'}`}
+          </p>
+        )}
         {showPricing && (
           <span
             className="self-end px-0.5 text-[10px] text-text-muted"
             title={message.pricingType ? `Meta pricing model: ${message.pricingType}` : undefined}
           >
             {pricingCategory}
-            {typeof message.billable === 'boolean' ? ` · ${message.billable ? 'billable' : 'free'}` : ''}
+            {typeof message.billable === 'boolean'
+              ? ` · ${message.billable ? 'billable' : 'free'}`
+              : ''}
           </span>
         )}
       </div>

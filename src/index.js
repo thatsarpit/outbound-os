@@ -1,3 +1,4 @@
+import { startWebPush, stopWebPush } from './services/webPush.js';
 import cron from 'node-cron';
 import config from './config.js';
 import logger from './utils/logger.js';
@@ -265,6 +266,7 @@ async function main() {
     // ── Step 5: Start API server ──
     logger.info('Step 4/4: Starting API server...');
     global.__httpServer = startApiServer();
+    startWebPush();
     telegramService.initialize().catch((error) =>
       logger.warn(`[Telegram] Listener startup skipped: ${error.message}`));
 
@@ -318,6 +320,7 @@ async function gracefulShutdown(signal) {
   }
 
   try {
+    stopWebPush();
     await recoveryCoordinator.stop().catch(() => {});
     await whatsappManager.destroy().catch(() => {});
     await telegramService.stop().catch(() => {});

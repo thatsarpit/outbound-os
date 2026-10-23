@@ -47,7 +47,8 @@ export default function MobileInstallPage() {
         </p>
         <p className="mt-5 border-t border-border pt-4 text-xs leading-5 text-text-muted">
           An internet connection is required to load conversations and send. Drafts stay on this
-          device. Background push notifications are not enabled yet.
+          device. After installation, open Account → Device notifications to enable alerts for new
+          customer messages.
         </p>
       </div>
     </div>

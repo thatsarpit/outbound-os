@@ -6,6 +6,7 @@ class ActivityLog {
   constructor(maxSize = 100) {
     this.events = [];
     this.maxSize = maxSize;
+    this.listeners = new Set();
   }
 
   /**
@@ -37,17 +38,24 @@ class ActivityLog {
         const leadId   = typeof data.leadId   === 'number' ? data.leadId   : null;
         const accountId = typeof data.accountId === 'number' ? data.accountId : null;
         const meta = Object.keys(data).length > 0 ? JSON.stringify(data) : null;
-        return prisma.activityLog.create({ data: { type, message, leadId, accountId, meta } });
+        return prisma.activityLog.create({ data: { type, message, leadId, accountId, meta } }).then(() => {
+          for (const listener of this.listeners) {
+            try { listener(event); } catch { /* Activity persistence must not depend on a connected browser. */ }
+          }
+        });
       }).catch(() => {}); // DB unavailable during cold-start or test-mode — degrade silently
     }
 
     return event;
   }
 
-  /**
-   * Get recent events
-   * @param {number} count - Number of events to return
-   */
+  subscribe(listener) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  /** Get recent events, most recent first. */
+
   getRecent(count = 20) {
     return this.events.slice(0, count);
   }

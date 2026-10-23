@@ -912,14 +912,14 @@ describe('Meta WhatsApp webhook', () => {
           metadata: { display_phone_number: '15550000000', phone_number_id: 'PNID-MEDIA' },
           contacts: [{ profile: { name: 'Photo Buyer' }, wa_id: '15551230099', user_id: 'US.55512300990001' }],
           messages: [{
-            from: '15551230099', from_user_id: 'US.55512300990001', id: 'wamid.PHOTO-IN-1', timestamp: '1790000500',
+            from: '15551230099', from_user_id: 'US.55512300990001', id: 'wamid.PHOTO-IN-1', timestamp: String(Math.floor(Date.now() / 1000)),
             type: 'image', image: { id: 'media-photo-1', mime_type: 'image/jpeg' },
           }],
         } }] }],
       };
       await deliver(payload);
-      // Meta is acknowledged before its media download and database write.
-      // A slow runner must wait for that result before restoring the fake API.
+      // Meta is acknowledged after the inbound message is durably recorded.
+      // Keep this lookup bounded so a failed write gives a useful assertion.
       const deadline = Date.now() + 3000;
       let inbound;
       do {
@@ -975,6 +975,7 @@ describe('Meta WhatsApp webhook', () => {
       const outbound = await prisma.message.findFirst({ where: { leadId: lead.id, direction: 'outbound', mediaFilename: 'price-list.pdf' } });
       assert.equal(outbound.waMessageId, 'wamid.MEDIA-OUT-1');
       assert.equal(outbound.mediaType, 'pdf');
+      assert.ok(outbound.manualSendKey, 'files use the same durable manual attempt path');
 
       // 4. Outside the 24-hour window the error says what to do.
       windowClosed = true;
@@ -998,7 +999,7 @@ describe('Meta WhatsApp webhook', () => {
     const outbound = await prisma.message.create({
       data: {
         leadId: lead.id, direction: 'outbound', channel: 'whatsapp', content: 'Template',
-        status: 'sent', waMessageId: 'wamid.PRICED-1',
+        status: 'sent', waAccount: (await prisma.whatsAppAccount.findFirst({ where: { cloudApiPhoneId: 'PNID-TEST-1' } })).id, waMessageId: 'wamid.PRICED-1',
       },
     });
     await deliver(metaDelivery({
@@ -2784,4 +2785,232 @@ describe('Generic connector intake and supplier attribution', () => {
     assert.equal((await request('DELETE', '/api/webhooks/sources/bad', { headers: admin })).status, 422);
     assert.equal((await request('DELETE', '/api/webhooks/sources/99999999', { headers: admin })).status, 404);
   });
+});
+
+test('personal read cursors and resolution stay independent of sales status and other viewers', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const users = await Promise.all([1, 2].map(i => prisma.user.create({ data: { name: `Read Viewer ${i}`, email: `read-viewer-${i}@example.test`, passwordHash: 'fixture', role: 'agent' } })));
+  const lead = await prisma.lead.create({ data: { name: 'Personal Read Fixture', mobile: 'no-phone:personal-read', status: 'paused', source: 'manual', messages: { create: { channel: 'whatsapp', direction: 'inbound', content: 'Please send a quote', status: 'delivered' } } }, include: { messages: true } });
+  const other = await prisma.lead.create({ data: { name: 'Other Read Fixture', mobile: 'no-phone:other-read', messages: { create: { channel: 'email', direction: 'inbound', content: 'Other conversation', status: 'delivered' } } }, include: { messages: true } });
+  const headers = i => ({ Authorization: `Bearer ${signToken(users[i])}`, 'X-Forwarded-For': `192.0.2.${120 + i}` });
+  const detail = i => request('GET', `/api/inbox/threads/${lead.id}`, { headers: headers(i) });
+  const read = (i, messageId) => request('POST', `/api/inbox/threads/${lead.id}/read`, { headers: headers(i), body: { messageId } });
+  try {
+    assert.equal((await detail(0)).body.unread, true);
+    const list = i => request('GET', '/api/inbox/threads?search=Read%20Fixture&limit=1', { headers: headers(i) });
+    assert.equal((await list(0)).body.unread, 2, 'unread total includes later pages');
+    assert.equal((await list(1)).body.unread, 2);
+    const assigned = await request('POST', `/api/inbox/threads/${lead.id}/assign-self`, { headers: headers(0) });
+    assert.equal(assigned.status, 200);
+    assert.equal(assigned.body.assignedToId, users[0].id);
+    const own = await request('GET', '/api/inbox/threads?assignedToMe=true&search=Read%20Fixture', { headers: headers(0) });
+    assert.equal(own.status, 200); assert.deepEqual(own.body.threads.map(row => row.leadId), [lead.id]);
+    assert.equal((await read(0, other.messages[0].id)).status, 400);
+    assert.equal((await read(0, -1)).status, 400);
+    assert.equal((await request('POST', `/api/inbox/threads/${lead.id}/read`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.122' }, body: { messageId: lead.messages[0].id } })).status, 403);
+    assert.equal((await read(0, lead.messages[0].id)).status, 200);
+    assert.equal((await detail(0)).body.unread, false);
+    assert.equal((await list(0)).body.unread, 1);
+    assert.equal((await list(1)).body.unread, 2, 'another viewer retains their own unread total');
+    assert.equal((await detail(0)).body.replyNeeded, true);
+    assert.equal((await detail(1)).body.unread, true);
+    const resolved = await request('POST', `/api/inbox/threads/${lead.id}/resolve`, { headers: headers(0) });
+    assert.equal(resolved.status, 200);
+    assert.equal((await detail(0)).body.threadState, 'resolved');
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'paused');
+    const fresh = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'inbound', content: 'Another question', status: 'delivered', createdAt: new Date(Date.now() + 1000) } });
+    assert.equal((await detail(0)).body.threadState, 'needs_reply');
+    assert.equal((await detail(0)).body.unread, true);
+    await read(0, fresh.id);
+    const stale = await read(0, lead.messages[0].id);
+    assert.equal(stale.body.lastReadMessageId, fresh.id);
+    assert.equal((await detail(0)).body.unread, false);
+    const reopened = await request('POST', `/api/inbox/threads/${lead.id}/reopen`, { headers: headers(0) });
+    assert.equal(reopened.status, 200);
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'paused');
+  } finally {
+    await prisma.lead.deleteMany({ where: { id: { in: [lead.id, other.id] } } });
+    await prisma.user.deleteMany({ where: { id: { in: users.map(user => user.id) } } });
+  }
+});
+
+test('Web Push enforces personal device ownership and retries durable reply cursors without exposing content', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { default: webpush } = await import('web-push');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const { deliverDeviceReplies, pollWebPush } = await import('../src/services/webPush.js');
+  const keys = webpush.generateVAPIDKeys();
+  const env = Object.fromEntries(['WEB_PUSH_PUBLIC_KEY', 'WEB_PUSH_PRIVATE_KEY', 'WEB_PUSH_SUBJECT'].map(key => [key, process.env[key]]));
+  process.env.WEB_PUSH_PUBLIC_KEY = keys.publicKey; process.env.WEB_PUSH_PRIVATE_KEY = keys.privateKey; process.env.WEB_PUSH_SUBJECT = 'mailto:admin@example.test';
+  const users = await Promise.all([1, 2].map(i => prisma.user.create({ data: { name: `Push Viewer ${i}`, email: `push-viewer-${i}@example.test`, passwordHash: 'fixture', role: 'agent' } })));
+  const headers = i => ({ Authorization: `Bearer ${signToken(users[i])}`, 'X-Forwarded-For': `192.0.2.${150 + i}` });
+  const device = { endpoint: 'https://web.push.apple.com/fixture-device', keys: { p256dh: keys.publicKey, auth: Buffer.alloc(16, 1).toString('base64url') } };
+  let lead;
+  try {
+    assert.equal((await request('POST', '/api/push/subscriptions', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.152' }, body: device })).status, 403);
+    assert.equal((await request('POST', '/api/push/subscriptions', { headers: headers(0), body: { ...device, endpoint: 'https://127.0.0.1/test' } })).status, 400);
+    assert.equal((await request('POST', '/api/push/subscriptions', { headers: headers(0), body: device })).status, 200);
+    assert.equal((await request('POST', '/api/push/subscriptions', { headers: headers(1), body: device })).status, 409);
+    assert.equal((await request('POST', '/api/push/test', { headers: headers(1), body: { endpoint: device.endpoint } })).status, 404);
+    await request('DELETE', '/api/push/subscriptions', { headers: headers(1), body: { endpoint: device.endpoint } });
+    let subscription = await prisma.webPushSubscription.findFirst({ where: { userId: String(users[0].id) } });
+    assert.ok(subscription);
+    assert.notEqual(subscription.encryptedData, JSON.stringify(device));
+    assert.ok(!subscription.encryptedData.includes(device.keys.auth));
+    lead = await prisma.lead.create({ data: { name: 'Push Reply Fixture', mobile: 'no-phone:push-reply-fixture' } });
+    const human = await prisma.message.create({ data: { leadId: lead.id, direction: 'inbound', channel: 'email', emailInboundKind: 'human', content: 'Private customer details', status: 'delivered' } });
+    await prisma.message.create({ data: { leadId: lead.id, direction: 'inbound', channel: 'email', emailInboundKind: 'automatic_reply', content: 'Vacation notice', status: 'delivered' } });
+    await deliverDeviceReplies(subscription, async () => { throw { statusCode: 503 }; });
+    assert.equal((await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } })).lastMessageId, subscription.lastMessageId);
+    const sent = [];
+    await deliverDeviceReplies(subscription, async (_device, payload) => { sent.push(payload); });
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].tag, `message-${human.id}`);
+    assert.ok(!JSON.stringify(sent).includes('Private customer'));
+    subscription = await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } });
+    assert.equal(subscription.lastMessageId, human.id);
+    await deliverDeviceReplies(subscription, async () => assert.fail('Already delivered messages must not send again'));
+    const newer = await prisma.message.create({ data: { leadId: lead.id, direction: 'inbound', channel: 'whatsapp', content: 'Another question', status: 'delivered' } });
+    await prisma.inboxReadState.create({ data: { leadId: lead.id, viewerKey: subscription.viewerKey, lastReadMessageId: newer.id } });
+    await deliverDeviceReplies(subscription, async () => assert.fail('Messages read in the foreground must not alert again'));
+    const last = await prisma.message.create({ data: { leadId: lead.id, direction: 'inbound', channel: 'whatsapp', content: 'Last question', status: 'delivered' } });
+    subscription = await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } });
+    await deliverDeviceReplies(subscription, async () => { throw { statusCode: 410 }; });
+    assert.equal(await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } }), null);
+    assert.ok(last.id > subscription.lastMessageId);
+    const original = prisma.webPushSubscription.findFirst;
+    prisma.webPushSubscription.findFirst = async () => { throw new Error('Fictional private database failure'); };
+    try {
+      const unavailable = await request('POST', '/api/push/status', { headers: { ...headers(0), 'X-Forwarded-For': '192.0.2.153' }, body: { endpoint: device.endpoint } });
+      assert.equal(unavailable.status, 500);
+      assert.ok(!JSON.stringify(unavailable.body).includes('private database'));
+    } finally { prisma.webPushSubscription.findFirst = original; }
+    await request('POST', '/api/push/subscriptions', { headers: { ...headers(0), 'X-Forwarded-For': '192.0.2.154' }, body: device });
+    await prisma.user.update({ where: { id: users[0].id }, data: { enabled: false } });
+    await pollWebPush();
+    assert.equal(await prisma.webPushSubscription.count({ where: { userId: String(users[0].id) } }), 0, 'disabled users lose device access before delivery');
+  } finally {
+    await prisma.webPushSubscription.deleteMany({ where: { userId: { in: users.map(user => String(user.id)) } } });
+    if (lead) await prisma.lead.delete({ where: { id: lead.id } });
+    await prisma.user.deleteMany({ where: { id: { in: users.map(user => user.id) } } });
+    for (const [key, value] of Object.entries(env)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  }
+});
+
+test('WhatsApp manual replies enforce the window, persist failures, retain reply ownership and deduplicate attempts', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { default: manager } = await import('../src/services/whatsapp.js');
+  const { default: cloud } = await import('../src/services/whatsappCloudApi.js');
+  const originalSend = manager.sendMessage, originalTemplate = manager.sendApprovedTemplate, originalList = cloud.listApprovedTemplates;
+  const account = await prisma.whatsAppAccount.create({ data: { name: 'Manual session fixture', enabled: true, cloudApiPhoneId: 'manual-fixture-phone' } });
+  const lead = await prisma.lead.create({ data: { name: 'Manual WhatsApp Fixture', mobile: '15551234501', assignedAccount: account.id, status: 'paused' } });
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.181' };
+  let sends = 0;
+  manager.sendMessage = async () => { sends++; return { success: true, waMessageId: 'wamid.MANUAL-FIXTURE', accountId: account.id }; };
+  manager.sendApprovedTemplate = async (...args) => { assert.equal(args[2], 'en_GB'); sends++; return { success: true, waMessageId: 'wamid.TEMPLATE-FIXTURE' }; };
+  cloud.listApprovedTemplates = async () => ({ ok: true, templates: [{ name: 'reconnect_fixture', language: 'en_GB', category: 'MARKETING', status: 'APPROVED', body: 'Hello {{1}}, still interested?', bodyVariables: ['1'], manualSupported: true }] });
+  const send = (body) => request('POST', '/api/inbox/send', { headers, body: { leadId: lead.id, channel: 'whatsapp', ...body } });
+  try {
+    await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'inbound', waAccount: account.id, content: 'Old enquiry', status: 'delivered', sentAt: new Date('2026-01-01'), createdAt: new Date() } });
+    const blocked = await send({ text: 'A normal reply' });
+    assert.equal(blocked.status, 409); assert.equal(blocked.body.reason, 're_engagement_required'); assert.equal(sends, 0);
+    const template = { name: 'reconnect_fixture', language: 'en_GB', parameters: ['Buyer'] };
+    assert.equal((await send({ whatsappTemplate: { ...template, parameters: [] } })).status, 400);
+    const accepted = await send({ whatsappTemplate: template, clientMessageId: 'fixture-template-00001' });
+    assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
+    assert.equal(accepted.body.message.content, 'Hello Buyer, still interested?');
+    assert.equal((await send({ text: 'Template did not reopen the window' })).status, 409);
+    await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'inbound', waAccount: account.id, content: 'Yes, please', status: 'delivered', sentAt: new Date() } });
+    const body = { text: 'Here are the details', clientMessageId: 'fixture-message-00001' };
+    const sent = await send(body); assert.equal(sent.status, 200);
+    assert.equal(sent.body.message.waMessageId, 'wamid.MANUAL-FIXTURE');
+    const duplicate = await send(body); assert.equal(duplicate.body.message.id, sent.body.message.id); assert.equal(sends, 2);
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'paused');
+    await prisma.message.update({ where: { id: sent.body.message.id }, data: { status: 'failed', providerStatusReason: 're_engagement_required' } });
+    const detail = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+    assert.ok(detail.body.messages.some(row => row.id === sent.body.message.id && row.status === 'failed'));
+    assert.equal(detail.body.replyNeeded, true, 'failed attempts never clear the unanswered human reply');
+    manager.sendMessage = async () => ({ success: false, reason: 'timeout' });
+    const unknown = await send({ text: 'Uncertain send', clientMessageId: 'fixture-uncertain-0001' });
+    assert.equal(unknown.status, 409);
+    assert.equal((await prisma.message.findFirst({ where: { idempotencyKey: `manual-wa:${lead.id}:fixture-uncertain-0001` } })).status, 'unconfirmed');
+    const { sendManualWhatsApp } = await import('../src/services/manualWhatsApp.js');
+    const { recordMetaReceipt } = await import('../src/services/whatsappDelivery.js');
+    let concurrentSends = 0;
+    const dependencies = { manager: { sendMessage: async () => { concurrentSends++; await new Promise(resolve => setTimeout(resolve, 30)); return { success: true, waMessageId: 'wamid.CONCURRENT-FIXTURE' }; } } };
+    const parallelBody = { leadId: lead.id, text: 'Only once across tabs', clientMessageId: 'fixture-concurrent-0001' };
+    const parallel = await Promise.all([sendManualWhatsApp(parallelBody, dependencies), sendManualWhatsApp(parallelBody, dependencies)]);
+    assert.equal(concurrentSends, 1);
+    assert.equal(parallel[0].message.id, parallel[1].message.id);
+    const finalFailure = await sendManualWhatsApp({ leadId: lead.id, text: 'Receipt arrived first', clientMessageId: 'fixture-receipt-first1' }, { manager: { sendMessage: async () => {
+      await recordMetaReceipt({ accountId: account.id, waMessageId: 'wamid.MANUAL-EARLY-FAILURE', status: 'failed', failureCode: 131047 });
+      return { success: true, waMessageId: 'wamid.MANUAL-EARLY-FAILURE' };
+    } } });
+    assert.equal(finalFailure.success, false, 'an early failure must not produce a success response');
+    assert.equal(finalFailure.message.status, 'failed');
+    assert.equal(finalFailure.reason, 're_engagement_required');
+    for (const route of [`/api/leads/${lead.id}/send-cloud-text`, `/api/leads/${lead.id}/send`]) {
+      const response = await request('POST', route, { headers, body: { text: 'Legacy route', message: 'Legacy route', accountId: 999999 } });
+      assert.equal(response.status, 503, 'an unavailable explicit sender cannot silently switch numbers');
+    }
+    await prisma.whatsAppAccount.update({ where: { id: account.id }, data: { enabled: false } });
+    assert.equal((await send({ text: 'No silent fallback' })).status, 503);
+    await prisma.whatsAppAccount.update({ where: { id: account.id }, data: { enabled: true } });
+    const { default: followup } = await import('../src/services/followup.js');
+    const { default: imessage } = await import('../src/services/imessage.js');
+    const previousRecovery = imessage.recoverStuckMessages;
+    const stale = new Date(Date.now() - 10 * 60_000);
+    const manual = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Interrupted manual attempt', status: 'sending', idempotencyKey: `manual-wa:${lead.id}:fixture-interrupted-0001`, updatedAt: stale } });
+    const automated = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Interrupted queue attempt', status: 'sending', updatedAt: stale } });
+    imessage.recoverStuckMessages = async () => ({ count: 0, confirmed: 0, requeued: 0 });
+    try {
+      const recovered = await followup.recoverStuckMessages();
+      assert.ok(recovered.unconfirmed >= 1);
+      assert.equal((await prisma.message.findUnique({ where: { id: manual.id } })).status, 'unconfirmed');
+      assert.equal((await prisma.message.findUnique({ where: { id: automated.id } })).status, 'queued');
+    } finally { imessage.recoverStuckMessages = previousRecovery; }
+
+  } finally {
+    manager.sendMessage = originalSend; manager.sendApprovedTemplate = originalTemplate; cloud.listApprovedTemplates = originalList;
+    await prisma.whatsAppReceipt.deleteMany({ where: { accountId: account.id } });
+    await prisma.lead.delete({ where: { id: lead.id } });
+    await prisma.whatsAppAccount.delete({ where: { id: account.id } });
+  }
+});
+
+test('Meta receipts survive early arrival, reject cross-number matching, and never downgrade delivery', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { recordMetaReceipt, replayPendingMetaReceipts } = await import('../src/services/whatsappDelivery.js');
+  const accounts = await Promise.all([1, 2].map(i => prisma.whatsAppAccount.create({ data: { name: `Receipt Fixture ${i}`, enabled: true } })));
+  const lead = await prisma.lead.create({ data: { name: 'Early receipt fixture', mobile: '15551234503' } });
+  const id = 'wamid.EARLY-FIXTURE';
+  try {
+    const failure = { accountId: accounts[0].id, waMessageId: id, status: 'failed', failureCode: 131047, failureReason: 'Re-engagement message', timestamp: '100' };
+    await recordMetaReceipt(failure); await recordMetaReceipt(failure);
+    assert.equal(await prisma.whatsAppReceipt.count({ where: { waMessageId: id } }), 1);
+    const message = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', status: 'sent', waMessageId: id, waAccount: accounts[0].id, content: 'Retain this attempt', sentAt: new Date() } });
+    const replay = await replayPendingMetaReceipts();
+    assert.ok(replay.applied >= 1, 'maintenance reconciles early receipts without another webhook');
+    let row = await prisma.message.findUnique({ where: { id: message.id } });
+    assert.equal(row.status, 'failed'); assert.equal(row.providerStatusReason, 're_engagement_required');
+    await recordMetaReceipt({ accountId: accounts[1].id, waMessageId: id, status: 'read', timestamp: '101' });
+    assert.equal((await prisma.message.findUnique({ where: { id: message.id } })).status, 'failed');
+    await recordMetaReceipt({ accountId: accounts[0].id, waMessageId: id, status: 'read', timestamp: '102' });
+    await recordMetaReceipt({ ...failure, timestamp: '103' });
+    await recordMetaReceipt({ accountId: accounts[0].id, waMessageId: id, status: 'sent', timestamp: '104' });
+    row = await prisma.message.findUnique({ where: { id: message.id } });
+    assert.equal(row.status, 'read'); assert.equal(row.ackStatus, 3); assert.equal(row.providerStatusReason, null);
+    const original = prisma.whatsAppReceipt.upsert;
+    prisma.whatsAppReceipt.upsert = async () => { throw new Error('Fictional storage failure'); };
+    try {
+      const payload = { entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: 'PNID-TEST-1' }, statuses: [{ id: 'wamid.RETRY-STORAGE', status: 'failed', errors: [{ code: 131047 }] }] } }] }] };
+      const signature = `sha256=${crypto.createHmac('sha256', 'test-meta-app-secret').update(JSON.stringify(payload)).digest('hex')}`;
+      assert.equal((await request('POST', '/webhook/meta', { headers: { 'X-Hub-Signature-256': signature }, body: payload })).status, 503, 'failed persistence must request a provider retry');
+    } finally { prisma.whatsAppReceipt.upsert = original; }
+  } finally {
+    await prisma.whatsAppReceipt.deleteMany({ where: { accountId: { in: accounts.map(row => row.id) } } });
+    await prisma.lead.delete({ where: { id: lead.id } });
+    await prisma.whatsAppAccount.deleteMany({ where: { id: { in: accounts.map(row => row.id) } } });
+  }
 });

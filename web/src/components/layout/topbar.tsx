@@ -104,7 +104,7 @@ export function Topbar({ onOpenSearch }: { onOpenSearch: () => void }) {
   const page = PAGE_TITLES.find((item) => location.pathname.startsWith(item.route))
 
   return (
-    <header className="sticky top-0 z-30 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-surface px-3 sm:px-4">
+    <header className="sticky top-0 z-30 flex min-h-12 pt-[env(safe-area-inset-top)] shrink-0 items-center gap-2 border-b border-border bg-surface px-3 sm:px-4">
       <button
         type="button"
         onClick={toggleSidebar}

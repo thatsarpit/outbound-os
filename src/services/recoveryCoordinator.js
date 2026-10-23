@@ -1,3 +1,4 @@
+import { replayPendingMetaReceipts } from './whatsappDelivery.js';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
 import activityLog, { EVENT_TYPES } from '../utils/activityLog.js';
@@ -137,6 +138,7 @@ class RecoveryCoordinator {
 
       const reconciliation = await freshLeadOutreach.reconcileRecent({ since });
       const stuck = await followupEngine.recoverStuckMessages();
+      const whatsappDeliveryEvents = await replayPendingMetaReceipts();
       // Recovery repairs existing work. Creating a marketing audience requires
       // an explicit, reviewed launch through the email batch endpoint.
       const dailyEmail = { skipped: true, reason: 'explicit_launch_required' };
@@ -150,6 +152,7 @@ class RecoveryCoordinator {
         reconciliation,
         stuckMessagesRecovered: Number(stuck?.count ?? stuck ?? 0),
         emailReplySync,
+        whatsappDeliveryEvents,
         dailyEmail,
       };
 
@@ -198,14 +201,15 @@ class RecoveryCoordinator {
       || validDate(state[KEYS.lastRecoveryAt])
       || new Date(Date.now() - config.recovery.initialLookbackHours * 60 * 60 * 1000);
     const since = new Date(anchor.getTime() - config.recovery.overlapMinutes * 60 * 1000);
-    const [stuck, reconciliation, emailDeliveryEvents] = await Promise.all([
+    const [stuck, reconciliation, emailDeliveryEvents, whatsappDeliveryEvents] = await Promise.all([
       followupEngine.recoverStuckMessages(),
       freshLeadOutreach.reconcileRecent({ since }),
       brevoDeliveryEvents.replayUnmatched(),
+      replayPendingMetaReceipts(),
     ]);
     const finishedAt = new Date().toISOString();
     await writeConfig({ [KEYS.lastMaintenanceAt]: finishedAt });
-    return { finishedAt, stuckMessagesRecovered: Number(stuck?.count ?? stuck ?? 0), reconciliation, emailDeliveryEvents };
+    return { finishedAt, stuckMessagesRecovered: Number(stuck?.count ?? stuck ?? 0), reconciliation, emailDeliveryEvents, whatsappDeliveryEvents };
   }
 
   async getStatus() {

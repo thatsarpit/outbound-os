@@ -52,3 +52,6 @@ logs/
 # OAuth provider state contains access and refresh tokens.
 oauth-store.json
 **/oauth-store.json
+
+# Local Cloudflare build state.
+.wrangler/
