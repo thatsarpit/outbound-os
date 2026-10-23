@@ -24,7 +24,11 @@ include breaking changes, and they are called out here.
 ### Website and maintenance
 
 - Unify the marketing site around direct Meta, a shared inbox and mobile sales.
-  Product illustrations and screenshots are labelled distinctly and use fictional data.
+  Use the app's dark design system, actual product captures with sample records
+  and animated workflow, integration and MCP explanations.
+- Redesign desktop and mobile sign-in while preserving Clerk's authentication
+  flow and visible branding. Gate passkey enrolment on actual instance/browser
+  support and the separately planned live-instance cutover.
 - Clarify incoming source keys versus outgoing event signatures. Preserve retired
   URLs with permanent redirects; verify exact canonical/sitemap correspondence,
   unique titles/descriptions, image assets, structured data and internal links.
@@ -36,6 +40,9 @@ include breaking changes, and they are called out here.
 - Remove the dedicated marketplace preset, legacy Android channel, vendor aliases, public integration page and branding. External collectors now use a generic source contract.
 - Add a replay-safe connector receipt ledger, paused historical imports, conflict quarantine, and stable lead-origin supplier attribution independent of order fulfilment.
 - Add order filtering by the supplier who originated a lead, and preserve that origin on each new order.
+- Protect configured source suppliers with a foreign key; disable referenced
+  suppliers instead of deleting them. Bound contact hydration during imports and
+  replay accepted records without scanning the workspace.
 
 ### Added
 
