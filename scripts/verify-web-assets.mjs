@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
@@ -32,4 +33,14 @@ const worker = (await read('push-sw.js', 'javascript')).toString();
 assert.ok(!worker.trimStart().startsWith('<'), 'Push worker must not be the SPA fallback');
 assert.match(worker, /addEventListener\('push'/);
 assert.match(worker, /showNotification/);
-console.log('Web manifest, Apple icon and 192/512px app icons verified.');
+if (remote) {
+  const version = createHash('sha256').update(worker).digest('hex').slice(0, 16);
+  const response = await fetch(new URL(`push-sw.js?v=${version}`, `${target.replace(/\/$/, '')}/`));
+  assert.equal(response.status, 200, 'Versioned push worker must load');
+  assert.equal(await response.text(), worker, 'Worker version must identify the same content');
+  assert.match(response.headers.get('cdn-cache-control') || response.headers.get('cache-control') || '', /no-store/, 'Push worker must bypass shared caches');
+} else {
+  const headers = (await read('_headers')).toString();
+  assert.match(headers, /\/push-sw\.js\n(?:[^\n]+\n)*?  CDN-Cache-Control: no-store/);
+}
+console.log('Web manifest, app icons and uncached push worker verified.');

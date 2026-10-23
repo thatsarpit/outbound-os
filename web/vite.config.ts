@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -20,17 +21,9 @@ function demoHosting(): Plugin {
     },
     closeBundle() {
       fs.writeFileSync(path.join(outDir, '_redirects'), '/*  /index.html  200\n')
-      fs.writeFileSync(
+      fs.copyFileSync(
+        path.resolve(import.meta.dirname, 'public/_headers'),
         path.join(outDir, '_headers'),
-        [
-          '/*',
-          '  X-Robots-Tag: noindex',
-          '  X-Content-Type-Options: nosniff',
-          '  Referrer-Policy: strict-origin-when-cross-origin',
-          '/assets/*',
-          '  Cache-Control: public, max-age=31536000, immutable',
-          '',
-        ].join('\n'),
       )
     },
   }
@@ -40,10 +33,18 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
 
   return {
+    define: {
+      __PUSH_WORKER_VERSION__: JSON.stringify(
+        createHash('sha256')
+          .update(fs.readFileSync(path.resolve(import.meta.dirname, 'public/push-sw.js')))
+          .digest('hex')
+          .slice(0, 16),
+      ),
+    },
     plugins: [react(), tailwindcss(), ...(mode === 'demo' ? [demoHosting()] : [])],
     resolve: {
       alias: {
-      '@': path.resolve(import.meta.dirname, './src'),
+        '@': path.resolve(import.meta.dirname, './src'),
       },
     },
     server: {

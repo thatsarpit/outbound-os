@@ -36,7 +36,7 @@ export function DeviceNotifications() {
     if (!supported || IS_DEMO) return
     let mounted = true
     void navigator.serviceWorker
-      .register('/push-sw.js', { scope: '/' })
+      .register(`/push-sw.js?v=${__PUSH_WORKER_VERSION__}`, { scope: '/', updateViaCache: 'none' })
       .then(async (registration) => {
         const existing = await registration.pushManager.getSubscription()
         if (existing) {

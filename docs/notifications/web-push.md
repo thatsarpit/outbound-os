@@ -7,7 +7,7 @@ Outbound OS can notify a signed-in person about new customer messages on WhatsAp
 1. Generate a VAPID key pair once with `node scripts/generate-web-push-keys.mjs`. Redirect the output into a private file outside source control.
 2. Set `WEB_PUSH_PUBLIC_KEY`, `WEB_PUSH_PRIVATE_KEY` and a real `WEB_PUSH_SUBJECT=mailto:you@example.com` in the server environment. Preserve the key pair across releases.
 3. Apply the committed migrations and restart the API. Deploy the dashboard from the same revision; it includes `/push-sw.js`.
-4. Serve the dashboard over HTTPS. Check that `/push-sw.js` returns JavaScript, rather than the SPA HTML fallback. The worker must have root scope and should not be cached indefinitely.
+4. Serve the dashboard over HTTPS. Check that `/push-sw.js` returns JavaScript, rather than the SPA HTML fallback. The worker must have root scope. Its registration URL includes a content version and uses updateViaCache=none; worker responses explicitly bypass browser/CDN storage. This avoids an old worker being retained by a custom-domain cache.
 
 Device subscriptions are encrypted using the existing `LEAD_SYNC_ENCRYPTION_KEY` (or configured JWT secret). Back up that key with the database. Changing the encryption key makes stored subscriptions unusable. Changing VAPID keys requires people to disable and enable notifications again.
 
