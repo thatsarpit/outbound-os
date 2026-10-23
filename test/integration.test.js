@@ -2770,6 +2770,16 @@ describe('Generic connector intake and supplier attribution', () => {
       assert.equal(absent.body.total, 0); assert.deepEqual(absent.body.records, []);
     } finally { await db.connectorReceipt.deleteMany({ where: { sourceId: source.id, externalId: { startsWith: 'paging-' } } }); }
   });
+  test('deleting a supplier used only by a configured source disables it and retains the reference', async () => {
+    const partner = await db.supplier.create({ data: { name: 'Source-only supplier fixture' } });
+    const configured = await db.webhookSource.create({ data: { name: 'Source-only fixture', source: 'source-only-fixture', apiKey: 'fixture-key', importSupplierId: partner.id } });
+    try {
+      const response = await request('DELETE', `/api/suppliers/${partner.id}`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.194' } });
+      assert.equal(response.status, 200); assert.equal(response.body.disabled, true);
+      assert.equal((await db.supplier.findUnique({ where: { id: partner.id } })).enabled, false);
+      assert.equal((await db.webhookSource.findUnique({ where: { id: configured.id } })).importSupplierId, partner.id);
+    } finally { await db.webhookSource.delete({ where: { id: configured.id } }); await db.supplier.delete({ where: { id: partner.id } }); }
+  });
   test('accepted import IDs remain replayable after their supplier is disabled', async () => {
     const receipt = await db.connectorReceipt.findUnique({ where: { sourceId_externalId: { sourceId: source.id, externalId: 'fixture-1' } } });
     await db.supplier.update({ where: { id: supplier.id }, data: { enabled: false } });

@@ -533,6 +533,7 @@ model WebhookSource {
   poolId         Int?
   enabled        Boolean   @default(true)
   importSupplierId Int?
+  importSupplier Supplier? @relation("ConnectorSourceSupplier", fields: [importSupplierId], references: [id], onDelete: Restrict)
   importTags String @default("")
   importReceipts ConnectorReceipt[]
   lastReceivedAt DateTime?
@@ -1219,6 +1220,7 @@ model Supplier {
   products Product[]
   originLeads Lead[] @relation("LeadOriginSupplier")
   originatedOrders SalesOrder[] @relation("OrderOriginSupplier")
+  connectorSources WebhookSource[] @relation("ConnectorSourceSupplier")
 
   @@unique([tenantId, name])
   @@index([enabled])
