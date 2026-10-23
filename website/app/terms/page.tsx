@@ -59,7 +59,7 @@ export default function TermsPage() {
           <section>
             <h2>Third-party services</h2>
             <p>
-              WhatsApp, email providers, IndiaMART and the other services
+              WhatsApp, email providers, marketplace and the other services
               Outbound OS connects to have their own terms and can suspend
               access independently of the project.
             </p>

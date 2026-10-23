@@ -9,9 +9,8 @@ import { MiniStat } from '@/components/settings/settings-stats'
  *
  * Meta's status webhooks say how each message is billed (category, and
  * whether it is billable) but not the amount, so this counts messages per
- * category; the rate card turns that into money. From 1 October 2026 Meta
- * also charges service replies inside the 24-hour window, and it stops
- * delivering them on accounts with no payment method.
+ * category; the rate card turns that into money. Use Meta's billable flag
+ * and pricing type rather than assuming every delivered message is charged.
  */
 
 type PricingSummary = {
@@ -59,11 +58,11 @@ export function WhatsAppPricingPanel() {
       }
     >
       <div className="mb-4 rounded-md border border-warning/30 bg-warning-muted px-4 py-3 text-sm text-text-primary">
-        <p className="font-medium">From 1 October 2026, Meta charges for service replies too.</p>
+        <p className="font-medium">WhatsApp charges depend on the message and its destination.</p>
         <p className="mt-1 text-text-secondary">
-          Replies inside the 24-hour customer-service window are billed per message, and Meta stops delivering
-          them on WhatsApp Business accounts without a payment method. Add one in Meta Business Settings →
-          Billing. Accounts billed from India must move to INR by 31 December 2026.
+          Meta currently provides free service replies inside the 24-hour customer-service window.
+          Marketing and other billable messages follow Meta&rsquo;s current rate card. Check the
+          pricing category and billable status below when reviewing usage.
         </p>
       </div>
 
@@ -74,7 +73,10 @@ export function WhatsAppPricingPanel() {
       ) : (
         <>
           <div className="grid gap-3 sm:grid-cols-3">
-            <MiniStat label={`Billable in ${monthName(data.since, data.timeZone)}`} value={data.billable.toLocaleString()} />
+            <MiniStat
+              label={`Billable in ${monthName(data.since, data.timeZone)}`}
+              value={data.billable.toLocaleString()}
+            />
             <MiniStat label="Free" value={data.free.toLocaleString()} />
             <MiniStat label="No pricing reported" value={data.unpriced.toLocaleString()} />
           </div>
@@ -92,21 +94,26 @@ export function WhatsAppPricingPanel() {
                 {data.categories.map((row) => (
                   <tr key={row.category} className="border-b border-border/60">
                     <td className="py-2">{CATEGORY_LABEL[row.category] ?? row.category}</td>
-                    <td className="py-2 text-right tabular-nums">{row.billable.toLocaleString()}</td>
-                    <td className="py-2 text-right tabular-nums text-text-muted">{row.free.toLocaleString()}</td>
+                    <td className="py-2 text-right tabular-nums">
+                      {row.billable.toLocaleString()}
+                    </td>
+                    <td className="py-2 text-right tabular-nums text-text-muted">
+                      {row.free.toLocaleString()}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           ) : (
             <p className="mt-4 text-sm text-text-muted">
-              No priced messages yet this month. Meta reports pricing once a message is sent through the Cloud API.
+              No priced messages yet this month. Meta reports pricing once a message is sent through
+              the Cloud API.
             </p>
           )}
           {data.unpriced > 0 && (
             <p className="mt-3 text-xs text-text-muted">
-              &ldquo;No pricing reported&rdquo; covers messages sent through a provider that does not pass Meta&rsquo;s
-              pricing on (AiSensy campaigns), and messages Meta has not confirmed yet.
+              &ldquo;No pricing reported&rdquo; covers messages sent through a provider that does
+              not pass Meta&rsquo;s pricing metadata for, and messages Meta has not confirmed yet.
             </p>
           )}
         </>

@@ -6,7 +6,6 @@ import androidx.compose.ui.graphics.Color
 // replaces these because a channel must retain its identity across devices.
 val WhatsApp = Color(0xFF047857)
 val Email = Color(0xFF7C3AED)
-val IndiaMart = Color(0xFFB45309)
 
 val Ink = Color(0xFF17171C)
 val Paper = Color(0xFFFAFAFB)

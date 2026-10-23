@@ -313,7 +313,7 @@ describe("Overview reporting provenance", () => {
       data: {
         name: "Current source lead",
         mobile: "919999991002",
-        source: "indiamart",
+        source: "marketplace",
         consumedAt: new Date(),
       },
     });
@@ -898,7 +898,7 @@ describe('Meta WhatsApp webhook', () => {
 
     try {
       const account = await prisma.whatsAppAccount.create({
-        data: { name: 'Media number', provider: 'meta', cloudApiPhoneId: 'PNID-MEDIA', enabled: true },
+        data: { name: 'Media number', provider: 'meta', cloudApiPhoneId: 'PNID-MEDIA', cloudApiToken: 'test-meta-token', enabled: true },
       });
       const lead = await prisma.lead.create({
         data: { name: 'Photo Buyer', mobile: '15551230099', source: 'manual', assignedAccount: account.id },
@@ -1264,10 +1264,11 @@ describe('View-only users cannot change or export data', () => {
 });
 
 describe('Provider webhooks refuse unauthenticated deliveries', () => {
-  test('AiSensy webhook is closed until a secret is set', async () => {
-    const fake = { topic: 'message.sender.user', data: { message: { phone_number: '15550002222', message_content: { text: 'fake reply' } } } };
-    const res = await request('POST', '/webhook/whatsapp-cloud', { body: fake });
-    assert.equal(res.status, 401);
+  test('retired WhatsApp webhook is not registered', async () => {
+    for (const method of ['GET', 'POST']) {
+      const res = await request(method, '/webhook/whatsapp-cloud', { body: method === 'POST' ? {} : undefined });
+      assert.equal(res.status, 404);
+    }
   });
 
   test('iMessage webhook needs its secret', async () => {
@@ -1482,7 +1483,7 @@ describe('Approved WhatsApp template discovery', () => {
     process.env.META_GRAPH_API_BASE = `http://127.0.0.1:${graph.address().port}`;
     const account = await prisma.whatsAppAccount.create({ data: {
       name: 'Template test', provider: 'meta', metaWabaId: 'TEST-WABA',
-      cloudApiToken: cloudApi.encryptToken('test-template-account-token'),
+      cloudApiPhoneId: 'TEST-PHONE', cloudApiToken: cloudApi.encryptToken('test-template-account-token'),
     } });
     try {
       const endpoint = `/api/whatsapp/accounts/${account.id}/templates`;
@@ -1510,22 +1511,18 @@ describe('Approved WhatsApp template discovery', () => {
     }
   });
 
-  test('reports invalid IDs, unknown accounts, AiSensy and missing WABA clearly', async () => {
+  test('reports invalid IDs, unknown accounts and missing WABA clearly', async () => {
     const { default: prisma } = await import('../src/utils/prismaClient.js');
-    const aisensy = await prisma.whatsAppAccount.create({ data: { name: 'AiSensy template test', provider: 'aisensy' } });
     const meta = await prisma.whatsAppAccount.create({ data: { name: 'Missing WABA template test', provider: 'meta' } });
     try {
       const get = (id) => request('GET', `/api/whatsapp/accounts/${id}/templates`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.60' } });
       assert.equal((await get('1abc')).status, 400);
       assert.equal((await get(999999999)).status, 404);
-      const unsupported = await get(aisensy.id);
-      assert.equal(unsupported.status, 422);
-      assert.match(unsupported.body.error, /AiSensy/);
       const missing = await get(meta.id);
       assert.equal(missing.status, 422);
       assert.match(missing.body.error, /Business Account ID/);
     } finally {
-      await prisma.whatsAppAccount.deleteMany({ where: { id: { in: [aisensy.id, meta.id] } } });
+      await prisma.whatsAppAccount.deleteMany({ where: { id: { in: [meta.id] } } });
     }
   });
 });
@@ -2548,6 +2545,246 @@ test('Clerk team membership route is mounted and keeps local sign-in behavior ex
   const invitations = await request('GET', '/api/team/invitations', {headers});
   assert.equal(invitations.status, 200);
   assert.deepEqual(invitations.body, []);
+});
+
+
+describe('Direct Meta transport', () => {
+  test('checks credentials with GET and sends templates through the same Meta account', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const { default: cloud } = await import('../src/services/whatsappCloudApi.js');
+    const calls = [];
+    const graph = http.createServer(async (req, res) => {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      calls.push({ method: req.method, url: req.url, authorization: req.headers.authorization, body: chunks.length ? JSON.parse(Buffer.concat(chunks)) : null });
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify(req.method === 'GET'
+        ? { display_phone_number: '+1 555 000 0001', verified_name: 'Example', quality_rating: 'GREEN' }
+        : { messages: [{ id: 'wamid.test-template-1' }] }));
+    });
+    await new Promise((resolve) => graph.listen(0, '127.0.0.1', resolve));
+    const previous = process.env.META_GRAPH_API_BASE;
+    process.env.META_GRAPH_API_BASE = `http://127.0.0.1:${graph.address().port}`;
+    const account = await prisma.whatsAppAccount.create({ data: {
+      name: 'Direct transport fixture', provider: 'meta', cloudApiPhoneId: 'phone-fixture',
+      cloudApiToken: cloud.encryptToken('fixture-token'), templateLanguage: 'en_US',
+    } });
+    try {
+      assert.equal((await cloud.testCredentials(account.id)).ok, true);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].method, 'GET');
+      const sent = await cloud.sendCampaignTemplate({ phone: '15550000001', campaignName: 'approved_enquiry', templateParams: ['Taylor', 'Canada'], accountId: account.id });
+      assert.equal(sent.success, true);
+      assert.equal(sent.messageId, 'wamid.test-template-1');
+      assert.equal(calls[1].url, '/phone-fixture/messages');
+      assert.equal(calls[1].authorization, 'Bearer fixture-token');
+      assert.equal(calls[1].body.template.name, 'approved_enquiry');
+      assert.equal(calls[1].body.template.language.code, 'en_US');
+      assert.deepEqual(calls[1].body.template.components[0].parameters, [{ type: 'text', text: 'Taylor' }, { type: 'text', text: 'Canada' }]);
+      assert.equal((await request('PATCH', `/api/whatsapp/accounts/${account.id}/cloud-credentials`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.91' }, body: { provider: 'retired-provider' } })).status, 400);
+      assert.equal((await request('PATCH', `/api/whatsapp/accounts/${account.id}/cloud-credentials`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.91' }, body: { defaultCampaignName: 'Old Campaign Label' } })).status, 400);
+      assert.equal((await prisma.whatsAppAccount.findUnique({ where: { id: account.id } })).defaultCampaignName, '');
+    } finally {
+      if (previous === undefined) delete process.env.META_GRAPH_API_BASE; else process.env.META_GRAPH_API_BASE = previous;
+      await new Promise((resolve) => graph.close(resolve));
+      await prisma.whatsAppAccount.delete({ where: { id: account.id } });
+    }
+  });
+});
+
+describe('Website service enquiries', () => {
+  const origin = 'https://website.example.test';
+  const endpoint = '/api/public/request-access';
+  const headers = (ip = '192.0.2.130') => ({ Origin: origin, 'X-Forwarded-For': ip });
+  const body = { name: 'Example Owner', workEmail: 'owner@example.test', company: 'Example Studio', notes: 'Help with Meta and hosting' };
+  let previous;
+  before(() => {
+    previous = { enabled: process.env.WEBSITE_ENQUIRY_ENABLED, origins: process.env.WEBSITE_ENQUIRY_ORIGINS };
+    process.env.WEBSITE_ENQUIRY_ENABLED = 'true';
+    process.env.WEBSITE_ENQUIRY_ORIGINS = origin;
+  });
+  after(() => {
+    for (const [key, value] of [['WEBSITE_ENQUIRY_ENABLED', previous.enabled], ['WEBSITE_ENQUIRY_ORIGINS', previous.origins]]) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  });
+  test('is opt-in and only accepts configured browser origins', async () => {
+    assert.equal((await request('POST', endpoint, { headers: { 'X-Forwarded-For': '192.0.2.129' }, body })).status, 403);
+    assert.equal((await request('POST', endpoint, { headers: { Origin: 'https://untrusted.example.test', 'X-Forwarded-For': '192.0.2.129' }, body })).status, 403);
+    const preflight = await request('OPTIONS', endpoint, { headers: headers() });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers['access-control-allow-origin'], origin);
+    process.env.WEBSITE_ENQUIRY_ENABLED = 'false';
+    assert.equal((await request('POST', endpoint, { headers: headers(), body })).status, 503);
+    process.env.WEBSITE_ENQUIRY_ENABLED = 'true';
+  });
+  test('validates input and ignores honeypot submissions', async () => {
+    const invalidEmails = ['invalid', 'person@@example.test', 'person@example', 'person@.test', 'person@example.', 'person@exam ple.test', `!@!${'!.'.repeat(120)}`];
+    for (const [i, workEmail] of invalidEmails.entries()) {
+      assert.equal((await request('POST', endpoint, { headers: headers(`192.0.2.${140 + i}`), body: { ...body, workEmail } })).status, 422);
+    }
+    assert.equal((await request('POST', endpoint, { headers: headers(), body: { ...body, notes: 'x'.repeat(4001) } })).status, 422);
+    assert.equal((await request('POST', endpoint, { headers: headers(), body: { ...body, companyWebsite: 'bot.test' } })).status, 200);
+  });
+  test('persists a paused enquiry without changing an existing contact or queueing outreach', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const existing = await prisma.lead.create({ data: { name: 'Existing contact', mobile: '15550000130', email: body.workEmail, status: 'replied' } });
+    try {
+      const result = await request('POST', endpoint, { headers: headers('192.0.2.131'), body });
+      assert.equal(result.status, 201);
+      assert.deepEqual(result.body, { success: true });
+      assert.equal(result.headers['access-control-allow-origin'], origin);
+      const saved = await prisma.lead.findFirst({ where: { source: 'website_service_enquiry', email: body.workEmail } });
+      assert.equal(saved.status, 'paused');
+      assert.equal(saved.emailMarketingConsent, false);
+      assert.match(saved.mobile, /^no-phone:website-enquiry:/);
+      assert.match(saved.notes, /Help with Meta and hosting/);
+      assert.equal(await prisma.message.count({ where: { leadId: saved.id } }), 0);
+      assert.equal((await prisma.lead.findUnique({ where: { id: existing.id } })).status, 'replied');
+      await prisma.lead.delete({ where: { id: saved.id } });
+    } finally { await prisma.lead.delete({ where: { id: existing.id } }); }
+  });
+  test('limits public submissions', async () => {
+    for (let i = 0; i < 5; i++) assert.equal((await request('POST', endpoint, { headers: headers('192.0.2.132'), body: { ...body, companyWebsite: 'bot.test' } })).status, 200);
+    assert.equal((await request('POST', endpoint, { headers: headers('192.0.2.132'), body })).status, 429);
+  });
+});
+
+describe('Generic connector intake and supplier attribution', () => {
+  let db, source, supplier, otherSupplier;
+  const created = [];
+  const endpoint = '/api/webhooks/connector/fixture-connector';
+  const headers = { 'x-api-key': 'fixture-connector-key', 'X-Forwarded-For': '192.0.2.170' };
+  const record = (externalId, extra = {}) => ({ externalId, name: 'Connector fixture', mobile: '+1 (555) 000-0171', email: 'connector@example.test', acquiredAt: '2026-01-02T12:00:00Z', ...extra });
+  before(async () => {
+    db = (await import('../src/utils/prismaClient.js')).default;
+    supplier = await db.supplier.create({ data: { name: 'Fixture origin partner', matchTag: 'fixture-partner' } });
+    otherSupplier = await db.supplier.create({ data: { name: 'Fixture other partner', matchTag: 'other-partner' } });
+    source = await db.webhookSource.create({ data: { name: 'Fixture connector', source: 'fixture-connector', apiKey: 'fixture-connector-key', importSupplierId: supplier.id, importTags: 'fixture-import' } });
+  });
+  after(async () => {
+    await db.connectorReceipt.deleteMany({ where: { sourceId: source.id } });
+    await db.salesOrder.deleteMany({ where: { originSupplierId: supplier.id } });
+    await db.lead.deleteMany({ where: { OR: [{ source: source.source }, { id: { in: created } }] } });
+    await db.webhookSource.delete({ where: { id: source.id } });
+    await db.supplier.deleteMany({ where: { id: { in: [supplier.id, otherSupplier.id] } } });
+  });
+  test('requires the source key and validates the whole batch before writes', async () => {
+    assert.equal((await request('POST', endpoint, { headers: { ...headers, 'x-api-key': 'wrong' }, body: { records: [record('bad-key')] } })).status, 401);
+    assert.equal((await request('POST', endpoint, { headers, body: { records: [record('valid-before-invalid'), { name: 'Missing ID' }] } })).status, 422);
+    assert.equal(await db.connectorReceipt.count({ where: { sourceId: source.id } }), 0);
+  });
+  test('persists a paused historical contact, source receipt and replay without outreach', async () => {
+    const first = await request('POST', endpoint, { headers, body: { records: [record('fixture-1')] } });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.outreachQueued, false);
+    assert.equal(first.body.results[0].state, 'created');
+    const id = first.body.results[0].leadId;
+    const lead = await db.lead.findUnique({ where: { id } });
+    assert.equal(lead.mobile, '15550000171'); assert.equal(lead.status, 'paused');
+    assert.equal(lead.emailMarketingConsent, false); assert.equal(lead.originSupplierId, supplier.id);
+    assert.match(lead.tags, /fixture-partner/); assert.equal(lead.consumedAt.toISOString(), '2026-01-02T12:00:00.000Z');
+    assert.equal(await db.message.count({ where: { leadId: id } }), 0);
+    const replay = await request('POST', endpoint, { headers, body: { records: [record('fixture-1')] } });
+    assert.equal(replay.body.results[0].replay, true); assert.equal(replay.body.results[0].leadId, id);
+    assert.equal(await db.connectorReceipt.count({ where: { sourceId: source.id } }), 1);
+  });
+  test('matches formatted phones and case-insensitive emails while preserving status and consent', async () => {
+    const lead = await db.lead.create({ data: { name: 'Existing', mobile: '+44-7700-900171', email: 'EXISTING@example.test', status: 'replied', emailMarketingConsent: true, emailOptOut: true } }); created.push(lead.id);
+    const response = await request('POST', endpoint, { headers, body: { records: [record('fixture-2', { mobile: '0044 7700 900171', email: 'existing@example.test', company: 'Filled company' })] } });
+    assert.equal(response.body.results[0].state, 'matched'); assert.equal(response.body.results[0].leadId, lead.id);
+    const saved = await db.lead.findUnique({ where: { id: lead.id } });
+    assert.equal(saved.status, 'replied'); assert.equal(saved.emailMarketingConsent, true); assert.equal(saved.emailOptOut, true); assert.equal(saved.company, 'Filled company');
+  });
+  test('holds different owners and split identities for review without changing contacts', async () => {
+    const owner = await db.lead.create({ data: { name: 'Other owner', mobile: '15550000173', tags: 'other-partner', originSupplierId: otherSupplier.id } }); created.push(owner.id);
+    const second = await db.lead.create({ data: { name: 'Split identity', mobile: '15550000174', email: 'split@example.test' } }); created.push(second.id);
+    const response = await request('POST', endpoint, { headers, body: { records: [record('owner-conflict', { mobile: '+1 555 000 0173', email: '' }), record('identity-conflict', { mobile: '+1 555 000 0171', email: 'split@example.test' })] } });
+    assert.deepEqual(response.body.results.map((r) => r.state), ['conflict', 'conflict']);
+    assert.equal((await db.lead.findUnique({ where: { id: owner.id } })).tags, 'other-partner');
+    assert.equal(await db.connectorReceipt.count({ where: { sourceId: source.id, state: 'conflict' } }), 2);
+  });
+  test('snapshots lead origin onto a new order independently of fulfilment supplier', async () => {
+    const lead = await db.lead.findFirst({ where: { source: source.source } });
+    const result = await request('POST', '/api/orders', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.175' }, body: { customerName: 'Fixture customer', leadId: lead.id, supplierId: otherSupplier.id, items: [] } });
+    assert.equal(result.status, 201);
+    assert.equal(result.body.originSupplierId, supplier.id); assert.equal(result.body.supplierId, otherSupplier.id);
+    await db.lead.update({ where: { id: lead.id }, data: { tags: 'changed-later' } });
+    assert.equal((await db.salesOrder.findUnique({ where: { id: result.body.id } })).originSupplierId, supplier.id);
+    const list = await request('GET', `/api/orders?originSupplierId=${supplier.id}`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.175' } });
+    assert.ok(list.body.data.some((order) => order.id === result.body.id));
+  });
+  test('configures future import attribution without rewriting existing receipts or origin', async () => {
+    const admin = { ...authHeader(), 'X-Forwarded-For': '192.0.2.176' };
+    const leadBefore = await db.lead.findFirst({ where: { source: source.source } });
+    const receiptBefore = await db.connectorReceipt.findFirst({ where: { sourceId: source.id } });
+    const invalid = await request('PATCH', `/api/connector-sources/${source.id}`, { headers: admin, body: { supplierId: supplier.id, tags: ['bad,tag'] } });
+    assert.equal(invalid.status, 422);
+    const unavailable = await request('PATCH', `/api/connector-sources/${source.id}`, { headers: admin, body: { supplierId: 99999999, tags: [] } });
+    assert.equal(unavailable.status, 404);
+    const saved = await request('PATCH', `/api/connector-sources/${source.id}`, { headers: admin, body: { supplierId: otherSupplier.id, tags: [' reviewed-import ', 'reviewed-import'] } });
+    assert.equal(saved.status, 200); assert.equal(saved.body.outreachQueued, false);
+    const listed = await request('GET', '/api/webhooks/sources', { headers: admin });
+    const configured = listed.body.find((entry) => entry.id === source.id);
+    assert.equal(configured.importSupplierId, otherSupplier.id); assert.equal(configured.importTags, 'reviewed-import');
+    assert.notEqual(configured.apiKey, source.apiKey);
+    assert.equal((await db.lead.findUnique({ where: { id: leadBefore.id } })).originSupplierId, leadBefore.originSupplierId);
+    assert.deepEqual(await db.connectorReceipt.findUnique({ where: { id: receiptBefore.id } }), receiptBefore);
+    await db.webhookSource.update({ where: { id: source.id }, data: { importSupplierId: supplier.id, importTags: 'fixture-import' } });
+  });
+  test('restricts configuration to admins and receipts to managers', async () => {
+    const { signToken } = await import('../src/auth/rbac.js');
+    const users = [];
+    try {
+      for (const role of ['agent', 'manager']) {
+        const user = await db.user.create({ data: { name: 'Import review fixture', email: `import-${role}@example.test`, passwordHash: 'not-a-password', role } }); users.push(user.id);
+        const auth = { Authorization: `Bearer ${signToken(user)}`, 'X-Forwarded-For': `192.0.2.${role === 'agent' ? 177 : 178}` };
+        const configuration = await request('PATCH', `/api/connector-sources/${source.id}`, { headers: auth, body: { supplierId: supplier.id, tags: [] } });
+        assert.equal(configuration.status, 403);
+        const records = await request('GET', `/api/connector-receipts?sourceId=${source.id}&state=conflict&page=1`, { headers: auth });
+        assert.equal(records.status, role === 'manager' ? 200 : 403);
+        if (role === 'manager') {
+          assert.equal(records.body.total, 2); assert.equal(records.body.records.length, 2);
+          assert.ok(records.body.records.every((receipt) => receipt.sourceId === source.id && receipt.state === 'conflict' && receipt.reason));
+          assert.equal(records.body.page, 1); assert.equal(records.body.pages, 1);
+        }
+      }
+      assert.equal((await request('GET', `/api/connector-receipts?sourceId=${source.id}`, { headers: { 'X-Forwarded-For': '192.0.2.181' } })).status, 401);
+      assert.equal((await request('GET', '/api/connector-receipts?sourceId=bad', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.179' } })).status, 422);
+    } finally { await db.user.deleteMany({ where: { id: { in: users } } }); }
+  });
+  test('pages large import histories without mixing sources or omitting records', async () => {
+    const admin = { ...authHeader(), 'X-Forwarded-For': '192.0.2.182' };
+    const before = await db.connectorReceipt.count({ where: { sourceId: source.id } });
+    await db.connectorReceipt.createMany({ data: Array.from({ length: 101 }, (_, index) => ({ sourceId: source.id, externalId: `paging-${index}`, state: 'matched', recordJson: '{}' })) });
+    try {
+      const first = await request('GET', `/api/connector-receipts?sourceId=${source.id}&page=1`, { headers: admin });
+      const second = await request('GET', `/api/connector-receipts?sourceId=${source.id}&page=2`, { headers: admin });
+      assert.equal(first.status, 200); assert.equal(second.status, 200);
+      assert.equal(first.body.total, before + 101); assert.equal(first.body.pages, 2);
+      assert.equal(first.body.records.length, 100); assert.equal(second.body.records.length, before + 1);
+      const all = [...first.body.records, ...second.body.records];
+      assert.equal(new Set(all.map((receipt) => receipt.id)).size, before + 101);
+      assert.ok(all.every((receipt) => receipt.sourceId === source.id));
+      const absent = await request('GET', '/api/connector-receipts?sourceId=99999999', { headers: admin });
+      assert.equal(absent.body.total, 0); assert.deepEqual(absent.body.records, []);
+    } finally { await db.connectorReceipt.deleteMany({ where: { sourceId: source.id, externalId: { startsWith: 'paging-' } } }); }
+  });
+  test('retains import history when deletion is attempted and allows disabling intake', async () => {
+    const admin = { ...authHeader(), 'X-Forwarded-For': '192.0.2.180' };
+    const count = await db.connectorReceipt.count({ where: { sourceId: source.id } });
+    const removed = await request('DELETE', `/api/webhooks/sources/${source.id}`, { headers: admin });
+    assert.equal(removed.status, 409); assert.match(removed.body.error, /Disable/);
+    assert.equal(await db.connectorReceipt.count({ where: { sourceId: source.id } }), count);
+    assert.ok(await db.webhookSource.findUnique({ where: { id: source.id } }));
+    const disabled = await request('PATCH', `/api/webhooks/sources/${source.id}`, { headers: admin, body: { enabled: false } });
+    assert.equal(disabled.status, 200); assert.equal(disabled.body.enabled, false);
+    const intake = await request('POST', endpoint, { headers, body: { records: [record('disabled-source')] } });
+    assert.equal(intake.status, 404);
+    assert.equal(await db.connectorReceipt.count({ where: { sourceId: source.id } }), count);
+    assert.equal((await request('DELETE', '/api/webhooks/sources/bad', { headers: admin })).status, 422);
+    assert.equal((await request('DELETE', '/api/webhooks/sources/99999999', { headers: admin })).status, 404);
+  });
 });
 
 test('personal read cursors and resolution stay independent of sales status and other viewers', async () => {

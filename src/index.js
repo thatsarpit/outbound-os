@@ -57,7 +57,7 @@ async function main() {
 
     // ── Step 2: Reply detection ──
     // Inbound WhatsApp replies and delivery receipts now arrive over the Cloud
-    // API webhook (POST /webhook/whatsapp-cloud in api.js), not from client
+    // API webhook (POST /webhook/meta), not from client
     // events, so there is no listener to wire up here. Email replies are still
     // polled over IMAP by emailService.
     logger.info('Step 2/4: Reply detection is webhook-driven (no listener wiring needed)');

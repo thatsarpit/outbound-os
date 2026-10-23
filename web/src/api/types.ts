@@ -28,6 +28,8 @@ export interface Lead {
   strength: string | null
   brand: string | null
   source: string
+  originSupplierId?: number | null
+  originSupplier?: { id: number; name: string } | null
   importBatchId: number | null
   status: LeadStatus
   isOnWhatsApp: boolean | null
@@ -208,15 +210,12 @@ export interface WhatsAppAccount {
   metaWabaId: string
   metaPhoneNumberId?: string
   metaConfigured?: boolean
-  aisensyProjectId: string
-  projectApiConfigured: boolean
-  campaignApiConfigured: boolean
   defaultCampaignName: string
   lastResetAt: string
   createdAt: string
 }
 
-export type WhatsAppProvider = 'meta' | 'aisensy'
+export type WhatsAppProvider = 'meta'
 
 export interface EmailAccount {
   id: number

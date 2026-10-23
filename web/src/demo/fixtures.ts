@@ -1,5 +1,6 @@
 import type { EmailTemplate } from '@/api/endpoints/templates'
 import { handleMobileSalesRequest } from './mobile-sales'
+import { handleConnectorRequest } from './connectors'
 import {
   defaultDashboardLayout,
   validateDashboardLayout,
@@ -216,7 +217,7 @@ const MORE_LEADS: Array<
     '30,000 units',
     'engaged',
     'HOT',
-    'indiamart',
+    'marketplace',
     88,
     'ahmed@gulf-fasteners.example',
     true,
@@ -268,7 +269,7 @@ const MORE_LEADS: Array<
     '200,000 pcs',
     'contacted',
     'WARM',
-    'indiamart',
+    'marketplace',
     55,
     'arjun@dhm.example',
     true,
@@ -359,7 +360,7 @@ const MORE_LEADS: Array<
     '80,000 pcs',
     'closed',
     'HOT',
-    'indiamart',
+    'marketplace',
     91,
     'rahul@pune-eng.example',
     true,
@@ -787,9 +788,6 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
         metaWabaId: '100000000000001',
         metaPhoneNumberId: '100000000000011',
         metaConfigured: true,
-        aisensyProjectId: '',
-        projectApiConfigured: false,
-        campaignApiConfigured: false,
         defaultCampaignName: '',
         lastResetAt: ago(600),
         createdAt: '2026-06-02T09:00:00Z',
@@ -823,9 +821,6 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
         metaWabaId: '100000000000001',
         metaPhoneNumberId: '100000000000012',
         metaConfigured: true,
-        aisensyProjectId: '',
-        projectApiConfigured: false,
-        campaignApiConfigured: false,
         defaultCampaignName: '',
         lastResetAt: ago(600),
         createdAt: '2026-07-14T09:00:00Z',
@@ -990,25 +985,6 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
         hasSession: true,
       },
     ],
-  ],
-  [
-    /\/webhooks\/sources/,
-    [
-      ['Website contact form', 'website', 612, 12],
-      ['Facebook Lead Ads', 'facebook_ads', 238, 95],
-      ['Zapier: trade show list', 'zapier', 141, 2880],
-      ['IndiaMART', 'indiamart', 401, 40],
-    ].map(([name, source, total, minutes], index) => ({
-      id: index + 1,
-      name,
-      source,
-      apiKey: 'demo-key-hidden',
-      fieldMap: '{}',
-      enabled: true,
-      lastReceivedAt: ago(minutes as number),
-      totalReceived: total,
-      createdAt: '2026-06-10T09:00:00Z',
-    })),
   ],
   [
     /\/settings\/sheets-webhook/,
@@ -2266,6 +2242,8 @@ export function installFixtureFetch() {
 
     const mobileSales = handleMobileSalesRequest(url, init, FIXTURE_LEADS)
     if (mobileSales) return mobileSales
+    const connector = handleConnectorRequest(url, init)
+    if (connector) return connector
     const inbox = await handleInboxRequest(url, init)
     if (inbox) return inbox
 

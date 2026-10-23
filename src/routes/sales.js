@@ -125,8 +125,13 @@ async function nextNumber(tx, model, field, prefix) {
 
 router.get('/orders', requireRole('agent'), async (req, res) => {
   try {
-    const { status, search, page = 1, limit = 25, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+    const { status, search, originSupplierId, page = 1, limit = 25, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
     const and = [];
+    if (originSupplierId) {
+      const id = Number(originSupplierId);
+      if (!Number.isSafeInteger(id) || id < 1) return res.status(400).json({ error: 'Invalid lead supplier.' });
+      and.push({ originSupplierId: id });
+    }
     if (status && status !== 'all') and.push({ status });
     if (search) {
       and.push({
@@ -154,6 +159,7 @@ router.get('/orders', requireRole('agent'), async (req, res) => {
           invoices: { select: { id: true, number: true, status: true, total: true, amountPaid: true } },
           shipments: { select: { id: true, carrier: true, trackingNumber: true, trackingUrl: true, status: true, estimatedDelivery: true } },
           lead: { select: { id: true, name: true, company: true } },
+          originSupplier: { select: { id: true, name: true } },
         },
       }),
       prisma.salesOrder.count({ where }),
@@ -195,6 +201,7 @@ router.get('/orders/:id', requireRole('agent'), async (req, res) => {
         invoices: { orderBy: { createdAt: 'desc' } },
         shipments: { orderBy: { createdAt: 'desc' } },
         supplier: true,
+        originSupplier: { select: { id: true, name: true } },
         paymentMethod: true,
         lead: { select: { id: true, name: true, company: true, email: true, mobile: true, country: true, tags: true } },
       },
@@ -215,6 +222,7 @@ router.post('/orders', requireRole('agent'), async (req, res) => {
     const items = Array.isArray(b.items) ? b.items : [];
 
     const order = await prisma.$transaction(async (tx) => {
+      const originLead = b.leadId ? await tx.lead.findUnique({ where: { id: toInt(b.leadId) }, select: { originSupplierId: true } }) : null;
       const orderNumber = await nextNumber(tx, 'salesOrder', 'orderNumber', `SO${fyPrefix()}`);
       const created = await tx.salesOrder.create({
         data: {
@@ -222,6 +230,7 @@ router.post('/orders', requireRole('agent'), async (req, res) => {
           leadId: b.leadId ? toInt(b.leadId) : null,
           customerId: b.customerId ? toInt(b.customerId) : null,
           supplierId: b.supplierId ? toInt(b.supplierId) : null,
+          originSupplierId: originLead?.originSupplierId || null,
           paymentMethodId: b.paymentMethodId ? toInt(b.paymentMethodId) : null,
           feeMode: b.feeMode === 'pass_on' ? 'pass_on' : 'absorb',
           fxRateToInr: b.fxRateToInr ? toInt(b.fxRateToInr) : null,

@@ -83,7 +83,7 @@ export default function UseCasesPage() {
             <h2>Turn contact into a visible next action.</h2>
           </div>
           <ol className="stack use-case-flow">
-            <li><p className="eyebrow">Arrives</p><h3>The enquiry enters from a connected source.</h3><p>WhatsApp, email, IndiaMART, CSV or a supported webhook creates the working context without requiring a rep to maintain a separate list.</p></li>
+            <li><p className="eyebrow">Arrives</p><h3>The enquiry enters from a connected source.</h3><p>WhatsApp, email, marketplace enquiries, CSV or a supported webhook creates the working context without requiring a rep to maintain a separate list.</p></li>
             <li><p className="eyebrow">Qualifies</p><h3>Priority and ownership become explicit.</h3><p>Scoring helps order attention. A person decides whether the request fits and takes responsibility for the next step.</p></li>
             <li><p className="eyebrow">Replies</p><h3>The answer starts from the actual conversation.</h3><p>First contact goes out automatically with an approved template. After that, the owner replies from the full thread and checks every commercial promise.</p></li>
             <li><p className="eyebrow">Moves</p><h3>Status and next action stay on the record.</h3><p>The manager sees what is being worked, what is waiting and where an enquiry needs someone else to decide.</p></li>
@@ -135,12 +135,12 @@ export default function UseCasesPage() {
             <h2>Specific enough to show where the system earns its keep.</h2>
             <p>
               Pharma export is a real operating pattern for Outbound OS: an
-              IndiaMART enquiry, an overseas buyer, WhatsApp and email, product
+              a marketplace enquiry, an overseas buyer, WhatsApp and email, product
               and quantity context, a quotation and disciplined follow-up.
             </p>
           </div>
           <div className="stack use-case-flow">
-            <article><p className="eyebrow">Intake</p><h3>IndiaMART supplies the enquiry context.</h3><p>The buyer, product and country arrive through <Link className="link" href="/integrations/indiamart">IndiaMART&rsquo;s Lead Manager Push API</Link> the moment the enquiry is sent, and first contact goes out within seconds.</p></article>
+            <article><p className="eyebrow">Intake</p><h3>The source supplies the enquiry context.</h3><p>The buyer, product and country arrive through <Link className="link" href="/integrations/webhooks">an authenticated webhook</Link> the moment the enquiry is sent, and first contact goes out within seconds.</p></article>
             <article><p className="eyebrow">Response</p><h3>The team replies across the channel the buyer is using.</h3><p>WhatsApp uses the official business route; email uses the exporter&rsquo;s own mailbox. Market timezone, template approval and account limits remain part of setup.</p></article>
             <article><p className="eyebrow">Commercial boundary</p><h3>The exporter approves the promise.</h3><p>Product fit, MOQ, lead time, regulatory detail, price and payment terms are decided by people, never by automation.</p></article>
             <article><p className="eyebrow">Follow-through</p><h3>The quotation remains connected to the chase.</h3><p>Approved follow-up can run on schedule, and a reply stops the sequence so the rep works the active buyer conversation.</p></article>

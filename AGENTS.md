@@ -7,7 +7,7 @@ same rules in fewer words.
 ## What this is
 
 Outbound OS is a self-hosted, open-source WhatsApp CRM and outreach platform.
-Leads arrive by signed webhook (website forms, Facebook Lead Ads, IndiaMART,
+Leads arrive by signed webhook (website forms, Facebook Lead Ads, external marketplaces,
 Zapier, CSV), are contacted within seconds on WhatsApp, email, Telegram or
 iMessage, and get follow-ups until they reply. It runs as one Docker Compose
 app with a SQLite database. AGPL-3.0.
@@ -56,7 +56,7 @@ from an untouched `.env.example`.
   (hand-written SQL is fine) and update `schema.prisma` to match. Check with
   `DATABASE_URL=file:<db> npx prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script`
   — it must print an empty migration. Never rely on `prisma db push`.
-- **WhatsApp goes through official APIs only**: Meta's Cloud API or AiSensy.
+- **WhatsApp goes through official APIs only**: Meta's Cloud API.
   Never automate the WhatsApp or WhatsApp Business phone apps.
 - **Leads can lack a phone number.** `Lead.mobile` is required and unique, so
   email-only leads and WhatsApp username users carry a `no-phone:` placeholder.

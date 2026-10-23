@@ -46,7 +46,7 @@ const GROUPS: Group[] = [
     items: [
       {
         name: 'WhatsApp',
-        detail: "Meta's official Cloud API, or AiSensy. Approved templates for first contact.",
+        detail: "Meta's official Cloud API. Approved templates for first contact.",
         icon: MessageSquare,
         to: '/integrations/whatsapp',
         channel: 'whatsapp',
@@ -103,7 +103,7 @@ const GROUPS: Group[] = [
       },
       {
         name: 'Marketplaces',
-        detail: 'IndiaMART, TradeIndia, JustDial and Engyne Cloud presets.',
+        detail: 'external marketplaces, TradeIndia, JustDial and Engyne Cloud presets.',
         icon: Store,
         to: '/integrations/webhooks',
       },

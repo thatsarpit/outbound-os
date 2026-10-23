@@ -28,7 +28,6 @@ export async function generateMetadata({ params }: { params: Promise<Params> }) 
 /** Guides that go deeper than an integration page can. */
 const guides: Record<string, { href: string; label: string }> = {
   'whatsapp-cloud-api': { href: '/docs/whatsapp-cloud-api', label: 'Full setup guide' },
-  indiamart: { href: '/docs/website-forms', label: 'How lead webhooks work' },
   zapier: { href: '/docs/website-forms', label: 'How lead webhooks work' },
   'facebook-lead-ads': { href: '/docs/website-forms', label: 'How lead webhooks work' },
 }

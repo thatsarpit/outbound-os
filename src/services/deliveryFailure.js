@@ -32,7 +32,7 @@ export const FAILURE_CLASS = Object.freeze({
 });
 
 /**
- * Meta error codes, as delivered through AiSensy or the Cloud API directly.
+ * Meta Cloud API error codes.
  * Codes are more reliable than prose, which is localised and reworded.
  */
 const CODE_CLASS = Object.freeze({
@@ -53,7 +53,7 @@ const CODE_CLASS = Object.freeze({
 });
 
 /**
- * Prose fallbacks. AiSensy surfaces several conditions as text with no code,
+ * Prose fallbacks for historical provider errors without a numeric code,
  * so these patterns carry real weight rather than being a nicety.
  *
  * Order matters: compliance patterns are tested first so an opt-out is never

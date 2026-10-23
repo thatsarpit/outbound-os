@@ -1,290 +1,320 @@
 import Link from 'next/link'
-import { ArrowRight } from 'lucide-react'
-import { HeroScene } from '@/components/visuals/hero-scene'
-import { Logo, LogoTile } from '@/components/brand-logo'
-import { IntegrationHub } from '@/components/visuals/integration-hub'
-import { LogoRow } from '@/components/visuals/logo-row'
-import { Bento } from '@/components/visuals/bento'
-import { CaptureVisual, CloseVisual, ContactVisual, FollowVisual, ReplyVisual } from '@/components/visuals/story-visuals'
-import { StoryScroller } from '@/components/story-scroller'
-import { Faq, InstallBand } from '@/components/content'
+import {
+  ArrowRight,
+  ArrowUpRight,
+  GitBranch,
+  Server,
+  SlidersHorizontal,
+} from 'lucide-react'
+import { Logo } from '@/components/brand-logo'
+import { ProductHero } from '@/components/product-hero'
 import { ProductTour } from '@/components/product-tour'
-import { integrations } from '@/lib/integrations'
-import { mcpToolCount } from '@/lib/mcp-tools'
+import { Faq } from '@/components/content'
 import { site } from '@/lib/site-content'
 
-/**
- * Home.
- *
- * Opens on what the software does and that it is yours to run: an
- * open-source WhatsApp CRM that contacts a new lead in seconds and keeps
- * following up until they answer. Every section after the hero is proof —
- * the real dashboard, the loop, what it connects to, and where its limits are.
- */
-
-const homeFaq = [
-  {
-    q: 'What is Outbound OS?',
-    a: 'Outbound OS is an open-source CRM and outreach platform built around WhatsApp. It captures leads from website forms, ads and marketplaces, contacts each one on WhatsApp, email, Telegram or iMessage within seconds, runs follow-ups that stop when the lead replies, and keeps the whole conversation on one lead record.',
-  },
+const questions = [
   {
     q: 'Is Outbound OS free?',
-    a: 'Yes. The software is free and open source under the AGPL-3.0 license, with no per-seat or per-contact fees. You pay for your own server and for what channel providers charge — Meta bills WhatsApp messages to your own WhatsApp Business account directly.',
+    a: 'Yes. The complete software is open source under AGPL-3.0. You can install it yourself without a software subscription. Hosting, WhatsApp messaging and other providers can have their own costs.',
   },
   {
-    q: 'Do I need the WhatsApp Business API?',
-    a: "Yes, for WhatsApp. Outbound OS sends through Meta's official WhatsApp Cloud API, which you can connect yourself in about fifteen minutes, or through AiSensy if your number is already there. It never automates the WhatsApp or WhatsApp Business phone apps, which is how numbers get banned.",
+    q: 'What can you set up for my business?',
+    a: 'We offer installation, a direct Meta WhatsApp connection, email and lead-source setup, contact imports and a team walkthrough. Managed hosting and ongoing assistance are also available. We agree the scope and quote before work starts.',
   },
   {
-    q: 'What do I need to run it?',
-    a: 'A machine with Docker — a small cloud server with 1–2 GB of memory is enough for a team — and an HTTPS address so Meta can deliver replies. One docker compose command starts the app, creates the database and your first admin account.',
+    q: 'Can I keep my existing WhatsApp number?',
+    a: 'We first check your current number and Meta Business account. A number already connected through another provider may need a migration. We plan that with you before making changes.',
   },
   {
-    q: 'Does it work outside India?',
-    a: 'Yes. Numbers are stored with their country code, follow-ups run in each lead’s own working hours, and the time zone, currency and default country code are settings. IndiaMART is one of many lead sources, not a requirement.',
+    q: 'Does this include the WhatsApp messaging fees?',
+    a: 'Software and setup services are separate from Meta messaging charges and other provider costs. Your proposal will explain which infrastructure costs are included and which are billed separately.',
   },
   {
-    q: 'Is there a hosted version?',
-    a: 'The project is built to be self-hosted. If you would rather not run a server, the maintainers can set up and run an instance for you — see managed hosting.',
+    q: 'Can I move to self-hosting later?',
+    a: 'Yes. Managed setup uses the same open-source product. You can export your data and run your own instance. We can include a handover in your service scope.',
   },
 ]
-
-const INTEGRATION_COUNT = integrations.length + 2 // + website forms and MCP
 
 export default function HomePage() {
   return (
     <>
-      <section className="stage-wrap">
-        <div className="stage">
-          <div className="page stage__inner">
-            <div className="stage__copy">
-              {/* On main, not yet in a numbered release: say "New", link the
-                  changelog, and don't pin it to a version it isn't in. */}
-              <a href={`${site.githubUrl}/blob/main/CHANGELOG.md`} className="stage__badge">
-                <b>New</b>
-                Photos and files on WhatsApp
-                <ArrowRight size={13} aria-hidden="true" />
-              </a>
-              <h1>
-                Answer every lead in seconds. <span>Follow up until they reply.</span>
+      <section className="os-hero" aria-labelledby="home-heading">
+        <div className="page">
+          <div className="os-hero__intro">
+            <div>
+              <p className="eyebrow">
+                Outbound OS / The open-source WhatsApp CRM
+              </p>
+              <h1 id="home-heading">
+                Your sales desk,
+                <br />
+                <span>wherever you work.</span>
               </h1>
-              <p className="stage__lede">
-                The open-source WhatsApp CRM. Leads from your website, ads and
-                marketplaces get a WhatsApp message and an email the moment they
-                arrive, and a follow-up every morning until they answer.
-              </p>
-              <div className="stage__actions">
-                <Link href="/docs/install" className="btn btn--brand btn--lg">
-                  Install in five minutes
-                </Link>
-                <a href={site.demoUrl} className="btn btn--glass btn--lg">
-                  Try the live demo
-                  <ArrowRight size={16} aria-hidden="true" />
-                </a>
-              </div>
-              <p className="stage__meta">
-                Free under {site.license}. Runs on your own server.{' '}
-                <a href={site.githubUrl}>
-                  <Logo brand="github" size={14} className="stage__gh" />
-                  Star on GitHub
-                </a>
-              </p>
             </div>
-
-            <HeroScene />
+            <div className="os-hero__right">
+              <p>
+                WhatsApp, email and customer records in one shared workspace.
+                The full picture at your desk. A focused inbox on your phone.
+              </p>
+              <div className="os-actions">
+                <a href={site.demoUrl} className="btn btn--primary btn--lg">
+                  Try the live demo <ArrowUpRight size={17} />
+                </a>
+                <Link
+                  href="/managed-hosting"
+                  className="btn btn--secondary btn--lg"
+                >
+                  Get setup help <ArrowRight size={16} />
+                </Link>
+              </div>
+              <a className="os-source-link" href={site.githubUrl}>
+                <GitBranch size={14} /> Open source · Free to self-host
+                <ArrowUpRight size={13} />
+              </a>
+            </div>
+          </div>
+          <ProductHero />
+          <div className="os-connections">
+            <p>Connected to the tools you work with</p>
+            <div>
+              {(
+                [
+                  'whatsapp',
+                  'meta',
+                  'gmail',
+                  'webhooks',
+                  'facebook',
+                  'mcp',
+                ] as const
+              ).map((brand) => (
+                <span key={brand}>
+                  <Logo brand={brand} size={23} />
+                  {
+                    (
+                      {
+                        whatsapp: 'WhatsApp',
+                        meta: 'Meta Cloud API',
+                        gmail: 'Email',
+                        webhooks: 'Webhooks',
+                        facebook: 'Facebook Leads',
+                        mcp: 'MCP agents',
+                      } as const
+                    )[brand]
+                  }
+                </span>
+              ))}
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="home-glance" aria-label="Works with">
-        <div className="page">
-          <LogoRow caption="Leads come in and messages go out through the tools you already use" />
-        </div>
-      </section>
-
-      <section className="section section--ruled home-story" aria-labelledby="story-heading">
-        <div className="page">
-          <div className="section-head" data-reveal>
-            <h2 id="story-heading">From enquiry to order, without anyone watching the queue.</h2>
+      <section
+        className="section os-workflow"
+        aria-labelledby="workflow-heading"
+      >
+        <div className="page os-workflow__layout">
+          <div className="os-workflow__intro">
+            <p className="eyebrow">The work, connected</p>
+            <h2 id="workflow-heading">
+              More context.
+              <br />
+              Fewer loose ends.
+            </h2>
             <p>
-              The slow part of selling is rarely the first message. It is the
-              second, third and fourth — so the software owns them.
+              An enquiry becomes a conversation. A conversation becomes an
+              order. Keep the details together, so the next person knows where
+              to start.
             </p>
+            <Link href="/platform" className="cta-link">
+              Explore the platform <ArrowRight size={15} />
+            </Link>
           </div>
-          <StoryScroller
-            steps={[
+          <ol className="os-workflow__list">
+            {[
               {
-                eyebrow: 'Capture',
-                title: 'Every lead lands in one place',
-                body: (
-                  <p>
-                    Website forms, <Link href="/integrations/facebook-lead-ads">Facebook Lead Ads</Link>,{' '}
-                    <Link href="/integrations/indiamart">IndiaMART</Link>, Zapier or a CSV. Each source is a
-                    signed webhook, and a lead that already exists is merged, not duplicated.
-                  </p>
-                ),
-                visual: <CaptureVisual />,
-                inline: <CaptureVisual />,
+                number: '01',
+                title: 'A shared inbox, with the customer attached.',
+                text: 'Read WhatsApp and email alongside notes, ownership and previous orders. A reply stops scheduled follow-ups.',
+                href: '/platform',
+                link: 'Inside the workspace',
               },
               {
-                eyebrow: 'Contact',
-                title: 'First message in seconds',
-                body: (
-                  <p>
-                    The moment a lead arrives it gets your approved WhatsApp template and an email from your own
-                    mailbox — not when someone next opens the dashboard.
-                  </p>
-                ),
-                visual: <ContactVisual />,
-                inline: <ContactVisual />,
+                number: '02',
+                title: 'Your WhatsApp number. A direct Meta connection.',
+                text: 'Use your own Business account, approved templates and delivery receipts. Keep control of the connection.',
+                href: '/integrations/whatsapp-cloud-api',
+                link: 'How WhatsApp connects',
               },
               {
-                eyebrow: 'Follow up',
-                title: 'Follow-ups on their morning',
-                body: (
-                  <p>
-                    Sequences are timed for the lead&rsquo;s morning in their own country, so a buyer in Lagos
-                    hears from you at 09:30 Lagos time.
-                  </p>
-                ),
-                visual: <FollowVisual />,
-                inline: <FollowVisual />,
+                number: '03',
+                title: 'The next step, wherever the day takes you.',
+                text: 'Reply from your phone, check a lead or work through your tasks. Add the web app to your Home Screen for quick access.',
+                href: '#product-heading',
+                link: 'See the product screens',
               },
-              {
-                eyebrow: 'Reply',
-                title: 'A reply stops the chase',
-                body: (
-                  <p>
-                    The moment they answer on any channel, every scheduled follow-up is cancelled and the
-                    conversation moves to your team.
-                  </p>
-                ),
-                visual: <ReplyVisual />,
-                inline: <ReplyVisual />,
-              },
-              {
-                eyebrow: 'Close',
-                title: 'Orders on the same record',
-                body: (
-                  <p>
-                    Orders, invoices and shipment updates live on the lead the conversation started on, so a
-                    repeat order starts with the whole history.
-                  </p>
-                ),
-                visual: <CloseVisual />,
-                inline: <CloseVisual />,
-              },
-            ]}
-          />
+            ].map((item) => (
+              <li key={item.number}>
+                <span className="os-workflow__number">{item.number}</span>
+                <div>
+                  <h3>{item.title}</h3>
+                  <p>{item.text}</p>
+                  <Link href={item.href} className="cta-link">
+                    {item.link} <ArrowUpRight size={14} />
+                  </Link>
+                </div>
+              </li>
+            ))}
+          </ol>
         </div>
       </section>
 
-      <section className="section section--ruled section--raised" aria-labelledby="bento-heading">
+      <section
+        className="section os-service-section"
+        aria-labelledby="services-heading"
+      >
         <div className="page">
-          <div className="section-head" data-reveal>
-            <h2 id="bento-heading">Everything a sales desk needs. Nothing to pay for.</h2>
-            <p>All of it ships in the open-source release — no paid tier, no add-ons.</p>
-          </div>
-          <div data-reveal>
-            <Bento />
+          <div className="os-service-panel">
+            <div className="os-service-panel__intro">
+              <p className="eyebrow">Built by us. Set up for you.</p>
+              <h2 id="services-heading">
+                You run the business.
+                <br />
+                We&rsquo;ll handle the setup.
+              </h2>
+              <p>
+                You don&rsquo;t need to become a server administrator to use
+                open-source software. Tell us how your team works. We&rsquo;ll
+                help make Outbound OS fit.
+              </p>
+              <Link href="/managed-hosting" className="btn btn--lime btn--lg">
+                Let&rsquo;s plan your setup <ArrowUpRight size={17} />
+              </Link>
+              <span className="os-service-note">
+                Clear scope. A quote before work starts.
+              </span>
+            </div>
+            <div className="os-service-list">
+              {[
+                {
+                  n: '01',
+                  title: 'Setup & launch',
+                  text: 'Installation, channel connections, lead imports and a walkthrough for your team.',
+                },
+                {
+                  n: '02',
+                  title: 'Managed hosting',
+                  text: 'A separate instance for your team, with hosting, backups and upgrades agreed in your plan.',
+                },
+                {
+                  n: '03',
+                  title: 'Ongoing assistance',
+                  text: 'Help with templates, workflow configuration, troubleshooting and future improvements.',
+                },
+              ].map((service) => (
+                <div key={service.n}>
+                  <span>{service.n}</span>
+                  <div>
+                    <h3>{service.title}</h3>
+                    <p>{service.text}</p>
+                  </div>
+                  <ArrowUpRight size={19} />
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="section section--ruled" aria-labelledby="shot-heading">
+      <section className="section" aria-labelledby="product-heading">
         <div className="page">
-          <div className="section-head" data-reveal>
-            <h2 id="shot-heading">See the real thing.</h2>
-            <p>Screens from the open-source release. It plays through on its own — or click any tab.</p>
+          <div className="os-section-heading">
+            <div>
+              <p className="eyebrow">Look inside</p>
+              <h2 id="product-heading">
+                Get a feel for
+                <br />
+                your next workspace.
+              </h2>
+            </div>
+            <p>
+              A closer look at the desktop and mobile experience. Every screen
+              comes from the product, with example data.
+            </p>
           </div>
           <ProductTour />
         </div>
       </section>
 
-      <section className="section section--ruled" aria-labelledby="connects-heading">
+      <section
+        className="section os-ownership"
+        aria-labelledby="ownership-heading"
+      >
+        <div className="page os-ownership__grid">
+          <div>
+            <p className="eyebrow">Open source, all the way through</p>
+            <h2 id="ownership-heading">
+              The software is yours.
+              <br />
+              The help is your choice.
+            </h2>
+            <p>
+              Read the code, run your own instance and keep your customer data
+              under your control. Our paid service is the work of setting it up
+              and keeping it running.
+            </p>
+            <div className="os-actions">
+              <Link href="/docs/install" className="btn btn--primary">
+                Self-host Outbound OS <ArrowRight size={15} />
+              </Link>
+              <Link href="/pricing" className="cta-link">
+                Compare your options <ArrowRight size={14} />
+              </Link>
+            </div>
+          </div>
+          <div className="os-ownership__facts">
+            <div>
+              <GitBranch size={20} />
+              <span>
+                <strong>Free software</strong>
+                <small>Every feature included under {site.license}.</small>
+              </span>
+            </div>
+            <div>
+              <Server size={20} />
+              <span>
+                <strong>Your own instance</strong>
+                <small>Your business accounts and your customer records.</small>
+              </span>
+            </div>
+            <div>
+              <SlidersHorizontal size={20} />
+              <span>
+                <strong>Room to make it yours</strong>
+                <small>Configure workflows. Extend the open-source code.</small>
+              </span>
+            </div>
+          </div>
+        </div>
+      </section>
+      <Faq items={questions} heading="Before you get started." />
+      <section className="os-final">
         <div className="page">
-          <div className="section-head" data-reveal>
-            <h2 id="connects-heading">Connects to where your leads already are.</h2>
-            <p>Every integration below ships in the open-source release.</p>
-          </div>
-          <div data-reveal>
-            <IntegrationHub />
-          </div>
-          <p className="home-why__more">
-            <Link href="/integrations" className="cta-link">
-              All integrations
-              <ArrowRight size={15} aria-hidden="true" />
+          <p className="eyebrow">Make it your workspace</p>
+          <h2>
+            Take a look around.
+            <br />
+            We can help with the rest.
+          </h2>
+          <div className="os-actions">
+            <Link href="/managed-hosting" className="btn btn--primary btn--lg">
+              Get setup help <ArrowUpRight size={17} />
             </Link>
-          </p>
-        </div>
-      </section>
-
-      <section className="section section--ruled section--raised">
-        <div className="page">
-          <div className="section-head" data-reveal>
-            <h2>Your leads, your server, your WhatsApp account.</h2>
-          </div>
-          <dl className="facts" data-reveal>
-            <div>
-              <dt>$0</dt>
-              <dd>
-                <strong>per seat, per contact, per month.</strong> Add the whole team and every lead.
-                Meta bills WhatsApp messages to your own account, with no markup.
-              </dd>
-            </div>
-            <div>
-              <dt>1 server</dt>
-              <dd>
-                <strong>Docker Compose and SQLite.</strong> A small 1–2 GB cloud server runs a team.
-                Contacts, conversations and credentials stay in your database.
-              </dd>
-            </div>
-            <div>
-              <dt>{site.license}</dt>
-              <dd>
-                <strong>Read it, change it, keep it.</strong> Add a lead source, a channel or a
-                report, and send it upstream if others need it too.
-              </dd>
-            </div>
-          </dl>
-          <p className="home-why__more">
-            <Link href="/self-hosted-crm" className="cta-link">
-              Why teams self-host their CRM
-              <ArrowRight size={15} aria-hidden="true" />
-            </Link>
-          </p>
-        </div>
-      </section>
-
-      <section className="section section--ruled">
-        <div className="page split">
-          <div className="section-head" data-reveal>
-            <h2>What it deliberately doesn&rsquo;t do.</h2>
-            <p>Worth knowing before you install it, not after.</p>
-          </div>
-          <div className="stack home-limits" data-reveal>
-            <article>
-              <h3>It does not bypass WhatsApp&rsquo;s rules</h3>
-              <p>
-                Messages go through Meta&rsquo;s official Cloud API or a Meta partner. Template approval, opt-in
-                and the 24-hour window all apply. Anything that promises otherwise is asking you to lose your number.
-              </p>
-            </article>
-            <article>
-              <h3>It does not blast</h3>
-              <p>Hourly and daily limits and a warm-up ramp are built in. The design assumes you want replies, not volume.</p>
-            </article>
-            <article>
-              <h3>It does not decide for you</h3>
-              <p>Price, terms and whether a lead is worth pursuing stay with the person who owns the deal. Automation handles the chasing.</p>
-            </article>
+            <a href={site.demoUrl} className="btn btn--secondary btn--lg">
+              Try the live demo
+            </a>
           </div>
         </div>
       </section>
-
-      <InstallBand />
-
-      <Faq items={homeFaq} />
     </>
   )
 }

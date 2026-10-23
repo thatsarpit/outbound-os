@@ -16,7 +16,7 @@ import { Logo, LogoTile, type BrandName } from '../brand-logo'
  */
 
 const SOURCES: { brand: BrandName; label: string; x: number; y: number }[] = [
-  { brand: 'indiamart', label: 'IndiaMART', x: 7, y: 22 },
+  { brand: 'webhooks', label: 'marketplace', x: 7, y: 22 },
   { brand: 'forms', label: 'Website form', x: 3, y: 42 },
   { brand: 'facebook', label: 'Lead Ads', x: 7, y: 62 },
   { brand: 'zapier', label: 'Zapier', x: 3, y: 81 },
@@ -35,7 +35,7 @@ export function HeroScene() {
   return (
     <figure
       className="scene"
-      aria-label="Sample: a lead from IndiaMART gets a WhatsApp message two seconds after enquiring; when they reply, the scheduled follow-ups are cancelled."
+      aria-label="Sample: a lead from marketplace gets a WhatsApp message two seconds after enquiring; when they reply, the scheduled follow-ups are cancelled."
     >
       <svg className="scene__beams" viewBox="0 0 640 640" aria-hidden="true">
         <defs>
@@ -95,8 +95,8 @@ export function HeroScene() {
             <span className="wa__date">Today</span>
 
             <p className="wa__sys hs hs--sys">
-              <LogoTile brand="indiamart" size={15} />
-              New enquiry via IndiaMART · 10:42:03
+              <LogoTile brand="webhooks" size={15} />
+              New enquiry via marketplace · 10:42:03
             </p>
 
             <div className="wa__msg wa__msg--out hs hs--out">

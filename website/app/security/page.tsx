@@ -28,9 +28,9 @@ export default function SecurityPage() {
             <p className="eyebrow">Security</p>
             <h1>What the code protects. What you protect. What is not certified.</h1>
             <p className="lede">
-              Outbound OS handles contact data and the ability to message people
-              in your name, so its defaults are strict. Because the code is
-              open, every control on this page can be read and checked.
+              Outbound OS handles contact data and the ability to message people in your name, so
+              its defaults are strict. Because the code is open, every control on this page can be
+              read and checked.
             </p>
           </div>
         </div>
@@ -57,38 +57,37 @@ export default function SecurityPage() {
             <div>
               <dt>No default password</dt>
               <dd>
-                The first admin gets the password you set, or a random one
-                printed once. There is no built-in login that works on every
-                install.
+                The first admin gets the password you set, or a random one printed once. There is no
+                built-in login that works on every install.
               </dd>
             </div>
             <div>
               <dt>Generated keys per install</dt>
               <dd>
-                Session-signing and encryption keys are generated on first boot
-                and stored beside the database, never shipped in the code.
+                Session-signing and encryption keys are generated on first boot and stored beside
+                the database, never shipped in the code.
               </dd>
             </div>
             <div>
               <dt>Encrypted credentials</dt>
               <dd>
-                WhatsApp, email, iMessage and Telegram credentials are encrypted
-                at rest with AES-256-GCM.
+                WhatsApp, email, iMessage and Telegram credentials are encrypted at rest with
+                AES-256-GCM.
               </dd>
             </div>
             <div>
               <dt>Roles and lead pools</dt>
               <dd>
-                Admin, manager, agent and viewer roles, checked on every API
-                route; lead pools limit which records a user can see.
+                Admin, manager, agent and viewer roles, checked on every API route; lead pools limit
+                which records a user can see.
               </dd>
             </div>
             <div>
               <dt>Authenticated webhooks</dt>
               <dd>
-                Lead sources need a per-source key, compared in constant time.
-                Meta deliveries are signature-checked, and AiSensy, Brevo and
-                iMessage webhooks are refused unless their secret is set.
+                Lead sources need a per-source key, compared in constant time. Meta deliveries are
+                signature-checked, and Brevo and iMessage webhooks are refused unless their secret
+                is set.
               </dd>
             </div>
             <div>
@@ -111,11 +110,10 @@ export default function SecurityPage() {
               <h2>What falls to you.</h2>
             </div>
             <p>
-              Running your own install means the server is yours to protect:
-              put it behind HTTPS, keep the host and Docker updated, keep{' '}
-              <code>.env</code> and backups private, rotate credentials when
-              people leave, and follow the consent and record-keeping rules
-              where you operate.
+              Running your own install means the server is yours to protect: put it behind HTTPS,
+              keep the host and Docker updated, keep <code>.env</code> and backups private, rotate
+              credentials when people leave, and follow the consent and record-keeping rules where
+              you operate.
             </p>
           </div>
         </div>
@@ -148,8 +146,8 @@ export default function SecurityPage() {
               <div>
                 <h3>Data processing agreement</h3>
                 <p>
-                  Relevant only to managed hosting, where the maintainers
-                  process data for you. Not yet a standard published document.
+                  Relevant only to managed hosting, where the maintainers process data for you. Not
+                  yet a standard published document.
                 </p>
               </div>
             </div>
@@ -163,9 +161,9 @@ export default function SecurityPage() {
             <div>
               <h2>Report a vulnerability privately.</h2>
               <p>
-                Use GitHub&rsquo;s private vulnerability reporting — never a
-                public issue. Reports are acknowledged within three working
-                days, with an assessment and fix timeline within ten.
+                Use GitHub&rsquo;s private vulnerability reporting — never a public issue. Reports
+                are acknowledged within three working days, with an assessment and fix timeline
+                within ten.
               </p>
             </div>
             <a href={advisoryUrl} className="btn btn--primary btn--lg">

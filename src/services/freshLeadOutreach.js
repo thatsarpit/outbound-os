@@ -10,7 +10,7 @@ import { isSendableMobile } from '../utils/inboundLead.js';
 export const FRESH_LEAD_VARIANT = 'fresh-lead-multichannel-v3';
 // Earlier names for the same first touch. Matching them keeps a lead that was
 // already contacted under an old name from being contacted again.
-export const LEGACY_FRESH_LEAD_VARIANTS = ['fresh-indiamart-multichannel-v2', 'fresh-indiamart-multichannel-v1'];
+export const LEGACY_FRESH_LEAD_VARIANTS = ['fresh-marketplace-multichannel-v2', 'fresh-marketplace-multichannel-v1'];
 // Template used for a new lead's first WhatsApp message when the sending
 // number has no default of its own (Settings → WhatsApp). Blank means "none":
 // first contact on WhatsApp must be an approved template, so without one the

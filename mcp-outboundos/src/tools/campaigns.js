@@ -49,8 +49,7 @@ export function registerCampaignTools(server) {
       targetFilter:      z.record(z.any()).optional().describe('Lead filter criteria — e.g. {status:"new", tags:"trade_show_2026"}'),
       senderAccountId:   z.number().int().optional().describe('Email sender account ID'),
       waCampaignName:    z.string().optional().describe(
-        'Approved WhatsApp template: its template name on Meta, or its API campaign name on '
-        + 'AiSensy (whichever the sending number uses). Set this for any WhatsApp audience '
+        'Exact approved Meta WhatsApp template name. Set this for any WhatsApp audience '
         + 'that is not inside an open 24h conversation — cold or re-engagement leads — '
         + 'because WhatsApp rejects free text there. Template params sent are '
         + '[first name, country].'),

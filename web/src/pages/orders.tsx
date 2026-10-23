@@ -109,6 +109,11 @@ export default function OrdersPage() {
    * a reload keep it open.
    */
   const [searchParams, setSearchParams] = useSearchParams()
+  const originSupplierId = Number(searchParams.get('originSupplierId')) || undefined
+  const { data: originSuppliers } = useQuery({
+    queryKey: ['suppliers'],
+    queryFn: () => salesApi.listSuppliers(),
+  })
   const openOrderId = searchParams.get('order') ? Number(searchParams.get('order')) : null
   const setOpenOrderId = (id: number | null) => {
     setSearchParams(
@@ -129,9 +134,13 @@ export default function OrdersPage() {
     : null
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['orders', statusFilter, search],
+    queryKey: ['orders', statusFilter, search, originSupplierId],
     queryFn: () =>
-      salesApi.listOrders({ status: statusFilter || undefined, search: search || undefined }),
+      salesApi.listOrders({
+        status: statusFilter || undefined,
+        search: search || undefined,
+        originSupplierId,
+      }),
   })
 
   const { data: stats } = useQuery({
@@ -215,6 +224,26 @@ export default function OrdersPage() {
               </option>
             ))}
           </select>
+          <select
+            className={cn(inputClass, 'max-w-[240px]')}
+            value={originSupplierId || ''}
+            aria-label="Filter by lead supplier"
+            onChange={(event) =>
+              setSearchParams((current) => {
+                const next = new URLSearchParams(current)
+                if (event.target.value) next.set('originSupplierId', event.target.value)
+                else next.delete('originSupplierId')
+                return next
+              })
+            }
+          >
+            <option value="">All lead suppliers</option>
+            {(originSuppliers?.data || []).map((supplier) => (
+              <option key={supplier.id} value={supplier.id}>
+                {supplier.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         {isLoading ? (
@@ -291,6 +320,11 @@ export default function OrdersPage() {
                         )}
                         {o.customerCompany && (
                           <div className="text-[11px] text-text-muted">{o.customerCompany}</div>
+                        )}
+                        {o.originSupplier && (
+                          <div className="mt-1 text-xs text-text-secondary">
+                            Lead from {o.originSupplier.name}
+                          </div>
                         )}
                       </td>
                       <td className="px-3 py-2">

@@ -55,13 +55,13 @@ Everything is off until you connect it; an empty credential means disabled,
 never simulated success.
 
 - **WhatsApp** — Settings → WhatsApp. Choose Meta Cloud API (recommended) or
-  AiSensy. The README has the step-by-step for Meta.
+  Meta's Cloud API. The README has the step-by-step setup.
 - **Email** — Settings → Email. Any SMTP/IMAP mailbox, or Brevo.
 - **Telegram** — Integrations → Telegram.
 - **iMessage** — Settings → iMessage; needs a Mac running BlueBubbles, see
   [docs/imessage-mac-mini-setup.md](../docs/imessage-mac-mini-setup.md).
 - **Lead sources** — Integrations → Webhooks. Pick a preset (website form,
-  Facebook Lead Ads, IndiaMART, TradeIndia, JustDial, Engyne Cloud) or map
+  Facebook Lead Ads, external marketplaces, TradeIndia, JustDial, Engyne Cloud) or map
   your own fields.
 
 ## Check an install

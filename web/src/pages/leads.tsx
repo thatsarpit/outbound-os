@@ -462,10 +462,15 @@ export default function LeadsPage() {
     {
       accessorKey: 'source',
       header: 'Source',
-      cell: ({ getValue }) => (
-        <span className="text-text-secondary text-sm">
-          {getValue() ? sourceLabel(getValue() as string) : '—'}
-        </span>
+      cell: ({ getValue, row }) => (
+        <div className="text-text-secondary text-sm">
+          <span>{getValue() ? sourceLabel(getValue() as string) : '—'}</span>
+          {row.original.originSupplier && (
+            <span className="mt-1 block text-xs font-medium text-text-primary">
+              {row.original.originSupplier.name}
+            </span>
+          )}
+        </div>
       ),
       size: 100,
     },
