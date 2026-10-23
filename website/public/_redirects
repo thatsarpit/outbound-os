@@ -5,4 +5,10 @@
 
 # Retired provider pages resolve to the current direct Meta setup.
 /integrations/aisensy /integrations/whatsapp-cloud-api 301
+/integrations/aisensy/ /integrations/whatsapp-cloud-api 301
 /alternatives/aisensy /whatsapp-crm 301
+/alternatives/aisensy/ /whatsapp-crm 301
+
+# Retired marketplace links lead to the supported source-neutral intake.
+/integrations/indiamart /integrations/webhooks 301
+/integrations/indiamart/ /integrations/webhooks 301
