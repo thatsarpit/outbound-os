@@ -25,10 +25,15 @@ source can still supply an explicit field map for its own payload.
 
 ## Set up a source
 
-An admin creates a webhook source through the existing
-`POST /api/webhooks/sources` API. Store its returned key privately and configure
-the pool that should own the imported contacts. The key is returned once; do not
-put it in a URL, repository, screenshot or log.
+An admin can use **Integrations → Webhooks → Add Source**. Save the source key
+from the creation dialog: it is displayed once, with reveal and copy controls.
+Then choose **Configure imports**, select an enabled origin supplier and add
+any additional tags. The source card will show its historical import URL.
+Use that URL for the bridge; the live inbound URL follows normal outreach rules.
+
+The equivalent creation API is `POST /api/webhooks/sources`. Configure the pool
+that should own imported contacts through the source API before importing.
+The key is returned once; do not put it in a URL, repository, screenshot or log.
 
 Configure attribution with:
 
@@ -91,7 +96,13 @@ acknowledged receipt. Review it as a separate correction.
 
 ## Review and report
 
-Managers can page through
+Managers can use **Integrations → Webhooks → Import records** to filter
+conflicts, new contacts and matched contacts, inspect retained source fields
+and page through the ledger. This is a review view; it does not approve merges.
+Admins can disable intake on the source card without deleting its history.
+Deleting a source with receipts is rejected, including during concurrent imports.
+
+The equivalent API is
 `GET /api/connector-receipts?sourceId=<id>&state=conflict&page=1`.
 Each page contains up to 100 receipts. Keep exports of these records private.
 

@@ -1,5 +1,6 @@
 import type { EmailTemplate } from '@/api/endpoints/templates'
 import { handleMobileSalesRequest } from './mobile-sales'
+import { handleConnectorRequest } from './connectors'
 import {
   defaultDashboardLayout,
   validateDashboardLayout,
@@ -984,25 +985,6 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
         hasSession: true,
       },
     ],
-  ],
-  [
-    /\/webhooks\/sources/,
-    [
-      ['Website contact form', 'website', 612, 12],
-      ['Facebook Lead Ads', 'facebook_ads', 238, 95],
-      ['Zapier: trade show list', 'zapier', 141, 2880],
-      ['external marketplaces', 'marketplace', 401, 40],
-    ].map(([name, source, total, minutes], index) => ({
-      id: index + 1,
-      name,
-      source,
-      apiKey: 'demo-key-hidden',
-      fieldMap: '{}',
-      enabled: true,
-      lastReceivedAt: ago(minutes as number),
-      totalReceived: total,
-      createdAt: '2026-06-10T09:00:00Z',
-    })),
   ],
   [
     /\/settings\/sheets-webhook/,
@@ -2260,6 +2242,8 @@ export function installFixtureFetch() {
 
     const mobileSales = handleMobileSalesRequest(url, init, FIXTURE_LEADS)
     if (mobileSales) return mobileSales
+    const connector = handleConnectorRequest(url, init)
+    if (connector) return connector
     const inbox = await handleInboxRequest(url, init)
     if (inbox) return inbox
 

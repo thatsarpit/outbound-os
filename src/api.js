@@ -5614,10 +5614,17 @@ app.patch('/api/webhooks/sources/:id', requireRole('admin'), async (req, res) =>
 });
 
 app.delete('/api/webhooks/sources/:id', requireRole('admin'), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(422).json({ error: 'Supply a valid source ID.' });
   try {
-    await prisma.webhookSource.delete({ where: { id: parseInt(req.params.id) } });
+    await prisma.webhookSource.delete({ where: { id } });
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    // The receipt foreign key also protects a concurrent import from deletion.
+    if (e.code === 'P2003') return res.status(409).json({ error: 'This source has import records. Disable it instead to preserve its history.' });
+    if (e.code === 'P2025') return res.status(404).json({ error: 'Source not found.' });
+    res.status(500).json({ error: 'Could not delete source.' });
+  }
 });
 
 // ======================== STUB ROUTES (NOT YET IMPLEMENTED) ========================

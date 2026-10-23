@@ -2713,4 +2713,75 @@ describe('Generic connector intake and supplier attribution', () => {
     const list = await request('GET', `/api/orders?originSupplierId=${supplier.id}`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.175' } });
     assert.ok(list.body.data.some((order) => order.id === result.body.id));
   });
+  test('configures future import attribution without rewriting existing receipts or origin', async () => {
+    const admin = { ...authHeader(), 'X-Forwarded-For': '192.0.2.176' };
+    const leadBefore = await db.lead.findFirst({ where: { source: source.source } });
+    const receiptBefore = await db.connectorReceipt.findFirst({ where: { sourceId: source.id } });
+    const invalid = await request('PATCH', `/api/connector-sources/${source.id}`, { headers: admin, body: { supplierId: supplier.id, tags: ['bad,tag'] } });
+    assert.equal(invalid.status, 422);
+    const unavailable = await request('PATCH', `/api/connector-sources/${source.id}`, { headers: admin, body: { supplierId: 99999999, tags: [] } });
+    assert.equal(unavailable.status, 404);
+    const saved = await request('PATCH', `/api/connector-sources/${source.id}`, { headers: admin, body: { supplierId: otherSupplier.id, tags: [' reviewed-import ', 'reviewed-import'] } });
+    assert.equal(saved.status, 200); assert.equal(saved.body.outreachQueued, false);
+    const listed = await request('GET', '/api/webhooks/sources', { headers: admin });
+    const configured = listed.body.find((entry) => entry.id === source.id);
+    assert.equal(configured.importSupplierId, otherSupplier.id); assert.equal(configured.importTags, 'reviewed-import');
+    assert.notEqual(configured.apiKey, source.apiKey);
+    assert.equal((await db.lead.findUnique({ where: { id: leadBefore.id } })).originSupplierId, leadBefore.originSupplierId);
+    assert.deepEqual(await db.connectorReceipt.findUnique({ where: { id: receiptBefore.id } }), receiptBefore);
+    await db.webhookSource.update({ where: { id: source.id }, data: { importSupplierId: supplier.id, importTags: 'fixture-import' } });
+  });
+  test('restricts configuration to admins and receipts to managers', async () => {
+    const { signToken } = await import('../src/auth/rbac.js');
+    const users = [];
+    try {
+      for (const role of ['agent', 'manager']) {
+        const user = await db.user.create({ data: { name: 'Import review fixture', email: `import-${role}@example.test`, passwordHash: 'not-a-password', role } }); users.push(user.id);
+        const auth = { Authorization: `Bearer ${signToken(user)}`, 'X-Forwarded-For': `192.0.2.${role === 'agent' ? 177 : 178}` };
+        const configuration = await request('PATCH', `/api/connector-sources/${source.id}`, { headers: auth, body: { supplierId: supplier.id, tags: [] } });
+        assert.equal(configuration.status, 403);
+        const records = await request('GET', `/api/connector-receipts?sourceId=${source.id}&state=conflict&page=1`, { headers: auth });
+        assert.equal(records.status, role === 'manager' ? 200 : 403);
+        if (role === 'manager') {
+          assert.equal(records.body.total, 2); assert.equal(records.body.records.length, 2);
+          assert.ok(records.body.records.every((receipt) => receipt.sourceId === source.id && receipt.state === 'conflict' && receipt.reason));
+          assert.equal(records.body.page, 1); assert.equal(records.body.pages, 1);
+        }
+      }
+      assert.equal((await request('GET', `/api/connector-receipts?sourceId=${source.id}`, { headers: { 'X-Forwarded-For': '192.0.2.181' } })).status, 401);
+      assert.equal((await request('GET', '/api/connector-receipts?sourceId=bad', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.179' } })).status, 422);
+    } finally { await db.user.deleteMany({ where: { id: { in: users } } }); }
+  });
+  test('pages large import histories without mixing sources or omitting records', async () => {
+    const admin = { ...authHeader(), 'X-Forwarded-For': '192.0.2.182' };
+    const before = await db.connectorReceipt.count({ where: { sourceId: source.id } });
+    await db.connectorReceipt.createMany({ data: Array.from({ length: 101 }, (_, index) => ({ sourceId: source.id, externalId: `paging-${index}`, state: 'matched', recordJson: '{}' })) });
+    try {
+      const first = await request('GET', `/api/connector-receipts?sourceId=${source.id}&page=1`, { headers: admin });
+      const second = await request('GET', `/api/connector-receipts?sourceId=${source.id}&page=2`, { headers: admin });
+      assert.equal(first.status, 200); assert.equal(second.status, 200);
+      assert.equal(first.body.total, before + 101); assert.equal(first.body.pages, 2);
+      assert.equal(first.body.records.length, 100); assert.equal(second.body.records.length, before + 1);
+      const all = [...first.body.records, ...second.body.records];
+      assert.equal(new Set(all.map((receipt) => receipt.id)).size, before + 101);
+      assert.ok(all.every((receipt) => receipt.sourceId === source.id));
+      const absent = await request('GET', '/api/connector-receipts?sourceId=99999999', { headers: admin });
+      assert.equal(absent.body.total, 0); assert.deepEqual(absent.body.records, []);
+    } finally { await db.connectorReceipt.deleteMany({ where: { sourceId: source.id, externalId: { startsWith: 'paging-' } } }); }
+  });
+  test('retains import history when deletion is attempted and allows disabling intake', async () => {
+    const admin = { ...authHeader(), 'X-Forwarded-For': '192.0.2.180' };
+    const count = await db.connectorReceipt.count({ where: { sourceId: source.id } });
+    const removed = await request('DELETE', `/api/webhooks/sources/${source.id}`, { headers: admin });
+    assert.equal(removed.status, 409); assert.match(removed.body.error, /Disable/);
+    assert.equal(await db.connectorReceipt.count({ where: { sourceId: source.id } }), count);
+    assert.ok(await db.webhookSource.findUnique({ where: { id: source.id } }));
+    const disabled = await request('PATCH', `/api/webhooks/sources/${source.id}`, { headers: admin, body: { enabled: false } });
+    assert.equal(disabled.status, 200); assert.equal(disabled.body.enabled, false);
+    const intake = await request('POST', endpoint, { headers, body: { records: [record('disabled-source')] } });
+    assert.equal(intake.status, 404);
+    assert.equal(await db.connectorReceipt.count({ where: { sourceId: source.id } }), count);
+    assert.equal((await request('DELETE', '/api/webhooks/sources/bad', { headers: admin })).status, 422);
+    assert.equal((await request('DELETE', '/api/webhooks/sources/99999999', { headers: admin })).status, 404);
+  });
 });
