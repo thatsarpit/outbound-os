@@ -6,6 +6,31 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+## [0.3.0] — Inbox reliability, mobile sales and direct Meta
+
+### Inbox and mobile
+
+- Retain failed and uncertain manual WhatsApp attempts; distinguish provider
+  acceptance from delivered/read receipts and enforce the exact number's reply window.
+- Prevent duplicate manual claims and automatic retries of interrupted manual sends.
+- Persist scoped Meta receipts and replay callbacks that arrive before send results.
+- Separate personal read cursors and Done/Reopen from the sales pipeline.
+- Add the focused mobile account/More flow, automatic inbox updates, safe-area and
+  keyboard layout handling, app icons and permission-based personal Web Push.
+- Preserve delivery diagnostics in MCP, with caller-known identities for text/file retries.
+- Add a discoverable AI agents & MCP setup page, public endpoint diagnostics and
+  ChatGPT/Codex instructions without revealing integration credentials.
+
+### Website and maintenance
+
+- Unify the marketing site around direct Meta, a shared inbox and mobile sales.
+  Product illustrations and screenshots are labelled distinctly and use fictional data.
+- Clarify incoming source keys versus outgoing event signatures. Preserve retired
+  URLs with permanent redirects; verify exact canonical/sitemap correspondence,
+  unique titles/descriptions, image assets, structured data and internal links.
+- Keep motion optional and reduced-motion aware, with no added animation framework.
+- Include the accumulated dependency/security upgrades and protected CI workflow.
+
 ### Source-neutral imports and attribution
 
 - Remove the dedicated marketplace preset, legacy Android channel, vendor aliases, public integration page and branding. External collectors now use a generic source contract.
@@ -24,7 +49,7 @@ include breaking changes, and they are called out here.
   Meta, kept in the data volume and shown in the inbox; they are served only
   to signed-in users, with a sandbox policy. The inbox can attach files to a
   WhatsApp reply, and `POST /api/leads/:id/send-media` sends library files.
-- MCP tools `list_media_files` and `send_whatsapp_file` (35 tools).
+- MCP tools `list_media_files` and `send_whatsapp_file` (36 tools).
 - More file types in the media library: spreadsheets, presentations, text,
   AAC and M4A audio.
 - **Live demo** at outboundos.space/demo: the dashboard on sample data, no

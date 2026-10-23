@@ -126,8 +126,8 @@ export default function RoadmapPage() {
               <h3>Lead capture and first contact</h3>
               <p>
                 Webhooks with presets for website forms, Facebook Lead Ads, marketplace, TradeIndia,
-                JustDial and Engyne Cloud; CSV import and export. Live leads are contacted within
-                seconds.
+                JustDial and generic external systems; CSV import and export. Configured live
+                sources can queue first contact; historical imports remain paused.
               </p>
             </article>
             <article>

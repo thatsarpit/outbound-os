@@ -5,7 +5,7 @@
 <h1 align="center">Outbound OS</h1>
 
 <p align="center">
-  <strong>The open-source WhatsApp CRM that answers every lead in seconds<br>and follows up until they reply.</strong>
+  <strong>The open-source WhatsApp CRM for conversations,<br>follow-ups and a focused mobile sales workspace.</strong>
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@
 <p align="center">
   <a href="https://outboundos.space">Website</a> ·
   <a href="https://outboundos.space/demo"><b>Live demo</b></a> ·
-  <a href="https://outboundos.space/docs/install">Install in 5 minutes</a> ·
+  <a href="https://outboundos.space/docs/install">Install with Docker</a> ·
   <a href="https://outboundos.space/docs">Docs</a> ·
   <a href="https://outboundos.space/mcp">MCP for AI agents</a> ·
   <a href="https://github.com/thatsarpit/outbound-os/discussions">Discussions</a>
@@ -34,10 +34,10 @@
 </p>
 
 Leads come in from your website, marketplaces, ad forms and spreadsheets.
-Outbound OS puts them in one queue, contacts them within seconds on WhatsApp,
-email, Telegram or iMessage, follows up on a schedule, and stops the moment
-someone replies. It runs on your own server, and your leads never leave your
-database.
+Outbound OS keeps conversations and customer context together, supports configured
+first contact and scheduled follow-ups, and stops automation on a reply or opt-out.
+It runs on your own server. Connected providers receive the data needed to deliver
+messages; your CRM database and backups stay under your control.
 
 **Why it exists.** It was built to run a real export sales desk: enquiries
 from external marketplaces and the web at all hours, buyers in dozens of time zones, and
@@ -74,11 +74,17 @@ is open source, so any team can run their own.
 
 ## What it does
 
-- **Instant first touch.** A lead that arrives by webhook is contacted on every
-  channel you have connected, straight away — not when someone next opens the
-  dashboard.
+- **Instant first touch.** Configured live sources can queue first contact on eligible
+  connected channels. Sending respects the lead state, channel settings,
+  approved templates and account limits.
 - **One inbox for every channel.** WhatsApp, email, Telegram and iMessage
   threads sit side by side on the lead they belong to.
+- **A focused phone workspace.** Add the web app to your Home Screen for
+  Inbox, Tasks, Leads and More. iPhone notifications require a supported iOS
+  version, Home Screen installation and permission on that device.
+- **Reliable manual WhatsApp replies.** Failed and uncertain attempts stay
+  visible. The composer checks the sending number’s 24-hour reply window;
+  outside it, choose an approved template to re-engage.
 - **Follow-ups that know when to stop.** Sequences run in the lead's working
   hours and end on a reply, an opt-out, or a closed deal.
 - **Campaigns** to any slice of your leads (by tag, status, country, score),
@@ -93,8 +99,8 @@ is open source, so any team can run their own.
 
 ## What it deliberately doesn't do
 
-- **Bypass channel rules.** WhatsApp goes through Meta's official Cloud API
-  (or a Meta partner). Template approval, opt-in and the 24-hour window apply.
+- **Bypass channel rules.** WhatsApp goes through Meta's official Cloud API.
+  Template approval, opt-in and the 24-hour window apply.
   Anything that promises otherwise is asking you to get your number banned.
 - **Blast.** Sending limits and warm-up are built in. The design assumes you
   want replies, not volume.
@@ -108,12 +114,13 @@ is open source, so any team can run their own.
 | Any website form (HTML, Formspree-style POST, Webflow, WordPress) | **WhatsApp** — Meta Cloud API | Outgoing webhooks on lead and message events |
 | Facebook Lead Ads | **Email** — any SMTP/IMAP inbox, Brevo | Google Sheets (live row sync) |
 | Authenticated webhooks from forms and external systems | **Telegram** — your own account | CSV export |
-| Engyne Cloud | **iMessage** — via a Mac running BlueBubbles | MCP server for AI clients |
-| Zapier, Make, n8n, or your own code (signed webhook) | | |
+| Authenticated connector imports with supplier attribution | **iMessage** — via a Mac running BlueBubbles | MCP server for AI clients |
+| Zapier, Make, n8n, or your own code (source-key webhook) | | |
 | CSV / JSON import | | |
 
-Every inbound source is a **signed webhook** with a field map, so a new source
-is a settings change, not a code change. Presets exist for the ones above.
+Incoming sources use their own **API key** and field map. Outgoing events use
+a separate HMAC signing secret. Historical connector imports retain source IDs
+and supplier attribution, hold conflicts for review, and never launch outreach.
 
 ### Website forms
 
@@ -146,8 +153,8 @@ one — and it works like a hosted form backend:
 
 ## Quick start (Docker)
 
-You need a machine with Docker. A 1–2 GB VM is plenty for a small team, on
-Intel or ARM.
+You need a machine with Docker. Start with 2 GB of memory for a small deployment and monitor usage.
+Intel and ARM images are published.
 
 ```bash
 git clone https://github.com/thatsarpit/outbound-os.git
@@ -203,7 +210,7 @@ docker compose pull && docker compose up -d
 
 Compose runs the published images from GitHub Container Registry
 (`ghcr.io/thatsarpit/outbound-os`, amd64 and arm64). Pin a version with
-`OUTBOUNDOS_VERSION=0.2.0` in `.env`. Database migrations run automatically
+`OUTBOUNDOS_VERSION=0.3.0` in `.env`. Database migrations run automatically
 on start. Running your own changes? `docker compose up -d --build` builds
 from this folder instead.
 
@@ -214,7 +221,9 @@ from this folder instead.
 1. Create an app at [developers.facebook.com](https://developers.facebook.com)
    and add the **WhatsApp** product. Add your number under **API Setup**.
 2. Create a **System User** in Meta Business Settings, give it the
-   `whatsapp_business_messaging` permission, and generate a permanent token.
+   app/WhatsApp asset permissions, and generate a long-lived token with
+   `whatsapp_business_messaging` and `whatsapp_business_management` as needed
+   for messaging and template management. Keep it private.
 3. In Outbound OS: **Settings → WhatsApp → Meta Cloud API**, paste the
    **Phone number ID** and the **token**, then **Test connection**.
 4. To receive replies, set `META_APP_SECRET` and `META_WEBHOOK_VERIFY_TOKEN`
@@ -276,7 +285,7 @@ shows the same data.
 | Path | What lives there |
 |---|---|
 | `src/` | Node/Express API, services, scheduled jobs |
-| `src/services/whatsappProviders.js` | What each WhatsApp provider needs |
+| `src/services/whatsappProviders.js` | Direct Meta account credential readiness |
 | `web/` | React + Vite dashboard |
 | `prisma/` | Schema and migrations (SQLite) |
 | `mcp-outboundos/` | MCP server (`docker compose --profile mcp up -d`) |
@@ -288,10 +297,14 @@ Adding a lead source or a channel? Read
 
 ## AI agents (MCP)
 
+Open **Integrations → AI agents & MCP** for the public server address, server
+checks, ChatGPT/Codex instructions and a read-only verification prompt. Server
+reachability is separate from authorizing your AI client.
+
 Outbound OS ships an [MCP](https://modelcontextprotocol.io) server, so Claude
 and other AI clients can search leads, import lists, build and start
-campaigns, and read analytics on your live data — with your approval on
-anything that sends.
+campaigns, and read analytics on your live data. Configure your AI client to require approval
+for sends and other consequential actions.
 
 ```bash
 # .env: MCP_SERVICE_TOKEN and MCP_BEARER_TOKEN (openssl rand -hex 32 each)
@@ -301,6 +314,10 @@ claude mcp add --transport http outbound-os https://mcp.your-host.com/mcp \
 ```
 
 claude.ai and the Claude apps connect as a custom connector through OAuth.
+Manual text/file sends use a caller-known `client_message_id`. If omitted,
+the tool prepares an ID without sending; reuse it for the send and any retry.
+Provider acceptance is distinct from delivery.
+
 Full guide and the list of tools: [outboundos.space/mcp](https://outboundos.space/mcp).
 
 ## Contributing

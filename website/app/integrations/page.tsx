@@ -8,7 +8,7 @@ import { siteUrl } from '@/lib/site-content'
 import { graph } from '@/lib/structured-data'
 
 export const metadata = buildMetadata(
-  'Integrations — WhatsApp, email, marketplace, Facebook Lead Ads',
+  'CRM integrations — messaging, forms & webhooks',
   'Every Outbound OS integration: WhatsApp Cloud API, email, Telegram, iMessage, marketplace, Facebook Lead Ads, Zapier, Google Sheets and signed webhooks.',
   '/integrations',
 )

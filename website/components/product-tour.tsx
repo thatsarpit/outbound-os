@@ -10,6 +10,7 @@ import {
   Smartphone,
 } from 'lucide-react'
 import { site } from '@/lib/site-content'
+import { InboxPreview } from './product-preview'
 
 /**
  * Desktop and mobile product screens, with manual keyboard-accessible tabs.
@@ -138,26 +139,31 @@ export function ProductTour() {
               hidden={index !== active}
               className={`tour__panel ${shot.id === 'mobile' ? 'tour__panel--mobile' : ''}`}
             >
-              <img
-                src={`/screenshots/${shot.path}.webp?v=${site.screenshotVersion}`}
-                srcSet={
-                  shot.id === 'mobile'
-                    ? undefined
-                    : `/screenshots/${shot.path}-800.webp?v=${site.screenshotVersion} 800w, /screenshots/${shot.path}.webp?v=${site.screenshotVersion} 1600w`
-                }
-                sizes="(min-width: 1200px) 1130px, 100vw"
-                alt={shot.alt}
-                width={shot.id === 'mobile' ? 390 : 1600}
-                height={shot.id === 'mobile' ? 844 : 1000}
-                loading={index === active ? 'eager' : 'lazy'}
-                decoding="async"
-              />
+              {shot.id === 'inbox' || shot.id === 'mobile' ? (
+                <InboxPreview mobile={shot.id === 'mobile'} />
+              ) : (
+                <img
+                  src={`/screenshots/${shot.path}.webp?v=${site.screenshotVersion}`}
+                  srcSet={`/screenshots/${shot.path}-800.webp?v=${site.screenshotVersion} 800w, /screenshots/${shot.path}.webp?v=${site.screenshotVersion} 1600w`}
+                  sizes="(min-width: 1200px) 1130px, 100vw"
+                  alt={shot.alt}
+                  width={1600}
+                  height={1000}
+                  loading={index === active ? 'eager' : 'lazy'}
+                  decoding="async"
+                />
+              )}
             </div>
           ))}
         </div>
       </div>
       <p className="tour__caption" aria-live="polite">
-        {SHOTS[active].caption} <span>Sample data.</span>
+        {SHOTS[active].caption}{' '}
+        <span>
+          {SHOTS[active].id === 'inbox' || SHOTS[active].id === 'mobile'
+            ? 'Product illustration. Fictional data.'
+            : 'Product screenshot. Sample data.'}
+        </span>
       </p>
     </div>
   )

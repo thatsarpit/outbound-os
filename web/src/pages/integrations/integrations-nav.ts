@@ -1,4 +1,13 @@
-import { LayoutGrid, Mail, MessageSquare, Smartphone, Send, Sheet, Webhook } from 'lucide-react'
+import {
+  Bot,
+  LayoutGrid,
+  Mail,
+  MessageSquare,
+  Smartphone,
+  Send,
+  Sheet,
+  Webhook,
+} from 'lucide-react'
 
 /**
  * Channel catalog for the /integrations/* sub-routes.
@@ -10,6 +19,14 @@ export const INTEGRATION_TABS = [
     label: 'All integrations',
     description: 'Everything Outbound OS connects to: channels, lead sources and data exports.',
     icon: LayoutGrid,
+  },
+  {
+    id: 'mcp',
+    to: '/integrations/mcp',
+    label: 'AI agents & MCP',
+    description:
+      'Connect your AI client to this workspace, check the server and follow guided setup.',
+    icon: Bot,
   },
   {
     id: 'whatsapp',

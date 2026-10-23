@@ -12,3 +12,6 @@
 # Retired marketplace links lead to the supported source-neutral intake.
 /integrations/indiamart /integrations/webhooks 301
 /integrations/indiamart/ /integrations/webhooks 301
+
+/integrations/engyne-cloud /integrations/webhooks 301
+/integrations/engyne-cloud/ /integrations/webhooks 301

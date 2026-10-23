@@ -1,12 +1,14 @@
 # Outbound OS
 
-> Outbound OS is a free, open-source (AGPL-3.0), self-hosted WhatsApp CRM and outreach platform. It captures leads from website forms, Facebook Lead Ads, marketplace and any webhook, contacts each lead on WhatsApp, email, Telegram or iMessage within seconds, runs follow-ups that stop when the lead replies, and keeps the conversation, pipeline, orders and invoices on one lead record. It runs with one Docker Compose command and includes an MCP server so Claude and other AI clients can work the CRM.
+> Outbound OS is a free, open-source (AGPL-3.0), self-hosted WhatsApp CRM. It connects directly to Meta's Cloud API and keeps WhatsApp, email, Telegram and iMessage conversations on customer records. It includes configurable first contact, follow-ups, campaigns, a focused mobile sales workspace and an MCP server. Sending depends on configured channels, account readiness, consent and provider rules. Historical connector imports do not queue outreach.
 
 Key facts:
 
 - License: AGPL-3.0. Free for any use, including commercial. No paid tier; optional managed hosting by the maintainers.
 - Source: https://github.com/thatsarpit/outbound-os
 - Live demo: https://outboundos.space/demo (the real dashboard on sample data, no sign-up; nothing is saved or sent)
+- Mobile: a Home Screen web app with Inbox, Tasks, Leads and More. Web Push requires a supported device, installation where required and explicit device permission.
+- Reliability: manual WhatsApp attempts retain failed/unconfirmed states; per-number 24-hour windows determine when approved templates are required.
 - Stack: Node.js 24, Express, Prisma, SQLite; React dashboard; Docker Compose.
 - WhatsApp: Meta's official WhatsApp Cloud API directly. It never automates the WhatsApp phone apps. Meta messaging charges are separate from the open-source software and any paid setup or hosting service.
 - Not included: chatbot builder, Instagram DMs, click-to-WhatsApp ad tools.

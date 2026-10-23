@@ -34,7 +34,6 @@ export async function importConnectorRecords(db, source, records) {
     const scope = source.tenantId == null ? { OR: [{ tenantId: null }, { tenantId: 1 }] } : { tenantId: source.tenantId };
     const suppliers = await tx.supplier.findMany({ where: scope });
     const supplier = suppliers.find((s) => s.id === source.importSupplierId && s.enabled);
-    if (!supplier) throw new Error('Configure an enabled source supplier before importing.');
     const leads = await tx.lead.findMany({ where: scope });
     const results = [];
     for (const row of rows) {
@@ -43,6 +42,9 @@ export async function importConnectorRecords(db, source, records) {
         results.push({ externalId: row.externalId, state: existingReceipt.state, leadId: existingReceipt.leadId, replay: true });
         continue;
       }
+      // Accepted source IDs remain replayable after a supplier is disabled.
+      // Only a new import needs a currently enabled attribution target.
+      if (!supplier) throw new Error('Configure an enabled source supplier before importing.');
       const phone = phoneKey(row.mobile), email = emailKey(row.email);
       const matches = leads.filter((lead) => (phone && phoneKey(lead.mobile) === phone) || (email && emailKey(lead.email) === email));
       let reason = matches.length > 1 ? 'Multiple contacts match these identifiers.' : null;

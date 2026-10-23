@@ -25,7 +25,7 @@ export const site = {
   discussionsUrl: 'https://github.com/thatsarpit/outbound-os/discussions',
   license: 'AGPL-3.0',
   licenseUrl: 'https://github.com/thatsarpit/outbound-os/blob/main/LICENSE',
-  version: '0.2.0',
+  version: '0.3.0',
   /**
    * The live demo: the real dashboard on sample data, no sign-in. A redirect
    * in public/_redirects, so where the demo is hosted can change without
@@ -37,7 +37,7 @@ export const site = {
    * week (public/_headers), so an unchanged URL keeps serving the old image.
    */
   screenshotVersion: '2026-10-23',
-  /** The hosted instance the Outbound OS team runs for managed customers. */
+  /** Sign-in for the current Outbound OS hosted workspace. */
   appUrl: 'https://app.outboundos.space',
   /**
    * Where the managed-hosting enquiry form posts. Inlined at build time by

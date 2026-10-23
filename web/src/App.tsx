@@ -45,6 +45,7 @@ const EmailIntegrationPage = lazy(() => import('@/pages/integrations/email'))
 const TelegramIntegrationPage = lazy(() => import('@/pages/integrations/telegram'))
 const WebhooksIntegrationPage = lazy(() => import('@/pages/integrations/webhooks'))
 const SheetsIntegrationPage = lazy(() => import('@/pages/integrations/sheets'))
+const McpIntegrationPage = lazy(() => import('@/pages/integrations/mcp'))
 const SettingsLayout = lazy(() => import('@/pages/settings/settings-layout'))
 const WorkspaceSettingsPage = lazy(() => import('@/pages/settings/workspace'))
 const WhatsAppSettingsPage = lazy(() => import('@/pages/settings/whatsapp'))
@@ -152,6 +153,7 @@ const configurationRoutes = () => (
       <Route path="telegram" element={<TelegramIntegrationPage />} />
       <Route path="webhooks" element={<WebhooksIntegrationPage />} />
       <Route path="sheets" element={<SheetsIntegrationPage />} />
+      <Route path="mcp" element={<McpIntegrationPage />} />
     </Route>
     <Route path="channels" element={<Navigate to="/integrations" replace />} />
     <Route path="settings" element={<SettingsLayout />}>

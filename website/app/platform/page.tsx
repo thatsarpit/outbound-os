@@ -4,7 +4,7 @@ import { buildMetadata } from '@/lib/metadata'
 import { ChannelFlow } from '@/components/visuals/channel-flow'
 
 export const metadata = buildMetadata(
-  'Platform — lead capture, shared inbox, follow-up, pipeline',
+  'CRM platform — inbox, follow-ups & pipeline',
   'How Outbound OS works end to end: lead capture from any source, instant first contact, a shared WhatsApp and email inbox, follow-ups that stop on reply, and a pipeline.',
   '/platform',
 )

@@ -2026,6 +2026,21 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
   ],
   [/\/stats\/activity/, []],
   [
+    /\/integrations\/mcp$/,
+    {
+      serverUrl: 'https://mcp.example.test/mcp',
+      backendConfigured: true,
+      transport: 'streamable-http',
+      authentication: ['oauth', 'bearer'],
+      health: {
+        status: 'reachable',
+        checkedAt: new Date().toISOString(),
+        message: 'Sample server status for the demo. No real MCP server was contacted.',
+      },
+      oauth: { available: true },
+    },
+  ],
+  [
     /\/onboarding\/status/,
     {
       dismissed: true,

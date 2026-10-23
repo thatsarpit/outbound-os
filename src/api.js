@@ -1,6 +1,7 @@
 import websiteEnquiries from './routes/websiteEnquiries.js';
 import connectorIntake from './routes/connectorIntake.js';
 import connectorAdmin from './routes/connectorAdmin.js';
+import mcpSetup from './routes/mcpSetup.js';
 import { withDefaultCountryCode } from './utils/phoneDefaults.js';
 import express from 'express';
 import cors from 'cors';
@@ -793,6 +794,7 @@ app.use(providerWebhookRoutes);
 
 app.use('/api', requireRole('viewer'));
 app.use('/api', connectorAdmin);
+app.use('/api', mcpSetup);
 app.use('/api/whatsapp', whatsappTemplateRoutes);
 app.use('/api', dashboardPreferenceRoutes);
 app.use('/api', leadFollowupRoutes);

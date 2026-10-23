@@ -12,12 +12,16 @@ function walk(dir) {
 const files = walk(root);
 const pages = files.filter((file) => file.endsWith('.html') && !['404.html', '_not-found.html'].includes(path.basename(file)));
 const titles = new Set();
+const descriptions = new Set();
+const canonicalUrls = new Set();
 let structuredBlocks = 0;
 let internalLinks = 0;
-const redirected = new Set(['/demo', '/demo/']);
+const redirects = new Map(fs.readFileSync(path.join(root, '_redirects'), 'utf8').split('\n')
+  .map((line) => line.trim()).filter((line) => line && !line.startsWith('#'))
+  .map((line) => { const [from, to, status] = line.split(/\s+/); return [from, { to, status }]; }));
 function resolves(urlPath) {
   const decoded = decodeURIComponent(urlPath);
-  return redirected.has(decoded) || [decoded, `${decoded}.html`, path.join(decoded, 'index.html')].some((candidate) => {
+  return redirects.has(decoded) || [decoded, `${decoded}.html`, path.join(decoded, 'index.html')].some((candidate) => {
     const absolute = path.join(root, candidate);
     return fs.existsSync(absolute) && fs.statSync(absolute).isFile();
   });
@@ -30,9 +34,12 @@ for (const file of pages) {
   assert(title && !titles.has(title), `${route}: missing or duplicate title`);
   titles.add(title);
   assert.equal((html.match(/<h1(?:\s|>)/g) || []).length, 1, `${route}: expected one primary heading`);
-  assert.match(html, /<meta name="description" content="[^"]+"/, `${route}: missing description`);
+  const description = html.match(/<meta name="description" content="([^"]+)"/)?.[1];
+  assert(description && !descriptions.has(description), `${route}: missing or duplicate description`);
+  descriptions.add(description);
   const canonical = html.match(/<link rel="canonical" href="([^"]+)"/)?.[1];
   assert.equal(canonical, `https://outboundos.space${route === '/' ? '' : route}`, `${route}: incorrect canonical`);
+  canonicalUrls.add(canonical);
   const image = html.match(/<meta property="og:image" content="([^"]+)"/)?.[1];
   assert(image && resolves(new URL(image, 'https://outboundos.space').pathname), `${route}: missing share image`);
   for (const match of html.matchAll(/<script type="application\/ld\+json">(.*?)<\/script>/gs)) {
@@ -44,10 +51,22 @@ for (const file of pages) {
     assert(resolves(match[1]), `${route}: broken internal link ${match[1]}`);
     internalLinks++;
   }
-  assert(!/aisensy|indiamart/i.test(html), `${route}: retired provider remains in rendered content`);
+  for (const match of html.matchAll(/<img\b([^>]+)>/g)) {
+    assert(/\balt="[^"]*"/.test(match[1]), `${route}: image missing alt text`);
+    const src = match[1].match(/\bsrc="(\/[^"?#]*)/)?.[1];
+    if (src) assert(resolves(src), `${route}: missing image ${src}`);
+  }
+  assert(!/aisensy|indiamart|engyne/i.test(html), `${route}: retired integration remains in rendered content`);
 }
 const sitemap = fs.readFileSync(path.join(root, 'sitemap.xml'), 'utf8');
-assert.equal((sitemap.match(/<loc>/g) || []).length, pages.length, 'Sitemap and page registry differ');
+assert.deepEqual(new Set([...sitemap.matchAll(/<loc>(.*?)<\/loc>/g)].map((match) => match[1])), canonicalUrls, 'Sitemap must match exact canonical pages');
 assert.equal(files.filter((file) => /\/og\/.*\.png$/.test(file)).length, pages.length, 'Share-card count differs');
-assert(!/aisensy|indiamart/i.test(sitemap), 'Retired routes remain in sitemap');
-console.log(JSON.stringify({ pages: pages.length, uniqueTitles: titles.size, structuredBlocks, internalLinks, sitemapAndCards: 'matched' }));
+assert(!/aisensy|indiamart|engyne/i.test(sitemap), 'Retired routes remain in sitemap');
+for (const route of ['/integrations/aisensy', '/alternatives/aisensy', '/integrations/indiamart', '/integrations/engyne-cloud']) {
+  for (const from of [route, `${route}/`]) {
+    const redirect = redirects.get(from);
+    assert.equal(redirect?.status, '301', `${from}: must preserve old links permanently`);
+    assert(!redirects.has(redirect.to) && resolves(redirect.to), `${from}: redirect must resolve without a chain`);
+  }
+}
+console.log(JSON.stringify({ pages: pages.length, uniqueTitles: titles.size, uniqueDescriptions: descriptions.size, structuredBlocks, internalLinks, sitemapAndCards: 'matched', retiredRedirects: 8 }));

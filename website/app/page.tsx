@@ -237,8 +237,8 @@ export default function HomePage() {
               </h2>
             </div>
             <p>
-              A closer look at the desktop and mobile experience. Every screen
-              comes from the product, with example data.
+              Explore product screenshots and illustrations of the desktop
+              and mobile experience. Try the demo to use the workspace yourself.
             </p>
           </div>
           <ProductTour />

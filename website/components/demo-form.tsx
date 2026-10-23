@@ -262,7 +262,7 @@ export function DemoForm({ toEmail }: { toEmail: string }) {
           </p>
         ) : (
           <p className="form__note">
-            Saved for our team to review. We will reply by email.
+            Send your request for our team to review. We will reply by email.
           </p>
         )}
       </div>

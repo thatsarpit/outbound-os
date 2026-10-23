@@ -2770,6 +2770,20 @@ describe('Generic connector intake and supplier attribution', () => {
       assert.equal(absent.body.total, 0); assert.deepEqual(absent.body.records, []);
     } finally { await db.connectorReceipt.deleteMany({ where: { sourceId: source.id, externalId: { startsWith: 'paging-' } } }); }
   });
+  test('accepted import IDs remain replayable after their supplier is disabled', async () => {
+    const receipt = await db.connectorReceipt.findUnique({ where: { sourceId_externalId: { sourceId: source.id, externalId: 'fixture-1' } } });
+    await db.supplier.update({ where: { id: supplier.id }, data: { enabled: false } });
+    try {
+      const replay = await request('POST', endpoint, { headers, body: { records: [record('fixture-1')] } });
+      assert.equal(replay.status, 200);
+      assert.equal(replay.body.results[0].replay, true);
+      assert.equal(replay.body.results[0].leadId, receipt.leadId);
+      const mixed = await request('POST', endpoint, { headers, body: { records: [record('fixture-1'), record('disabled-supplier-new', { mobile: '15550000190', email: 'new-import@example.test' })] } });
+      assert.equal(mixed.status, 503);
+      assert.equal(await db.connectorReceipt.count({ where: { sourceId: source.id, externalId: 'disabled-supplier-new' } }), 0);
+      assert.deepEqual(await db.connectorReceipt.findUnique({ where: { id: receipt.id } }), receipt);
+    } finally { await db.supplier.update({ where: { id: supplier.id }, data: { enabled: true } }); }
+  });
   test('retains import history when deletion is attempted and allows disabling intake', async () => {
     const admin = { ...authHeader(), 'X-Forwarded-For': '192.0.2.180' };
     const count = await db.connectorReceipt.count({ where: { sourceId: source.id } });
@@ -3013,4 +3027,32 @@ test('Meta receipts survive early arrival, reject cross-number matching, and nev
     await prisma.lead.delete({ where: { id: lead.id } });
     await prisma.whatsAppAccount.deleteMany({ where: { id: { in: accounts.map(row => row.id) } } });
   }
+});
+
+describe('MCP dashboard connection setup', () => {
+  let previous;
+  before(() => { previous = process.env.MCP_PUBLIC_URL; delete process.env.MCP_PUBLIC_URL; });
+  after(() => { if (previous === undefined) delete process.env.MCP_PUBLIC_URL; else process.env.MCP_PUBLIC_URL = previous; });
+  test('returns public configuration without credentials or trusting query-supplied destinations', async () => {
+    const result = await request('GET', '/api/integrations/mcp?url=https://untrusted.example.test/mcp', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.190' } });
+    assert.equal(result.status, 200);
+    assert.equal(result.headers['cache-control'], 'no-store');
+    assert.equal(result.body.serverUrl, null);
+    assert.equal(result.body.health.status, 'not_configured');
+    assert.equal(result.body.backendConfigured, true);
+    assert.ok(!JSON.stringify(result.body).includes(process.env.MCP_SERVICE_TOKEN));
+  });
+  test('allows managers but rejects agents and anonymous callers', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const { signToken } = await import('../src/auth/rbac.js');
+    const users = [];
+    try {
+      for (const role of ['agent', 'manager']) {
+        const user = await db.user.create({ data: { name: 'MCP setup fixture', email: `mcp-${role}@example.test`, passwordHash: 'fixture', role } }); users.push(user.id);
+        const result = await request('GET', '/api/integrations/mcp', { headers: { Authorization: `Bearer ${signToken(user)}`, 'X-Forwarded-For': role === 'agent' ? '192.0.2.191' : '192.0.2.192' } });
+        assert.equal(result.status, role === 'manager' ? 200 : 403);
+      }
+      assert.equal((await request('GET', '/api/integrations/mcp', { headers: { 'X-Forwarded-For': '192.0.2.193' } })).status, 401);
+    } finally { await db.user.deleteMany({ where: { id: { in: users } } }); }
+  });
 });
