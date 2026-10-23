@@ -12,8 +12,8 @@ const o = (n: number) => ({ '--o': n }) as CSSProperties
 
 export function CaptureVisual() {
   const sources: { brand: BrandName; label: string; meta: string }[] = [
-    { brand: 'webhooks', label: 'marketplace', meta: 'Push API' },
-    { brand: 'facebook', label: 'Facebook Lead Ads', meta: 'via Zapier' },
+    { brand: 'webhooks', label: 'Signed webhook', meta: 'Your connected source' },
+    { brand: 'facebook', label: 'Facebook Lead Ads', meta: 'Connected forms' },
     { brand: 'forms', label: 'Website form', meta: 'yoursite.com/contact' },
     { brand: 'zapier', label: 'Zapier · Make · n8n', meta: 'webhook' },
   ]
@@ -43,7 +43,7 @@ export function CaptureVisual() {
         <dl className="sv-fields">
           <div><dt>Wants</dt><dd>500 units, CIF Lagos</dd></div>
           <div><dt>Phone</dt><dd>+234 ••• ••• 4471</dd></div>
-          <div><dt>Source</dt><dd>marketplace</dd></div>
+          <div><dt>Source</dt><dd>Webhook</dd></div>
         </dl>
         <span className="sv-pill sv-pill--merge sv-in" style={o(7)}>
           <Check size={12} strokeWidth={3} /> Duplicate merged

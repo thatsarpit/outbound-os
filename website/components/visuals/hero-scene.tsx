@@ -35,14 +35,14 @@ export function HeroScene() {
   return (
     <figure
       className="scene"
-      aria-label="Sample: a lead from marketplace gets a WhatsApp message two seconds after enquiring; when they reply, the scheduled follow-ups are cancelled."
+      aria-label="Example workflow: a new enquiry receives an eligible WhatsApp template; when the customer replies, scheduled follow-ups stop."
     >
       <svg className="scene__beams" viewBox="0 0 640 640" aria-hidden="true">
         <defs>
           <linearGradient id="beam-grad" x1="0" x2="1">
-            <stop offset="0" stopColor="#22c55e" stopOpacity="0" />
-            <stop offset="0.5" stopColor="#4ade80" />
-            <stop offset="1" stopColor="#a7f3d0" />
+            <stop offset="0" stopColor="#d7d7e2" stopOpacity="0" />
+            <stop offset="0.5" stopColor="#a0a0ac" />
+            <stop offset="1" stopColor="#f7f7f9" />
           </linearGradient>
         </defs>
         {BEAMS.map((d, i) => (
@@ -144,8 +144,8 @@ export function HeroScene() {
       </div>
 
       <div className="scene__card scene__card--speed hs hs--speed" aria-hidden="true">
-        <span className="scene__big">2s</span>
-        <small>enquiry → WhatsApp</small>
+        <span className="scene__big">Direct</span>
+        <small>Official Meta Cloud API</small>
       </div>
 
       <div className="scene__card scene__card--follow" aria-hidden="true">

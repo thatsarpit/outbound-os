@@ -10,6 +10,10 @@ import { Logo } from '@/components/brand-logo'
 import { ProductHero } from '@/components/product-hero'
 import { ProductTour } from '@/components/product-tour'
 import { Faq } from '@/components/content'
+import { StoryScroller } from '@/components/story-scroller'
+import { CaptureVisual, FollowVisual, ReplyVisual } from '@/components/visuals/story-visuals'
+import { IntegrationHub } from '@/components/visuals/integration-hub'
+import { AgentExchange } from '@/components/visuals/agent-exchange'
 import { site } from '@/lib/site-content'
 
 const questions = [
@@ -40,7 +44,7 @@ export default function HomePage() {
     <>
       <section className="os-hero" aria-labelledby="home-heading">
         <div className="page">
-          <div className="os-hero__intro">
+          <div className="os-hero__intro" data-reveal>
             <div>
               <p className="eyebrow">
                 Outbound OS / The open-source WhatsApp CRM
@@ -105,6 +109,21 @@ export default function HomePage() {
               ))}
             </div>
           </div>
+        </div>
+      </section>
+
+      <section className="section os-product-story" aria-labelledby="story-heading">
+        <div className="page">
+          <div className="os-section-heading" data-reveal>
+            <div><p className="eyebrow">From first enquiry to the next reply</p><h2 id="story-heading">A workflow that keeps<br />the conversation moving.</h2></div>
+            <p>Bring in the lead, follow up with control, and hand the conversation to a person when the customer answers.</p>
+          </div>
+          <StoryScroller steps={[
+            { eyebrow: 'Capture', title: 'Every enquiry starts with context.', body: <p>Connect forms, Facebook Lead Ads and signed webhooks. Keep source details with the customer record, and merge a repeat enquiry into the existing lead.</p>, visual: <CaptureVisual />, inline: <CaptureVisual /> },
+            { eyebrow: 'Follow up', title: 'Set the rhythm. Keep the controls.', body: <p>Configure follow-up steps, sending hours and connected channels. Templates, consent, opt-outs and provider rules determine what is eligible to send.</p>, visual: <FollowVisual />, inline: <FollowVisual /> },
+            { eyebrow: 'Take over', title: 'They reply. Your team takes it from here.', body: <p>A customer reply stops scheduled follow-ups and appears in the shared inbox. Open the thread, read the history and reply from desktop or your phone.</p>, visual: <ReplyVisual />, inline: <ReplyVisual /> },
+          ]} />
+          <p className="os-visual-note">Workflow examples shown with sample records. Your configured rules control sending.</p>
         </div>
       </section>
 
@@ -237,11 +256,26 @@ export default function HomePage() {
               </h2>
             </div>
             <p>
-              Explore product screenshots and illustrations of the desktop
-              and mobile experience. Try the demo to use the workspace yourself.
+              Actual product screens, from the full desktop workspace to a
+              focused mobile conversation. Try the demo to use it yourself.
             </p>
           </div>
           <ProductTour />
+        </div>
+      </section>
+
+      <section className="section section--ruled os-connections-section" aria-labelledby="connections-heading">
+        <div className="page">
+          <div className="os-section-heading" data-reveal><div><p className="eyebrow">Your tools. One working system.</p><h2 id="connections-heading">Connected around<br />the customer.</h2></div><p>Use your own business accounts. Bring enquiries into the workspace and connect the channels your team already uses.</p></div>
+          <IntegrationHub />
+          <div className="os-section-link"><Link className="cta-link" href="/integrations">Explore every integration <ArrowRight size={15} /></Link></div>
+        </div>
+      </section>
+
+      <section className="section section--ruled" aria-labelledby="agent-heading">
+        <div className="page split os-agent">
+          <div className="section-head" data-reveal><p className="eyebrow">An open workspace for your AI tools</p><h2 id="agent-heading">Ask your CRM.<br />Then choose the next move.</h2><p>Connect an MCP client to inspect leads, read conversations and work with campaigns through the product&rsquo;s tools. Your assistant gets the context. You decide what to do with it.</p><Link className="cta-link" href="/mcp">Meet the MCP server <ArrowRight size={15} /></Link><p className="os-visual-note">Example exchange with sample records.</p></div>
+          <div data-reveal><AgentExchange /></div>
         </div>
       </section>
 

@@ -20,6 +20,7 @@ export function StoryScroller({ steps }: { steps: Story[] }) {
   const refs = useRef<(HTMLLIElement | null)[]>([])
 
   useEffect(() => {
+    if (!('IntersectionObserver' in window)) return
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {

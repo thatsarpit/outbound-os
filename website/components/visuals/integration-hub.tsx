@@ -60,7 +60,7 @@ export function IntegrationHub() {
           <strong>Outbound OS</strong>
           <ol className="hub__verbs">
             <li>Captures and de-duplicates</li>
-            <li>Replies in seconds</li>
+            <li>Routes eligible first contact</li>
             <li>Follows up on schedule</li>
             <li>Stops when they answer</li>
           </ol>

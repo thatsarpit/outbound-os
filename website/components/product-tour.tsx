@@ -10,7 +10,6 @@ import {
   Smartphone,
 } from 'lucide-react'
 import { site } from '@/lib/site-content'
-import { InboxPreview } from './product-preview'
 
 /**
  * Desktop and mobile product screens, with manual keyboard-accessible tabs.
@@ -77,7 +76,7 @@ const SHOTS = [
 ] as const
 
 export function ProductTour() {
-  const [active, setActive] = useState(0)
+  const [active, setActive] = useState(1)
   const base = useId()
 
   const onKey = (event: KeyboardEvent<HTMLButtonElement>) => {
@@ -138,21 +137,18 @@ export function ProductTour() {
               aria-labelledby={`${base}-tab-${index}`}
               hidden={index !== active}
               className={`tour__panel ${shot.id === 'mobile' ? 'tour__panel--mobile' : ''}`}
+              tabIndex={0}
             >
-              {shot.id === 'inbox' || shot.id === 'mobile' ? (
-                <InboxPreview mobile={shot.id === 'mobile'} />
-              ) : (
-                <img
-                  src={`/screenshots/${shot.path}.webp?v=${site.screenshotVersion}`}
-                  srcSet={`/screenshots/${shot.path}-800.webp?v=${site.screenshotVersion} 800w, /screenshots/${shot.path}.webp?v=${site.screenshotVersion} 1600w`}
+              <img
+                  src={shot.id === 'inbox' ? `/screenshots/inbox-dark.png?v=${site.screenshotVersion}` : `/screenshots/${shot.path}.webp?v=${site.screenshotVersion}`}
+                  srcSet={shot.id === 'mobile' || shot.id === 'inbox' ? undefined : `/screenshots/${shot.path}-800.webp?v=${site.screenshotVersion} 800w, /screenshots/${shot.path}.webp?v=${site.screenshotVersion} 1600w`}
                   sizes="(min-width: 1200px) 1130px, 100vw"
                   alt={shot.alt}
-                  width={1600}
-                  height={1000}
-                  loading={index === active ? 'eager' : 'lazy'}
+                  width={shot.id === 'mobile' ? 390 : shot.id === 'inbox' ? 1920 : 1600}
+                  height={shot.id === 'mobile' ? 844 : shot.id === 'inbox' ? 872 : 1000}
+                  loading="lazy"
                   decoding="async"
-                />
-              )}
+              />
             </div>
           ))}
         </div>
@@ -160,9 +156,7 @@ export function ProductTour() {
       <p className="tour__caption" aria-live="polite">
         {SHOTS[active].caption}{' '}
         <span>
-          {SHOTS[active].id === 'inbox' || SHOTS[active].id === 'mobile'
-            ? 'Product illustration. Fictional data.'
-            : 'Product screenshot. Sample data.'}
+          Product screenshot. Sample data.
         </span>
       </p>
     </div>
