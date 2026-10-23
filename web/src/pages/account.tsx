@@ -1,4 +1,5 @@
 import { DeviceNotifications } from '@/components/notifications/device-notifications'
+import { ClerkPasskeys } from '@/components/auth/clerk-passkeys'
 import { useLocation } from 'react-router-dom'
 import { useState, type FormEvent } from 'react'
 import { useClerk } from '@clerk/react'
@@ -82,6 +83,7 @@ export default function AccountPage() {
 
         <div className="space-y-4">
           <DeviceNotifications />
+          {provider === 'clerk' && <ClerkPasskeys />}
           {provider === 'clerk' ? (
             <SectionCard title="Password & security" description="Managed by Clerk.">
               <p className="text-[13px] text-text-secondary">
