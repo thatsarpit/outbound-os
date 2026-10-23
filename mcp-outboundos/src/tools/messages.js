@@ -8,8 +8,21 @@ const ClientMessageId = z
   .regex(/^[\w-]{16,100}$/)
   .optional()
   .describe(
-    'Reuse this request ID when retrying an interrupted send; choose a new ID for a separate intentional message.',
+    'Known request ID required before sending. Omit to prepare an ID without sending; reuse it for retries of the same request.',
   );
+
+function prepareRequestId() {
+  return {
+    ...ok({
+      success: false,
+      reason: 'request_id_required',
+      client_message_id: randomUUID(),
+      nextStep:
+        'No message was sent. Call this tool again with this client_message_id. Keep it for any retry of this exact request; use a new ID for a separate intentional message.',
+    }),
+    isError: true,
+  };
+}
 
 function sendError(error, clientMessageId) {
   const payload = error.data || {};
@@ -75,14 +88,15 @@ export function registerMessageTools(server) {
   // ── send_whatsapp ──
   server.tool(
     'send_whatsapp',
-    'Send a normal WhatsApp reply using the assigned sending number. Requires a customer message to that number within 24 hours. Success means provider acceptance; check list_messages for delivery. Reuse client_message_id if a request is interrupted.',
+    'Send a normal WhatsApp reply using the assigned sending number. Requires a customer message to that number within 24 hours. Success means provider acceptance; check list_messages for delivery. A caller-known client_message_id is required to send. Omit it to prepare an ID without sending; reuse it if interrupted.',
     {
       lead_id: LeadId,
       message: z.string().min(1).max(4096).describe('Message text to send'),
       client_message_id: ClientMessageId,
     },
     async ({ lead_id, message, client_message_id }) => {
-      const clientMessageId = client_message_id || randomUUID();
+      if (!client_message_id) return prepareRequestId();
+      const clientMessageId = client_message_id;
       try {
         const { data } = await post(`/api/leads/${lead_id}/send`, {
           message,
@@ -145,7 +159,8 @@ export function registerMessageTools(server) {
       client_message_id: ClientMessageId,
     },
     async ({ lead_id, media_file_id, caption, client_message_id }) => {
-      const clientMessageId = client_message_id || randomUUID();
+      if (!client_message_id) return prepareRequestId();
+      const clientMessageId = client_message_id;
       try {
         const { data } = await post(`/api/leads/${lead_id}/send-media`, {
           mediaFileId: media_file_id,

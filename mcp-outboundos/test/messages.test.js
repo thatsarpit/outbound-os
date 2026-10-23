@@ -86,13 +86,11 @@ test('manual WhatsApp tools pass retry identities and distinguish acceptance fro
   assert.notEqual(result.isError, true);
   assert.match(tools.get('send_whatsapp').description, /acceptance/);
   assert.throws(() =>
-    tools
-      .get('send_whatsapp')
-      .schema.parse({
-        lead_id: 12,
-        message: 'Fixture',
-        client_message_id: 'short',
-      }),
+    tools.get('send_whatsapp').schema.parse({
+      lead_id: 12,
+      message: 'Fixture',
+      client_message_id: 'short',
+    }),
   );
 });
 
@@ -102,15 +100,24 @@ test('an interrupted MCP send returns its request identity without automatic ret
     calls++;
     throw new Error('Fixture connection interrupted');
   });
-  const failed = await invoke('send_whatsapp', {
+  const prepared = await invoke('send_whatsapp', {
     lead_id: 12,
     message: 'Fixture reply',
   });
+  assert.equal(calls, 0, 'preparing an ID must not call the backend');
+  assert.equal(prepared.isError, true);
+  const first = payload(prepared);
+  assert.match(first.client_message_id, /^[\w-]{16,100}$/);
+  assert.equal(first.reason, 'request_id_required');
+  const failed = await invoke('send_whatsapp', {
+    lead_id: 12,
+    message: 'Fixture reply',
+    client_message_id: first.client_message_id,
+  });
   assert.equal(calls, 1, 'no automatic second send');
   assert.equal(failed.isError, true);
-  const first = payload(failed);
-  assert.match(first.client_message_id, /^[\w-]{16,100}$/);
-  assert.equal(first.reason, 'confirmation_unknown');
+  assert.equal(payload(failed).client_message_id, first.client_message_id);
+  assert.equal(payload(failed).reason, 'confirmation_unknown');
   mock.mock.mockImplementation(async (_url, options) => {
     calls++;
     assert.equal(
@@ -205,8 +212,24 @@ test('a rejected authenticated request is not described as an uncertain provider
   const result = await invoke('send_whatsapp', {
     lead_id: 12,
     message: 'Fixture reply',
+    client_message_id: 'fixture-rejected-0001',
   });
   assert.equal(result.isError, true);
   assert.equal(payload(result).httpStatus, 401);
   assert.equal(payload(result).reason, 'request_rejected');
+});
+
+test('preparing a file request never contacts the backend or sends before the caller knows its ID', async (t) => {
+  let calls = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    calls++;
+    throw new Error('No request expected');
+  });
+  const prepared = await invoke('send_whatsapp_file', {
+    lead_id: 12,
+    media_file_id: 4,
+  });
+  assert.equal(calls, 0);
+  assert.equal(payload(prepared).reason, 'request_id_required');
+  assert.match(payload(prepared).client_message_id, /^[\w-]{16,100}$/);
 });
