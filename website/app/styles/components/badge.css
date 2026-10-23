@@ -27,7 +27,7 @@
    same thing on the site as it does in the app. */
 .badge--whatsapp { color: var(--whatsapp); }
 .badge--email { color: var(--email); }
-.badge--indiamart { color: var(--indiamart); }
+.badge--marketplace { color: var(--marketplace); }
 
 /* State — reserved for genuine state. Never for emphasis. */
 .badge--planned { color: var(--text-muted); border-style: dashed; }

@@ -31,7 +31,7 @@ export default async function AlternativePage({ params }: { params: Promise<Para
     ['Where your data lives', 'Your own server and database', 'The vendor’s cloud'],
     ['Paying for it', 'Free software; you pay for your server, and Meta bills WhatsApp messages to your own account', 'Subscription plans plus message charges — see their pricing page'],
     ['Source code', 'Open, AGPL-3.0', 'Closed'],
-    ['Lead capture', 'Webhooks with presets for forms, Facebook Lead Ads, IndiaMART, TradeIndia, JustDial, Zapier', 'Through their integrations'],
+    ['Lead capture', 'Webhooks with presets for forms, Facebook Lead Ads, marketplace, TradeIndia, JustDial, Zapier', 'Through their integrations'],
     ['First contact', 'Automatic, within seconds of a lead arriving', 'Through their automation features'],
     ['Follow-ups', 'Sequences across WhatsApp and email that stop on reply', 'Through their campaigns and automation'],
     ['Other channels', 'Email, Telegram and iMessage on the same lead', alt.theirChannels],

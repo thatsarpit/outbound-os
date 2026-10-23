@@ -3,7 +3,7 @@ import { loginReturnPath } from '@/lib/login-return'
 import { SignIn } from '@clerk/react'
 
 /**
- * Clerk's hosted email-code sign-in, styled to sit inside the login card.
+ * Clerk's prebuilt sign-in retains all enabled strategies and recovery steps.
  * Only rendered when the server's provider is Clerk (it needs ClerkProvider).
  * Social controls are hidden as a defence-in-depth UI rule; the providers are
  * disabled in Clerk too.
@@ -57,7 +57,9 @@ export function ClerkSignIn() {
           socialButtons: { display: 'none' },
           socialButtonsBlockButton: { display: 'none' },
           dividerRow: { display: 'none' },
-          footer: { display: 'none' },
+          // Keep Clerk's branding and development notice visible. Only the
+          // sign-up action is suppressed for this existing-member entry page.
+          footer: { background: 'transparent', border: 0 },
           footerAction: { display: 'none' },
           form: 'gap-4',
           formFieldLabel: 'text-[12px] font-medium text-text-secondary',

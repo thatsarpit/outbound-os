@@ -1,6 +1,13 @@
 import type { CSSProperties } from 'react'
 import logoSet from '@iconify-json/logos/icons.json'
-import { siBrevo, siGooglesheets, siImessage, siMake, siWebflow, type SimpleIcon } from 'simple-icons'
+import {
+  siBrevo,
+  siGooglesheets,
+  siImessage,
+  siMake,
+  siWebflow,
+  type SimpleIcon,
+} from 'simple-icons'
 import { FileSpreadsheet, FormInput, Mail, Webhook, type LucideIcon } from 'lucide-react'
 import { BrandMark } from './brand-mark'
 
@@ -10,7 +17,7 @@ import { BrandMark } from './brand-mark'
  * Full-colour marks come from Gil Barbara's "logos" set (CC0). Brands that set
  * does not carry use their official glyph from Simple Icons (CC0) in their own
  * colour — Google Sheets, Make, Brevo, Webflow — or, for iMessage, the app
- * icon's own green square. IndiaMART, AiSensy and TradeIndia use the site
+ * icon's own green square. TradeIndia uses the site
  * icons they publish themselves (public/logos/). A brand with no square mark
  * of its own gets a lettered tile, never a hand-drawn imitation. Generic
  * ideas (email, webhooks, CSV) get an icon. Trademarks belong to their owners
@@ -18,7 +25,11 @@ import { BrandMark } from './brand-mark'
  */
 
 type LogoSetIcon = { body: string; width?: number; height?: number }
-const set = logoSet as unknown as { width?: number; height?: number; icons: Record<string, LogoSetIcon> }
+const set = logoSet as unknown as {
+  width?: number
+  height?: number
+  icons: Record<string, LogoSetIcon>
+}
 
 type Brand =
   | { kind: 'color'; title: string; body: string; w: number; h: number }
@@ -32,9 +43,20 @@ type Brand =
 function color(name: string, title: string): Brand {
   const icon = set.icons[name]
   if (!icon) throw new Error(`Logo not found: ${name}`)
-  return { kind: 'color', title, body: icon.body, w: icon.width ?? set.width ?? 256, h: icon.height ?? set.height ?? 256 }
+  return {
+    kind: 'color',
+    title,
+    body: icon.body,
+    w: icon.width ?? set.width ?? 256,
+    h: icon.height ?? set.height ?? 256,
+  }
 }
-const glyph = (icon: SimpleIcon): Brand => ({ kind: 'glyph', title: icon.title, hex: `#${icon.hex}`, path: icon.path })
+const glyph = (icon: SimpleIcon): Brand => ({
+  kind: 'glyph',
+  title: icon.title,
+  hex: `#${icon.hex}`,
+  path: icon.path,
+})
 
 export const brands = {
   whatsapp: color('whatsapp-icon', 'WhatsApp'),
@@ -55,11 +77,8 @@ export const brands = {
   brevo: glyph(siBrevo),
   webflow: glyph(siWebflow),
   imessage: { kind: 'app', title: 'iMessage', hex: '#34DA50', path: siImessage.path },
-  indiamart: { kind: 'image', title: 'IndiaMART', src: '/logos/indiamart.png' },
-  aisensy: { kind: 'image', title: 'AiSensy', src: '/logos/aisensy.png' },
   tradeindia: { kind: 'image', title: 'TradeIndia', src: '/logos/tradeindia.png' },
   justdial: { kind: 'mono', title: 'JustDial', hex: '#c2410c', letters: 'JD' },
-  engyne: { kind: 'mono', title: 'Engyne Cloud', hex: '#4338ca', letters: 'En' },
   email: { kind: 'icon', title: 'Email', hex: '#7c3aed', Icon: Mail },
   webhooks: { kind: 'icon', title: 'Webhooks', hex: '#17171c', Icon: Webhook },
   csv: { kind: 'icon', title: 'CSV', hex: '#15803d', Icon: FileSpreadsheet },
@@ -72,15 +91,12 @@ export type BrandName = keyof typeof brands
 /** Which logo stands for each integration page. */
 export const integrationBrand: Record<string, BrandName> = {
   'whatsapp-cloud-api': 'whatsapp',
-  aisensy: 'aisensy',
   email: 'gmail',
   brevo: 'brevo',
   telegram: 'telegram',
   imessage: 'imessage',
-  indiamart: 'indiamart',
   'facebook-lead-ads': 'facebook',
   zapier: 'zapier',
-  'engyne-cloud': 'engyne',
   'google-sheets': 'sheets',
   webhooks: 'webhooks',
   'csv-import': 'csv',
@@ -95,11 +111,21 @@ export const integrationBrand: Record<string, BrandName> = {
 let instance = 0
 function uniqueIds(body: string) {
   const suffix = `-l${(instance += 1)}`
-  return body.replace(/id="([^"]+)"/g, `id="$1${suffix}"`).replace(/url\(#([^)]+)\)/g, `url(#$1${suffix})`)
+  return body
+    .replace(/id="([^"]+)"/g, `id="$1${suffix}"`)
+    .replace(/url\(#([^)]+)\)/g, `url(#$1${suffix})`)
 }
 
 /** Just the mark, no tile. */
-export function Logo({ brand, size = 24, className }: { brand: BrandName; size?: number; className?: string }) {
+export function Logo({
+  brand,
+  size = 24,
+  className,
+}: {
+  brand: BrandName
+  size?: number
+  className?: string
+}) {
   const b: Brand = brands[brand]
   if (b.kind === 'color') {
     const scale = size / Math.max(b.w, b.h)
@@ -121,13 +147,30 @@ export function Logo({ brand, size = 24, className }: { brand: BrandName; size?:
       </svg>
     )
   }
-  if (b.kind === 'icon') return <b.Icon className={className} size={size} strokeWidth={2} color={b.hex} aria-hidden="true" />
+  if (b.kind === 'icon')
+    return (
+      <b.Icon className={className} size={size} strokeWidth={2} color={b.hex} aria-hidden="true" />
+    )
   if (b.kind === 'image') {
-    return <img className={className} src={b.src} width={size} height={size} alt="" decoding="async" loading="lazy" />
+    return (
+      <img
+        className={className}
+        src={b.src}
+        width={size}
+        height={size}
+        alt=""
+        decoding="async"
+        loading="lazy"
+      />
+    )
   }
   if (b.kind === 'self') return <BrandMark className={className} />
   return (
-    <span className={className} style={{ fontSize: Math.round(size * 0.7), fontWeight: 700, color: '#fff' }} aria-hidden="true">
+    <span
+      className={className}
+      style={{ fontSize: Math.round(size * 0.7), fontWeight: 700, color: '#fff' }}
+      aria-hidden="true"
+    >
       {b.letters}
     </span>
   )
@@ -151,14 +194,19 @@ export function LogoTile({
 }) {
   const b: Brand = brands[brand]
   const solid = b.kind === 'app' || b.kind === 'mono' || b.kind === 'self'
-  const ground = b.kind === 'app' || b.kind === 'mono' ? b.hex : b.kind === 'self' ? '#0b0d10' : '#ffffff'
+  const ground =
+    b.kind === 'app' || b.kind === 'mono' ? b.hex : b.kind === 'self' ? '#0b0d10' : '#ffffff'
   const style = { '--tile': ground, width: size, height: size } as CSSProperties
   const a11y = label ? { role: 'img', 'aria-label': b.title } : { 'aria-hidden': true as const }
-  const inner = Math.round(size * (b.kind === 'color' ? 0.58 : b.kind === 'image' ? 0.7 : b.kind === 'self' ? 0.6 : 0.54))
+  const inner = Math.round(
+    size * (b.kind === 'color' ? 0.58 : b.kind === 'image' ? 0.7 : b.kind === 'self' ? 0.6 : 0.54),
+  )
 
   return (
     <span
-      className={['logo-tile', solid ? 'logo-tile--solid' : '', className].filter(Boolean).join(' ')}
+      className={['logo-tile', solid ? 'logo-tile--solid' : '', className]
+        .filter(Boolean)
+        .join(' ')}
       style={style}
       {...a11y}
     >

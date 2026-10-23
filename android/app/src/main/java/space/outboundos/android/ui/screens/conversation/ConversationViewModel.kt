@@ -142,10 +142,6 @@ class ConversationViewModel(
                 _state.update { it.copy(error = "No enabled email sender is available for this lead") }
                 return
             }
-            draft.channel == Channel.IndiaMart && conversation.summary.conversationId == null -> {
-                _state.update { it.copy(error = "This lead is not linked to an IndiaMART conversation") }
-                return
-            }
         }
         viewModelScope.launch {
             _state.update { it.copy(sending = true, error = null) }

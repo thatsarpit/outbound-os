@@ -155,6 +155,8 @@ export interface SalesOrder {
   paymentTerms: string | null
   notes: string | null
   supplierId: number | null
+  originSupplierId?: number | null
+  originSupplier?: { id: number; name: string } | null
   paymentMethodId: number | null
   feeMode: 'absorb' | 'pass_on'
   feeAmount: number
@@ -174,6 +176,7 @@ export interface SalesOrder {
 }
 
 export interface OrderFilters {
+  originSupplierId?: number
   status?: string
   search?: string
   page?: number

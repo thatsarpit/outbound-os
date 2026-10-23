@@ -21,7 +21,7 @@ class CSVImporter {
     product: ['product', 'product_name', 'subject', 'product name', 'query subject', 'product interest'],
     country: ['country', 'country_name', 'sender_country', 'country name'],
     quantity: ['quantity', 'qty', 'requirement_qty'],
-    externalId: ['external_id', 'external id', 'query_id', 'unique_query_id', 'indiamart_id', 'query id', 'lead_id'],
+    externalId: ['external_id', 'external id', 'query_id', 'unique_query_id', 'query id', 'lead_id'],
     // Extended columns found in richer CRM exports
     consumedAt: ['consumed on date', 'consumed_at', 'lead date'],
     dealValue: ['estimated value', 'estimated value ($ usd)', 'order value', 'deal value'],

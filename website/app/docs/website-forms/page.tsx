@@ -30,15 +30,14 @@ export default function WebsiteFormsDoc() {
       <p>
         Open <strong>Integrations → Webhooks</strong>. Use{' '}
         <strong>Quick add from presets</strong> for a known sender (website
-        form, Facebook Lead Ads, IndiaMART, TradeIndia, JustDial, Engyne
-        Cloud, Typeform, Tally, Google Forms), or <strong>Add webhook source</strong> for anything else. You
+        form, Facebook Lead Ads, marketplace, TradeIndia, JustDial, Typeform, Tally, Google Forms), or <strong>Add webhook source</strong> for anything else. You
         get an address and a key:
       </p>
       <Code label="Address">{'https://your-host/api/webhooks/inbound/<source>'}</Code>
       <p>
         The key is shown in full only once. Send it in an{' '}
         <code>x-api-key</code> header, or — for senders that cannot set headers,
-        such as a plain HTML form or IndiaMART — as <code>?apiKey=&lt;key&gt;</code>{' '}
+        such as a plain HTML form or marketplace — as <code>?apiKey=&lt;key&gt;</code>{' '}
         on the address.
       </p>
 
@@ -265,15 +264,11 @@ export default function WebsiteFormsDoc() {
       <h2 id="sources">Source-specific guides</h2>
       <ul>
         <li>
-          <Link href="/integrations/indiamart">IndiaMART</Link> — the Lead
-          Manager Push API
-        </li>
-        <li>
           <Link href="/integrations/facebook-lead-ads">Facebook Lead Ads</Link> — through
           Zapier, Make or n8n
         </li>
         <li>
-          <Link href="/integrations/engyne-cloud">Engyne Cloud</Link> — lead.captured events
+          <Link href="/integrations/webhooks">External systems and webhooks</Link> — incoming sources and outgoing events
         </li>
         <li>
           <Link href="/form-backend">Using Outbound OS as a form backend</Link>

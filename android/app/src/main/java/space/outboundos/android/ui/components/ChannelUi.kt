@@ -4,7 +4,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Message
-import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -18,7 +17,6 @@ fun channelColor(channel: Channel): Color {
     return when (channel) {
         Channel.WhatsApp -> colors.whatsapp
         Channel.Email -> colors.email
-        Channel.IndiaMart -> colors.indiaMart
         Channel.Other -> androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
     }
 }
@@ -28,7 +26,6 @@ fun ChannelIcon(channel: Channel, modifier: Modifier = Modifier, contentDescript
     val icon = when (channel) {
         Channel.WhatsApp -> Icons.Outlined.Message
         Channel.Email -> Icons.Outlined.Email
-        Channel.IndiaMart -> Icons.Outlined.Storefront
         Channel.Other -> Icons.Outlined.Forum
     }
     Icon(icon, contentDescription = contentDescription, tint = channelColor(channel), modifier = modifier)

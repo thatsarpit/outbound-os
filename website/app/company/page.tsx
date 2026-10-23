@@ -22,7 +22,7 @@ export default function CompanyPage() {
             <h1>Built to run a real sales desk. Now open source.</h1>
             <p className="lede">
               Outbound OS started as the system behind a pharmaceutical export
-              business answering buyers from IndiaMART, WhatsApp and email
+              business answering buyers from marketplace, WhatsApp and email
               around the world. It worked, so we made it general and released
               it as open source under {site.license}.
             </p>
@@ -44,7 +44,7 @@ export default function CompanyPage() {
             <p>Outbound OS does not ask a business to abandon the identities its customers already know. It connects those accounts to consistent CRM work.</p>
           </div>
           <div className="company-product stack">
-            <article><span className="eyebrow">Capture</span><h3>Bring the enquiry and source into view.</h3><p>Website forms, ads, IndiaMART, CSV and any webhook feed a customer record the team is able to own.</p></article>
+            <article><span className="eyebrow">Capture</span><h3>Bring the enquiry and source into view.</h3><p>Website forms, ads, marketplace, CSV and any webhook feed a customer record the team is able to own.</p></article>
             <article><span className="eyebrow">Work</span><h3>Connect qualification, conversation and next action.</h3><p>Scoring, assignment and pipeline status help the team decide and act without losing context between tools.</p></article>
             <article><span className="eyebrow">Follow through</span><h3>Run the approved sequence, then stop at the answer.</h3><p>Campaigns and follow-up respect connected accounts and configured limits. A customer reply returns the work to a live conversation.</p></article>
             <article><span className="eyebrow">Extend</span><h3>Let approved AI clients work through MCP.</h3><p>The MCP server exposes explicit lead, message, campaign, analytics and system tools instead of requiring a copied export.</p></article>

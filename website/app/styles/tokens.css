@@ -7,8 +7,8 @@
 
    Principles:
      1. Ink first. Hierarchy comes from size, weight and space.
-     2. Green is the brand: WhatsApp, a lead answered, something that worked.
-        It is the one colour allowed to glow. Blue means a link.
+     2. The brand is monochrome. Channel colours and semantic states retain
+        their meaning; a green WhatsApp icon does not make the page green.
      3. Other brands appear in their own colours, as logos — never as
         decoration of our own.
      4. Motion explains a sequence (a lead arriving, a reply stopping the
@@ -21,63 +21,66 @@
 ════════════════════════════════════════════════════════════════════════════ */
 
 :root {
-  /* ── Paper and ink ── */
-  --bg: #fafafb;
-  --surface: #ffffff;
-  --surface-raised: #f4f4f7;
+  color-scheme: dark;
+  /* The same dark surfaces as web/src/styles/globals.css. */
+  --bg: #0b0b0e;
+  --surface: #141419;
+  --surface-raised: #1c1c22;
+  --surface-overlay: #22222a;
 
-  --border: #e4e4ea;
-  --border-subtle: #efeff2;
-  --border-strong: #d2d2da;
+  --border: #26262e;
+  --border-subtle: #1a1a20;
+  --border-strong: #383842;
 
-  --text: #17171c;
-  --text-secondary: #55555f;
-  --text-muted: #6b6b75;
+  --text: #f7f7f9;
+  --text-secondary: #a0a0ac;
+  --text-muted: #8b8b98;
 
-  /* ── Action. Solid ink, never a bright fill. ── */
-  --accent: #17171c;
-  --accent-hover: #2e2e36;
-  --accent-fg: #fafafb;
-  --accent-muted: #f0f0f4;
+  /* ── Action. Paper on ink, as in the dashboard. ── */
+  --accent: #f7f7f9;
+  --accent-hover: #ffffff;
+  --accent-fg: #17171c;
+  --accent-muted: #22222a;
 
   /* ── The only blue: links and focus. ── */
-  --focus: #2c3fe0;
-  --focus-muted: #eef0fe;
-  --focus-border: #c7cdf8;
+  --focus: #8b99ff;
+  --focus-muted: #191a33;
+  --focus-border: #33355e;
 
   /* ── State. Never used for identity or decoration. ── */
-  --success: #15803d;
-  --success-muted: #eaf6ee;
-  --warning: #b45309;
-  --warning-muted: #fbf1e3;
-  --danger: #dc2626;
-  --danger-muted: #fdecec;
+  --success: #4ade80;
+  --success-muted: #10241a;
+  --warning: #fbbf24;
+  --warning-muted: #261c10;
+  --danger: #f87171;
+  --danger-muted: #2a1618;
 
-  /* ── Brand. Deep green for text on paper (5:1), bright green for fills
-        and light, never for body text. ── */
-  --brand: #047857;
-  --brand-bright: #22c55e;
-  --brand-soft: #e7f8ee;
-  --brand-glow: rgba(34, 197, 94, 0.22);
-  --sky-glow: rgba(44, 63, 224, 0.12);
+  --brand: #f7f7f9;
+  --brand-bright: #d7d7e2;
+  --brand-soft: #22222a;
+  --brand-glow: rgba(190, 190, 210, 0.07);
+  --sky-glow: rgba(139, 153, 255, 0.06);
 
   /* ── The dark showcase surface: one section per page at most. ── */
-  --night: #0b0d10;
-  --night-raised: #14171c;
-  --night-border: #262a31;
-  --night-text: #f3f4f6;
-  --night-muted: #9ca3af;
+  --night: #0b0b0e;
+  --night-raised: #141419;
+  --night-border: #26262e;
+  --night-text: #f7f7f9;
+  --night-muted: #a0a0ac;
 
   /* ── Chat. The WhatsApp conversation colours, for the hero illustration. ── */
-  --chat-bg: #efeae2;
-  --chat-out: #d9fdd3;
-  --chat-in: #ffffff;
+  --chat-bg: #0b0b0e;
+  --chat-out: #102c25;
+  --chat-in: #1c1c22;
   --chat-tick: #53bdeb;
 
   /* ── Channel identity. Matches the app's channel colours exactly. ── */
-  --whatsapp: #047857;
-  --email: #7c3aed;
-  --indiamart: #b45309;
+  --whatsapp: #25d366;
+  --email: #9575f7;
+  --marketplace: #fbbf24;
+  --lime: #f7f7f9;
+  --service-ink: #141419;
+  --service-muted: #a0a0ac;
 
   /* ── Geometry. Three radii, no more. ── */
   --r-sm: 4px;
@@ -86,16 +89,16 @@
   --r-tile: 14px;
 
   /* ── Elevation. A hairline first, a whisper of shadow second. ── */
-  --shadow-sm: 0 1px 2px rgba(20, 20, 30, 0.04);
-  --shadow-md: 0 4px 12px rgba(20, 20, 30, 0.08);
-  --shadow-lg: 0 24px 60px -18px rgba(20, 20, 30, 0.25), 0 8px 20px -10px rgba(20, 20, 30, 0.12);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 24px 80px -18px rgba(0, 0, 0, 0.7);
 
   /* ── Editorial measure. Prose stops being readable past ~72ch. ── */
   --measure: 68ch;
   --measure-tight: 46ch;
 
   /* ── Page frame ── */
-  --page-max: 1180px;
+  --page-max: 1280px;
   --page-pad: 24px;
   --rule: 1px solid var(--border);
   --rule-subtle: 1px solid var(--border-subtle);
@@ -106,7 +109,7 @@
 
   /* ── Type ── */
   --font-sans:
-    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
 }
 

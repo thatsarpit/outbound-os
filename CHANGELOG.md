@@ -6,14 +6,57 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+## [0.3.0] — Inbox reliability, mobile sales and direct Meta
+
+### Inbox and mobile
+
+- Retain failed and uncertain manual WhatsApp attempts; distinguish provider
+  acceptance from delivered/read receipts and enforce the exact number's reply window.
+- Prevent duplicate manual claims and automatic retries of interrupted manual sends.
+- Persist scoped Meta receipts and replay callbacks that arrive before send results.
+- Separate personal read cursors and Done/Reopen from the sales pipeline.
+- Add the focused mobile account/More flow, automatic inbox updates, safe-area and
+  keyboard layout handling, app icons and permission-based personal Web Push.
+- Preserve delivery diagnostics in MCP, with caller-known identities for text/file retries.
+- Add a discoverable AI agents & MCP setup page, public endpoint diagnostics and
+  ChatGPT/Codex instructions without revealing integration credentials.
+
+### Website and maintenance
+
+- Unify the marketing site around direct Meta, a shared inbox and mobile sales.
+  Use the app's dark design system, actual product captures with sample records
+  and animated workflow, integration and MCP explanations.
+- Redesign desktop and mobile sign-in while preserving Clerk's authentication
+  flow and visible branding. Gate passkey enrolment on actual instance/browser
+  support and the separately planned live-instance cutover.
+- Clarify incoming source keys versus outgoing event signatures. Preserve retired
+  URLs with permanent redirects; verify exact canonical/sitemap correspondence,
+  unique titles/descriptions, image assets, structured data and internal links.
+- Keep motion optional and reduced-motion aware, with no added animation framework.
+- Include the accumulated dependency/security upgrades and protected CI workflow.
+
+### Source-neutral imports and attribution
+
+- Remove the dedicated marketplace preset, legacy Android channel, vendor aliases, public integration page and branding. External collectors now use a generic source contract.
+- Add a replay-safe connector receipt ledger, paused historical imports, conflict quarantine, and stable lead-origin supplier attribution independent of order fulfilment.
+- Add order filtering by the supplier who originated a lead, and preserve that origin on each new order.
+- Protect configured source suppliers with a foreign key; disable referenced
+  suppliers instead of deleting them. Bound contact hydration during imports and
+  replay accepted records without scanning the workspace.
+
 ### Added
+
+- A refreshed website with paid setup, managed hosting and support enquiries,
+  current dashboard screenshots and checks for exported SEO metadata and links.
+- An opt-in, rate-limited website enquiry endpoint that records paused leads
+  without granting marketing consent or scheduling outreach.
 
 - **WhatsApp files in both directions** (Meta Cloud API numbers). Photos,
   PDFs, documents, voice notes and videos a lead sends are downloaded from
   Meta, kept in the data volume and shown in the inbox; they are served only
   to signed-in users, with a sandbox policy. The inbox can attach files to a
   WhatsApp reply, and `POST /api/leads/:id/send-media` sends library files.
-- MCP tools `list_media_files` and `send_whatsapp_file` (35 tools).
+- MCP tools `list_media_files` and `send_whatsapp_file` (36 tools).
 - More file types in the media library: spreadsheets, presentations, text,
   AAC and M4A audio.
 - **Live demo** at outboundos.space/demo: the dashboard on sample data, no
@@ -22,6 +65,12 @@ include breaking changes, and they are called out here.
   `npm run build:demo --prefix web`.
 
 ### Changed
+
+- **Breaking:** WhatsApp now connects only through Meta's official Cloud API.
+  The old provider transport, webhook, credential fields and dashboard controls
+  are removed. The upgrade retains conversations and account IDs, disables
+  retired-provider accounts and clears incompatible default template labels.
+  See `docs/meta-only-upgrade.md` before upgrading an existing installation.
 
 - Incoming media placeholders read `[Photo]`, `[Voice message]` or
   `[Document] name.pdf` instead of `[image]`.
@@ -61,7 +110,7 @@ include breaking changes, and they are called out here.
   Meta identifies them by a business-scoped user id and omits the phone
   number; those webhooks were skipped. They now match or create a lead, and
   replies are addressed to the user id.
-- IndiaMART's Lead Manager Push API format (`{CODE, STATUS, RESPONSE}`) is
+- external marketplaces's Lead Manager Push API format (`{CODE, STATUS, RESPONSE}`) is
   read correctly; the preset maps its field names.
 - Manual inbox replies store the WhatsApp message id, so delivery receipts
   attach to them.
@@ -70,7 +119,7 @@ include breaking changes, and they are called out here.
 
 - Meta's per-message pricing is recorded from status webhooks, and
   Settings → WhatsApp shows this month's billable messages by category.
-  Meta charges for service replies from 1 October 2026.
+  Counts follow the billable flag and category in Meta delivery receipts.
 - Opt-outs in Hindi and Hinglish, Spanish, Portuguese, French, German,
   Italian, Indonesian/Malay, Turkish, Russian and Arabic, plus one-word
   replies such as `PARAR` or `Стоп`.
@@ -113,8 +162,7 @@ The first release as a self-hostable, open-source product.
   (`AUTH_PROVIDER=clerk`).
 - First-run setup wizard (business details, channels, lead sources, team) and a
   "finish setting up" checklist.
-- WhatsApp through Meta's Cloud API directly, with AiSensy as an option, chosen
-  per number. Meta webhooks at `/webhook/meta`, signature-checked.
+- WhatsApp through official API connections, configured per number. Meta webhooks at `/webhook/meta`, signature-checked.
 - Integrations catalogue in the dashboard.
 - Website forms: spam trap (`_gotcha`), return page (`_next`), email-consent
   checkbox, and a thank-you page for plain HTML posts.
@@ -135,7 +183,7 @@ The first release as a self-hostable, open-source product.
 
 ### Removed
 
-- Live IndiaMART polling and the bundled headless browser. IndiaMART and other
+- Live external marketplaces polling and the bundled headless browser. external marketplaces and other
   marketplaces connect through their CRM webhooks instead.
 - Hosted-service scaffolding (billing, tenancy, access requests).
 
@@ -143,7 +191,7 @@ The first release as a self-hostable, open-source product.
 
 - Viewers can no longer change or export data; every write route checks the
   role it needs.
-- Provider webhooks (Meta, AiSensy, iMessage, Brevo) reject deliveries until
+- Provider webhooks (Meta, iMessage, Brevo) reject deliveries until
   their secret is set.
 - No fixed default admin password or signing key; login rate limits count
   failed attempts only and cannot be reset with a forged `X-Forwarded-For`.

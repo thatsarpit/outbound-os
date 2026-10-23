@@ -1,6 +1,13 @@
 import Link from 'next/link'
 import { ArrowRight } from 'lucide-react'
-import { Breadcrumbs, Code, Faq, InstallBand, Related, Screenshot } from '@/components/content'
+import {
+  Breadcrumbs,
+  Code,
+  Faq,
+  InstallBand,
+  Related,
+  Screenshot,
+} from '@/components/content'
 import { buildMetadata } from '@/lib/metadata'
 import { LogoPair } from '@/components/logo-pair'
 import { installCommands, site } from '@/lib/site-content'
@@ -43,15 +50,17 @@ export default function SelfHostedCrmPage() {
     <>
       <section className="section section--lead hero-ground">
         <div className="page landing-hero">
-          <Breadcrumbs trail={[{ name: 'Self-hosted CRM', path: '/self-hosted-crm' }]} />
+          <Breadcrumbs
+            trail={[{ name: 'Self-hosted CRM', path: '/self-hosted-crm' }]}
+          />
           <LogoPair brands={['outboundos', 'docker']} />
           <p className="eyebrow">Self-hosted CRM</p>
           <h1>A CRM that runs on your server, not someone else&rsquo;s.</h1>
           <p className="lede">
             Outbound OS is an open-source CRM and outreach platform you start
             with one Docker command. Leads, conversations and channel
-            credentials live in your own database, on a machine you control,
-            for as long as you want — with no per-seat bill.
+            credentials live in your own database, on a machine you control, for
+            as long as you want — with no per-seat bill.
           </p>
           <div className="hero__actions">
             <Link href="/docs/install" className="btn btn--primary btn--lg">
@@ -71,13 +80,15 @@ export default function SelfHostedCrmPage() {
             <p className="eyebrow">Install</p>
             <h2>Four commands to a running CRM.</h2>
             <p>
-              The first boot creates the database, generates the secret keys
-              and makes your admin account. Then the setup wizard asks for your
+              The first boot creates the database, generates the secret keys and
+              makes your admin account. Then the setup wizard asks for your
               business details and first channel.
             </p>
           </div>
           <div>
-            <Code label="Terminal">{installCommands.map((line) => `$ ${line}`).join('\n')}</Code>
+            <Code label="Terminal">
+              {installCommands.map((line) => `$ ${line}`).join('\n')}
+            </Code>
             <p className="landing-note">
               Open http://localhost:3001 and sign in with the ADMIN_EMAIL you
               set in .env. If you left ADMIN_PASSWORD empty, a generated one is
@@ -98,8 +109,7 @@ export default function SelfHostedCrmPage() {
               <h3>One app container</h3>
               <p>
                 A Node.js API that serves the dashboard, receives webhooks and
-                runs the schedulers for first contact, follow-ups and
-                campaigns.
+                runs the schedulers for first contact, follow-ups and campaigns.
               </p>
             </div>
             <div>
@@ -164,36 +174,47 @@ export default function SelfHostedCrmPage() {
               <tbody>
                 <tr>
                   <th scope="row">Where the data lives</th>
-                  <td><strong>Your server</strong>, your database file</td>
+                  <td>
+                    <strong>Your server</strong>, your database file
+                  </td>
                   <td>The vendor&rsquo;s infrastructure</td>
                 </tr>
                 <tr>
                   <th scope="row">Pricing</th>
-                  <td><strong>Free software</strong>; you pay for the server</td>
+                  <td>
+                    <strong>Free software</strong>; you pay for the server
+                  </td>
                   <td>Usually per seat or per contact, per month</td>
                 </tr>
                 <tr>
                   <th scope="row">Changing the product</th>
-                  <td><strong>Edit the code</strong>, or add a webhook source in settings</td>
+                  <td>
+                    <strong>Edit the code</strong>, or add a webhook source in
+                    settings
+                  </td>
                   <td>Limited to what the vendor exposes</td>
                 </tr>
                 <tr>
                   <th scope="row">Updates and uptime</th>
                   <td>Your job: two commands to update</td>
-                  <td><strong>The vendor&rsquo;s job</strong></td>
+                  <td>
+                    <strong>The vendor&rsquo;s job</strong>
+                  </td>
                 </tr>
                 <tr>
                   <th scope="row">Support</th>
                   <td>GitHub issues and Discussions, or managed hosting</td>
-                  <td><strong>Vendor support</strong>, by plan</td>
+                  <td>
+                    <strong>Vendor support</strong>, by plan
+                  </td>
                 </tr>
               </tbody>
             </table>
           </div>
           <p className="landing-note">
             Want the ownership without running the server?{' '}
-            <Link href="/managed-hosting">Managed hosting</Link> sets up and runs an
-            instance for you.
+            <Link href="/managed-hosting">Managed hosting</Link> sets up and
+            runs an instance for you.
           </p>
         </div>
       </section>
@@ -208,15 +229,21 @@ export default function SelfHostedCrmPage() {
               included script checks the database&rsquo;s integrity and keeps
               seven days.
             </p>
-            <Code label="Back up">{'docker compose exec app bash scripts/backup.sh\ndocker compose cp app:/app/data/backups ./backups'}</Code>
+            <Code label="Back up">
+              {
+                'docker compose exec app bash scripts/backup.sh\ndocker compose cp app:/app/data/backups ./backups'
+              }
+            </Code>
           </div>
           <div>
             <h3>Updates</h3>
             <p>
-              Pull the new image and restart. Migrations run on start, and
-              your data volume is untouched.
+              Pull the new image and restart. Migrations run on start, and your
+              data volume is untouched.
             </p>
-            <Code label="Update">{'git pull\ndocker compose pull && docker compose up -d'}</Code>
+            <Code label="Update">
+              {'git pull\ndocker compose pull && docker compose up -d'}
+            </Code>
           </div>
         </div>
       </section>
@@ -225,9 +252,21 @@ export default function SelfHostedCrmPage() {
 
       <Related
         links={[
-          { href: '/docs/install', title: 'Install guide', body: 'Docker, HTTPS, first admin and the setup wizard.' },
-          { href: '/docs/backups-and-upgrades', title: 'Backups and upgrades', body: 'What to back up, how to restore, how to update.' },
-          { href: '/open-source', title: 'The open-source project', body: `${site.license}, the stack, and how to contribute.` },
+          {
+            href: '/docs/install',
+            title: 'Install guide',
+            body: 'Docker, HTTPS, first admin and the setup wizard.',
+          },
+          {
+            href: '/docs/backups-and-upgrades',
+            title: 'Backups and upgrades',
+            body: 'What to back up, how to restore, how to update.',
+          },
+          {
+            href: '/open-source',
+            title: 'The open-source project',
+            body: `${site.license}, the stack, and how to contribute.`,
+          },
         ]}
       />
 

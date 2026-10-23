@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { footerNav, legalNav, site } from '@/lib/site-content'
 import { Wordmark } from './wordmark'
+import { MotionToggle } from './motion-toggle'
 
 /**
  * Site footer — the sitemap and the trust signals.
@@ -14,7 +15,11 @@ export function SiteFooter() {
       <div className="page footer__inner">
         <div className="footer__top">
           <div>
-            <Link href="/" className="header__brand" aria-label={`${site.name} home`}>
+            <Link
+              href="/"
+              className="header__brand"
+              aria-label={`${site.name} home`}
+            >
               <Wordmark />
             </Link>
             <p className="footer__brand-line">{site.description}</p>
@@ -51,6 +56,7 @@ export function SiteFooter() {
               </Link>
             ))}
             <a href={`mailto:${site.email}`}>{site.email}</a>
+            <MotionToggle />
           </div>
         </div>
       </div>

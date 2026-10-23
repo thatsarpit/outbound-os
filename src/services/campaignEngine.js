@@ -334,11 +334,10 @@ class CampaignEngine {
           },
         });
 
-        // Route through Cloud API or web_js based on account type
+        // Send through Meta's official Cloud API
         let sendResult;
         if (campaign.waCampaignName) {
-          // An approved template (a template name on Meta, a campaign name on
-          // AiSensy). Free text is only deliverable inside
+          // Use the exact approved Meta template name. Free text is only deliverable inside
           // the 24h customer-service window, so for a cold or re-engagement
           // audience this is the only transport WhatsApp accepts — a plain text
           // send to those leads is rejected for every recipient.

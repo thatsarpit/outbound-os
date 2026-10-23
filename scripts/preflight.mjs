@@ -76,8 +76,11 @@ if (!fs.existsSync(envPath)) {
     warnings.push('Every CORS_ORIGIN entry should use HTTPS in production');
   }
 
-  if ((env.AISENSY_API_KEY || env.AISENSY_PROJECT_ID) && !env.AISENSY_WEBHOOK_SECRET) {
-    warnings.push('AISENSY_WEBHOOK_SECRET is missing; the inbound webhook will be unauthenticated');
+  if (Boolean(env.META_ACCESS_TOKEN) !== Boolean(env.META_PHONE_NUMBER_ID)) {
+    problems.push('META_ACCESS_TOKEN and META_PHONE_NUMBER_ID must be configured together');
+  }
+  if (env.META_ACCESS_TOKEN && (!env.META_APP_SECRET || !env.META_WEBHOOK_VERIFY_TOKEN)) {
+    warnings.push('Set META_APP_SECRET and META_WEBHOOK_VERIFY_TOKEN before receiving WhatsApp webhooks');
   }
 
   const brand = env.DASHBOARD_BRAND_NAME || '';

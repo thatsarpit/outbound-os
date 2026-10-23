@@ -4,7 +4,7 @@ Purpose: the customer service window has almost always closed by the time an
 order actually ships, so a free-form message cannot be delivered. Only an
 approved template reopens the thread.
 
-Submit in **Meta WhatsApp Manager → Message templates → Create template** (or AiSensy → Templates if you use AiSensy).
+Submit in **Meta WhatsApp Manager → Message templates → Create template**.
 
 | Field | Value |
 |---|---|
@@ -71,8 +71,4 @@ FedEx without a `yourdomain.com/track/{{1}}` redirect existing first.
 
 ### After approval
 
-Set `WA_CAMPAIGN_ORDER_SHIPPED` in `.env` to what your provider expects:
-
-- **Meta Cloud API** — the template's name, e.g. `order_shipped`.
-- **AiSensy** — create a **Campaign** wrapping the template and use the
-  campaign name. A template name there returns `Campaign does not exist`.
+Set `WA_CAMPAIGN_ORDER_SHIPPED` in `.env` to the exact approved Meta template name (default `order_shipped`).

@@ -30,6 +30,7 @@ type Integration = {
   /** Reads connected-ness from the onboarding status; omitted = no status shown. */
   connected?: (status: OnboardingStatus) => boolean
   channel?: InboxChannel
+  action?: string
 }
 
 type Group = { title: string; blurb: string; items: Integration[] }
@@ -46,7 +47,7 @@ const GROUPS: Group[] = [
     items: [
       {
         name: 'WhatsApp',
-        detail: "Meta's official Cloud API, or AiSensy. Approved templates for first contact.",
+        detail: "Meta's official Cloud API. Approved templates for first contact.",
         icon: MessageSquare,
         to: '/integrations/whatsapp',
         channel: 'whatsapp',
@@ -103,7 +104,7 @@ const GROUPS: Group[] = [
       },
       {
         name: 'Marketplaces',
-        detail: 'IndiaMART, TradeIndia, JustDial and Engyne Cloud presets.',
+        detail: 'external marketplaces, TradeIndia, JustDial and Engyne Cloud presets.',
         icon: Store,
         to: '/integrations/webhooks',
       },
@@ -133,12 +134,19 @@ const GROUPS: Group[] = [
         to: '/integrations/webhooks',
         connected: (s) => s.integrations.outgoingWebhooks,
       },
+    ],
+  },
+  {
+    title: 'Work with AI',
+    blurb: 'Bring this workspace into the AI agent you already use.',
+    items: [
       {
-        name: 'AI clients (MCP)',
-        detail: 'Let Claude or any MCP client search leads, import lists and run campaigns.',
+        name: 'AI agents & MCP',
+        detail:
+          'Connect ChatGPT, Codex, Claude or another agent. Copy the server URL and follow guided setup.',
         icon: Bot,
-        to: 'https://github.com/thatsarpit/outbound-os/tree/main/mcp-outboundos',
-        connected: (s) => s.integrations.mcp,
+        to: '/integrations/mcp',
+        action: 'Connect an AI agent',
       },
     ],
   },
@@ -262,7 +270,7 @@ function IntegrationCard({
         </span>
       )}
       <span className="mt-4 inline-flex items-center gap-1 text-xs font-medium text-text-primary">
-        {external ? 'View documentation' : 'Manage connection'}{' '}
+        {item.action || (external ? 'View documentation' : 'Manage connection')}{' '}
         <ArrowUpRight aria-hidden="true" className="h-3 w-3" />
       </span>
     </>

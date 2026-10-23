@@ -1,3 +1,7 @@
+import websiteEnquiries from './routes/websiteEnquiries.js';
+import connectorIntake from './routes/connectorIntake.js';
+import connectorAdmin from './routes/connectorAdmin.js';
+import mcpSetup from './routes/mcpSetup.js';
 import { withDefaultCountryCode } from './utils/phoneDefaults.js';
 import express from 'express';
 import cors from 'cors';
@@ -460,6 +464,10 @@ app.use('/api/auth/change-password', authLimiter);
 app.use('/api/import/csv', bulkLimiter);
 app.use('/api/config/env', bulkLimiter);
 
+// Public website intake has its own opt-in origin and rate-limit boundary.
+app.use('/api/public/request-access', websiteEnquiries);
+app.use('/api/webhooks/connector', connectorIntake);
+
 // Browsers only need CORS when the dashboard is served from a different origin
 // than this API (for example a CDN in front of a separate API host). The
 // Docker image serves both from one origin, so self-hosted installs usually
@@ -785,6 +793,8 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
 app.use(providerWebhookRoutes);
 
 app.use('/api', requireRole('viewer'));
+app.use('/api', connectorAdmin);
+app.use('/api', mcpSetup);
 app.use('/api/whatsapp', whatsappTemplateRoutes);
 app.use('/api', dashboardPreferenceRoutes);
 app.use('/api', leadFollowupRoutes);
@@ -1508,7 +1518,7 @@ app.get('/api/leads', async (req, res) => {
       status, search, page = 1, limit = 25,
       sortBy = 'createdAt', sortOrder = 'desc',
       minScore, maxScore, source, tags, engagement,
-      dateFrom, dateTo, assignedToId, poolId,
+      dateFrom, dateTo, assignedToId, poolId, originSupplierId,
     } = req.query;
 
     // Build the where clause with AND composition so search and statusFilter can coexist
@@ -1537,6 +1547,11 @@ app.get('/api/leads', async (req, res) => {
       }
     }
     if (source) andClauses.push({ source });
+    if (originSupplierId) {
+      const supplierId = Number(originSupplierId);
+      if (!Number.isSafeInteger(supplierId) || supplierId < 1) return res.status(400).json({ error: 'Invalid supplier.' });
+      andClauses.push({ originSupplierId: supplierId });
+    }
     if (engagement) andClauses.push({ engagementLevel: engagement });
     if (assignedToId === 'unassigned') andClauses.push({ assignedToId: null });
     else if (assignedToId) andClauses.push({ assignedToId: parseInt(assignedToId) });
@@ -1579,6 +1594,7 @@ app.get('/api/leads', async (req, res) => {
         skip,
         take: parseInt(limit),
         include: {
+          originSupplier: { select: { id: true, name: true } },
           messages: {
             orderBy: { createdAt: 'desc' },
             take: 1,
@@ -2532,8 +2548,6 @@ app.get('/api/whatsapp/status', async (req, res) => {
           status = 'disconnected';
         }
         const {
-          aisensyApiKey,
-          aisensyCampaignApiKey,
           cloudApiToken,
           ...safeAccount
         } = account;
@@ -2847,7 +2861,7 @@ app.get('/api/onboarding/status', requireRole('manager'), async (_req, res) => {
     const [whatsappAccounts, emailAccounts, telegramAccounts, imessageAccounts, leadSources, leads, users, dismissed, sheetsRow, subscriptions] = await Promise.all([
       prisma.whatsAppAccount.findMany({
         where: { enabled: true },
-        select: { provider: true, cloudApiPhoneId: true, cloudApiToken: true, aisensyProjectId: true, aisensyApiKey: true, aisensyCampaignApiKey: true },
+        select: { provider: true, cloudApiPhoneId: true, cloudApiToken: true },
       }),
       prisma.emailAccount.count({ where: { enabled: true } }),
       prisma.telegramAccount.count({ where: { enabled: true, status: 'connected' } }),
@@ -2955,9 +2969,6 @@ app.get('/api/inbox/channel-health', requireRole('agent'), async (_req, res) => 
           provider: true,
           cloudApiPhoneId: true,
           cloudApiToken: true,
-          aisensyProjectId: true,
-          aisensyApiKey: true,
-          aisensyCampaignApiKey: true,
         },
       }),
       prisma.iMessageAccount.findMany({
@@ -2985,15 +2996,12 @@ app.get('/api/inbox/channel-health', requireRole('agent'), async (_req, res) => 
 
     res.json({
       whatsapp: {
-        status: campaignReady > 0 ? projectReady > 0 ? 'ready' : 'limited'
-              : 'offline',
+        status: campaignReady > 0 ? 'ready' : 'offline',
         total: whatsappAccounts.length,
         campaignReady,
         projectReady,
         detail: campaignReady > 0
-          ? projectReady > 0
-            ? 'Outreach and session replies ready'
-            : 'Approved outreach ready · session replies need AiSensy Project API credentials'
+          ? 'Meta credentials configured for templates and session replies'
           : 'Connect a WhatsApp number in Settings → WhatsApp',
       },
       imessage: {
@@ -4046,7 +4054,7 @@ export function startApiServer() {
 // GET /api/analytics/whatsapp-pricing — this month's WhatsApp messages as
 // Meta will bill them, grouped by pricing category, from the pricing block
 // on its status webhooks. Meta sends categories, not amounts; rates are on
-// its rate card. From 1 October 2026 service replies are charged too.
+// its current rate card. Service-window replies may be non-billable.
 app.get('/api/analytics/whatsapp-pricing', async (_req, res) => {
   try {
     const timeZone = workspaceTimezone();
@@ -4079,7 +4087,7 @@ app.get('/api/analytics/whatsapp-pricing', async (_req, res) => {
       categories,
       billable: categories.reduce((sum, c) => sum + c.billable, 0),
       free: categories.reduce((sum, c) => sum + c.free, 0),
-      // Sent through a provider that reports no pricing (AiSensy campaigns),
+      // Historical sends without retained pricing metadata,
       // or not yet acknowledged by Meta.
       unpriced,
     });
@@ -5004,7 +5012,6 @@ app.post('/api/leads/:id/email/send-template', requireRole('agent'), async (req,
 // PATCH /api/whatsapp/accounts/:id/cloud-credentials
 // Chooses the account's provider and stores its credentials.
 //   meta:    { provider: 'meta', metaPhoneNumberId, metaAccessToken, metaWabaId?, templateLanguage? }
-//   aisensy: { provider: 'aisensy', aisensyProjectId, aisensyApiKey, aisensyCampaignApiKey, defaultCampaignName }
 // Omitted fields are left as they are, so a secret never has to be re-entered
 // to change something else. Secrets are never returned to the browser.
 app.patch('/api/whatsapp/accounts/:id/cloud-credentials', requireRole('admin'), async (req, res) => {
@@ -5014,7 +5021,7 @@ app.patch('/api/whatsapp/accounts/:id/cloud-credentials', requireRole('admin'), 
     const {
       provider,
       metaPhoneNumberId, metaAccessToken, metaWabaId, templateLanguage,
-      aisensyApiKey, aisensyProjectId, aisensyCampaignApiKey, defaultCampaignName,
+      defaultCampaignName,
     } = req.body || {};
 
     if (provider !== undefined && !Object.values(WHATSAPP_PROVIDERS).includes(provider)) {
@@ -5027,10 +5034,12 @@ app.patch('/api/whatsapp/accounts/:id/cloud-credentials', requireRole('admin'), 
     if (metaAccessToken) data.cloudApiToken = whatsappCloudApi.encryptToken(String(metaAccessToken).trim());
     if (metaWabaId !== undefined) data.metaWabaId = String(metaWabaId).trim();
     if (templateLanguage !== undefined) data.templateLanguage = String(templateLanguage).trim() || 'en';
-    if (aisensyApiKey) data.aisensyApiKey = whatsappCloudApi.encryptToken(aisensyApiKey);
-    if (aisensyProjectId) data.aisensyProjectId = String(aisensyProjectId).trim();
-    if (aisensyCampaignApiKey) data.aisensyCampaignApiKey = whatsappCloudApi.encryptToken(aisensyCampaignApiKey);
-    if (defaultCampaignName !== undefined) data.defaultCampaignName = String(defaultCampaignName).trim();
+    if (defaultCampaignName !== undefined) {
+      data.defaultCampaignName = String(defaultCampaignName).trim();
+      if (data.defaultCampaignName && !/^[a-z0-9_]+$/.test(data.defaultCampaignName)) {
+        return res.status(400).json({ error: 'Use the exact approved Meta template name: lowercase letters, numbers and underscores.' });
+      }
+    }
 
     if (Object.keys(data).length === 1) {
       return res.status(400).json({ error: 'Nothing to update' });
@@ -5052,7 +5061,6 @@ app.patch('/api/whatsapp/accounts/:id/cloud-credentials', requireRole('admin'), 
       ok: true,
       id: account.id,
       ...publicCredentialSummary(account),
-      aisensyProjectId: account.aisensyProjectId,
       defaultCampaignName: account.defaultCampaignName,
       templateLanguage: account.templateLanguage,
       metaWabaId: account.metaWabaId,
@@ -5375,22 +5383,6 @@ app.get('/api/webhooks/sources/presets', requireRole('admin'), (req, res) => {
       notes: 'TradeIndia sends JSON POST. Configure webhook URL in TradeIndia Seller Dashboard.',
     },
     {
-      id: 'indiamart',
-      name: 'IndiaMART (Webhook)',
-      description: 'IndiaMART Lead Manager pushes each new enquiry to this URL',
-      // IndiaMART's Push API wraps the lead: {CODE, STATUS, RESPONSE: {...}}.
-      fieldMap: {
-        name: 'RESPONSE.SENDER_NAME',
-        mobile: 'RESPONSE.SENDER_MOBILE',
-        email: 'RESPONSE.SENDER_EMAIL',
-        company: 'RESPONSE.SENDER_COMPANY',
-        product: 'RESPONSE.QUERY_PRODUCT_NAME',
-        country: 'RESPONSE.SENDER_COUNTRY_ISO',
-      },
-      responseFormat: 'json',
-      notes: 'IndiaMART seller panel → Lead Manager → Import/Export Leads → Push API → Other. IndiaMART sends no auth header, so paste the webhook URL with ?apiKey=<key> on the end.',
-    },
-    {
       id: 'facebook',
       name: 'Facebook Lead Ads',
       description: 'Facebook Lead Ads via Zapier/Make webhook bridge',
@@ -5434,7 +5426,6 @@ app.post('/api/webhooks/sources/from-preset', requireRole('admin'), async (req, 
       ...Object.fromEntries(FORM_SOURCE_PRESETS.map((preset) => [preset.id, preset])),
       justdial:   { name: 'JustDial', fieldMap: { name:'sender_name', mobile:'sender_mobile', email:'sender_email', company:'company_name', product:'cat', country:'sender_country' } },
       tradeindia: { name: 'TradeIndia', fieldMap: { name:'Name', mobile:'Mobile', email:'Email', company:'CompanyName', product:'Subject', country:'Country', quantity:'Quantity' } },
-      indiamart:  { name: 'IndiaMART (Webhook)', fieldMap: { name:'RESPONSE.SENDER_NAME', mobile:'RESPONSE.SENDER_MOBILE', email:'RESPONSE.SENDER_EMAIL', company:'RESPONSE.SENDER_COMPANY', product:'RESPONSE.QUERY_PRODUCT_NAME', country:'RESPONSE.SENDER_COUNTRY_ISO' } },
       facebook:   { name: 'Facebook Lead Ads', fieldMap: { name:'full_name', mobile:'phone_number', email:'email', company:'company_name', product:'what_product', country:'country' } },
       website:    { name: 'Website Form', fieldMap: { name:'name', mobile:'phone', email:'email', company:'company', product:'message', country:'country' } },
       // Engyne Cloud posts an envelope, not a flat body: the buyer sits under
@@ -5502,10 +5493,17 @@ app.patch('/api/webhooks/sources/:id', requireRole('admin'), async (req, res) =>
 });
 
 app.delete('/api/webhooks/sources/:id', requireRole('admin'), async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1) return res.status(422).json({ error: 'Supply a valid source ID.' });
   try {
-    await prisma.webhookSource.delete({ where: { id: parseInt(req.params.id) } });
+    await prisma.webhookSource.delete({ where: { id } });
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    // The receipt foreign key also protects a concurrent import from deletion.
+    if (e.code === 'P2003') return res.status(409).json({ error: 'This source has import records. Disable it instead to preserve its history.' });
+    if (e.code === 'P2025') return res.status(404).json({ error: 'Source not found.' });
+    res.status(500).json({ error: 'Could not delete source.' });
+  }
 });
 
 // ======================== STUB ROUTES (NOT YET IMPLEMENTED) ========================
@@ -5595,7 +5593,7 @@ app.post('/api/email/accounts/test-config', requireRole('manager'), async (req, 
 // Enables client-side routing on the dashboard.
 // Placed after all /api/* routes so API paths are never caught here.
 app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api/')) return next();
+  if (req.path.startsWith('/api/') || req.path.startsWith('/webhook/')) return next();
   res.sendFile(path.join(WEB_DIST, 'index.html'));
 });
 

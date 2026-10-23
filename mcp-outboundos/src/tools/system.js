@@ -59,7 +59,7 @@ export function registerSystemTools(server) {
   // ── whatsapp_templates ──
   server.tool(
     'whatsapp_templates',
-    'List approved Meta WhatsApp templates for a sending account, including language, category and body variables. Use before creating a WhatsApp campaign. AiSensy campaign names must be obtained from its dashboard.',
+    'List approved Meta WhatsApp templates for a sending account, including language, category and body variables. Use before creating a WhatsApp campaign.',
     { account_id: z.number().int().positive().describe('WhatsApp account ID from whatsapp_accounts') },
     async ({ account_id }) => {
       try {

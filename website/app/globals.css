@@ -30,3 +30,6 @@
 @import './styles/pages/mcp.css';
 @import './styles/pages/roadmap.css';
 @import './styles/pages/landing.css';
+
+@import './styles/pages/refresh.css';
+@import './styles/components/product-stage.css';

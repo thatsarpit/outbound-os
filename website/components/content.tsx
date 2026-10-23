@@ -92,7 +92,7 @@ export function Code({ children, label }: { children: string; label?: string }) 
    your machine in four commands. */
 
 export function InstallBand({
-  heading = 'Running on your server in five minutes.',
+  heading = 'Ready to make it your own?',
   body = 'One Docker command starts the app, creates the database and your first admin. The setup wizard does the rest.',
 }: {
   heading?: string

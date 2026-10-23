@@ -3,7 +3,7 @@
 
    One entry per integration page. Every claim here describes what the code in
    github.com/thatsarpit/outbound-os actually does; when a step depends on a
-   third party (Meta, IndiaMART, Zapier), it follows that party's own docs.
+   third party (Meta, marketplace, Zapier), it follows that party's own docs.
 ════════════════════════════════════════════════════════════════════════════ */
 
 export type IntegrationKind = 'Channel' | 'Lead source' | 'Data out'
@@ -36,16 +36,17 @@ export const integrations: Integration[] = [
     description:
       "Send WhatsApp templates and replies through Meta's official Cloud API, no middleman. Open-source, self-hosted CRM. Set up in about 15 minutes.",
     h1: 'The WhatsApp Cloud API, connected straight to your CRM.',
-    summary: "Meta's official API, no reseller in between. Templates, replies and read receipts.",
+    summary:
+      "Meta's official API, no reseller in between. Templates, replies and read receipts.",
     intro: [
-      "Outbound OS talks to Meta's WhatsApp Cloud API directly. You create a Meta developer app, add your business number, and paste two values into Settings: the phone number ID and a permanent access token. Messages go from your server to Meta and nowhere else.",
+      "Outbound OS talks to Meta's WhatsApp Cloud API directly. You create a Meta developer app, add your business number, and paste two values into Settings: the phone number ID and a permanent access token. Messages are submitted from your server to Meta for delivery.",
       'A new lead is contacted with an approved template the moment it arrives. When the lead writes back, the reply lands in the shared inbox and every scheduled follow-up for that lead stops. Inside the 24-hour customer-service window your team answers in free text; outside it, the system uses a template, because that is what WhatsApp requires.',
     ],
     capabilities: [
       'First contact with an approved template, filled with the lead’s first name and country',
       'Free-text replies from the inbox inside the 24-hour window',
       'Photos, PDFs, voice notes and videos both ways — kept on your server, shown in the inbox',
-      'Sent, delivered and read receipts on every message',
+      'Provider acceptance, delivery, read and failed states where reported by Meta',
       'Replies stop the lead’s follow-up sequence automatically',
       'A connection test that reads your number’s verified name and quality rating',
       'Several numbers, each with its own hourly and daily limits',
@@ -79,11 +80,11 @@ export const integrations: Integration[] = [
     faq: [
       {
         q: 'Is the WhatsApp Cloud API free?',
-        a: 'Meta hosts the Cloud API at no cost, and Outbound OS is free. Meta charges per message: templates by category and the recipient’s country, and — from 1 October 2026 — replies inside the 24-hour customer-service window as well. Check Meta’s current rate card before budgeting.',
+        a: 'Outbound OS has no software licence fee. Meta messaging charges depend on category, destination and applicable service-window rules. Check the current Meta rate card before budgeting.',
       },
       {
         q: 'Do I need a WhatsApp Business Solution Provider (BSP)?',
-        a: 'No. The Cloud API is Meta’s own, so you can connect your number directly. If you already use AiSensy, Outbound OS supports that too, chosen per number.',
+        a: 'No. The Cloud API is Meta’s own, so you can connect your number directly. No Business Solution Provider is required.',
       },
       {
         q: 'Why must the first message be a template?',
@@ -91,65 +92,10 @@ export const integrations: Integration[] = [
       },
       {
         q: 'Can I use more than one WhatsApp number?',
-        a: 'Yes. Each number is its own account in Outbound OS with its own provider, daily limit and first-contact template, and new leads are spread across the numbers that are ready.',
+        a: 'Yes. Each number is its own account in Outbound OS with its own Meta credentials, daily limit and first-contact template, and new leads are spread across the numbers that are ready.',
       },
     ],
-    related: ['aisensy', 'indiamart', 'facebook-lead-ads'],
-  },
-  {
-    slug: 'aisensy',
-    name: 'AiSensy',
-    kind: 'Channel',
-    title: 'AiSensy CRM integration — open-source and self-hosted',
-    description:
-      'Already on AiSensy? Connect it to Outbound OS, an open-source CRM: send AiSensy campaigns to new leads instantly and handle replies in one inbox.',
-    h1: 'Keep AiSensy. Add a CRM that follows up for you.',
-    summary:
-      'Use an existing AiSensy number: API campaigns for templates, Project API for replies.',
-    intro: [
-      'If your WhatsApp number already runs through AiSensy, you do not have to move it. Choose AiSensy as the provider for that number and Outbound OS sends through AiSensy’s API Campaigns for templates and its Project API for free-text replies.',
-      'Leads from your website, ads and marketplaces get their first AiSensy campaign within seconds of arriving, and a reply stops every scheduled follow-up. Other numbers in the same install can use Meta’s Cloud API directly.',
-    ],
-    capabilities: [
-      'Approved-template outreach through AiSensy API Campaigns',
-      'Free-text replies through the AiSensy Project API (Pro plan)',
-      'Inbound replies and delivery receipts through a signed webhook',
-      'Per-number choice between AiSensy and Meta’s Cloud API',
-      'Campaign names used directly as first-contact and campaign templates',
-    ],
-    steps: [
-      {
-        title: 'Copy your API Campaign key',
-        body: 'In AiSensy: Manage → API Key. Paste it in Outbound OS under Settings → WhatsApp → AiSensy.',
-      },
-      {
-        title: 'Name a first-contact campaign',
-        body: 'Create an API campaign in AiSensy that wraps an approved template, and enter its name as the number’s first-contact campaign.',
-      },
-      {
-        title: 'Add Project API credentials for replies',
-        body: 'Optional, on AiSensy’s Pro plan: the Project ID and Project API password enable free-text replies from the inbox.',
-      },
-      {
-        title: 'Secure the webhook',
-        body: 'Set AISENSY_WEBHOOK_SECRET and configure https://your-host/webhook/whatsapp-cloud?token=<secret> in AiSensy. Deliveries without it are rejected.',
-      },
-    ],
-    faq: [
-      {
-        q: 'Do I have to leave AiSensy to use Outbound OS?',
-        a: 'No. AiSensy is a supported provider. You can keep every number on AiSensy, move some to Meta’s Cloud API, or mix the two.',
-      },
-      {
-        q: 'Why does AiSensy need a campaign name instead of a template name?',
-        a: 'AiSensy’s API addresses a campaign, which wraps the approved template. Sending a template name returns “Campaign does not exist”.',
-      },
-      {
-        q: 'What does Outbound OS add on top of AiSensy?',
-        a: 'Lead capture from every source, instant first contact, follow-up sequences that stop on reply, email, Telegram and iMessage alongside WhatsApp, a pipeline, and an MCP server for AI agents — on your own server.',
-      },
-    ],
-    related: ['whatsapp-cloud-api', 'indiamart', 'email'],
+    related: ['email', 'webhooks', 'facebook-lead-ads'],
   },
   {
     slug: 'email',
@@ -159,7 +105,8 @@ export const integrations: Integration[] = [
     description:
       'Send outreach and follow-ups from your own mailboxes over SMTP, sync replies over IMAP, and stop sequences on reply. Open-source and self-hosted.',
     h1: 'Email that sends from your mailbox and stops when they answer.',
-    summary: 'Any mailbox over SMTP, replies synced over IMAP, sequences that stop on reply.',
+    summary:
+      'Any mailbox over SMTP, replies synced over IMAP, sequences that stop on reply.',
     intro: [
       'Connect Google Workspace, Microsoft 365, Zoho or any mailbox that speaks SMTP and IMAP. Outbound OS sends outreach and follow-ups from it, and syncs replies back so the thread sits on the lead next to WhatsApp.',
       'A reply removes the lead from its sequence. Daily limits per mailbox and rotation across several senders protect your domain’s reputation, and every message carries a List-Unsubscribe header.',
@@ -247,7 +194,8 @@ export const integrations: Integration[] = [
     description:
       'Connect your own Telegram account to Outbound OS and message leads by username or phone number, with replies in the shared inbox. Open-source.',
     h1: 'Telegram conversations in the same inbox as WhatsApp and email.',
-    summary: 'Your own Telegram account, for one-to-one conversations with leads.',
+    summary:
+      'Your own Telegram account, for one-to-one conversations with leads.',
     intro: [
       'Some buyers live on Telegram. Connect your own Telegram account and message a lead by @username or phone number; replies land in the same inbox, on the same lead, as their WhatsApp and email threads.',
       'Telegram is for deliberate one-to-one conversation. It is not used for bulk outreach, which Telegram does not allow for personal accounts.',
@@ -280,7 +228,7 @@ export const integrations: Integration[] = [
     slug: 'imessage',
     name: 'iMessage',
     kind: 'Channel',
-    title: 'iMessage CRM — send iMessages from your CRM (BlueBubbles)',
+    title: 'iMessage CRM integration with BlueBubbles',
     description:
       'Reach iPhone buyers on iMessage from Outbound OS through a Mac running BlueBubbles. Replies thread on the lead. Open-source and self-hosted.',
     h1: 'iMessage for the buyers who never open WhatsApp.',
@@ -316,72 +264,15 @@ export const integrations: Integration[] = [
     related: ['telegram', 'whatsapp-cloud-api', 'email'],
   },
   {
-    slug: 'indiamart',
-    name: 'IndiaMART',
-    kind: 'Lead source',
-    title: 'IndiaMART CRM integration — reply to every lead in seconds',
-    description:
-      "Connect IndiaMART's Lead Manager Push API to Outbound OS and contact every buyer enquiry on WhatsApp and email within seconds. Free, open-source.",
-    h1: 'Every IndiaMART enquiry answered in seconds, not hours.',
-    summary: "IndiaMART's Lead Manager Push API, straight into the queue.",
-    intro: [
-      'On IndiaMART the first seller to reply usually wins the conversation. Outbound OS receives each enquiry through IndiaMART’s Lead Manager Push API the moment the buyer sends it, creates the lead with name, phone, email, company, product and country, and sends your first WhatsApp template and email straight away.',
-      'Duplicate enquiries from the same buyer merge into one lead instead of creating a second one, and a reply on any channel stops the follow-ups.',
-    ],
-    capabilities: [
-      'Real-time leads from IndiaMART’s official Push API',
-      'Name, mobile, email, company, product and country mapped automatically',
-      'Instant first contact on WhatsApp, email and any other connected channel',
-      'Duplicate enquiries merged into the existing lead',
-      'Every lead keeps its source, so IndiaMART leads can be filtered and reported on separately',
-    ],
-    steps: [
-      {
-        title: 'Create an IndiaMART source',
-        body: 'Integrations → Webhooks → Quick add from presets → IndiaMART. Copy the address and key it gives you, and join them as <address>?apiKey=<key>, because IndiaMART does not send a login header.',
-      },
-      {
-        title: 'Turn on the Push API in IndiaMART',
-        body: 'In the seller panel: Lead Manager → Import/Export Leads → Push API → choose “Other” and paste the address.',
-      },
-      {
-        title: 'Check it arrived',
-        body: 'The next enquiry appears in Leads within seconds, and the first-touch messages show in the inbox.',
-      },
-    ],
-    code: {
-      label: 'What IndiaMART sends (abridged)',
-      body: '{\n  "CODE": 200,\n  "STATUS": "SUCCESS",\n  "RESPONSE": {\n    "UNIQUE_QUERY_ID": "621654886",\n    "SENDER_NAME": "Prabhat",\n    "SENDER_MOBILE": "+91-9999999999",\n    "SENDER_EMAIL": "buyer@example.com",\n    "SENDER_COMPANY": "ABC Pvt Ltd.",\n    "QUERY_PRODUCT_NAME": "Mineral Water Bottle",\n    "SENDER_COUNTRY_ISO": "IN"\n  }\n}',
-    },
-    faq: [
-      {
-        q: 'Does this use IndiaMART’s official API?',
-        a: 'Yes — the Lead Manager Push API, which IndiaMART documents for third-party CRMs. Outbound OS does not log in to your seller account or scrape pages.',
-      },
-      {
-        q: 'What happens if my server is down when a lead arrives?',
-        a: 'IndiaMART retries a push until your server accepts it, and deactivates the Push API only after 48 hours of continuous failure.',
-      },
-      {
-        q: 'Can I also connect TradeIndia or JustDial?',
-        a: 'Yes. Both have presets under Integrations → Webhooks; check the field map against what your account sends on the first delivery.',
-      },
-      {
-        q: 'Will international IndiaMART buyers be contacted correctly?',
-        a: 'Yes. Numbers with a country code are used as sent. Set a home country code only for numbers that arrive without one.',
-      },
-    ],
-    related: ['whatsapp-cloud-api', 'engyne-cloud', 'csv-import'],
-  },
-  {
     slug: 'facebook-lead-ads',
     name: 'Facebook Lead Ads',
     kind: 'Lead source',
-    title: 'Facebook Lead Ads to WhatsApp — contact ad leads instantly',
+    title: 'Facebook Lead Ads — connect your CRM',
     description:
       'Send Facebook and Instagram Lead Ads into Outbound OS through Zapier, Make or n8n and message every lead on WhatsApp within seconds.',
     h1: 'Message your Facebook ad leads while they still remember the ad.',
-    summary: 'Meta instant-form leads through Zapier, Make or n8n, contacted in seconds.',
+    summary:
+      'Meta instant-form leads through Zapier, Make or n8n, contacted in seconds.',
     intro: [
       'A lead from a Facebook or Instagram instant form is warmest in the first few minutes. Send each one to Outbound OS through Zapier, Make or n8n and it is on WhatsApp and email before the prospect has closed the app.',
       'The Facebook preset already understands the field names instant forms use (full_name, phone_number, email), so most forms need no mapping.',
@@ -418,7 +309,7 @@ export const integrations: Integration[] = [
     slug: 'zapier',
     name: 'Zapier, Make and n8n',
     kind: 'Lead source',
-    title: 'Zapier, Make & n8n to WhatsApp CRM — webhook integration',
+    title: 'CRM webhooks for Zapier, Make & n8n',
     description:
       'Send leads from any app into Outbound OS with one webhook step in Zapier, Make or n8n, and contact them on WhatsApp and email instantly.',
     h1: 'Any app that Zapier, Make or n8n connects to is a lead source.',
@@ -459,42 +350,6 @@ export const integrations: Integration[] = [
     related: ['facebook-lead-ads', 'website-forms', 'webhooks'],
   },
   {
-    slug: 'engyne-cloud',
-    name: 'Engyne Cloud',
-    kind: 'Lead source',
-    title: 'Engyne Cloud integration — captured leads, contacted instantly',
-    description:
-      'Connect Engyne Cloud to Outbound OS: every lead it captures arrives with phone and email and is contacted on WhatsApp and email within seconds.',
-    h1: 'Engyne Cloud captures the lead. Outbound OS makes the first move.',
-    summary: 'Engyne Cloud lead.captured events, with phone and email, contacted in seconds.',
-    intro: [
-      'Engyne Cloud captures marketplace leads for your seller accounts. Its admin webhook posts a lead.captured event for each one; Outbound OS reads the buyer from the event and starts first contact immediately.',
-      'A lead first delivered without a phone number is updated in place when Engyne resolves it, so nothing is duplicated.',
-    ],
-    capabilities: [
-      'Reads Engyne’s lead.captured envelope without mapping',
-      'Backfills the phone number on a re-delivery',
-      'Engyne’s Test button is honoured: nothing is created or sent',
-    ],
-    steps: [
-      {
-        title: 'Create an Engyne source',
-        body: 'Integrations → Webhooks → Quick add from presets → Engyne Cloud.',
-      },
-      {
-        title: 'Paste it into Engyne',
-        body: 'Engyne Cloud → Admin → Webhooks: add the address and key, then press Test.',
-      },
-    ],
-    faq: [
-      {
-        q: 'Does the Test button create a lead?',
-        a: 'No. A test delivery returns what would be created and sends nothing.',
-      },
-    ],
-    related: ['indiamart', 'whatsapp-cloud-api', 'zapier'],
-  },
-  {
     slug: 'google-sheets',
     name: 'Google Sheets',
     kind: 'Data out',
@@ -502,7 +357,8 @@ export const integrations: Integration[] = [
     description:
       'Send every new lead, reply and engaged lead from Outbound OS to a Google Sheet in real time with a small Apps Script. No OAuth, no add-on.',
     h1: 'A Google Sheet that fills itself as leads arrive.',
-    summary: 'A live row for every new lead and reply, through a small Apps Script.',
+    summary:
+      'A live row for every new lead and reply, through a small Apps Script.',
     intro: [
       'Some people will always live in a spreadsheet. Outbound OS posts each event — new lead, reply, engaged — to a Google Apps Script web app you deploy on your own sheet, which writes it as a row under your header names.',
     ],
@@ -540,24 +396,33 @@ export const integrations: Integration[] = [
   },
   {
     slug: 'webhooks',
-    name: 'Outgoing webhooks',
+    name: 'Lead intake & webhooks',
     kind: 'Data out',
-    title: 'CRM outgoing webhooks — signed lead and message events',
+    title: 'CRM webhooks — lead intake and outgoing events',
     description:
-      'Subscribe any URL to lead and message events from Outbound OS. Every request is signed with HMAC-SHA256 so your receiver can verify it.',
-    h1: 'Tell your other systems the moment something happens.',
-    summary: 'Signed POSTs to your URLs on lead and message events.',
+      'Connect forms and external systems to your CRM. Import leads with source keys, then send signed lead and message events to your other tools.',
+    h1: 'Leads come in. Your other systems stay in sync.',
+    summary:
+      'Source-key lead intake, reviewed imports and signed outgoing events.',
     intro: [
+      'Incoming lead sources receive JSON or form posts at /api/webhooks/inbound/<source>, authenticated with the source API key. Map your fields, test the connection and configure first contact before enabling live intake. Website forms and external systems use the same source settings.',
+      'Historical exports use the separate connector import endpoint. A configured supplier and source ID preserve attribution; records are deduplicated and conflicts held for review. Imports remain paused and do not queue outreach.',
       'Subscribe a URL to events such as lead.created, lead.replied, lead.engaged and lead.status_changed. Each request carries an X-Webhook-Signature header — an HMAC-SHA256 of the body with your secret — so the receiver can prove it came from your install.',
     ],
     capabilities: [
+      'Incoming JSON and HTML forms, with a separate key for each source',
+      'Historical connector imports with replay protection and attribution review',
       'Per-subscription event filters, or every event',
       'HMAC-SHA256 signatures with a secret you choose',
       'Works with Zapier, Make, n8n or your own endpoint',
     ],
     steps: [
       {
-        title: 'Add a subscription',
+        title: 'Connect an incoming source',
+        body: 'Integrations → Webhooks → Incoming: create a source, copy its URL and key, map fields and test before enabling outreach. The website-forms guide includes examples.',
+      },
+      {
+        title: 'Add an outgoing subscription',
         body: 'Integrations → Webhooks → Outgoing: URL, events and a secret.',
       },
       {
@@ -567,20 +432,30 @@ export const integrations: Integration[] = [
     ],
     code: {
       label: 'Verify a delivery (Node.js)',
-      body: "import crypto from 'node:crypto'\n\nconst expected = 'sha256=' + crypto\n  .createHmac('sha256', process.env.WEBHOOK_SECRET)\n  .update(rawBody)\n  .digest('hex')\nconst valid = crypto.timingSafeEqual(\n  Buffer.from(expected),\n  Buffer.from(req.headers['x-webhook-signature'] ?? ''),\n)",
+      body: "import crypto from 'node:crypto'\n\nconst expected = 'sha256=' + crypto\n  .createHmac('sha256', process.env.WEBHOOK_SECRET)\n  .update(rawBody)\n  .digest('hex')\nconst received = Buffer.from(req.headers['x-webhook-signature'] ?? '')\nconst signature = Buffer.from(expected)\nconst valid = received.length === signature.length\n  && crypto.timingSafeEqual(signature, received)",
     },
-    faq: [],
-    related: ['google-sheets', 'zapier', 'csv-import'],
+    faq: [
+      {
+        q: 'Are incoming and outgoing webhook credentials the same?',
+        a: 'No. Incoming lead sources use their own API key. Outgoing event subscriptions use an HMAC signing secret. Keep both private; never use one as the other.',
+      },
+      {
+        q: 'Will importing historical leads start a campaign?',
+        a: 'No. Connector imports create paused records or preserve existing contact states. Review attribution, consent and your audience before explicitly launching outreach.',
+      },
+    ],
+    related: ['website-forms', 'google-sheets', 'zapier', 'csv-import'],
   },
   {
     slug: 'csv-import',
     name: 'CSV import',
     kind: 'Lead source',
-    title: 'Import leads from CSV — deduplicated, never auto-messaged',
+    title: 'CSV lead import — deduplication and review',
     description:
       'Import leads into Outbound OS from a CSV or another CRM export. Common columns are detected, duplicates merge by phone or email, nothing is sent.',
     h1: 'Bring your existing list. Duplicates merge instead of doubling.',
-    summary: 'CSV upload with column detection and merging; export back to CSV any time.',
+    summary:
+      'CSV upload with column detection and merging; export back to CSV any time.',
     intro: [
       'Moving from a spreadsheet or another CRM? Upload the export: common column names — name, mobile, phone, email, company, product, country — are detected automatically, and rows that match an existing lead by phone or email merge into it.',
       'An import never messages anyone by itself. Reaching an imported list is a campaign you start on purpose, with approved templates for anyone outside the 24-hour window.',
@@ -617,7 +492,7 @@ export const integrations: Integration[] = [
         a: 'Yes. The MCP server has an import tool, so Claude or another MCP client can add a list you give it, with the same merging rules.',
       },
     ],
-    related: ['indiamart', 'google-sheets', 'email'],
+    related: ['webhooks', 'google-sheets', 'email'],
   },
 ]
 
@@ -636,7 +511,8 @@ export const directoryExtras = [
     href: '/mcp',
     name: 'AI agents (MCP)',
     kind: 'Data out' as IntegrationKind,
-    summary: 'Claude and other MCP clients search leads, import lists and run campaigns.',
+    summary:
+      'Claude and other MCP clients search leads, import lists and run campaigns.',
   },
 ]
 

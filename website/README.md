@@ -49,3 +49,16 @@ Public marketing pages use `G-GS1BKVLCM0` (property `557595873`) through
 `public/site-analytics.js`. Google loads only after visitor opt-in. Page views
 omit query strings/fragments and form details. Enhanced measurement is off.
 This integration is restricted to the public website and its production hosts.
+
+## Website service enquiries
+
+The static form posts to `NEXT_PUBLIC_API_URL` (default `https://api.outboundos.space`).
+The API owner must enable `WEBSITE_ENQUIRY_ENABLED=true` and allow the exact site
+origins in `WEBSITE_ENQUIRY_ORIGINS`. Submissions become paused CRM leads with no
+marketing consent and no queued sends. They do not change existing contacts.
+The intake is rate-limited and has a honeypot. Failed submissions offer an email
+draft to `hello@outboundos.space`; they never show a false success message.
+
+The checked-in Cloudflare CSP permits only the default API hostname. If you use
+another API origin, update `connect-src` and `form-action` in `public/_headers`.
+No public API key or account credential belongs in the static site.

@@ -66,7 +66,7 @@ function publicDataUri(src: string) {
   return `data:image/png;base64,${file.toString('base64')}`
 }
 
-const DEFAULT_LOGOS: BrandName[] = ['whatsapp', 'gmail', 'telegram', 'imessage', 'indiamart', 'claude']
+const DEFAULT_LOGOS: BrandName[] = ['whatsapp', 'gmail', 'telegram', 'imessage', 'webhooks', 'claude']
 
 export const socialImageSize = { width: 1200, height: 630 }
 

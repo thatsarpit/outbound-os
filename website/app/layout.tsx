@@ -1,4 +1,4 @@
-import Script from "next/script"
+import Script from 'next/script'
 import type { Metadata, Viewport } from 'next'
 import type { ReactNode } from 'react'
 import localFont from 'next/font/local'
@@ -10,15 +10,7 @@ import { buildMetadata } from '@/lib/metadata'
 import { site } from '@/lib/site-content'
 import { graph, organizationLd, softwareLd, sourceCodeLd, websiteLd } from '@/lib/structured-data'
 
-/**
- * One typeface.
- *
- * The site previously loaded Outfit for headings, Inter for body and
- * JetBrains Mono alongside. The product dashboard deliberately dropped its
- * display face — a second family used only for headings decorates rather than
- * organises, and is the most reliable tell of a generated design. Weight,
- * size and space carry the hierarchy instead.
- */
+/** Keep the local typeface consistent across every marketing page. */
 const inter = localFont({
   src: './fonts/inter-latin.woff2',
   display: 'swap',
@@ -26,7 +18,7 @@ const inter = localFont({
   variable: '--font-inter',
 })
 
-const HOME_TITLE = 'Outbound OS — open-source WhatsApp CRM you host yourself'
+const HOME_TITLE = 'Outbound OS — Open-source WhatsApp CRM & expert setup'
 
 export const metadata: Metadata = {
   ...buildMetadata(HOME_TITLE, site.description, '/', { absoluteTitle: true }),
@@ -42,7 +34,7 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  themeColor: '#fafafb',
+  themeColor: '#0b0b0e',
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -54,9 +46,13 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <JsonLd data={graph(organizationLd(), websiteLd(), softwareLd(), sourceCodeLd())} />
         <MarketingLayout>{children}</MarketingLayout>
         <RevealRoot />
-        <Script src="/site-analytics.js" data-ga-id="G-GS1BKVLCM0"
+        <Script
+          src="/site-analytics.js"
+          data-ga-id="G-GS1BKVLCM0"
           data-ga-hosts="outboundos.space,www.outboundos.space"
-          data-ga-name="Outbound OS" strategy="afterInteractive" />
+          data-ga-name="Outbound OS"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   )

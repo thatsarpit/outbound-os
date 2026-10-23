@@ -24,7 +24,7 @@ export function AgentExchange({ className }: { className?: string }) {
 
       <div className="agent__thread">
         <p className="agent__msg agent__msg--user">
-          Which deals went quiet this week?
+          Show contacted leads, oldest activity first.
         </p>
 
         {/* The tool call is the point. It shows the agent is reading live data
@@ -32,27 +32,27 @@ export function AgentExchange({ className }: { className?: string }) {
         <div className="agent__call">
           <span className="agent__call-label">Calling</span>
           <code className="mono">list_leads</code>
-          <span className="agent__call-args mono">status=contacted, engagement=none, sortBy=lastMessageAt</span>
+          <span className="agent__call-args mono">status=contacted, sortBy=lastMessageAt, sortOrder=asc, limit=4</span>
         </div>
 
         <div className="agent__msg agent__msg--agent">
-          <p>Four have gone quiet since Monday:</p>
+          <p>Here are the first four, ordered by last message:</p>
           <ul className="agent__list">
             <li>
               <span className="agent__lead">Meridian Distributors</span>
-              <span className="agent__meta tabular">quoted 6d ago &middot; &#8377;4.2L</span>
+              <span className="agent__meta tabular">last message 9 days ago</span>
             </li>
             <li>
               <span className="agent__lead">Adler Handel GmbH</span>
-              <span className="agent__meta tabular">quoted 7d ago &middot; &euro;18k</span>
+              <span className="agent__meta tabular">last message 8 days ago</span>
             </li>
             <li>
               <span className="agent__lead">Lagos Medical Supply</span>
-              <span className="agent__meta tabular">quoted 8d ago &middot; $9.4k</span>
+              <span className="agent__meta tabular">last message 7 days ago</span>
             </li>
             <li>
               <span className="agent__lead">Northwind Pharma</span>
-              <span className="agent__meta tabular">quoted 9d ago &middot; $22k</span>
+              <span className="agent__meta tabular">last message 6 days ago</span>
             </li>
           </ul>
           <p className="agent__followup">

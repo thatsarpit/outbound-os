@@ -21,7 +21,7 @@ export function registerAnalyticsTools(server) {
   // ── whatsapp_costs ──
   server.tool(
     'whatsapp_costs',
-    'This month\'s WhatsApp messages as Meta bills them: counts per pricing category (marketing, utility, authentication, service), billable vs free, from Meta\'s delivery updates. Meta reports categories, not amounts — multiply by Meta\'s rate card for the recipients\' countries. From 1 October 2026 service replies are billed too.',
+    'This month\'s WhatsApp messages as Meta bills them: counts per pricing category (marketing, utility, authentication, service), billable vs free, from Meta\'s delivery updates. Meta reports categories, not amounts — multiply by Meta\'s rate card for the recipients\' countries. Service replies inside the customer-service window can be free; use the reported billable flag.',
     {},
     async () => {
       try {

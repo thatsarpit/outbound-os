@@ -142,10 +142,15 @@ router.patch('/suppliers/:id', requireRole('manager'), async (req, res) => {
 router.delete('/suppliers/:id', requireRole('manager'), async (req, res) => {
   try {
     const id = toInt(req.params.id);
-    const used = await prisma.salesOrder.count({ where: { supplierId: id } });
+    const [orders, leads, sources] = await Promise.all([
+      prisma.salesOrder.count({ where: { OR: [{ supplierId: id }, { originSupplierId: id }] } }),
+      prisma.lead.count({ where: { originSupplierId: id } }),
+      prisma.webhookSource.count({ where: { importSupplierId: id } }),
+    ]);
+    const used = orders + leads + sources;
     if (used > 0) {
       const row = await prisma.supplier.update({ where: { id }, data: { enabled: false } });
-      return res.json({ disabled: true, reason: `${used} order(s) reference this supplier`, data: row });
+      return res.json({ disabled: true, reason: `${used} order(s), lead(s) or source(s) reference this supplier`, data: row });
     }
     await prisma.supplier.delete({ where: { id } });
     res.json({ success: true });

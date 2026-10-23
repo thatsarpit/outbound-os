@@ -12,8 +12,6 @@
  * the returned id is sent in a message. data/media is never served publicly,
  * so the "link" form of media messages is not an option.
  *
- * AiSensy numbers are not handled here: their Project API passes messages
- * through, not media downloads, so their media stays a text placeholder.
  */
 
 import fs from 'fs';

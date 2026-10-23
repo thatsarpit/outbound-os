@@ -14,7 +14,7 @@ import { MessageCircle, Mail, Store, Globe, ArrowRight } from 'lucide-react'
 const SOURCES = [
   { icon: MessageCircle, label: 'WhatsApp', note: 'Cloud API', token: '--whatsapp' },
   { icon: Mail, label: 'Email', note: 'Your mailboxes', token: '--email' },
-  { icon: Store, label: 'IndiaMART', note: 'Push API', token: '--indiamart' },
+  { icon: Store, label: 'marketplace', note: 'Push API', token: '--marketplace' },
   { icon: Globe, label: 'Web forms', note: 'Webhooks & CSV', token: '--text-muted' },
 ]
 

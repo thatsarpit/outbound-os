@@ -61,5 +61,52 @@ This source change does not create users, change an active Clerk instance,
 configure DNS, send invitations, migrate local assignments or prove owner login.
 Track operational completion independently from merged code.
 
+## Passkeys and sign-in appearance
+
+The login uses Clerk's prebuilt `SignIn` component inside the app's dark layout.
+Clerk controls enabled sign-in strategies, email-code fallback, recovery, session
+tasks and passkey authentication. Its footer branding and development notice are
+visible; only the sign-up action is hidden on this existing-member entry page.
+Clerk's current Hobby plan does not include removing branding or production
+passkeys. Do not enable a paid feature or change plans as part of a UI release.
+
+Account → Passkeys reads only the documented public Frontend API environment
+setting, without sending dashboard credentials or cookies. An unknown, failed or
+disabled capability cannot show Add passkey. Enrollment also requires WebAuthn in
+a secure context. A development instance on a public domain is deliberately
+blocked until the production cutover above is complete; localhost development
+can exercise the flow separately. A positive capability response is not proof
+that a plan, relying-party domain or physical-device ceremony is valid.
+
+After production domain and plan settings are reviewed and approved:
+
+1. Enable passkeys in the correct production instance while retaining email-code
+   sign-in. Confirm its domain/relying-party configuration matches the everyday
+   app origin. Do not create a passkey in an unrelated Account Portal or preview
+   domain and assume it will work on the app domain.
+2. Sign in on the intended iPhone Safari or installed Home Screen app with email.
+   Open Account → Passkeys → Add passkey. Complete the system prompt yourself;
+   choose Passwords/iCloud Keychain if offered. The app cannot choose or inspect
+   the user's password manager or biometric data.
+3. Confirm the passkey appears on the personal account. Cancel a second creation
+   attempt and verify that no success message or extra credential appears. Clerk
+   reverification, if required, remains in Clerk's supported modal flow.
+4. Sign out, use Clerk's passkey option on the same app origin, and verify the
+   signed-in user, intended organization and authenticated API access. Verify
+   email-code fallback and conversation-return navigation independently.
+5. Review or remove test credentials through Clerk's security settings. Confirm
+   a browser without passkey support and an unavailable settings request both
+   retain a working sign-in fallback. Verify CSP/proxy rules allow the configured
+   Clerk script and Frontend API origins before shipping a self-hosted frontend.
+
+Automated tests cover capability parsing, credential-free settings requests,
+development/domain and browser gates, and truthful failure states. They do not
+claim a completed iCloud Keychain enrollment, successful Face ID sign-in, paid
+plan configuration or a finished production authentication migration.
+
 References: [production requirements](https://clerk.com/docs/guides/development/deployment/production),
-[session claims](https://clerk.com/docs/guides/sessions/session-tokens).
+[session claims](https://clerk.com/docs/guides/sessions/session-tokens),
+[passkeys](https://clerk.com/docs/guides/development/custom-flows/authentication/passkeys),
+[Frontend API](https://clerk.com/docs/reference/frontend-api),
+[sign-in options](https://clerk.com/docs/guides/configure/auth-strategies/sign-up-sign-in-options),
+[Clerk pricing](https://clerk.com/pricing).

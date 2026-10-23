@@ -333,10 +333,9 @@ class WhatsAppManager {
   }
 
   /**
-   * Trigger an approved AiSensy API Campaign while preserving the same account
+   * Send an approved Meta template while preserving the same account
    * selection, throttling, and counters used by normal WhatsApp sends.
-   * This is the only valid first-contact transport when the Project API app
-   * password is unavailable.
+   * First contact outside a reply window requires an approved template.
    */
   async sendCampaignTemplate(phone, campaignName, templateParams = [], accountId = null, {
     poolId,
@@ -485,8 +484,6 @@ class WhatsAppManager {
     const accounts = await prisma.whatsAppAccount.findMany({ orderBy: { id: 'asc' } });
     return accounts.map(a => {
       const {
-        aisensyApiKey,
-        aisensyCampaignApiKey,
         cloudApiToken,
         ...safe
       } = a;

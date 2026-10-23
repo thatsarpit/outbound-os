@@ -28,7 +28,8 @@
   max-width: var(--measure);
 }
 
-.landing-cols { display: grid; gap: 32px; }
+.landing-cols { display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; }
+.landing-cols > * { min-width: 0; }
 @media (min-width: 900px) { .landing-cols { grid-template-columns: 1fr 1fr; gap: 48px; } }
 .landing-cols h3 { font-size: 1rem; margin-bottom: 10px; }
 

@@ -16,7 +16,7 @@ import { Logo, LogoTile, type BrandName } from '../brand-logo'
  */
 
 const SOURCES: { brand: BrandName; label: string; x: number; y: number }[] = [
-  { brand: 'indiamart', label: 'IndiaMART', x: 7, y: 22 },
+  { brand: 'webhooks', label: 'marketplace', x: 7, y: 22 },
   { brand: 'forms', label: 'Website form', x: 3, y: 42 },
   { brand: 'facebook', label: 'Lead Ads', x: 7, y: 62 },
   { brand: 'zapier', label: 'Zapier', x: 3, y: 81 },
@@ -35,14 +35,14 @@ export function HeroScene() {
   return (
     <figure
       className="scene"
-      aria-label="Sample: a lead from IndiaMART gets a WhatsApp message two seconds after enquiring; when they reply, the scheduled follow-ups are cancelled."
+      aria-label="Example workflow: a new enquiry receives an eligible WhatsApp template; when the customer replies, scheduled follow-ups stop."
     >
       <svg className="scene__beams" viewBox="0 0 640 640" aria-hidden="true">
         <defs>
           <linearGradient id="beam-grad" x1="0" x2="1">
-            <stop offset="0" stopColor="#22c55e" stopOpacity="0" />
-            <stop offset="0.5" stopColor="#4ade80" />
-            <stop offset="1" stopColor="#a7f3d0" />
+            <stop offset="0" stopColor="#d7d7e2" stopOpacity="0" />
+            <stop offset="0.5" stopColor="#a0a0ac" />
+            <stop offset="1" stopColor="#f7f7f9" />
           </linearGradient>
         </defs>
         {BEAMS.map((d, i) => (
@@ -95,8 +95,8 @@ export function HeroScene() {
             <span className="wa__date">Today</span>
 
             <p className="wa__sys hs hs--sys">
-              <LogoTile brand="indiamart" size={15} />
-              New enquiry via IndiaMART · 10:42:03
+              <LogoTile brand="webhooks" size={15} />
+              New enquiry via marketplace · 10:42:03
             </p>
 
             <div className="wa__msg wa__msg--out hs hs--out">
@@ -144,8 +144,8 @@ export function HeroScene() {
       </div>
 
       <div className="scene__card scene__card--speed hs hs--speed" aria-hidden="true">
-        <span className="scene__big">2s</span>
-        <small>enquiry → WhatsApp</small>
+        <span className="scene__big">Direct</span>
+        <small>Official Meta Cloud API</small>
       </div>
 
       <div className="scene__card scene__card--follow" aria-hidden="true">

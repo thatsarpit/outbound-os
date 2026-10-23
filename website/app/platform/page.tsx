@@ -4,7 +4,7 @@ import { buildMetadata } from '@/lib/metadata'
 import { ChannelFlow } from '@/components/visuals/channel-flow'
 
 export const metadata = buildMetadata(
-  'Platform — lead capture, shared inbox, follow-up, pipeline',
+  'CRM platform — inbox, follow-ups & pipeline',
   'How Outbound OS works end to end: lead capture from any source, instant first contact, a shared WhatsApp and email inbox, follow-ups that stop on reply, and a pipeline.',
   '/platform',
 )
@@ -77,7 +77,7 @@ export default function PlatformPage() {
           <ol className="stack platform-process">
             <li>
               <div className="platform-process__meta"><span className="eyebrow">Capture</span><span className="badge">System</span></div>
-              <div><h3>Bring in the enquiry where it already arrives.</h3><p>WhatsApp, email, IndiaMART, CSV and supported webhooks feed the working lead record. The original channel remains the customer&rsquo;s account and keeps its own provider rules.</p></div>
+              <div><h3>Bring in the enquiry where it already arrives.</h3><p>WhatsApp, email, marketplace, CSV and supported webhooks feed the working lead record. The original channel remains the customer&rsquo;s account and keeps its own provider rules.</p></div>
             </li>
             <li>
               <div className="platform-process__meta"><span className="eyebrow">Unify</span><span className="badge">Shared record</span></div>

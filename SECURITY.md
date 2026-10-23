@@ -51,7 +51,7 @@ Most real-world incidents with software like this are configuration, not code:
   so trigger first-touch messages to numbers of their choosing. Rotate a key
   that is abused, and use the `_gotcha` spam trap on public forms.
 - **Set the webhook secrets** for the channels you use: `META_APP_SECRET`,
-  `AISENSY_WEBHOOK_SECRET`, `IMESSAGE_WEBHOOK_SECRET`, `BREVO_WEBHOOK_SECRET`.
+  `IMESSAGE_WEBHOOK_SECRET`, `BREVO_WEBHOOK_SECRET`.
   Each provider webhook rejects every delivery until its secret is set.
 - **Set `TRUST_PROXY` correctly** if you run behind a CDN, so login rate
   limits see the real client address.
@@ -59,7 +59,7 @@ Most real-world incidents with software like this are configuration, not code:
 
 ## Out of scope
 
-- Vulnerabilities in third-party services (Meta, AiSensy, Brevo, Clerk) —
+- Vulnerabilities in third-party services (Meta, Brevo, Clerk) —
   report those to the vendor
 - Findings from automated scanners with no demonstrated impact
 - Missing hardening headers on a self-hosted deployment you control

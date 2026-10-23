@@ -12,15 +12,13 @@ type Node = { brand: BrandName; href: string; label?: string }
 const SOURCES: Node[] = [
   { brand: 'forms', href: '/form-backend' },
   { brand: 'facebook', href: '/integrations/facebook-lead-ads', label: 'Facebook Lead Ads' },
-  { brand: 'indiamart', href: '/integrations/indiamart' },
+  { brand: 'webhooks', href: '/integrations/webhooks' },
   { brand: 'zapier', href: '/integrations/zapier', label: 'Zapier · Make · n8n' },
-  { brand: 'engyne', href: '/integrations/engyne-cloud' },
   { brand: 'csv', href: '/integrations/csv-import', label: 'CSV import' },
 ]
 
 const CHANNELS: Node[] = [
   { brand: 'whatsapp', href: '/integrations/whatsapp-cloud-api', label: 'WhatsApp Cloud API' },
-  { brand: 'aisensy', href: '/integrations/aisensy' },
   { brand: 'email', href: '/integrations/email', label: 'Email (SMTP/IMAP)' },
   { brand: 'brevo', href: '/integrations/brevo' },
   { brand: 'telegram', href: '/integrations/telegram' },
@@ -62,7 +60,7 @@ export function IntegrationHub() {
           <strong>Outbound OS</strong>
           <ol className="hub__verbs">
             <li>Captures and de-duplicates</li>
-            <li>Replies in seconds</li>
+            <li>Routes eligible first contact</li>
             <li>Follows up on schedule</li>
             <li>Stops when they answer</li>
           </ol>

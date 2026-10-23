@@ -129,7 +129,7 @@ fun QueueScreen(
                     onClick = { onChannel(null) },
                     label = { Text("All") },
                 )
-                listOf(Channel.WhatsApp, Channel.Email, Channel.IndiaMart).forEach { channel ->
+                listOf(Channel.WhatsApp, Channel.Email).forEach { channel ->
                     FilterChip(
                         selected = state.channel == channel,
                         onClick = { onChannel(channel) },
