@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inboxViewerKey, inboxThreadState, inboxMessagePreview } from '../src/utils/inboxState.js';
+import { inboxViewerKey, inboxThreadState, inboxMessagePreview, localInboxAssigneeId } from '../src/utils/inboxState.js';
 
 test('reading and resolving a conversation do not use sales status as inbox state', () => {
   const incoming = { direction: 'inbound', channel: 'whatsapp', createdAt: '2026-10-20T10:00:00Z' };
@@ -42,4 +42,10 @@ test('the inbox migration preserves sales stages and enforces read cursor owners
     db.prepare('DELETE FROM Lead WHERE id=1').run();
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM InboxReadState').get().n, 0);
   } finally { db.close(); }
+});
+
+test('local assignments accept exact integer identities and never guess Clerk mappings', () => {
+  assert.equal(localInboxAssigneeId({ sub: 42 }), 42);
+  assert.equal(localInboxAssigneeId({ id: '42' }), 42);
+  for (const user of [{ id: 'user_fixture', orgId: 'org_fixture' }, { sub: '42garbage' }, { id: 'mcp-service' }, { id: '42', orgId: 'org_fixture' }, null]) assert.equal(localInboxAssigneeId(user), null);
 });

@@ -581,7 +581,7 @@ export interface InboxThreadListResponse {
   total: number
   page: number
   pages: number
-  unread?: number
+  unread: number
   needsReply: number
 }
 

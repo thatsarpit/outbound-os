@@ -18,7 +18,9 @@ Meta receipts are persisted before returning HTTP 200. Storage failures return 5
 
 ## Everyday phone workflow
 
-Needs reply, All, Waiting and Done describe inbox work independently of the sales pipeline. Reading a conversation changes the signed-in person's unread state; Done resolves inbox work without closing the lead. A new customer reply reopens the conversation. Notifications link directly to the mobile conversation.
+Needs reply, All, Waiting and Done describe inbox work independently of the sales pipeline. Personal unread totals cover the full inbox matching channel, search and assignment filters, before queue selection and pagination. The shared MCP identity has no personal unread state. Self-assignment and Assigned to me use local integer user identities; Clerk identities have no mapping to those records, so the UI hides those controls and the API returns an explicit assignment-unavailable response. No numeric ID is guessed from a Clerk account.
+
+Reading a conversation changes the signed-in person's unread state; Done resolves inbox work without closing the lead. A new customer reply reopens the conversation. Notifications link directly to the mobile conversation.
 
 The inbox uses live events, periodic query refresh and resume/reconnect refresh. There is no routine Refresh button in the mobile workspace. Connection errors remain visible with recovery controls. Installed mobile mode keeps the layout scale fixed; normal Safari pages retain browser zoom. Safe areas and the visual viewport protect the status bar, home indicator and keyboard.
 

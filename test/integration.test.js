@@ -2561,11 +2561,21 @@ test('personal read cursors and resolution stay independent of sales status and 
   const read = (i, messageId) => request('POST', `/api/inbox/threads/${lead.id}/read`, { headers: headers(i), body: { messageId } });
   try {
     assert.equal((await detail(0)).body.unread, true);
+    const list = i => request('GET', '/api/inbox/threads?search=Read%20Fixture&limit=1', { headers: headers(i) });
+    assert.equal((await list(0)).body.unread, 2, 'unread total includes later pages');
+    assert.equal((await list(1)).body.unread, 2);
+    const assigned = await request('POST', `/api/inbox/threads/${lead.id}/assign-self`, { headers: headers(0) });
+    assert.equal(assigned.status, 200);
+    assert.equal(assigned.body.assignedToId, users[0].id);
+    const own = await request('GET', '/api/inbox/threads?assignedToMe=true&search=Read%20Fixture', { headers: headers(0) });
+    assert.equal(own.status, 200); assert.deepEqual(own.body.threads.map(row => row.leadId), [lead.id]);
     assert.equal((await read(0, other.messages[0].id)).status, 400);
     assert.equal((await read(0, -1)).status, 400);
     assert.equal((await request('POST', `/api/inbox/threads/${lead.id}/read`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.122' }, body: { messageId: lead.messages[0].id } })).status, 403);
     assert.equal((await read(0, lead.messages[0].id)).status, 200);
     assert.equal((await detail(0)).body.unread, false);
+    assert.equal((await list(0)).body.unread, 1);
+    assert.equal((await list(1)).body.unread, 2, 'another viewer retains their own unread total');
     assert.equal((await detail(0)).body.replyNeeded, true);
     assert.equal((await detail(1)).body.unread, true);
     const resolved = await request('POST', `/api/inbox/threads/${lead.id}/resolve`, { headers: headers(0) });

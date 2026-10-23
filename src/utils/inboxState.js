@@ -25,3 +25,12 @@ export function inboxMessagePreview(message) {
   const text = String(message.content || '').replace(/\s+/g, ' ').trim();
   return message.direction === 'outbound' ? `You: ${text}` : text;
 }
+
+/** Local integer assignments cannot be inferred from an unrelated Clerk identity. */
+export function localInboxAssigneeId(user) {
+  if (user?.orgId && user.orgId !== 'local') return null;
+  const id = user?.id ?? user?.sub;
+  if (!/^[1-9]\d*$/.test(String(id ?? ''))) return null;
+  const numeric = Number(id);
+  return Number.isSafeInteger(numeric) ? numeric : null;
+}

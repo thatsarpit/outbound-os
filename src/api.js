@@ -29,7 +29,7 @@ import emailInboxRoutes from './routes/emailInbox.js';
 import { sendManualWhatsApp, whatsappReplyContext } from './services/manualWhatsApp.js';
 import webPushRoutes from './routes/webPush.js';
 import inboxReadStateRoutes from './routes/inboxReadState.js';
-import { inboxViewerKey, inboxThreadState, inboxMessagePreview } from './utils/inboxState.js';
+import { inboxViewerKey, inboxThreadState, inboxMessagePreview, localInboxAssigneeId } from './utils/inboxState.js';
 import config from './config.js';
 import logger from './utils/logger.js';
 import activityLog, { EVENT_TYPES } from './utils/activityLog.js';
@@ -3067,8 +3067,9 @@ app.get('/api/inbox/threads', async (req, res) => {
     }
     if (leadId) where.id = leadId;
     if (assignedToMe) {
-      const assigneeId = Number(req.user?.sub);
-      where.assignedToId = Number.isSafeInteger(assigneeId) && assigneeId > 0 ? assigneeId : -1;
+      const assigneeId = localInboxAssigneeId(req.user);
+      if (!assigneeId) return res.status(409).json({ error: 'Personal assignment requires a local user. Clerk assignment identities are not mapped yet.', code: 'assignment_unavailable' });
+      where.assignedToId = assigneeId;
     } else if (assigned === true) {
       where.assignedToId = { not: null };
     } else if (assigned === false) {
@@ -3102,6 +3103,9 @@ app.get('/api/inbox/threads', async (req, res) => {
     // Bound each scan below SQLite's parameter limit; keep scanning the whole
     // queue so older replies and totals are still correct before pagination.
     const candidates = [];
+    const viewerKey = inboxViewerKey(req.user);
+    const readByLead = new Map();
+    const inboundByLead = new Map();
     const scanSize = 400;
     let afterId = 0;
     while (true) {
@@ -3130,6 +3134,15 @@ app.get('/api/inbox/threads', async (req, res) => {
         ...batch.filter(lead => isActionableConversationMessage(lead.messages[0])).map(lead => [lead.id, lead.messages[0]]),
         ...actionableRows.map(lead => [lead.id, lead.messages[0] || null]),
       ]);
+      if (viewerKey && batch.length) {
+        const leadIds = batch.map(lead => lead.id);
+        const [readStates, inboundHeads] = await Promise.all([
+          prisma.inboxReadState.findMany({ where: { viewerKey, leadId: { in: leadIds } }, select: { leadId: true, lastReadMessageId: true } }),
+          prisma.message.groupBy({ by: ['leadId'], where: { leadId: { in: leadIds }, AND: [visibleMessageWhere, HUMAN_REPLY_WHERE] }, _max: { id: true } }),
+        ]);
+        for (const row of readStates) readByLead.set(row.leadId, row.lastReadMessageId);
+        for (const row of inboundHeads) inboundByLead.set(row.leadId, row._max.id);
+      }
       candidates.push(...batch.map(lead => ({ ...lead, lastActionableMessage: actionable.get(lead.id) || null })));
       if (batch.length < scanSize) break;
       afterId = batch[batch.length - 1].id;
@@ -3150,8 +3163,7 @@ app.get('/api/inbox/threads', async (req, res) => {
     }).sort((a, b) => new Date(b.latestAt) - new Date(a.latestAt) || b.id - a.id);
     const total = queue.length;
     const ids = queue.slice((page - 1) * limit, page * limit).map((lead) => lead.id);
-    const viewerKey = inboxViewerKey(req.user);
-    const [leads, emailAccounts, telegramSenderAccounts, readStates, inboundHeads] = await Promise.all([
+    const [leads, emailAccounts, telegramSenderAccounts] = await Promise.all([
       prisma.lead.findMany({
         where: { id: { in: ids } },
         include: {
@@ -3161,18 +3173,15 @@ app.get('/api/inbox/threads', async (req, res) => {
       }),
       prisma.emailAccount.findMany({ where: { enabled: true }, orderBy: { id: 'asc' } }),
       prisma.telegramAccount.findMany({ where: { enabled: true }, select: { id: true, name: true, displayName: true }, orderBy: { id: 'asc' } }),
-      viewerKey ? prisma.inboxReadState.findMany({ where: { viewerKey, leadId: { in: ids } }, select: { leadId: true, lastReadMessageId: true } }) : [],
-      viewerKey ? prisma.message.groupBy({ by: ['leadId'], where: { leadId: { in: ids }, AND: [visibleMessageWhere, HUMAN_REPLY_WHERE] }, _max: { id: true } }) : [],
     ]);
     const emailAccountsById = Object.fromEntries(emailAccounts.map((account) => [account.id, account]));
     const telegramAccountsById = Object.fromEntries(telegramSenderAccounts.map((account) => [account.id, account]));
     const byId = new Map(leads.map((lead) => [lead.id, lead]));
     const actionableById = new Map(queue.map(lead => [lead.id, lead.lastActionableMessage]));
-    const readByLead = new Map(readStates.map(row => [row.leadId, row.lastReadMessageId]));
-    const inboundByLead = new Map(inboundHeads.map(row => [row.leadId, row._max.id]));
     const threads = ids.filter((id) => byId.has(id)).map((id) => buildInboxThreadSummary(byId.get(id), emailAccountsById, telegramAccountsById, actionableById.get(id), { lastReadMessageId: readByLead.get(id), latestInboundMessageId: inboundByLead.get(id) }));
     const counts = { all: scopedQueue.length, needsReply: scopedQueue.filter(lead => lead.threadState === 'needs_reply').length, waiting: scopedQueue.filter(lead => lead.threadState !== 'resolved' && lead.lastActionableMessage?.direction === 'outbound').length, resolved: scopedQueue.filter(lead => lead.threadState === 'resolved').length };
-    res.json({ threads, total, page, pages: Math.ceil(total / limit), counts, needsReply: counts.needsReply });
+    const unread = scopedQueue.filter(lead => (inboundByLead.get(lead.id) || 0) > (readByLead.get(lead.id) || 0)).length;
+    res.json({ threads, total, page, pages: Math.ceil(total / limit), counts, needsReply: counts.needsReply, unread });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -3312,8 +3321,8 @@ app.post('/api/inbox/threads/:leadId/assign-self', requireRole('agent'), async (
     const leadId = parseInt(req.params.leadId);
     if (!leadId) return res.status(400).json({ error: 'Valid lead ID required' });
 
-    const userId = req.user?.sub ? parseInt(req.user.sub) : null;
-    if (!userId) return res.status(400).json({ error: 'Could not determine current user' });
+    const userId = localInboxAssigneeId(req.user);
+    if (!userId) return res.status(409).json({ error: 'Personal assignment requires a local user. Clerk assignment identities are not mapped yet.', code: 'assignment_unavailable' });
 
     const lead = await prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });

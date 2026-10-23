@@ -98,6 +98,7 @@ function InboxInner() {
     return () => media.removeEventListener('change', sync)
   }, [])
   const [replyText, setReplyText] = useState('')
+  const assignmentAvailable = useAuthStore((state) => state.provider === 'local')
   const requestIds = useRef(new Map<string, string>())
   const pendingFingerprint = useRef<string | null>(null)
   const [htmlBody, setHtmlBody] = useState('')
@@ -176,7 +177,7 @@ function InboxInner() {
         channel: channelFilter === 'all' ? undefined : channelFilter,
         state: threadStateFilter === 'all' ? undefined : threadStateFilter,
         search: deferredSearchQuery || undefined,
-        assignedToMe: assignment === 'me' || undefined,
+        assignedToMe: (assignmentAvailable && assignment === 'me') || undefined,
         assigned: assignment === 'unassigned' ? false : undefined,
         page,
       }),
@@ -702,7 +703,7 @@ function InboxInner() {
                 className="min-h-8 rounded-md bg-surface px-2 text-text-secondary"
               >
                 <option value="all">Everyone</option>
-                <option value="me">Assigned to me</option>
+                {assignmentAvailable && <option value="me">Assigned to me</option>}
                 <option value="unassigned">Unassigned</option>
               </select>
             </label>
@@ -857,7 +858,9 @@ function InboxInner() {
                     replyDisabledReason={replyDisabledReason}
                     onResolve={() => resolveThreadMutation.mutate()}
                     onReopen={() => reopenThreadMutation.mutate()}
-                    onAssignSelf={() => assignSelfMutation.mutate()}
+                    onAssignSelf={
+                      assignmentAvailable ? () => assignSelfMutation.mutate() : undefined
+                    }
                     threadActionPending={threadActionPending}
                     attachments={attachments}
                     onAddAttachment={handleAddAttachment}
@@ -936,7 +939,7 @@ function InboxInner() {
               }}
               onResolve={() => resolveThreadMutation.mutate()}
               onReopen={() => reopenThreadMutation.mutate()}
-              onAssignSelf={() => assignSelfMutation.mutate()}
+              onAssignSelf={assignmentAvailable ? () => assignSelfMutation.mutate() : undefined}
               threadActionPending={threadActionPending}
               attachments={attachments}
               onAddAttachment={handleAddAttachment}
