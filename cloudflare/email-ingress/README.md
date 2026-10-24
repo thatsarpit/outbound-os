@@ -62,3 +62,5 @@ A deployment file and an enabled Worker do not by themselves configure Email Rou
 See the [backend contract and remaining acceptance work](../../docs/inbound-email-receiver.md).
 
 Current provider references: [Email Worker handler](https://developers.cloudflare.com/email-service/api/route-emails/email-handler/), [R2 object notifications](https://developers.cloudflare.com/r2/buckets/event-notifications/), [Queue JavaScript API](https://developers.cloudflare.com/queues/configuration/javascript-apis/), [R2 data security](https://developers.cloudflare.com/r2/reference/data-security/).
+
+Storage failures in the KV receiver explicitly reject SMTP delivery so the sender is told to resend. There is no Gmail fallback. Queues and cron only retry mail after the original was retained. CPU-limit termination is a platform failure and still needs live workload monitoring; mocks do not establish Free-plan capacity.

@@ -26,10 +26,10 @@ test('unsupported WhatsApp content is explained without changing legacy records 
   assert.equal(inboxMessageContent({ ...row, channel: 'email' }), '[unsupported]');
 });
 
-test('a delayed older provider event does not reopen a conversation resolved later', () => {
+test('a reply first received after resolution reopens even when its provider event is older', () => {
   assert.equal(inboxThreadState({ lead: { inboxResolvedAt: '2026-10-24T10:10:00Z' }, lastMessage: {
     direction: 'inbound', channel: 'whatsapp', providerCreatedAt: '2026-10-24T10:00:00Z', createdAt: '2026-10-24T10:20:00Z',
-  } }), 'resolved');
+  } }), 'needs_reply');
 });
 
 test('campaign archive previews do not pass raw personalization markup off as sent text', () => {

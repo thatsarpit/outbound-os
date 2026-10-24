@@ -93,9 +93,10 @@ export async function reconcileStoredMail(env, { now = Date.now() } = {}) {
   const stateKey = 'relay-state/reconcile.json';
   const state = await env.MAIL_SPOOL.get(stateKey);
   let cursor;
+  let savedCursor = null;
   if (state) {
     const saved = await state.json();
-    if (typeof saved.cursor === 'string') cursor = saved.cursor;
+    if (typeof saved.cursor === 'string') cursor = savedCursor = saved.cursor;
   }
   // Ten entries leave room for recovery bookkeeping within Free Workers'
   // 50-subrequest budget, including the queue write for every retained item.
@@ -112,7 +113,10 @@ export async function reconcileStoredMail(env, { now = Date.now() } = {}) {
     // duplicate delivery; it cannot make an unqueued object look accepted.
     await env.MAIL_SPOOL.put(`relay-state/${eventId}.json`, JSON.stringify({ queuedAt: new Date(now).toISOString() }));
   }
-  await env.MAIL_SPOOL.put(stateKey, JSON.stringify({ cursor: page.truncated ? page.cursor : null }));
+  const nextCursor = page.truncated ? page.cursor : null;
+  if (!state || nextCursor !== savedCursor) {
+    await env.MAIL_SPOOL.put(stateKey, JSON.stringify({ cursor: nextCursor }));
+  }
 }
 
 export default {

@@ -1394,3 +1394,5 @@ model WhatsAppReceipt {
   @@index([waMessageId, accountId])
   @@index([appliedAt])
 }
+
+// Durable, private inbound MIME receipt ledger.

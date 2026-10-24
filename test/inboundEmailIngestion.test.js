@@ -172,6 +172,35 @@ test('unknown senders and ambiguous addresses are held as private receipts rathe
   assert.equal(await db.message.count(), 0);
 }));
 
+test('ambiguous human replies hold all duplicate contacts without assigning a conversation or stopping unrelated work', () => fixture(async ({ db, deliver, mime, lead, events }) => {
+  const duplicates = [lead];
+  for (let index = 0; index < 3; index++) duplicates.push(await db.lead.create({ data: {
+    name: `Duplicate ${index}`, mobile: `no-phone:duplicate-${index}`, email: ` ${lead.email.toUpperCase()} `, status: 'contacted',
+  } }));
+  const other = await db.lead.create({ data: { name: 'Unrelated', mobile: 'no-phone:unrelated', email: 'other@example.test' } });
+  for (const contact of [...duplicates, other]) await db.message.create({ data: { leadId: contact.id, direction: 'outbound', channel: 'email', status: 'queued', content: 'Fixture outreach' } });
+  await deliver(mime('Automatic reply', 'Auto-Submitted: auto-replied\r\n', '<automatic-duplicate@example.test>'), { dedupeKey: 'cloudflare-inbound:automatic-duplicate-123' });
+  assert.equal(await db.message.count({ where: { status: 'queued' } }), 5);
+  const result = await deliver(mime('Please stop the scheduled outreach'));
+  assert.equal(result.receipt.reason, 'ambiguous_sender_address');
+  assert.equal(result.receipt.messageId, null);
+  assert.equal(await db.message.count({ where: { status: 'cancelled', providerStatusReason: 'inbound_email_pending_review' } }), 4);
+  assert.equal(await db.message.count({ where: { leadId: other.id, status: 'queued' } }), 1);
+  assert.equal(await db.message.count({ where: { direction: 'inbound' } }), 0);
+  assert.equal(events.length, 0);
+}));
+
+test('backup follows a relative DATABASE_URL and refuses a receipt snapshot whose originals are missing', () => fixture(async ({ db, directory }) => {
+  const script = new URL('../scripts/backup.sh', import.meta.url).pathname;
+  const schema = new URL('../prisma/', import.meta.url).pathname;
+  const env = { ...process.env, OUTBOUNDOS_DB_FILE: '', DATABASE_URL: `file:${path.relative(schema, path.join(directory, 'fixture.db'))}`,
+    OUTBOUNDOS_BACKUP_DIR: path.join(directory, 'relative-backup') };
+  execFileSync('bash', [script], { env, stdio: 'pipe' });
+  assert.ok(readdirSync(env.OUTBOUNDOS_BACKUP_DIR).some(name => name.endsWith('.db.gz')));
+  await db.inboundEmailReceipt.create({ data: { provider: 'cloudflare', dedupeKey: 'fixture-missing-original', payloadHash: 'fixture', envelopeFrom: '', envelopeTo: '[]', rawPath: 'missing.mime.enc' } });
+  assert.throws(() => execFileSync('bash', [script], { env: { ...env, OUTBOUNDOS_BACKUP_DIR: path.join(directory, 'incomplete-backup') }, stdio: 'pipe' }), error => /originals directory is missing/.test(String(error.stderr)));
+}));
+
 test('recipient routing and outbound references are scoped before matching a strict delivery', () => fixture(async ({ db, deliver, mime, lead, account }) => {
   const other = await db.emailAccount.create({ data: { name: 'Another sender', email: 'other@example.test', smtpHost: 'smtp.example.test', smtpUser: 'fixture', smtpPass: 'fixture' } });
   const outgoing = await db.message.create({ data: { leadId: lead.id, channel: 'email', direction: 'outbound', status: 'sent', content: 'Quotation', emailAccountId: other.id, emailMessageId: '<other-outgoing@example.test>' } });

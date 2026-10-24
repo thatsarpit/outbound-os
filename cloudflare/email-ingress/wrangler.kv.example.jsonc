@@ -4,6 +4,7 @@
   "compatibility_date": "2026-10-01",
   "workers_dev": false,
   "preview_urls": false,
+  "observability": { "enabled": true },
   "vars": {
     "RELAY_ENABLED": "false",
     "EMAIL_INGRESS_URL": "https://api.example.test/api/webhooks/email-ingress"

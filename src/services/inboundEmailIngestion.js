@@ -169,8 +169,18 @@ export class InboundEmailIngestion {
         }
       }
       if (!lead && !reason) {
-        const candidates = await tx.$queryRawUnsafe('SELECT id FROM "Lead" WHERE LOWER(TRIM(email)) = LOWER(?) LIMIT 2', from);
-        if (candidates.length > 1) reason = 'ambiguous_sender_address';
+        const candidates = await tx.$queryRawUnsafe('SELECT id FROM "Lead" WHERE LOWER(TRIM(email)) = LOWER(?)', from);
+        if (candidates.length > 1) {
+          reason = 'ambiguous_sender_address';
+          // A real or incomplete reply must stop every plausible recipient's
+          // queued outreach without inventing which contact owns this email.
+          if (kind === 'human' || kind === 'pending') {
+            for (let offset = 0; offset < candidates.length; offset += 400) {
+              await tx.message.updateMany({ where: { leadId: { in: candidates.slice(offset, offset + 400).map(item => item.id) }, direction: 'outbound', status: 'queued' },
+                data: { status: 'cancelled', providerStatusReason: 'inbound_email_pending_review' } });
+            }
+          }
+        }
         else if (candidates.length === 1) lead = await tx.lead.findUnique({ where: { id: candidates[0].id } });
         else reason = 'unknown_sender_address';
       }

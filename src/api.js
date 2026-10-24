@@ -44,6 +44,7 @@ import webPushRoutes from './routes/webPush.js';
 import inboxReadStateRoutes from './routes/inboxReadState.js';
 import { inboxViewerKey, inboxThreadState, inboxMessagePreview, inboxMessageContent } from './utils/inboxState.js';
 import { sortConversationMessages, messageEventTime } from './utils/messageTimeline.js';
+import { INBOX_VISIBLE_MESSAGE_WHERE, inboxMessageHeads } from './utils/inboxMessageHeads.js';
 import config from './config.js';
 import logger from './utils/logger.js';
 import activityLog, { EVENT_TYPES } from './utils/activityLog.js';
@@ -158,15 +159,6 @@ const VALID_LEAD_STATUSES = ['new', 'contacted', 'replied', 'engaged', 'closed',
 // Inbox is a record of conversations, not a campaign outbox or dead-letter
 // queue. Drafts that never left the system remain available to campaign/admin
 // diagnostics but must not masquerade as chats with a lead.
-const INBOX_HIDDEN_MESSAGE_STATUSES = ['queued', 'cancelled', 'failed', 'permanently_failed'];
-const INBOX_VISIBLE_MESSAGE_WHERE = { AND: [{ OR: [
-  { status: { notIn: INBOX_HIDDEN_MESSAGE_STATUSES } },
-  { channel: 'whatsapp', direction: 'outbound', OR: [{ waMessageId: { not: null } }, { idempotencyKey: { startsWith: 'manual-wa:' } }] },
-  // An email accepted by the provider stays in conversation history when a
-  // subsequent receipt reports failure. It is not an unsent draft.
-  { channel: 'email', direction: 'outbound', sentAt: { not: null },
-    providerDeliveryStatus: { in: ['hard_bounce', 'invalid', 'blocked', 'error'] } },
-] }] };
 
 function parsePositiveInt(value) {
   if (!['string', 'number'].includes(typeof value) || !/^[1-9]\d*$/.test(String(value))) return null;
@@ -3092,8 +3084,8 @@ app.get('/api/inbox/threads', async (req, res) => {
     }
 
     // Determine queue membership from event time before pagination. Compare
-    // timestamp metadata so delayed webhooks cannot replace a newer reply.
-    // Message bodies stay out of the scan; hydrate only the visible previews.
+    // event-time heads in SQLite so delayed webhooks cannot replace a newer reply.
+    // Only two message rows per lead can leave the database before pagination.
     // Prisma loads these related messages with an IN parameter per parent.
     // Bound each scan below SQLite's parameter limit; keep scanning the whole
     // queue so older replies and totals are still correct before pagination.
@@ -3110,16 +3102,11 @@ app.get('/api/inbox/threads', async (req, res) => {
         take: scanSize,
         select: {
           id: true, status: true, inboxResolvedAt: true, assignedToId: true, assignedMemberKey: true, lastMessageAt: true, updatedAt: true,
-          messages: { where: visibleMessageWhere,
-            select: { id: true, direction: true, channel: true, emailInboundKind: true, status: true, createdAt: true, sentAt: true, providerCreatedAt: true } },
         },
       });
-      const actionable = new Map();
-      for (const lead of batch) {
-        const ordered = sortConversationMessages(lead.messages);
-        actionable.set(lead.id, ordered.findLast(isActionableConversationMessage) || null);
-        lead.messages = ordered.slice(-1);
-      }
+      const heads = await inboxMessageHeads(prisma, batch.map(lead => lead.id), channel);
+      const actionable = heads.actionable;
+      for (const lead of batch) lead.messages = heads.visible.has(lead.id) ? [heads.visible.get(lead.id)] : [];
       if (viewerKey && batch.length) {
         const leadIds = batch.map(lead => lead.id);
         const [readStates, inboundHeads] = await Promise.all([
@@ -3299,7 +3286,8 @@ app.post('/api/inbox/threads/:leadId/reopen', requireRole('agent'), async (req, 
     const lead = await prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
     const updated = await prisma.lead.update({ where: { id: leadId }, data: { inboxResolvedAt: null } });
-    const lastMessage = await prisma.message.findFirst({ where: { leadId, AND: [INBOX_VISIBLE_MESSAGE_WHERE, ACTIONABLE_CONVERSATION_WHERE] }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+    const history = await prisma.message.findMany({ where: { leadId, AND: [INBOX_VISIBLE_MESSAGE_WHERE, ACTIONABLE_CONVERSATION_WHERE] } });
+    const lastMessage = sortConversationMessages(history).at(-1) || null;
     broadcastEvent('inbox_reopened', { leadId });
     res.json({ id: leadId, status: lead.status, threadState: normalizeInboxThreadState({ lead: updated, lastMessage, assignedToId: lead.assignedToId }) });
   } catch (error) { res.status(500).json({ error: error.message }); }
@@ -3321,7 +3309,8 @@ app.post('/api/inbox/threads/:leadId/assign-self', requireRole('agent'), async (
     if (!claimed.count) return res.status(409).json({ error: 'This lead already belongs to a teammate. Ask a manager to reassign it.' });
     const updated = await prisma.lead.findUnique({ where: { id: leadId }, include: { assignedMember: true } });
     broadcastEvent('lead_assigned', { leadId });
-    const lastMessage = await prisma.message.findFirst({ where: { leadId, AND: [INBOX_VISIBLE_MESSAGE_WHERE, ACTIONABLE_CONVERSATION_WHERE] }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+    const history = await prisma.message.findMany({ where: { leadId, AND: [INBOX_VISIBLE_MESSAGE_WHERE, ACTIONABLE_CONVERSATION_WHERE] } });
+    const lastMessage = sortConversationMessages(history).at(-1) || null;
     res.json({ id: leadId, assignedToId: updated.assignedToId, assignedMemberKey: updated.assignedMemberKey, assignedMember: leadAssignedMember(updated), threadState: normalizeInboxThreadState({ lead: updated, lastMessage, assignedToId: updated.assignedToId }) });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message, ...(error.code ? { code: error.code } : {}) });

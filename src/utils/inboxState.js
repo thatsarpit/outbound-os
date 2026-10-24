@@ -10,7 +10,10 @@ export function inboxViewerKey(user) {
 
 export function inboxThreadState({ lead, lastMessage, assignedToId }) {
   const resolvedAt = lead.inboxResolvedAt ? new Date(lead.inboxResolvedAt).getTime() : null;
-  const messageAt = lastMessage ? messageEventTime(lastMessage) : null;
+  // Provider time orders history, but a reply first received after resolution
+  // still needs attention even when delivery or an import was delayed.
+  const arrivedAt = lastMessage?.createdAt ? new Date(lastMessage.createdAt).getTime() : NaN;
+  const messageAt = Number.isFinite(arrivedAt) ? arrivedAt : lastMessage ? messageEventTime(lastMessage) : null;
   if (resolvedAt !== null && (!isHumanReply(lastMessage) || messageAt <= resolvedAt)) return 'resolved';
   if (isHumanReply(lastMessage)) return 'needs_reply';
   return lead.assignedMemberKey || assignedToId ? 'assigned' : 'unassigned';
