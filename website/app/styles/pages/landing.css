@@ -11,6 +11,32 @@
 
 .landing-shot { margin-top: 8px; }
 
+/* WhatsApp identifies the channel; the frame and primary action remain Outbound OS. */
+.crm-hero { padding-bottom: 32px; }
+.crm-hero__intro { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr); gap: 60px; align-items: end; }
+.crm-hero__intro .eyebrow { margin-bottom: 20px; }
+.crm-hero__intro h1 { max-width: 17ch; font-size: clamp(2.5rem, 4.6vw, 4.25rem); letter-spacing: -0.055em; line-height: 1.08; }
+.crm-hero__copy .lede { font-size: 1rem; line-height: 1.8; max-width: 46ch; }
+.crm-hero__copy .hero__actions { gap: 18px; margin-top: 26px; }
+.crm-hero__product { margin-top: 44px; border: 1px solid var(--border-strong); border-radius: var(--r-lg); overflow: hidden; background: var(--surface); box-shadow: var(--shadow-lg); }
+.crm-hero__product-label { display: flex; justify-content: space-between; gap: 20px; padding: 14px 18px; font-size: 11px; color: var(--text-secondary); border-bottom: var(--rule); }
+.crm-hero__product .screenshot { border: 0; border-radius: 0; box-shadow: none; margin: 0; }
+.crm-hero__product .screenshot img { display: block; border-radius: 0; }
+.crm-hero__product .screenshot figcaption { margin: 0; padding: 12px 18px; border-top: var(--rule); }
+.crm-hero__facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; padding-block: 26px 12px; }
+.crm-hero__facts p { font-size: 12px; color: var(--text-muted); }
+.crm-hero__facts strong { color: var(--text-secondary); font-weight: 500; }
+@media (max-width: 900px) {
+  .crm-hero__intro { grid-template-columns: 1fr; gap: 24px; }
+  .crm-hero__copy .lede { max-width: 60ch; }
+  .crm-hero__product-label > :last-child { display: none; }
+}
+@media (max-width: 600px) {
+  .crm-hero__facts { grid-template-columns: 1fr; gap: 10px; }
+  .crm-hero__product { margin-top: 32px; }
+  .crm-hero__intro h1 { max-width: 16ch; }
+}
+
 /* A heading rail beside a column of short, bold-led points. */
 .points { display: grid; gap: 0; border-top: var(--rule); }
 .points > div { padding-block: 20px; border-bottom: var(--rule); }

@@ -38,7 +38,7 @@ export const alternatives: Alternative[] = [
       'Outbound OS vs Wati: a free, open-source WhatsApp CRM you host yourself, compared fairly with Wati’s hosted platform — including when Wati is the better choice.',
     h1: 'An open-source alternative to Wati.',
     intro:
-      'Wati is a hosted WhatsApp Business platform with a team inbox, campaigns and a no-code chatbot builder. Outbound OS is open-source software you run on your own server, built around capturing leads and following up until they reply. They overlap on the inbox and campaigns and differ on almost everything else.',
+      'Wati is a hosted WhatsApp Business platform with a team inbox, campaigns and a no-code chatbot builder. Outbound OS is open-source software you run on your own server, built around capturing eligible leads, shared conversations and configured follow-up that stops on reply. They overlap on the inbox and campaigns and differ on almost everything else.',
     theyAre: 'Hosted WhatsApp Business platform (SaaS) with subscription plans',
     theirChannels: 'Instagram, Facebook, website chat and SMS, per their website',
     theirStrengths: [
@@ -55,8 +55,8 @@ export const alternatives: Alternative[] = [
     ],
     chooseUs: [
       'You want leads and conversations in your own database',
-      'You do not want a per-seat or per-plan subscription',
-      'Leads arrive from forms, ads and marketplaces like marketplace and must be contacted in seconds',
+      'You prefer an open-source software license and accept responsibility for infrastructure and provider costs',
+      'Your leads arrive through forms, ads or marketplace connectors and need a visible next action',
       'Follow-ups should run across WhatsApp and email, and stop on reply',
       'You want to read and change the code, or let AI agents work the CRM over MCP',
     ],
@@ -67,11 +67,11 @@ export const alternatives: Alternative[] = [
       },
       {
         q: 'Can I move my WhatsApp number from Wati to Outbound OS?',
-        a: 'A number can only be connected to one WhatsApp Business API setup at a time. Moving means migrating the number to your own Meta app; Meta documents the migration, and your approved templates may need to be re-submitted. Plan it for a quiet day.',
+        a: 'Check Meta’s current migration route and your provider’s requirements for the number and WhatsApp account you own. Review app access, templates, billing and webhook cutover before switching, then verify incoming and outgoing messages. Do not assume migration includes the previous inbox history.',
       },
       {
         q: 'Does Outbound OS have a chatbot?',
-        a: 'No. It sends your approved templates and follow-up sequences automatically, and people reply from a shared inbox. Automated conversation flows are not part of it.',
+        a: 'No. Configured outreach can send approved templates and follow-ups for eligible leads; replies, opt-outs, pauses and closed states stop the sequence. People work the conversation from the shared inbox. A no-code conversation builder is not included.',
       },
     ],
   },
@@ -83,7 +83,7 @@ export const alternatives: Alternative[] = [
       'Outbound OS vs Interakt: a free, open-source WhatsApp CRM you host yourself, compared fairly with Interakt’s hosted platform, including where Interakt fits better.',
     h1: 'An open-source alternative to Interakt.',
     intro:
-      'Interakt is a hosted WhatsApp and Instagram platform with marketing, support and a WhatsApp-first sales CRM, plus chatbots and WhatsApp commerce. Outbound OS is open-source software you host, focused on getting every lead contacted in seconds and followed up until they reply.',
+      'Interakt is a hosted WhatsApp and Instagram platform with marketing, support and a WhatsApp-first sales CRM, plus chatbots and WhatsApp commerce. Outbound OS is open-source software you host, focused on shared conversations, lead ownership and configured follow-up that stops on reply.',
     theyAre: 'Hosted WhatsApp and Instagram platform (SaaS) with subscription plans',
     theirChannels: 'Instagram, with RCS fallback, per their website',
     theirStrengths: [
@@ -100,7 +100,7 @@ export const alternatives: Alternative[] = [
     chooseUs: [
       'You sell B2B and your leads come from forms, ads and marketplaces',
       'You want follow-ups across WhatsApp and email that stop on reply',
-      'Your data should live on your own server, with no subscription',
+      'Your CRM data should live on your own server, with infrastructure and provider costs under your control',
       'You want to change the code or connect AI agents over MCP',
     ],
     faq: [

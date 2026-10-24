@@ -6,7 +6,7 @@ import { LogoPair } from '@/components/logo-pair'
 
 export const metadata = buildMetadata(
   'Open-source form backend that replies on WhatsApp',
-  'Point any HTML form at Outbound OS: spam trap, redirect, consent capture and JSON — and every submission becomes a lead that gets a WhatsApp and email reply in seconds.',
+  'Connect website forms to your self-hosted CRM. Capture leads and consent, merge repeat submissions, and queue eligible first-contact messages on configured channels.',
   '/form-backend',
 )
 
@@ -24,7 +24,7 @@ const snippet = `<form action="https://your-host/api/webhooks/inbound/<source>?a
 const faq = [
   {
     q: 'What is a form backend?',
-    a: 'A service that receives a website form’s submissions so you do not have to write server code. Outbound OS is one you host yourself — and instead of only emailing you the submission, it turns it into a lead and contacts that person.',
+    a: 'A service that receives a website form’s submissions so you do not have to write server code. Outbound OS is one you host yourself: it turns a valid submission into a lead and can queue a first-contact message when your channel and automation settings allow it.',
   },
   {
     q: 'Is it a Formspree alternative?',
@@ -36,11 +36,11 @@ const faq = [
   },
   {
     q: 'How is spam handled?',
-    a: 'Add the hidden _gotcha field. People never see it; bots fill every field, so a submission with _gotcha filled is answered as a success and silently discarded.',
+    a: 'Add the hidden _gotcha field. Submissions that fill it are answered as a success and silently discarded. This catches some automated spam; monitor and rotate source keys if a public form is abused.',
   },
   {
-    q: 'Is the API key safe in public HTML?',
-    a: 'The key only allows creating leads for that one source, and a redirect is only followed back to the site that posted the form. Keys are per source, so you can rotate one without touching the others.',
+    q: 'Should I put a source key in public HTML?',
+    a: 'Prefer a server-side form handler or your builder’s server-side webhook so the key stays private. A plain HTML action exposes its source key to every visitor. That key can create leads and trigger eligible outreach if automation is enabled. Use a dedicated source, review its sending rules and monitor abuse; rotate the key if it leaks.',
   },
   {
     q: 'What happens if someone submits twice?',
@@ -56,12 +56,12 @@ export default function FormBackendPage() {
           <Breadcrumbs trail={[{ name: 'Form backend', path: '/form-backend' }]} />
           <LogoPair brands={['forms', 'outboundos', 'whatsapp']} />
           <p className="eyebrow">Form backend</p>
-          <h1>A form backend that answers the lead for you.</h1>
+          <h1>From your website form to a working customer record.</h1>
           <p className="lede">
             Point any HTML form at Outbound OS. Each submission becomes a lead,
-            deduplicated, and gets a WhatsApp message and an email within
-            seconds — then follow-ups until they reply. Open source, on your
-            own server, with no monthly submission cap.
+            with the source and consent you collect. Configure eligible first
+            contact and follow-ups on your connected channels. Open source,
+            on your own server, with no software submission quota.
           </p>
           <div className="hero__actions">
             <Link href="/docs/website-forms" className="btn btn--primary btn--lg">
@@ -133,14 +133,14 @@ export default function FormBackendPage() {
         <div className="page">
           <div className="section-head">
             <p className="eyebrow">After submit</p>
-            <h2>What happens in the next few seconds.</h2>
+            <h2>The next steps, under your control.</h2>
           </div>
           <ol className="steps">
             {[
               ['The lead is created or merged', 'Matched by phone or email, so a repeat visitor updates their existing record.'],
-              ['First contact goes out', 'Your approved WhatsApp template and an email, on every channel you have connected.'],
-              ['Your other tools hear about it', 'A row in Google Sheets and a signed webhook to anything else you subscribe.'],
-              ['Follow-ups are scheduled', 'Timed for the lead’s morning, and cancelled the moment they reply.'],
+              ['Eligible first contact is queued', 'Your source and automation settings decide the route. Approved templates, consent, channel readiness and sending limits still apply.'],
+              ['Connected tools can receive the event', 'Configured Google Sheets sync and signed outgoing webhooks keep your other tools informed.'],
+              ['Configured follow-ups take over', 'Follow-ups use the lead’s country and stop on reply, opt-out, pause or close.'],
             ].map(([title, body], index) => (
               <li key={title}>
                 <span className="steps__n tabular">{String(index + 1).padStart(2, '0')}</span>
@@ -159,7 +159,7 @@ export default function FormBackendPage() {
       <Related
         links={[
           { href: '/docs/website-forms', title: 'Website forms guide', body: 'Field names, JSON posts, testing and field maps.' },
-          { href: '/integrations/facebook-lead-ads', title: 'Facebook Lead Ads', body: 'Instant-form leads contacted in seconds.' },
+          { href: '/integrations/facebook-lead-ads', title: 'Facebook Lead Ads', body: 'Bring instant-form enquiries into your lead workflow.' },
           { href: '/integrations/google-sheets', title: 'Google Sheets', body: 'A live row for every new lead and reply.' },
         ]}
       />

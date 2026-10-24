@@ -181,6 +181,7 @@ export function SiteHeader() {
           <a className="header__demo" href={site.demoUrl}>
             Live demo <span aria-hidden="true">↗</span>
           </a>
+          <a className="header__signin" href={`${site.appUrl}/login`}>Sign in</a>
           <Link className="btn btn--primary btn--sm" href="/managed-hosting">
             Get setup help
           </Link>
@@ -239,10 +240,7 @@ export function SiteHeader() {
               </Link>
             ))}
             <div className="header__menu-actions">
-              <a className="btn btn--secondary" href={site.githubUrl}>
-                <GitHubMark />
-                GitHub
-              </a>
+              <a className="btn btn--secondary" href={`${site.appUrl}/login`}>Sign in</a>
               <Link className="btn btn--primary" href="/managed-hosting">
                 Get setup help
               </Link>

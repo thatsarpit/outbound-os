@@ -14,26 +14,26 @@ import { installCommands, site } from '@/lib/site-content'
 
 export const metadata = buildMetadata(
   'Self-hosted CRM with Docker — open source',
-  'Outbound OS is an open-source, self-hosted CRM you run with one Docker command. Your leads, messages and credentials stay in your own database. AGPL-3.0.',
+  'Run Outbound OS on your own infrastructure with Docker Compose. An open-source CRM with a shared inbox, SQLite database, backups and optional MCP server. AGPL-3.0.',
   '/self-hosted-crm',
 )
 
 const faq = [
   {
     q: 'What is a self-hosted CRM?',
-    a: 'A CRM you run on your own server instead of renting from a vendor. The database, the backups and the access rules are yours; nobody else can read your customer list, change the price or switch the service off.',
+    a: 'A CRM you run on infrastructure you control. You manage the database, backups, server access and availability. Connected channels such as Meta and your email provider still have their own requirements, terms and usage charges.',
   },
   {
     q: 'What are the server requirements?',
-    a: 'Docker and Docker Compose on Linux, macOS or Windows. A cloud server with 1–2 GB of memory and a few gigabytes of disk runs a small team. For WhatsApp replies the server needs a public HTTPS address.',
+    a: 'Docker and Docker Compose. Start around 2 GB of memory for a small deployment and monitor memory, media storage and backup space as usage grows. Provider webhooks, including WhatsApp replies, need a public HTTPS address.',
   },
   {
     q: 'Which database does it use?',
-    a: 'SQLite, stored in a Docker volume. It needs no separate database server, and backing up is copying a file — the included backup script checks its integrity first.',
+    a: 'SQLite, stored in a Docker volume, with no separate database server. The included backup script uses SQLite’s online backup API and checks the result. Keep the instance secrets and uploaded media with your recovery copies.',
   },
   {
     q: 'How do I update it?',
-    a: 'Pull the new release and restart: docker compose pull, then docker compose up -d. Database migrations run automatically when the app starts.',
+    a: 'Create a complete backup first, review the release notes and follow the upgrade guide. Pull the chosen release and restart with Docker Compose. Database migrations run when the app starts.',
   },
   {
     q: 'Can I run it without Docker?',
@@ -57,10 +57,10 @@ export default function SelfHostedCrmPage() {
           <p className="eyebrow">Self-hosted CRM</p>
           <h1>A CRM that runs on your server, not someone else&rsquo;s.</h1>
           <p className="lede">
-            Outbound OS is an open-source CRM and outreach platform you start
-            with one Docker command. Leads, conversations and channel
-            credentials live in your own database, on a machine you control, for
-            as long as you want — with no per-seat bill.
+            Outbound OS is an open-source CRM and outreach platform you run
+            with Docker Compose. Leads, conversations and channel
+            credentials live in your own database, on a machine you control,
+            with no per-seat software bill.
           </p>
           <div className="hero__actions">
             <Link href="/docs/install" className="btn btn--primary btn--lg">
@@ -78,7 +78,7 @@ export default function SelfHostedCrmPage() {
         <div className="page split">
           <div className="section-head">
             <p className="eyebrow">Install</p>
-            <h2>Four commands to a running CRM.</h2>
+            <h2>Start with Docker. Connect from the dashboard.</h2>
             <p>
               The first boot creates the database, generates the secret keys and
               makes your admin account. Then the setup wizard asks for your
@@ -227,23 +227,26 @@ export default function SelfHostedCrmPage() {
               Back up the database and the instance secrets together — saved
               credentials cannot be decrypted without the secrets file. The
               included script checks the database&rsquo;s integrity and keeps
-              seven days.
+              the seven most recent database snapshots. Include uploaded media
+              in your recovery plan too.
             </p>
             <Code label="Back up">
               {
-                'docker compose exec app bash scripts/backup.sh\ndocker compose cp app:/app/data/backups ./backups'
+                'docker compose exec app bash scripts/backup.sh\ndocker compose cp app:/app/data/backups ./backups\ndocker compose cp app:/app/data/instance-secrets.json ./backups/'
               }
             </Code>
           </div>
           <div>
             <h3>Updates</h3>
             <p>
-              Pull the new image and restart. Migrations run on start, and your
-              data volume is untouched.
+              Make a complete backup and review release notes before pulling
+              the chosen image. Migrations run on start; the backup gives you a
+              recovery path if an upgrade needs to be reversed.
             </p>
             <Code label="Update">
               {'git pull\ndocker compose pull && docker compose up -d'}
             </Code>
+            <p className="landing-note"><Link className="link" href="/docs/backups-and-upgrades">Read the backup, upgrade and recovery guide</Link> before updating a live workspace.</p>
           </div>
         </div>
       </section>

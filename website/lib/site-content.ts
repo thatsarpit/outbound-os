@@ -9,7 +9,7 @@ export const siteUrl = 'https://outboundos.space'
 
 /** When the site's product copy was last checked against the code. Shown on
     docs pages and used as dateModified in structured data. */
-export const contentUpdated = '2026-10-23'
+export const contentUpdated = '2026-10-24'
 
 export const site = {
   name: 'Outbound OS',
@@ -31,12 +31,13 @@ export const site = {
    * in public/_redirects, so where the demo is hosted can change without
    * touching a link. A plain <a>, never next/link: /demo is not a page here.
    */
-  demoUrl: '/demo',
+  demoUrl: process.env.NEXT_PUBLIC_DEMO_URL || '/demo',
+  mobileDemoUrl: process.env.NEXT_PUBLIC_MOBILE_DEMO_URL || '/demo/mobile',
   /**
    * Bump when the files in public/screenshots change. They are cached for a
    * week (public/_headers), so an unchanged URL keeps serving the old image.
    */
-  screenshotVersion: '2026-10-23',
+  screenshotVersion: '2026-10-24',
   /** Sign-in for the current Outbound OS hosted workspace. */
   appUrl: 'https://app.outboundos.space',
   /**
