@@ -71,7 +71,7 @@ test('successful delivery requires a durable JSON acknowledgement and replays av
   const fetcher = async (url, options) => {
     count++;
     assert.equal(url, env.EMAIL_INGRESS_URL);
-    assert.equal(options.redirect, 'error');
+    assert.equal(options.redirect, 'manual');
     assert.equal(options.method, 'POST');
     const parsed = readEmailIngressHeaders(options.headers, clock);
     assert.equal(verifyEmailIngressSignature(parsed, Buffer.from(options.body), env.EMAIL_INGRESS_SECRET), true);
@@ -131,4 +131,18 @@ test('the default runtime fetch keeps its global receiver in Workers', async t =
     return Promise.resolve(ack());
   });
   await relayStoredEmail(key, env, { now: clock });
+});
+
+test('Workers-compatible manual redirects are rejected without forwarding signed mail', async () => {
+  const { env, capture, entries } = fixture();
+  const key = await capture();
+  let calls = 0;
+  await assert.rejects(relayStoredEmail(key, env, { fetcher: async (_url, options) => {
+    calls++;
+    if (options.redirect === 'error') throw new TypeError('Workers does not implement redirect error mode');
+    assert.equal(options.redirect, 'manual');
+    return new Response(null, { status: 302, headers: { location: 'https://elsewhere.example.test' } });
+  } }), error => error.relayCode === 'receiver_response' && error.httpStatus === 302);
+  assert.equal(calls, 1);
+  assert.equal(entries.has(`accepted/${eventId}.json`), false);
 });

@@ -82,7 +82,9 @@ export async function relayStoredEmail(key, env, { fetcher = (...args) => global
   const raw = await object.arrayBuffer();
   if (raw.byteLength !== object.size) throw new Error('Stored email length is inconsistent');
   const headers = await relayStep('signature', () => signedDeliveryHeaders({ secret: env.EMAIL_INGRESS_SECRET, eventId, from: metadata.from, to: metadata.to, receivedAt: metadata.receivedAt, raw, now }));
-  const response = await relayStep('receiver_fetch', () => fetcher(url, { method: 'POST', headers, body: raw, redirect: 'error', signal: AbortSignal.timeout(25_000) }));
+  // Workers rejects redirect:'error' before sending any request. Manual mode
+  // keeps credentials on the configured origin; a redirect is rejected below.
+  const response = await relayStep('receiver_fetch', () => fetcher(url, { method: 'POST', headers, body: raw, redirect: 'manual', signal: AbortSignal.timeout(25_000) }));
   if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw relayError('receiver_response', `Email ingress did not acknowledge persistence (${response.status})`, response.status);
   const receipt = await relayStep('acknowledgement_read', () => response.json());
   if (receipt.accepted !== true || !Number.isSafeInteger(receipt.receiptId) || receipt.receiptId < 1
