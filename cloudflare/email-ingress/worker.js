@@ -2,6 +2,13 @@
 const MAX_BYTES = 25 * 1024 * 1024;
 const KEY = /^incoming\/([A-Za-z0-9_-]{16,100})\.eml$/;
 const encoder = new TextEncoder();
+function relayError(code, message, status = undefined) {
+  return Object.assign(new Error(message), { relayCode: code, ...(status ? { httpStatus: status } : {}) });
+}
+async function relayStep(stage, operation) {
+  try { return await operation(); }
+  catch (error) { error.relayStage = stage; throw error; }
+}
 const hex = bytes => Array.from(new Uint8Array(bytes), value => value.toString(16).padStart(2, '0')).join('');
 const encodeAddress = value => btoa(String.fromCharCode(...encoder.encode(value))).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
 function config(env) {
@@ -60,13 +67,13 @@ export async function storeIncomingEmail(message, env, { eventId = crypto.random
 }
 
 /** HTTP success alone is insufficient: require the backend's persisted receipt acknowledgement. */
-export async function relayStoredEmail(key, env, { fetcher = fetch, now = Date.now() } = {}) {
+export async function relayStoredEmail(key, env, { fetcher = (...args) => globalThis.fetch(...args), now = Date.now() } = {}) {
   const url = config(env);
   const eventId = keyIdentity(key);
   const acceptedKey = `accepted/${eventId}.json`;
-  if (await env.MAIL_SPOOL.head(acceptedKey)) return;
-  const object = await env.MAIL_SPOOL.get(key);
-  if (!object) throw new Error('The queued raw email object is missing');
+  if (await relayStep('accepted_marker_read', () => env.MAIL_SPOOL.head(acceptedKey))) return;
+  const object = await relayStep('original_read', () => env.MAIL_SPOOL.get(key));
+  if (!object) throw relayError('original_not_visible', 'The queued raw email object is missing');
   if (object.size < 1 || object.size > MAX_BYTES) throw new Error('Stored raw email exceeds the receiver size limit');
   const metadata = object.customMetadata || {};
   if (metadata.eventId !== eventId || !validEnvelope(metadata.from, metadata.to)
@@ -74,17 +81,19 @@ export async function relayStoredEmail(key, env, { fetcher = fetch, now = Date.n
     || !Number.isFinite(Date.parse(metadata.receivedAt))) throw new Error('Stored email envelope metadata is invalid');
   const raw = await object.arrayBuffer();
   if (raw.byteLength !== object.size) throw new Error('Stored email length is inconsistent');
-  const headers = await signedDeliveryHeaders({ secret: env.EMAIL_INGRESS_SECRET, eventId, from: metadata.from, to: metadata.to, receivedAt: metadata.receivedAt, raw, now });
-  const response = await fetcher(url, { method: 'POST', headers, body: raw, redirect: 'error', signal: AbortSignal.timeout(25_000) });
-  if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error(`Email ingress did not acknowledge persistence (${response.status})`);
-  const receipt = await response.json();
+  const headers = await relayStep('signature', () => signedDeliveryHeaders({ secret: env.EMAIL_INGRESS_SECRET, eventId, from: metadata.from, to: metadata.to, receivedAt: metadata.receivedAt, raw, now }));
+  // Workers rejects redirect:'error' before sending any request. Manual mode
+  // keeps credentials on the configured origin; a redirect is rejected below.
+  const response = await relayStep('receiver_fetch', () => fetcher(url, { method: 'POST', headers, body: raw, redirect: 'manual', signal: AbortSignal.timeout(25_000) }));
+  if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw relayError('receiver_response', `Email ingress did not acknowledge persistence (${response.status})`, response.status);
+  const receipt = await relayStep('acknowledgement_read', () => response.json());
   if (receipt.accepted !== true || !Number.isSafeInteger(receipt.receiptId) || receipt.receiptId < 1
-    || !['matched', 'unmatched', 'invalid', 'conflict'].includes(receipt.state)) throw new Error('Email ingress returned no durable receipt acknowledgement');
+    || !['matched', 'unmatched', 'invalid', 'conflict'].includes(receipt.state)) throw relayError('invalid_acknowledgement', 'Email ingress returned no durable receipt acknowledgement');
   // This marker contains no envelope or message content. Raw mail remains private
   // for reconciliation; retention is configured only after the pilot is accepted.
-  await env.MAIL_SPOOL.put(acceptedKey, JSON.stringify({ receiptId: receipt.receiptId, state: receipt.state, acceptedAt: new Date(now).toISOString() }), {
+  await relayStep('accepted_marker_write', () => env.MAIL_SPOOL.put(acceptedKey, JSON.stringify({ receiptId: receipt.receiptId, state: receipt.state, acceptedAt: new Date(now).toISOString() }), {
     httpMetadata: { contentType: 'application/json' },
-  });
+  }));
 }
 
 /** A bounded cursor scan recovers an object whose event notification was missed. */
@@ -128,9 +137,15 @@ export default {
         if (!['PutObject', 'CopyObject', 'CompleteMultipartUpload', 'Reconcile'].includes(body?.action)) throw new Error('Unexpected R2 queue notification');
         await relayStoredEmail(body.object?.key, env);
         message.ack();
-      } catch {
+      } catch (error) {
         // Do not log envelope, raw mail, signatures or provider response bodies.
-        console.error('Inbound email remains in private storage; queue delivery will retry.');
+        const reason = ['original_not_visible', 'receiver_response', 'invalid_acknowledgement'].includes(error?.relayCode) ? error.relayCode : 'relay_exception';
+        console.error('Inbound email remains in private storage; queue delivery will retry.', {
+          reason,
+          ...(['accepted_marker_read', 'original_read', 'signature', 'receiver_fetch', 'acknowledgement_read', 'accepted_marker_write'].includes(error?.relayStage) ? { stage: error.relayStage } : {}),
+          ...(Number.isInteger(error?.httpStatus) ? { httpStatus: error.httpStatus } : {}),
+          errorType: ['Error', 'TypeError', 'TimeoutError', 'AbortError', 'OperationError'].includes(error?.name) ? error.name : 'Error',
+        });
         message.retry({ delaySeconds: Math.min(3600, 30 * 2 ** Math.min(message.attempts || 1, 7)) });
       }
     }
