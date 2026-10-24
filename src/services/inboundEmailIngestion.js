@@ -8,6 +8,7 @@ import leadScorer from './leadScorer.js';
 import { classifyInboundEmail, HUMAN_REPLY_WHERE } from '../utils/emailInbound.js';
 import { InboundEmailSpool } from '../utils/inboundEmailSpool.js';
 import { EMAIL_INGRESS_MAX_BYTES } from '../utils/emailIngressSignature.js';
+import { emailAttachmentMetadata } from '../utils/emailAttachments.js';
 
 const normalizeAddress = (value) => String(value || '').trim().toLowerCase();
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
@@ -39,15 +40,6 @@ function contentOf(parsed, subject, complete, from) {
   if (text) return text;
   if (parsed.attachments?.length) return `[${parsed.attachments.length} attachment${parsed.attachments.length === 1 ? '' : 's'}] ${subject}`.trim();
   return `[Empty email] ${subject}`.trim();
-}
-function attachmentMetadata(parsed) {
-  return (parsed.attachments || []).map((attachment) => ({
-    filename: String(attachment.filename || 'attachment').replace(/[\x00-\x1f\x7f]/g, '').slice(0, 255),
-    contentType: String(attachment.contentType || 'application/octet-stream').slice(0, 150),
-    size: attachment.size || attachment.content?.length || 0,
-    contentId: attachment.cid ? String(attachment.cid).slice(0, 255) : null,
-    sha256: sha256(attachment.content || Buffer.alloc(0)),
-  }));
 }
 
 /** Shared, provider-independent persistence. No inbound message creates a lead or sends a reply. */
@@ -122,7 +114,7 @@ export class InboundEmailIngestion {
     const from = normalizeAddress(parsed.from?.value?.[0]?.address || envelopeFrom);
     const subject = String(parsed.subject || '').slice(0, 2000);
     const rfcMessageId = typeof parsed.messageId === 'string' && parsed.messageId.length <= 1000 ? parsed.messageId : null;
-    const metadata = attachmentMetadata(parsed);
+    const metadata = emailAttachmentMetadata(parsed);
     const html = complete ? sanitizeReceivedEmailHtml(parsed.html) : null;
     const content = contentOf(parsed, subject, complete, from);
     const kind = complete ? classifyInboundEmail(parsed) : classifyInboundEmail(parsed) === 'human' ? 'pending' : classifyInboundEmail(parsed);

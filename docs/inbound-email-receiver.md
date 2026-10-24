@@ -59,8 +59,8 @@ See [`cloudflare/email-ingress/`](../cloudflare/email-ingress/README.md). It con
 
 ## Operational work still required before live cutover
 
-1. The administrator-only review API is included here. The **Integrations → Email → Inbound email review** UI remains in the separate dashboard PR #53; deploy and accept it before cutting over all customer aliases. Use that queue to inspect receipt metadata and retry retained mail. An unmatched, unlinked receipt can be explicitly associated with an existing lead and enabled receiving account. Linked messages cannot be reassigned; partial MIME waits for mailbox recovery. Original MIME paths, bytes and payload hashes are never returned to the browser. A human reply still runs the normal automation-stop and notification transaction. Conflicts remain held when identity checks cannot be resolved.
-2. Implement authorized attachment retrieval/scanning and a received-HTML display policy. Attachment bytes exist in encrypted original MIME; metadata is persisted. Do not claim a safe attachment-download UI is present.
+1. Deploy and accept **Integrations → Email → Inbound email review** before cutting over all customer aliases. Administrators can read retained mail as plain text, inspect its files, retry matching, and explicitly associate an unmatched, unlinked receipt with an existing lead and enabled receiving account. Linked messages cannot be reassigned; partial MIME waits for mailbox recovery. Private original paths, raw MIME and payload hashes are never returned to the browser. Linking a human reply runs the normal automation-stop and notification transaction. Conflicts remain held when identity checks cannot be resolved. The server's receiver-enabled flag describes configuration; it does not prove that a particular external route is delivering.
+2. Accept attachment downloads on desktop and the installed iPhone app. Inbound email cards load file metadata only when expanded. Download endpoints authenticate the viewer, bind the receipt to the message and receiving account, verify the encrypted original and hashes, and force binary downloads with `no-store`, `nosniff` and a sandbox CSP. Administrators can also download files from held receipts. Preview text is escaped by React; received HTML and remote images are never rendered in the review dialog. Two concurrent original parses are allowed; excess work returns 503. These checks are **not malware scanning**. Files remain sender-supplied and should only be downloaded when trusted. Older imported messages without retained originals explicitly report that downloads are unavailable.
 3. Set a storage quota, monitored retention policy and recovery procedure. This patch deliberately never purges the only recoverable copy. `scripts/backup.sh` now includes a companion archive of private encrypted MIME objects and prunes it with its database snapshot. Partial and recovered originals have immutable object names. Back up the corresponding instance encryption secret separately and rehearse restoring both archives; database-only copies cannot replay held mail.
 4. Review receiving addresses and aliases. The strict receiver currently resolves an envelope recipient against enabled `EmailAccount.email` values. A separate `replies.example.test` address needs an explicit route-to-account mapping and Reply-To support before it can serve as a pilot alias; changing MX alone is insufficient.
 5. Preserve an external route for owner sign-in codes, billing, account recovery and administrative mail. Login access must not depend on opening an already-authenticated CRM inbox.
@@ -72,7 +72,23 @@ See [`cloudflare/email-ingress/`](../cloudflare/email-ingress/README.md). It con
 
 ```bash
 node --test test/inboundEmailIngestion.test.js test/emailIngress.test.js test/cloudflareEmailRelay.test.js
+node --test test/emailAttachments.test.js
 RUST_LOG=debug node --test --test-name-pattern='IMAP MIME|Inbound email classification' test/integration.test.js
 ```
 
 The focused tests cover full content, sanitization, attachment metadata, encrypted originals, unmatched/ambiguous routes, partial recovery, replay/identity conflicts, storage/publication failures, signed raw-body authentication, size/backpressure limits and Cloudflare relay recovery contracts. The existing IMAP classification tests must remain green. Local mocks and contract checks do not establish real Cloudflare/SMTP or iPhone acceptance.
+
+## Review and download API
+
+All endpoints require the existing authenticated workspace session or trusted backend credentials. Administrator-only receipt operations are deliberately separate from conversation reads.
+
+| Method and path | Access | Result |
+|---|---|---|
+| `GET /api/email/receipts?state=attention&page=1` | Admin | Paginated receipt metadata and state totals |
+| `GET /api/email/receipts/:id` | Admin | Verified subject, complete plain text and file labels; no raw MIME |
+| `GET /api/email/receipts/:id/attachments/:index` | Admin | Explicit file download from a retained receipt |
+| `POST /api/email/receipts/:id/retry` | Admin | Retry matching; optional `leadId` and `accountId` for an unmatched, unlinked receipt |
+| `GET /api/messages/:id/email-attachments` | Viewer or above | File metadata for a matched inbound email, or `retained: false` for a legacy original that was not retained |
+| `GET /api/messages/:id/email-attachments/:index` | Viewer or above | Explicit file download after message/account checks |
+
+Receipt and message identifiers are positive safe integers; attachment indexes start at zero. Filenames are display labels, never server paths. MIME content types do not control how downloaded content is served. A failed integrity check returns a generic 503 without exposing storage paths or decrypted data. Previewing or downloading never sends mail, creates leads, marks a conversation resolved, or credits engagement.

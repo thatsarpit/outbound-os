@@ -17,6 +17,7 @@ import type { EmailAccount } from '@/api/types'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import { Loader2, Mail, Plus, TestTube, Trash2, X } from 'lucide-react'
 import { InfoTile } from '@/components/integrations/integration-helpers'
+import { EmailReceipts } from '@/components/integrations/email-receipts'
 
 export default function EmailSection() {
   const queryClient = useQueryClient()
@@ -24,9 +25,15 @@ export default function EmailSection() {
   const [confirmDelete, setConfirmDelete] = useState<EmailAccount | null>(null)
   const [inboxAccount, setInboxAccount] = useState<EmailAccount | null>(null)
   const canConfigure = useAuthStore((state) => state.user?.role === 'admin')
+  const dashboardScope = useAuthStore((state) => state.dashboardScope)
 
-  const { data: rawAccounts, isLoading } = useQuery({
-    queryKey: ['email-accounts'],
+  const {
+    data: rawAccounts,
+    isLoading,
+    error: accountsError,
+    refetch,
+  } = useQuery({
+    queryKey: ['email-accounts', dashboardScope],
     queryFn: async () => {
       const res = await api.get<EmailAccount[]>('/email/accounts')
       if (!res) throw new Error('Empty response')
@@ -36,6 +43,11 @@ export default function EmailSection() {
   })
 
   const accounts = Array.isArray(rawAccounts) ? rawAccounts : []
+  const syncTimes = accounts
+    .map((account) => account.lastSyncAt)
+    .filter((value): value is string => Boolean(value))
+    .sort()
+  const lastSync = syncTimes[syncTimes.length - 1]
 
   const testMutation = useMutation({
     mutationFn: (id: number) => api.post(`/email/accounts/${id}/test`),
@@ -54,12 +66,31 @@ export default function EmailSection() {
     )
   }
 
+  if (accountsError && !rawAccounts) {
+    return (
+      <p role="alert" className="rounded-md border border-danger/30 p-4 text-sm text-danger">
+        Email accounts could not be loaded.{' '}
+        <button className="min-h-11 underline" onClick={() => void refetch()}>
+          Try again
+        </button>
+      </p>
+    )
+  }
+
   return (
     <div className="space-y-4">
+      {accountsError && (
+        <p role="alert" className="rounded-md border border-danger/30 p-4 text-sm text-danger">
+          Email accounts could not be loaded.{' '}
+          <button className="min-h-11 underline" onClick={() => void refetch()}>
+            Try again
+          </button>
+        </p>
+      )}
       <div className="rounded-lg border border-border bg-surface px-5 py-5 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-sm font-semibold">Email delivery surface</p>
+            <p className="text-sm font-semibold">Email accounts</p>
             <p className="mt-1 text-sm text-text-secondary">
               {accounts.length} email accounts configured for sending and testing.
             </p>
@@ -84,8 +115,8 @@ export default function EmailSection() {
         />
         <InfoTile
           label="Last Sync"
-          value={accounts.some((acc) => acc.lastSyncAt) ? 'Recent' : 'Never'}
-          detail="Provider sync health"
+          value={lastSync ? formatRelativeTime(lastSync) : 'Never'}
+          detail="Most recent mailbox check; not a delivery guarantee"
         />
       </div>
 
@@ -176,7 +207,7 @@ export default function EmailSection() {
         ))}
       </div>
 
-      {accounts.length === 0 && (
+      {!accountsError && accounts.length === 0 && (
         <div className="rounded-md border border-dashed border-border bg-surface px-6 py-12 text-center">
           <Mail className="mx-auto mb-2 h-10 w-10 text-text-muted/40 animate-pulse" />
           <p className="text-text-secondary text-sm">No email accounts configured</p>
@@ -185,6 +216,8 @@ export default function EmailSection() {
           </p>
         </div>
       )}
+
+      {canConfigure && <EmailReceipts key={dashboardScope} accounts={accounts} />}
 
       {showAdd && <AddEmailModal onClose={() => setShowAdd(false)} />}
       {inboxAccount && (
