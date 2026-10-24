@@ -9,7 +9,17 @@ umask 077
 REMOTE_DIR="${REMOTE_DIR:-$(dirname "$(dirname "$(realpath "$0")")")}"
 # Defaults to the path in .env.example (DATABASE_URL=file:../data/outboundos.db,
 # relative to prisma/). Set OUTBOUNDOS_DB_FILE if your database lives elsewhere.
-DB_FILE="${OUTBOUNDOS_DB_FILE:-$REMOTE_DIR/data/outboundos.db}"
+if [ -n "${OUTBOUNDOS_DB_FILE:-}" ]; then
+  DB_FILE="$OUTBOUNDOS_DB_FILE"
+elif [ -n "${DATABASE_URL:-}" ]; then
+  case "$DATABASE_URL" in
+    file:/*) DB_FILE="${DATABASE_URL#file:}" ;;
+    file:*) DB_FILE="$REMOTE_DIR/prisma/${DATABASE_URL#file:}" ;;
+    *) echo "❌ Backup requires a file: SQLite DATABASE_URL" >&2; exit 1 ;;
+  esac
+else
+  DB_FILE="$REMOTE_DIR/data/outboundos.db"
+fi
 BACKUP_DIR="${OUTBOUNDOS_BACKUP_DIR:-$REMOTE_DIR/data/backups}"
 MAX_BACKUPS=7
 
@@ -17,6 +27,7 @@ if [ ! -s "$DB_FILE" ]; then
   echo "❌ Refusing backup: live database is missing or empty: $DB_FILE" >&2
   exit 1
 fi
+DB_FILE="$(realpath "$DB_FILE")"
 
 INTEGRITY=$(sqlite3 "$DB_FILE" "PRAGMA integrity_check;")
 if [ "$INTEGRITY" != "ok" ]; then
@@ -55,6 +66,10 @@ if [ -d "$PRIVATE_MAIL_DIR" ]; then
   fi
   mv "$MAIL_BACKUP.tmp" "$MAIL_BACKUP"
   echo "✅ Encrypted inbound originals included in backup set"
+elif [ "$(sqlite3 "$DB_FILE" "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='InboundEmailReceipt';")" = "1" ] \
+  && [ "$(sqlite3 "$DB_FILE" "SELECT count(*) FROM InboundEmailReceipt WHERE rawPath IS NOT NULL;")" -gt 0 ]; then
+  echo "❌ Backup set is incomplete: retained email receipts exist but their private originals directory is missing" >&2
+  exit 1
 fi
 
 # Prune old backups — keep only the newest MAX_BACKUPS

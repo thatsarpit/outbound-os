@@ -808,6 +808,19 @@ describe('Meta WhatsApp webhook', () => {
     assert.equal(queue.body.threads[0].replyNeeded, false);
   });
 
+  test('a newly imported customer reply reopens a resolved conversation despite an older provider timestamp', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const lead = await prisma.lead.create({ data: { name: 'Delayed reply fixture', mobile: 'no-phone:delayed-reply-fixture', status: 'closed', inboxResolvedAt: new Date('2026-10-24T10:10:00Z') } });
+    await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'inbound', status: 'delivered', content: 'Delayed customer reply',
+      providerCreatedAt: new Date('2026-10-24T10:00:00Z'), createdAt: new Date('2026-10-24T10:20:00Z') } });
+    const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.77' };
+    const queue = await request('GET', `/api/inbox/threads?leadId=${lead.id}&state=needs_reply`, { headers });
+    assert.equal(queue.status, 200);
+    assert.equal(queue.body.threads.length, 1);
+    assert.equal(queue.body.threads[0].replyNeeded, true);
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'closed');
+  });
+
   const metaDelivery = (value) => ({
     object: 'whatsapp_business_account',
     entry: [{
@@ -2442,11 +2455,12 @@ describe('Inbound email classification', () => {
       mailbox.push({ uid, headers: Buffer.from(headers), envelope: { from: [{ address: from }], to: [{ address: account.email }], subject: 'Re: Fixture quotation' }, internalDate: new Date(Date.now() - 60000), raw: `${headers}\r\n\r\n${content}` });
     };
     const score = t.mock.method(scorer, 'calculateScore', async () => {});
+    let bodyDownloads = 0;
     t.mock.method(email, '_createImapClient', () => ({
       mailbox: { uidValidity: 123n }, on() {}, connect: async () => {}, logout: async () => {},
       getMailboxLock: async () => ({ release() {} }), search: async () => mailbox.map(msg => msg.uid),
       fetchAll: async () => mailbox,
-      download: async uid => ({ content: Readable.from([Buffer.from(mailbox.find(msg => msg.uid === uid).raw)]) }),
+      download: async uid => { bodyDownloads++; return { content: Readable.from([Buffer.from(mailbox.find(msg => msg.uid === uid).raw)]) }; },
     }));
     const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.202' };
     const overview = () => request('GET', '/api/stats/overview', { headers });
@@ -2460,6 +2474,7 @@ describe('Inbound email classification', () => {
       add(302, lead.email, 'Auto-Submitted: auto-replied\r\nContent-Type: text/plain', 'I am away. This is an automatic response.');
       assert.equal((await email.syncInbox(account.id)).replies, 0);
       await email.syncInbox(account.id);
+      assert.equal(bodyDownloads, 2, 'completed receipts are not downloaded again on the overlap sync');
       const machine = await prisma.message.findMany({ where: { leadId: lead.id, direction: 'inbound' }, orderBy: { id: 'asc' } });
       assert.deepEqual(machine.map(message => message.emailInboundKind), ['delivery_report', 'automatic_reply']);
       assert.ok(machine.every(message => !message.emailReplyProcessedAt));

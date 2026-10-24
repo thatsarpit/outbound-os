@@ -1008,6 +1008,12 @@ class EmailService {
               msg.internalDate || msg.envelope?.date || null, String(msg.headers || ''),
             ])).digest('hex')}`;
 
+            const receipt = await prisma.inboundEmailReceipt.findUnique({ where: { dedupeKey: inboundKey }, select: { state: true, messageId: true } });
+            if (receipt && !['pending', 'partial'].includes(receipt.state)) {
+              const linked = receipt.messageId ? await prisma.message.findUnique({ where: { id: receipt.messageId }, select: { status: true } }) : null;
+              if (linked?.status !== 'partial') continue;
+            }
+
             // Persist every receipt, including unknown senders, through the
             // same pipeline as the optional Cloudflare receiver. Transport
             // failure is distinct from a valid empty or attachment-only MIME.

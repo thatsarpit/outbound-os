@@ -97,10 +97,14 @@ test('VM outages, HTML login pages and missing receipt acknowledgements never ma
 test('bounded reconciliation requeues unacknowledged old originals and throttles repeated recovery attempts', async () => {
   const { env, entries, queued, capture } = fixture();
   const key = await capture();
+  const put = env.MAIL_SPOOL.put;
+  let cursorWrites = 0;
+  env.MAIL_SPOOL.put = async (name, ...args) => { if (name === 'relay-state/reconcile.json') cursorWrites++; return put(name, ...args); };
   await reconcileStoredMail(env, { now: clock });
   assert.deepEqual(queued, [{ action: 'Reconcile', object: { key } }]);
   await reconcileStoredMail(env, { now: clock + 600000 });
   assert.equal(queued.length, 1);
+  assert.equal(cursorWrites, 1, 'an unchanged recovery cursor does not consume another Free KV write');
   assert.deepEqual(JSON.parse(entries.get('relay-state/reconcile.json').bytes), { cursor: null });
   await reconcileStoredMail(env, { now: clock + 25 * 3_600_000 });
   assert.equal(queued.length, 2);
