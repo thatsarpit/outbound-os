@@ -122,3 +122,13 @@ test('failed Queue delivery explicitly retries and does not expose raw mail over
   assert.deepEqual(retry, { delaySeconds: 120 });
   assert.equal((await worker.fetch()).status, 404);
 });
+
+test('the default runtime fetch keeps its global receiver in Workers', async t => {
+  const { env, capture } = fixture();
+  const key = await capture();
+  t.mock.method(globalThis, 'fetch', function () {
+    assert.equal(this, globalThis, 'native Workers functions require their runtime receiver');
+    return Promise.resolve(ack());
+  });
+  await relayStoredEmail(key, env, { now: clock });
+});
