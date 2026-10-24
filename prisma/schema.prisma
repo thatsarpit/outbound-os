@@ -1327,3 +1327,25 @@ model WhatsAppReceipt {
   @@index([waMessageId, accountId])
   @@index([appliedAt])
 }
+
+// Durable, private inbound MIME receipt ledger.
+model InboundEmailReceipt {
+  id Int @id @default(autoincrement())
+  provider String
+  dedupeKey String @unique
+  payloadHash String
+  envelopeFrom String
+  envelopeTo String
+  emailAccountId Int?
+  messageId Int?
+  rfcMessageId String?
+  state String @default("pending")
+  reason String?
+  rawPath String?
+  attachmentMetadata String?
+  receivedAt DateTime @default(now())
+  processedAt DateTime?
+
+  @@index([state, receivedAt])
+  @@index([emailAccountId])
+}

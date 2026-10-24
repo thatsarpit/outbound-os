@@ -82,4 +82,8 @@ describe('metaInboundText', () => {
     assert.equal(metaInboundText(null), '');
     assert.equal(metaInboundText(undefined), '');
   });
+
+  test('retains an explicit unavailable-content marker when Meta supplies an unsupported message', () => {
+    assert.equal(metaInboundText({ type: 'unsupported', errors: [{ code: 131051 }] }), '[Unsupported WhatsApp message]');
+  });
 });

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inboxViewerKey, inboxThreadState, inboxMessagePreview, localInboxAssigneeId } from '../src/utils/inboxState.js';
+import { inboxViewerKey, inboxThreadState, inboxMessagePreview, inboxMessageContent, localInboxAssigneeId } from '../src/utils/inboxState.js';
 
 test('reading and resolving a conversation do not use sales status as inbox state', () => {
   const incoming = { direction: 'inbound', channel: 'whatsapp', createdAt: '2026-10-20T10:00:00Z' };
@@ -16,6 +16,20 @@ test('personal read keys isolate organizations and exclude the shared service id
   assert.equal(inboxViewerKey(null), null);
   assert.notEqual(inboxViewerKey({ id: 1, orgId: 'a' }), inboxViewerKey({ id: 1, orgId: 'b' }));
   assert.notEqual(inboxViewerKey({ id: 1, orgId: 'a' }), inboxViewerKey({ id: 2, orgId: 'a' }));
+});
+
+test('unsupported WhatsApp content is explained without changing legacy records or other channels', () => {
+  const row = { channel: 'whatsapp', direction: 'inbound', content: '[unsupported]' };
+  assert.match(inboxMessageContent(row), /WhatsApp could not provide/);
+  assert.equal(inboxMessagePreview(row), 'WhatsApp message content unavailable');
+  assert.equal(row.content, '[unsupported]');
+  assert.equal(inboxMessageContent({ ...row, channel: 'email' }), '[unsupported]');
+});
+
+test('a reply first received after resolution reopens even when its provider event is older', () => {
+  assert.equal(inboxThreadState({ lead: { inboxResolvedAt: '2026-10-24T10:10:00Z' }, lastMessage: {
+    direction: 'inbound', channel: 'whatsapp', providerCreatedAt: '2026-10-24T10:00:00Z', createdAt: '2026-10-24T10:20:00Z',
+  } }), 'needs_reply');
 });
 
 test('campaign archive previews do not pass raw personalization markup off as sent text', () => {
