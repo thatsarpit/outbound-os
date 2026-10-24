@@ -10,6 +10,7 @@ import { useWorkspaceTimezone } from '@/hooks/use-workspace-timezone'
 import { useAuthStore } from '@/stores/auth-store'
 import { useOnlineStatus } from '@/hooks/use-online-status'
 import { toast } from '@/stores/toast-store'
+import { LeadAssignment } from '@/components/inbox/lead-assignment'
 import { MobileError, mobileButton, mobileInput, mobileDueDate } from './mobile-shared'
 
 export function MobileLeadPanel({
@@ -138,6 +139,14 @@ export function MobileLeadPanel({
             </a>
           )}
         </div>
+      </section>
+      <section className="rounded-xl border border-border bg-surface p-4">
+        <LeadAssignment
+          leadId={leadId}
+          member={data.assignedMember}
+          legacyId={data.assignedToId}
+          legacyName={data.assignedTo?.name}
+        />
       </section>
       <section className="rounded-xl border border-border bg-surface p-4">
         <h3 className="font-semibold">Follow-ups</h3>

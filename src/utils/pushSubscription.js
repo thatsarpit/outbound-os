@@ -23,15 +23,43 @@ function encryptionKey() {
   if (key.length < 16) throw new Error('Push subscription encryption is not configured.');
   return createHash('sha256').update(key).digest();
 }
-export function encryptPushSubscription(value) {
+export function pushDeviceLabel(value) {
+  if (typeof value !== 'string') return 'Notification device';
+  return value.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, '').trim().slice(0, 64) || 'Notification device';
+}
+
+export function encryptPushSubscription(value, label) {
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', encryptionKey(), iv);
-  const body = Buffer.concat([cipher.update(JSON.stringify(value), 'utf8'), cipher.final()]);
+  const payload = { ...validatePushSubscription(value), deviceLabel: pushDeviceLabel(label) };
+  const body = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
   return [iv, cipher.getAuthTag(), body].map(part => part.toString('base64url')).join('.');
 }
-export function decryptPushSubscription(value) {
+function decryptPayload(value) {
   const [iv, tag, body] = value.split('.').map(part => Buffer.from(part, 'base64url'));
   const decipher = createDecipheriv('aes-256-gcm', encryptionKey(), iv);
   decipher.setAuthTag(tag);
-  return validatePushSubscription(JSON.parse(Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8')));
+  return JSON.parse(Buffer.concat([decipher.update(body), decipher.final()]).toString('utf8'));
+}
+export function decryptPushSubscription(value) {
+  return validatePushSubscription(decryptPayload(value));
+}
+
+/** The inventory never exposes endpoint credentials, hashes or encryption keys. */
+export function publicPushDevice(row, publicKey) {
+  let label = 'Notification device';
+  try { label = pushDeviceLabel(decryptPayload(row.encryptedData).deviceLabel); } catch { /* An unreadable subscription must still be removable. */ }
+  return {
+    id: row.id,
+    label,
+    registeredAt: row.createdAt,
+    enabled: Boolean(row.enabled),
+    needsReconnect: !publicKey || row.vapidKey !== publicKey,
+  };
+}
+
+export function pushDeviceId(value) {
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return null;
+  const id = Number(value);
+  return Number.isSafeInteger(id) ? id : null;
 }

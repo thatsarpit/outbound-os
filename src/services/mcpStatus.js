@@ -7,9 +7,11 @@ export async function mcpConnectionStatus(env = process.env, fetcher = fetch) {
   } catch { server = null; }
   const result = {
     serverUrl: server?.href || null,
-    backendConfigured: Boolean(String(env.MCP_SERVICE_TOKEN || '').trim()),
+    backendConfigured: Boolean(String(env.MCP_AUTH_MODE === 'personal' ? env.MCP_CONTROL_SECRET || '' : env.MCP_SERVICE_TOKEN || '').trim()),
     transport: 'streamable-http',
     authentication: ['oauth', 'bearer'],
+    authorizationMode: env.MCP_AUTH_MODE === 'personal' ? 'personal' : 'legacy',
+    legacyCompatibility: env.MCP_AUTH_MODE === 'personal' && env.MCP_LEGACY_COMPAT === 'true',
     health: { status: 'not_configured', checkedAt: null, message: 'Set MCP_PUBLIC_URL to the public HTTPS /mcp address on this API deployment.' },
     oauth: { available: false },
   };

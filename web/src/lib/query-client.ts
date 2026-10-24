@@ -6,8 +6,7 @@ import { toast } from '@/stores/toast-store'
 /* ── Query Client ──
  * Global mutation + query error handlers fire a toast whenever an API call
  * fails. Pages may opt out by passing `meta: { silent: true }` on the
- * mutation/query, or by providing their own `onError` (which doesn't suppress
- * the global one — they compose). Auth failures (401) are swallowed because
+ * mutation/query, or by providing their own mutation `onError`. Auth failures (401) are swallowed because
  * the api client already redirects to /login. */
 export const queryClient = new QueryClient({
   defaultOptions: {
@@ -19,7 +18,7 @@ export const queryClient = new QueryClient({
   },
   mutationCache: new MutationCache({
     onError: (error, _variables, _context, mutation) => {
-      if (mutation.meta?.silent) return
+      if (mutation.meta?.silent || mutation.options.onError) return
       const msg = (error as Error)?.message || 'Something went wrong'
       // Swallow 401s — auth client already redirects
       if (/unauthorized|401/i.test(msg)) return

@@ -724,6 +724,8 @@ const FIXTURE_CUSTOMERS = [
     notifyChannel: 'both',
     totalOrders: 3,
     lifetimeValue: 184500,
+    lifetimeValueByCurrency: [{ currency: 'USD', total: 184500 }],
+    lifetimeCurrency: 'USD',
     lastOrderAt: '2026-08-24T09:00:00Z',
     notes: null,
     tags: null,
@@ -746,6 +748,8 @@ const FIXTURE_CUSTOMERS = [
     notifyChannel: 'email',
     totalOrders: 1,
     lifetimeValue: 20000,
+    lifetimeValueByCurrency: [{ currency: 'EUR', total: 20000 }],
+    lifetimeCurrency: 'EUR',
     lastOrderAt: '2026-09-01T10:30:00Z',
     notes: null,
     tags: null,
@@ -1058,6 +1062,8 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
             defaultUnit: 'box',
             sellCurrency: 'USD',
           },
+          currency: 'USD',
+          unit: 'box',
           lineCount: 6,
           quantity: 940,
           revenue: 1128000,
@@ -1071,6 +1077,8 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
             defaultUnit: 'box',
             sellCurrency: 'USD',
           },
+          currency: 'USD',
+          unit: 'box',
           lineCount: 4,
           quantity: 610,
           revenue: 793000,
@@ -1084,6 +1092,8 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
             defaultUnit: 'box',
             sellCurrency: 'USD',
           },
+          currency: 'USD',
+          unit: 'box',
           lineCount: 3,
           quantity: 300,
           revenue: 405000,
@@ -1368,18 +1378,32 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
         { status: 'confirmed', _count: { id: 1 }, _sum: { total: 20000 } },
         { status: 'shipped', _count: { id: 1 }, _sum: { total: 62800 } },
       ],
-      totalRevenue: 82800,
+      totalRevenue: null,
+      revenueByCurrency: [
+        { currency: 'EUR', total: 20000 },
+        { currency: 'USD', total: 62800 },
+      ],
       orderCount: 2,
       openShipments: 1,
     },
   ],
-  [/\/orders\/\d+$/, FIXTURE_ORDERS[0]],
+  [
+    /\/orders\/\d+$/,
+    (url: string) =>
+      FIXTURE_ORDERS.find((order) => order.id === Number(url.split('/').pop())) ||
+      FIXTURE_ORDERS[0],
+  ],
   [/\/orders/, { data: FIXTURE_ORDERS, total: 2, page: 1, pages: 1 }],
   [
     /\/customers\/stats/,
     {
       customerCount: 2,
-      lifetimeValue: 204500,
+      lifetimeValue: null,
+      lifetimeValueByCurrency: [
+        { currency: 'EUR', total: 20000 },
+        { currency: 'USD', total: 184500 },
+      ],
+      topCustomersByCurrency: [],
       repeatCustomers: 1,
       topCustomers: [
         {
@@ -1421,33 +1445,77 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
   [/\/customers/, { data: FIXTURE_CUSTOMERS, total: 2, page: 1, pages: 1 }],
   [
     /\/revenue\/summary/,
-    {
-      months: [
-        { month: '2026-06', total: 41000 },
-        { month: '2026-07', total: 58000 },
-        { month: '2026-08', total: 62800 },
-        { month: '2026-09', total: 20000 },
-      ],
-      byCountry: [
-        { country: 'United States Of America', total: 62800 },
-        { country: 'Spain', total: 20000 },
-      ],
-      bookedTotal: 181800,
-      orderCount: 6,
-      invoiced: 82800,
-      collected: 31400,
-      outstanding: 51400,
-      unpaidInvoices: [
-        {
-          id: 1,
-          number: 'INV2627-0001',
-          total: 62800,
-          amountPaid: 31400,
-          dueAt: '2026-09-08T00:00:00Z',
-          currency: 'USD',
-          order: { id: 1, orderNumber: 'SO2627-0001', customerName: 'Dana Whitaker' },
+    (url: string) => {
+      const currency = new URL(url, location.origin).searchParams.get('currency') || ''
+      const summary = {
+        currency: null,
+        byCurrency: [
+          {
+            currency: 'EUR',
+            months: [{ month: '2026-09', total: 20000 }],
+            byCountry: [{ country: 'Spain', total: 20000 }],
+            bookedTotal: 20000,
+            orderCount: 1,
+            invoiced: 20000,
+            collected: 0,
+            outstanding: 20000,
+          },
+          {
+            currency: 'USD',
+            months: [
+              { month: '2026-06', total: 41000 },
+              { month: '2026-07', total: 58000 },
+              { month: '2026-08', total: 62800 },
+            ],
+            byCountry: [{ country: 'United States Of America', total: 161800 }],
+            bookedTotal: 161800,
+            orderCount: 5,
+            invoiced: 62800,
+            collected: 31400,
+            outstanding: 31400,
+          },
+        ],
+        period: {
+          since: '2025-10-24T00:00:00Z',
+          timezone: 'UTC',
+          orderDateBasis: 'createdAt',
+          invoiceScope: 'lifetime',
         },
-      ],
+        unpaidInvoiceCount: 1,
+        invoicePage: 1,
+        invoicePages: 1,
+        months: [],
+        byCountry: [],
+        bookedTotal: null,
+        orderCount: 6,
+        invoiced: null,
+        collected: null,
+        outstanding: null,
+        unpaidInvoices: [
+          {
+            id: 2,
+            number: 'INV2627-0002',
+            total: 20000,
+            amountPaid: 0,
+            dueAt: '2026-10-01T00:00:00Z',
+            currency: 'EUR',
+            order: { id: 2, orderNumber: 'SO2627-0002', customerName: 'Lucía Ortega' },
+          },
+          {
+            id: 1,
+            number: 'INV2627-0001',
+            total: 62800,
+            amountPaid: 31400,
+            dueAt: '2026-09-08T00:00:00Z',
+            currency: 'USD',
+            order: { id: 1, orderNumber: 'SO2627-0001', customerName: 'Dana Whitaker' },
+          },
+        ],
+      }
+      const unpaidInvoices = summary.unpaidInvoices.filter(
+        (invoice) => !currency || invoice.currency === currency,
+      )
+      return { ...summary, unpaidInvoices, unpaidInvoiceCount: unpaidInvoices.length }
     },
   ],
   [/\/system\/status/, { connectedAccounts: 2, enabledAccounts: 2 }],
@@ -2024,6 +2092,23 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
       return found ? { ...found, assignedTo: { id: 3, name: 'Priya Sharma' } } : FIXTURE_LEADS[0]
     },
   ],
+  [
+    /\/activity\/records/,
+    (url: string) => {
+      const params = new URL(url, location.origin).searchParams
+      const items = FIXTURE_NOTIFICATIONS.filter(
+        (item) => !params.get('type') || params.get('type') === item.type,
+      )
+      const page = Math.max(1, Number(params.get('page')) || 1)
+      return {
+        items: items.slice((page - 1) * 50, page * 50),
+        total: items.length,
+        page,
+        pages: Math.ceil(items.length / 50),
+        types: [...new Set(FIXTURE_NOTIFICATIONS.map((item) => item.type))],
+      }
+    },
+  ],
   [/\/stats\/activity/, []],
   [
     /\/integrations\/mcp$/,
@@ -2259,7 +2344,7 @@ export function installFixtureFetch() {
     if (mobileSales) return mobileSales
     const connector = handleConnectorRequest(url, init)
     if (connector) return connector
-    const inbox = await handleInboxRequest(url, init)
+    const inbox = await handleInboxRequest(url, init, FIXTURE_LEADS)
     if (inbox) return inbox
 
     const method = (init?.method || 'GET').toUpperCase()

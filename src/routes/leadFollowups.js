@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import prisma from '../utils/prismaClient.js';
 import { requireRole } from '../auth/index.js';
+import { memberAssignmentWhere } from '../utils/workspaceMember.js';
+import { taskQueueWhere } from '../utils/taskQueue.js';
 
 const router = Router();
 const positiveId = (value) => /^\d+$/.test(value) && Number.isSafeInteger(Number(value)) && Number(value) > 0;
@@ -98,19 +100,25 @@ router.get('/tasks', async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
     const showDone = req.query.done === 'true';
-    const where = showDone ? {} : { done: false };
-    const [tasks, total, overdueCount] = await Promise.all([
+    if (req.query.scope && !['mine', 'workspace'].includes(req.query.scope)) return res.status(400).json({ error: 'Choose Mine or Workspace tasks.' });
+    const ownership = req.query.scope === 'mine' ? { lead: memberAssignmentWhere(req.user) } : {};
+    const where = { AND: [taskQueueWhere({ done: showDone, due: req.query.due, now }), ownership] };
+    const [tasks, total, overdueCount, pendingCount] = await Promise.all([
       prisma.leadTask.findMany({ where, orderBy: [{ dueAt: { sort: 'asc', nulls: 'last' } }, { createdAt: 'asc' }, { id: 'asc' }], skip: (page - 1) * limit, take: limit }),
       prisma.leadTask.count({ where }),
-      prisma.leadTask.count({ where: { done: false, dueAt: { lt: now } } }),
+      prisma.leadTask.count({ where: { AND: [{ done: false, dueAt: { lt: now } }, ownership] } }),
+      prisma.leadTask.count({ where: { AND: [{ done: false }, ownership] } }),
     ]);
     // Attach lead name
     const leadIds = [...new Set(tasks.map((t) => t.leadId))];
     const leads = await prisma.lead.findMany({ where: { id: { in: leadIds } }, select: { id: true, name: true } });
     const leadMap = Object.fromEntries(leads.map((l) => [l.id, l.name]));
     const enriched = tasks.map((t) => ({ ...t, leadName: leadMap[t.leadId] || '—', overdue: !t.done && Boolean(t.dueAt && t.dueAt < now) }));
-    res.json({ tasks: enriched, overdueCount, total, page, pages: Math.ceil(total / limit) });
-  } catch (e) { handleError(res, e); }
+    res.json({ tasks: enriched, overdueCount, pendingCount, total, page, pages: Math.ceil(total / limit) });
+  } catch (e) {
+    if (e.statusCode) return res.status(e.statusCode).json({ error: e.message });
+    handleError(res, e);
+  }
 });
 
 

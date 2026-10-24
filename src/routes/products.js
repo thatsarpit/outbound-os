@@ -1,6 +1,7 @@
 import express from 'express';
 import prisma from '../utils/prismaClient.js';
 import { requireRole } from '../auth/index.js';
+import { productCurrencyPerformance } from '../utils/moneyGroups.js';
 
 /**
  * The product catalogue.
@@ -53,35 +54,19 @@ router.get('/products', requireRole('agent'), async (req, res) => {
  */
 router.get('/products/performance', requireRole('agent'), async (_req, res) => {
   try {
-    const grouped = await prisma.salesOrderItem.groupBy({
-      by: ['productId'],
+    const lines = await prisma.salesOrderItem.findMany({
       where: { productId: { not: null }, order: { status: { notIn: ['draft', 'cancelled'] } } },
-      _sum: { quantity: true, lineTotal: true, procurementTotal: true },
-      _count: { id: true },
+      select: { productId: true, quantity: true, unit: true, lineTotal: true, procurementTotal: true,
+        order: { select: { currency: true } } },
     });
     const products = await prisma.product.findMany({
-      where: { id: { in: grouped.map((g) => g.productId) } },
+      where: { id: { in: [...new Set(lines.map(line => line.productId))] } },
       select: { id: true, name: true, strength: true, defaultUnit: true, sellCurrency: true },
     });
-    const byId = Object.fromEntries(products.map((p) => [p.id, p]));
-
-    const rows = grouped
-      .map((g) => {
-        const revenue = g._sum.lineTotal || 0;
-        const cost = g._sum.procurementTotal || 0;
-        return {
-          product: byId[g.productId] || null,
-          lineCount: g._count.id,
-          quantity: g._sum.quantity || 0,
-          revenue,
-          costInr: cost,
-        };
-      })
-      .filter((r) => r.product)
-      .sort((a, b) => b.revenue - a.revenue);
+    const rows = productCurrencyPerformance(lines, products);
 
     // Lines that never got linked, so the totals above can be read honestly.
-    const unlinked = await prisma.salesOrderItem.count({ where: { productId: null } });
+    const unlinked = await prisma.salesOrderItem.count({ where: { productId: null, order: { status: { notIn: ['draft', 'cancelled'] } } } });
     res.json({ data: rows, unlinkedLines: unlinked });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

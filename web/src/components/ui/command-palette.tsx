@@ -9,12 +9,18 @@ import {
   Loader2,
   Megaphone,
   Users,
+  Bell,
+  ShieldCheck,
+  UserRound,
+  Upload,
 } from 'lucide-react'
 import { leadsApi } from '@/api/endpoints/leads'
 import { campaignsApi } from '@/api/endpoints/campaigns'
 import { useAuthStore } from '@/stores/auth-store'
 import { cn } from '@/lib/utils'
 import { NAVIGATION_ITEMS } from '@/lib/navigation'
+import { INTEGRATION_TABS } from '@/pages/integrations/integrations-nav'
+import { SETTINGS_SECTIONS } from '@/pages/settings/settings-nav'
 
 type PaletteItem = {
   id: string
@@ -59,18 +65,18 @@ export function CommandPalette({
   const { data: leadHits, isFetching: loadingLeads } = useQuery({
     queryKey: ['palette-leads', query],
     queryFn: () => leadsApi.getLeads({ search: query, limit: 6 }),
-    enabled: open && query.trim().length >= 2,
+    enabled: open && hasCapability('page.leads') && query.trim().length >= 2,
     staleTime: 10_000,
   })
 
-  // Live search — campaigns (filter client-side for small volume)
+  // Search the full campaign collection rather than the first loaded page.
   const { data: campaignList } = useQuery({
-    queryKey: ['palette-campaigns'],
+    queryKey: ['palette-campaigns', query.trim()],
     queryFn: async () => {
-      const res = await campaignsApi.list({ limit: 50 })
+      const res = await campaignsApi.list({ limit: 5, search: query.trim() })
       return Array.isArray(res?.campaigns) ? res.campaigns : []
     },
-    enabled: open,
+    enabled: open && hasCapability('page.campaigns') && query.trim().length >= 2,
     staleTime: 30_000,
   })
 
@@ -84,13 +90,98 @@ export function CommandPalette({
         label: `Go to ${r.label}`,
         group: 'Navigate',
         icon: r.icon,
-        keywords: [r.label.toLowerCase(), r.to],
+        keywords: [
+          r.label.toLowerCase(),
+          r.to,
+          ...(r.to === '/tasks'
+            ? ['follow-ups', 'followups', 'due', 'overdue', 'next action']
+            : []),
+        ],
         run: () => {
           navigate(r.to)
           onClose()
         },
       })
     })
+
+    if (hasCapability('page.account')) {
+      ;[
+        {
+          route: '/account#profile',
+          label: 'Profile',
+          hint: 'Your name, photo and verified email',
+          icon: UserRound,
+          keywords: ['account', 'personal settings', 'avatar'],
+        },
+        {
+          route: '/account#security',
+          label: 'Sign-in & security',
+          hint: 'Login methods and active sessions',
+          icon: ShieldCheck,
+          keywords: ['account', 'password', 'sessions', 'passkeys', 'google sign in'],
+        },
+        {
+          route: '/account#notifications',
+          label: 'Notification devices',
+          hint: 'Push alerts and subscribed devices',
+          icon: Bell,
+          keywords: ['account', 'iphone', 'push', 'notifications', 'phone alerts'],
+        },
+      ].forEach((item) =>
+        list.push({
+          id: `nav:${item.route}`,
+          label: `Go to ${item.label}`,
+          hint: item.hint,
+          group: 'Navigate',
+          icon: item.icon,
+          keywords: item.keywords,
+          run: () => {
+            navigate(item.route)
+            onClose()
+          },
+        }),
+      )
+    }
+
+    if (hasCapability('page.integrations'))
+      INTEGRATION_TABS.filter((tab) => tab.id !== 'all').forEach((tab) =>
+        list.push({
+          id: `nav:${tab.to}`,
+          label: `Go to ${tab.label} integration`,
+          hint: tab.description,
+          group: 'Navigate',
+          icon: tab.icon,
+          keywords: [
+            tab.id,
+            'connect',
+            'connection',
+            ...(tab.id === 'email'
+              ? ['gmail', 'outlook', 'brevo', 'smtp', 'imap', 'receiving']
+              : []),
+            ...(tab.id === 'mcp' ? ['codex', 'chatgpt', 'claude', 'ai authorization'] : []),
+          ],
+          run: () => {
+            navigate(tab.to)
+            onClose()
+          },
+        }),
+      )
+
+    if (hasCapability('page.settings'))
+      SETTINGS_SECTIONS.forEach((section) =>
+        list.push({
+          id: `nav:${section.to}`,
+          label: `Go to ${section.label} settings`,
+          hint: section.description,
+          group: 'Navigate',
+          icon: section.icon,
+          keywords: [section.id, 'configure', 'settings'],
+          run: () => {
+            navigate(section.to)
+            onClose()
+          },
+        }),
+      )
 
     // Quick actions
     if (hasCapability('page.leads') && onCreateLead) {
@@ -107,57 +198,65 @@ export function CommandPalette({
         },
       })
     }
-    if (hasCapability('page.campaigns') && onCreateCampaign) {
+    if (hasCapability('page.import'))
+      list.push({
+        id: 'action:import-leads',
+        label: 'Import leads',
+        hint: 'Review and import a CSV file',
+        group: 'Actions',
+        icon: Upload,
+        keywords: ['add contacts', 'upload csv', 'new leads'],
+        run: () => {
+          navigate('/import')
+          onClose()
+        },
+      })
+    if (hasCapability('page.campaigns')) {
       list.push({
         id: 'action:new-campaign',
-        label: 'New Campaign',
-        hint: 'Launch outreach sequence',
+        label: 'Prepare campaign',
+        hint: 'Choose a channel, sender and audience before launch',
         group: 'Actions',
         icon: Megaphone,
         keywords: ['create campaign', 'new sequence'],
         run: () => {
-          onCreateCampaign()
+          if (onCreateCampaign) onCreateCampaign()
+          else navigate('/campaigns?create=1')
           onClose()
         },
       })
     }
     // Lead hits
-    leadHits?.data?.forEach((lead) => {
-      list.push({
-        id: `lead:${lead.id}`,
-        label: lead.name || `Lead #${lead.id}`,
-        hint: [lead.company, lead.mobile].filter(Boolean).join(' • '),
-        group: 'Leads',
-        icon: Users,
-        run: () => {
-          navigate(`/leads?leadId=${lead.id}`)
-          onClose()
-        },
-      })
-    })
-
-    // Campaign hits (client filter)
-    if (query.trim()) {
-      const q = query.toLowerCase()
-      ;(campaignList ?? [])
-        .filter(
-          (c) =>
-            c.name.toLowerCase().includes(q) || (c.description ?? '').toLowerCase().includes(q),
-        )
-        .slice(0, 5)
-        .forEach((c) => {
-          list.push({
-            id: `campaign:${c.id}`,
-            label: c.name,
-            hint: c.description ?? undefined,
-            group: 'Campaigns',
-            icon: Megaphone,
-            run: () => {
-              navigate(`/campaigns?id=${c.id}`)
-              onClose()
-            },
-          })
+    if (hasCapability('page.leads'))
+      leadHits?.data?.forEach((lead) => {
+        list.push({
+          id: `lead:${lead.id}`,
+          label: lead.name || `Lead #${lead.id}`,
+          hint: [lead.company, lead.mobile].filter(Boolean).join(' • '),
+          group: 'Leads',
+          icon: Users,
+          run: () => {
+            navigate(`/leads?leadId=${lead.id}`)
+            onClose()
+          },
         })
+      })
+
+    // Campaign hits come from the server-side search.
+    if (hasCapability('page.campaigns') && query.trim()) {
+      ;(campaignList ?? []).slice(0, 5).forEach((c) => {
+        list.push({
+          id: `campaign:${c.id}`,
+          label: c.name,
+          hint: c.description ?? undefined,
+          group: 'Campaigns',
+          icon: Megaphone,
+          run: () => {
+            navigate(`/campaigns?id=${c.id}`)
+            onClose()
+          },
+        })
+      })
     }
 
     return list
@@ -204,6 +303,13 @@ export function CommandPalette({
 
   useEffect(() => {
     if (!open) return
+    listRef.current
+      ?.querySelector(`[data-command-index="${activeIndex}"]`)
+      ?.scrollIntoView({ block: 'nearest' })
+  }, [activeIndex, open])
+
+  useEffect(() => {
+    if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         onClose()
@@ -211,7 +317,7 @@ export function CommandPalette({
       }
       if (e.key === 'ArrowDown') {
         e.preventDefault()
-        setActiveIndex((i) => Math.min(flatOrder.length - 1, i + 1))
+        setActiveIndex((i) => Math.max(0, Math.min(flatOrder.length - 1, i + 1)))
       } else if (e.key === 'ArrowUp') {
         e.preventDefault()
         setActiveIndex((i) => Math.max(0, i - 1))
@@ -285,6 +391,7 @@ export function CommandPalette({
                       <button
                         key={item.id}
                         type="button"
+                        data-command-index={idx}
                         onMouseEnter={() => setActiveIndex(idx)}
                         onClick={item.run}
                         className={cn(

@@ -19,6 +19,20 @@ const invoke = (name, args) =>
   tools.get(name).handler(tools.get(name).schema.parse(args));
 const payload = (result) => JSON.parse(result.content[0].text);
 
+test('team reads accept the real API array, preserve legacy compatibility and omit disabled members', async (t) => {
+  const enabled = { id: 1, name: 'Fixture member', enabled: true };
+  const disabled = { id: 2, name: 'Disabled fixture member', enabled: false };
+  for (const response of [[enabled, disabled], { users: [enabled, disabled] }]) {
+    const mock = t.mock.method(globalThis, 'fetch', async () => Response.json(response));
+    assert.deepEqual(payload(await invoke('list_users', {})), [enabled]);
+    mock.mock.restore();
+  }
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ unexpected: true }));
+  const invalid = await invoke('list_users', {});
+  assert.equal(invalid.isError, true);
+  assert.match(invalid.content[0].text, /team response was incomplete/);
+});
+
 test('message history preserves failure, delivery and account facts without leaking unlisted backend fields', async (t) => {
   t.mock.method(globalThis, 'fetch', async () =>
     Response.json([

@@ -4,6 +4,8 @@ import type { SalesOrder } from './sales'
 /** Customers, revenue and the updates customers receive. Money is minor units. */
 
 export type NotifyChannel = 'email' | 'whatsapp' | 'both' | 'none'
+export type CurrencyTotal = { currency: string; total: number }
+
 export type CustomerStatus = 'active' | 'dormant' | 'blocked'
 
 export interface Customer {
@@ -22,7 +24,9 @@ export interface Customer {
   currency: string
   notifyChannel: NotifyChannel
   totalOrders: number
-  lifetimeValue: number
+  lifetimeValue: number | null
+  lifetimeValueByCurrency: CurrencyTotal[]
+  lifetimeCurrency?: string | null
   lastOrderAt: string | null
   notes: string | null
   tags: string | null
@@ -50,7 +54,8 @@ export interface OrderNotification {
 
 export interface CustomerStats {
   customerCount: number
-  lifetimeValue: number
+  lifetimeValue: number | null
+  lifetimeValueByCurrency: CurrencyTotal[]
   repeatCustomers: number
   topCustomers: Array<{
     id: number
@@ -60,9 +65,11 @@ export interface CustomerStats {
     totalOrders: number
     currency: string
   }>
+  topCustomersByCurrency: Array<{ currency: string; customers: CustomerStats['topCustomers'] }>
 }
 
-export interface RevenueSummary {
+export interface RevenueCurrencySummary {
+  currency: string
   months: Array<{ month: string; total: number }>
   byCountry: Array<{ country: string; total: number }>
   bookedTotal: number
@@ -70,6 +77,22 @@ export interface RevenueSummary {
   invoiced: number
   collected: number
   outstanding: number
+}
+
+export interface RevenueSummary {
+  byCurrency: RevenueCurrencySummary[]
+  currency: string | null
+  months: Array<{ month: string; total: number }>
+  byCountry: Array<{ country: string; total: number }>
+  bookedTotal: number | null
+  orderCount: number
+  invoiced: number | null
+  collected: number | null
+  outstanding: number | null
+  period: { since: string; timezone: string; orderDateBasis: 'createdAt'; invoiceScope: 'lifetime' }
+  unpaidInvoiceCount: number
+  invoicePage: number
+  invoicePages: number
   unpaidInvoices: Array<{
     id: number
     number: string
@@ -102,7 +125,10 @@ export const crmApi = {
   deleteCustomer: (id: number) => api.delete(`/customers/${id}`),
   convertLead: (leadId: number) => api.post<Customer>(`/leads/${leadId}/convert`, {}),
 
-  getRevenue: (months = 12) => api.get<RevenueSummary>(`/revenue/summary?months=${months}`),
+  getRevenue: (months = 12, currency = '', invoicePage = 1) =>
+    api.get<RevenueSummary>(
+      `/revenue/summary?months=${months}&currency=${encodeURIComponent(currency)}&invoicePage=${invoicePage}`,
+    ),
 
   notifyOrder: (orderId: number, event: string, ctx: Record<string, unknown> = {}) =>
     api.post<{ results: Array<{ channel: string; status: string; error?: string }> }>(

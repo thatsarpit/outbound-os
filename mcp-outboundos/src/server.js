@@ -7,12 +7,18 @@ import log from './logger.js';
 import { registerAllTools } from './registerTools.js';
 import { mountOAuth, verifyOAuthToken } from './oauth.js';
 import { requestOrigin } from './requestOrigin.js';
+import { mountPersonalOAuth, personalControl, personalOAuthConfig, personalReadToolAllowed } from './personalOAuth.js';
+import { mcpRequestContext } from './client.js';
 
 // ── Config ──
 const PORT = parseInt(process.env.PORT) || 3002;
 const MCP_BEARER_TOKEN = process.env.MCP_BEARER_TOKEN;
+const PERSONAL = personalOAuthConfig();
+if (process.env.MCP_AUTH_MODE && !['legacy', 'personal'].includes(process.env.MCP_AUTH_MODE)) {
+  throw new Error('MCP_AUTH_MODE must be legacy or personal.');
+}
 
-if (!MCP_BEARER_TOKEN) {
+if (!MCP_BEARER_TOKEN && (!PERSONAL || PERSONAL.legacyCompat)) {
   log.error('MCP_BEARER_TOKEN is required. Set it in .env');
   process.exit(1);
 }
@@ -52,7 +58,10 @@ app.get('/healthz', (req, res) => {
 // Limit unauthenticated discovery, registration, token attempts and bearer
 // checks as well as successful tool requests.
 app.use(rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }));
-mountOAuth(app);
+if (PERSONAL) {
+  mountPersonalOAuth(app, PERSONAL);
+  if (PERSONAL.legacyCompat) mountOAuth(app, { tokensOnly: true });
+} else mountOAuth(app);
 
 // ── Bearer auth middleware ──
 // Accepts either the static MCP_BEARER_TOKEN or an OAuth access token issued
@@ -61,18 +70,28 @@ mountOAuth(app);
 function unauthorized(req, res, message) {
   res.set(
     'WWW-Authenticate',
-    `Bearer resource_metadata="${requestOrigin(req)}/.well-known/oauth-protected-resource"`
+    `Bearer resource_metadata="${PERSONAL?.issuer || requestOrigin(req)}/.well-known/oauth-protected-resource"${PERSONAL ? ', scope="mcp:read"' : ''}`
   );
   return res.status(401).json({ error: message });
 }
 
-function requireBearer(req, res, next) {
+async function requireBearer(req, res, next) {
   const auth = req.headers.authorization;
   if (!auth || !auth.startsWith('Bearer ')) {
     return unauthorized(req, res, 'Missing Authorization: Bearer <token>');
   }
   const token = auth.slice(7);
-  if (token === MCP_BEARER_TOKEN || verifyOAuthToken(token)) {
+  if (PERSONAL && token.startsWith('mcp_personal_')) {
+    try {
+      await personalControl('inspect', { token }, PERSONAL);
+      req.personalMcpToken = token;
+      return next();
+    } catch (error) {
+      if (!error.status || error.status >= 500) return res.status(503).json({ error: 'Authorization service unavailable.' });
+      return unauthorized(req, res, 'Connection expired or revoked');
+    }
+  }
+  if ((!PERSONAL || PERSONAL.legacyCompat) && (token === MCP_BEARER_TOKEN || verifyOAuthToken(token))) {
     return next();
   }
   return unauthorized(req, res, 'Invalid bearer token');
@@ -80,19 +99,27 @@ function requireBearer(req, res, next) {
 
 // ── MCP transport map (stateless — one transport per request) ──
 
-function createMcpServer() {
+function createMcpServer(personalToken) {
   const server = new McpServer({
     name: 'outbound-os',
     version: '1.0.0',
   });
-  registerAllTools(server);
+  if (personalToken) {
+    registerAllTools({
+      tool(name, ...args) {
+        if (!personalReadToolAllowed(name)) return;
+        const handler = args.pop();
+        server.tool(name, ...args, (...handlerArgs) => mcpRequestContext.run({ personalToken, tool: name }, () => handler(...handlerArgs)));
+      },
+    });
+  } else registerAllTools(server);
   return server;
 }
 
 // POST /mcp — main MCP endpoint (Streamable HTTP)
 app.post('/mcp', requireBearer, async (req, res) => {
   try {
-    const server = createMcpServer();
+    const server = createMcpServer(req.personalMcpToken);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,  // stateless mode
     });

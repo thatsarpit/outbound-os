@@ -1,33 +1,28 @@
 # AI agents & MCP setup
 
 Open **Integrations → AI agents & MCP** with a manager/admin dashboard role.
-The page has the configured URL, a server check, instructions for ChatGPT, Codex
-and other clients, and a read-only verification prompt.
+Choose a provider and client, copy the setup prompt or expand manual setup, then
+verify with the separate read-only test prompt. ChatGPT and Codex appear under
+OpenAI but create independent connections.
 
-Set `MCP_PUBLIC_URL=https://mcp.your-domain.example/mcp` on the API deployment to
-advertise an existing HTTPS MCP service. This setting does not start that service
-or change its authentication. Run the MCP container with the matching API service
-credential and its own client/OAuth credentials as described in the MCP guide.
+The server panel reports bounded HTTPS health/OAuth discovery. It does not prove
+that a client is installed, authorized or able to use tools. Public connection
+details contain no service or client credentials. The connected-app list uses
+actual personal grants and recorded tool activity, never inferred sessions.
 
-The page distinguishes three things:
+Existing deployments remain in legacy shared-integration mode. The page labels
+its separate password and shared administrator authority truthfully; no personal
+owner is invented for old credentials. Personal authorization is an explicit
+opt-in release described in [Personal MCP authorization](mcp-personal-authorization.md).
+That first version uses existing dashboard sign-in, explicit administrator
+approval, read-only scope, personal grant inventory and immediate revocation.
 
-- Backend configuration: the API has a service credential. Its value is never shown.
-- Reachability and discovery: bounded unauthenticated GETs to the explicitly
-  configured MCP server. Requests do not follow redirects, accept arbitrary request
-  destinations, transmit secrets or send messages. OAuth discovery must advertise
-  PKCE S256 and same-origin authorization/token endpoints.
-- Client authorization: completed inside the AI client and the MCP authorization
-  page. A successful read-only tool call verifies the full route to the CRM.
-  A green server badge alone does not prove credentials or an AI session work.
+Set `MCP_PUBLIC_URL` to the canonical HTTPS `/mcp` endpoint. This setting alone
+starts no service and changes no authentication. OAuth discovery must advertise
+S256 PKCE and same-origin authorization/token endpoints. Reachability checks do
+not follow redirects, transmit credentials or send messages.
 
-The current MCP uses shared integration access rather than personal dashboard
-roles. Do not treat it as a per-agent read-only token or role inheritance. Configure
-client tool approvals before authorizing changes. This page does not issue
-credentials, enumerate client sessions or revoke them; those require separate
-server-side identity/session work.
-
-Official setup references (checked for this release):
-[Codex MCP](https://learn.chatgpt.com/docs/extend/mcp) and
-[ChatGPT MCP authentication](https://developers.openai.com/plugins/build/auth).
-Client screens and workspace policy may differ. Codex's local MCP configuration
-and ChatGPT web plugin installation are distinct setup steps.
+Official references: [Codex MCP](https://learn.chatgpt.com/docs/extend/mcp) and
+[ChatGPT custom MCP setup](https://developers.openai.com/api/docs/guides/custom-mcp-server).
+Client labels and workspace policies vary. A setup prompt guides the user; it
+does not guarantee installation or bypass personal authorization.

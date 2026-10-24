@@ -78,7 +78,7 @@ export const inboxApi = {
     ),
 
   assignSelf: (leadId: number) =>
-    api.post<{ id: number; assignedToId: number; threadState: string }>(
+    api.post<{ id: number; assignedToId: number | null; threadState: string }>(
       `/inbox/threads/${leadId}/assign-self`,
     ),
 

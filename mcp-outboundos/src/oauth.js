@@ -153,11 +153,14 @@ export function verifyOAuthToken(token) {
 }
 
 // ── Wire the OAuth routes onto the Express app ──
-export function mountOAuth(app) {
+export function mountOAuth(app, { tokensOnly = false } = {}) {
   if (!OAUTH_PASSWORD) {
     log.warn('oauth: no OAUTH_PASSWORD or MCP_BEARER_TOKEN set — authorize endpoint will reject all logins');
   }
 
+  // In personal mode only explicit compatibility refreshes reach this module.
+  // New registrations and authorization always use dashboard consent.
+  if (!tokensOnly) {
   // RFC 9728 — Protected Resource Metadata
   app.get('/.well-known/oauth-protected-resource', (req, res) => {
     const base = requestOrigin(req);
@@ -297,6 +300,8 @@ export function mountOAuth(app) {
     log.info(`oauth: authorized device, issued code for redirect ${url.origin}`);
     res.redirect(url.toString());
   });
+
+  }
 
   // Token endpoint — authorization_code + refresh_token grants.
   app.post('/oauth/token', (req, res) => {

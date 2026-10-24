@@ -1,6 +1,6 @@
 import { queryClient } from '@/lib/query-client'
 import { notificationActions } from '@/stores/notification-store'
-import type { InboxChannel, InboxMessage, InboxSenderAccount } from '@/api/types'
+import type { InboxChannel, InboxMessage, InboxSenderAccount, Lead } from '@/api/types'
 
 /**
  * A working inbox for the demo, held in memory.
@@ -28,6 +28,8 @@ type Thread = {
   subject: string | null
   senderAccountId: number
   assignedToId: number | null
+  assignedMemberKey?: string | null
+  assignedMember?: { key: string; name: string } | null
   unread: boolean
   replyNeeded: boolean
   threadState: 'needs_reply' | 'assigned' | 'resolved'
@@ -459,9 +461,66 @@ async function readBody(init?: RequestInit): Promise<Record<string, unknown>> {
 export async function handleInboxRequest(
   url: string,
   init?: RequestInit,
+  leads: Array<
+    Pick<Lead, 'id' | 'name'> & Partial<Pick<Lead, 'assignedToId' | 'assignedMemberKey'>>
+  > = [],
 ): Promise<Response | null> {
   const method = (init?.method || 'GET').toUpperCase()
   const path = new URL(url, window.location.origin)
+
+  const members = [
+    {
+      key: 'local:local:1',
+      name: 'Maya Collins',
+      provider: 'local',
+      externalId: '1',
+      orgId: 'local',
+      role: 'admin',
+      email: 'maya@acme.example',
+    },
+    {
+      key: 'local:local:3',
+      name: 'Sample teammate',
+      provider: 'local',
+      externalId: '3',
+      orgId: 'local',
+      role: 'agent',
+      email: 'teammate@acme.example',
+    },
+  ]
+  const assign = (leadId: number, key: string | null) => {
+    const member = members.find((item) => item.key === key) || null
+    const ownership = {
+      assignedMemberKey: member?.key || null,
+      assignedMember: member,
+      assignedToId: member ? Number(member.externalId) : null,
+    }
+    const lead = leads.find((item) => item.id === leadId)
+    const thread = THREADS.find((item) => item.leadId === leadId)
+    if (lead) Object.assign(lead, ownership)
+    if (thread) {
+      Object.assign(thread, ownership)
+      thread.assignmentState = !member
+        ? 'unassigned'
+        : member.externalId === '1'
+          ? 'assigned_to_me'
+          : 'assigned'
+      if (!thread.replyNeeded && thread.threadState !== 'resolved') thread.threadState = 'assigned'
+      refresh(leadId)
+    }
+    return ownership
+  }
+  if (path.pathname === '/api/workspace/members') return json({ members })
+  if (path.pathname === '/api/email/receipts')
+    return json({ items: [], total: 0, page: 1, pages: 0, receiverEnabled: false })
+  const assignment = path.pathname.match(/^\/api\/leads\/(\d+)\/assign$/)
+  if (assignment && method === 'POST') {
+    const body = await readBody(init)
+    if (body.memberKey !== null && !members.some((item) => item.key === body.memberKey))
+      return json({ error: 'Choose a sample teammate' }, 400)
+    const id = Number(assignment[1])
+    return json({ id, ...assign(id, body.memberKey as string | null) })
+  }
 
   const media = path.pathname.match(/\/api\/messages\/(\d+)\/media$/)
   if (media) {
@@ -510,9 +569,7 @@ export async function handleInboxRequest(
     } else if (action === 'reopen') {
       thread.threadState = thread.assignmentState === 'unassigned' ? 'needs_reply' : 'assigned'
     } else if (action === 'assign-self') {
-      thread.assignedToId = 1
-      thread.assignmentState = 'assigned_to_me'
-      if (thread.threadState === 'needs_reply') thread.threadState = 'assigned'
+      assign(thread.leadId, 'local:local:1')
     } else if (action === 'read') {
       thread.unread = false
     }

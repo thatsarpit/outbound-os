@@ -32,6 +32,7 @@ const CustomersPage = lazy(() => import('@/pages/customers'))
 const RevenuePage = lazy(() => import('@/pages/revenue'))
 const AnalyticsPage = lazy(() => import('@/pages/analytics'))
 const PipelinePage = lazy(() => import('@/pages/pipeline'))
+const TasksPage = lazy(() => import('@/pages/tasks'))
 const TeamPage = lazy(() => import('@/pages/team'))
 const ActivityPage = lazy(() => import('@/pages/activity'))
 const NotFoundPage = lazy(() => import('@/pages/not-found'))
@@ -46,6 +47,7 @@ const TelegramIntegrationPage = lazy(() => import('@/pages/integrations/telegram
 const WebhooksIntegrationPage = lazy(() => import('@/pages/integrations/webhooks'))
 const SheetsIntegrationPage = lazy(() => import('@/pages/integrations/sheets'))
 const McpIntegrationPage = lazy(() => import('@/pages/integrations/mcp'))
+const McpAuthorizePage = lazy(() => import('@/pages/integrations/mcp-authorize'))
 const SettingsLayout = lazy(() => import('@/pages/settings/settings-layout'))
 const WorkspaceSettingsPage = lazy(() => import('@/pages/settings/workspace'))
 const WhatsAppSettingsPage = lazy(() => import('@/pages/settings/whatsapp'))
@@ -123,6 +125,7 @@ const PAGE_ROUTES: Array<{ path: string; element: React.ReactNode }> = [
   { path: 'customers', element: <CustomersPage /> },
   { path: 'revenue', element: <RevenuePage /> },
   { path: 'pipeline', element: <PipelinePage /> },
+  { path: 'tasks', element: <TasksPage /> },
   { path: 'analytics', element: <AnalyticsPage /> },
   { path: 'campaigns', element: <CampaignsPage /> },
   { path: 'templates', element: <TemplatesPage /> },
@@ -154,6 +157,7 @@ const configurationRoutes = () => (
       <Route path="webhooks" element={<WebhooksIntegrationPage />} />
       <Route path="sheets" element={<SheetsIntegrationPage />} />
       <Route path="mcp" element={<McpIntegrationPage />} />
+      <Route path="mcp/authorize" element={<McpAuthorizePage />} />
     </Route>
     <Route path="channels" element={<Navigate to="/integrations" replace />} />
     <Route path="settings" element={<SettingsLayout />}>

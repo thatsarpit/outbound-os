@@ -49,6 +49,8 @@ export interface ProductPerformanceRow {
     defaultUnit: string
     sellCurrency: string
   }
+  currency: string
+  unit: string
   lineCount: number
   quantity: number
   revenue: number

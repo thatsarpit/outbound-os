@@ -77,7 +77,12 @@ export function registerSystemTools(server) {
     async () => {
       try {
         const { data } = await get('/api/users');
-        return ok(data.users);
+        // The API returns an array. Accept the older envelope as well so a
+        // staggered API/MCP upgrade does not turn a successful read into an
+        // invalid MCP response containing undefined text.
+        const users = Array.isArray(data) ? data : data?.users;
+        if (!Array.isArray(users)) throw new Error('The team response was incomplete. Try again after checking the API version.');
+        return ok(users.filter(user => user.enabled !== false));
       } catch (e) { return err(e.message); }
     },
   );

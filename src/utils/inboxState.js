@@ -12,7 +12,7 @@ export function inboxThreadState({ lead, lastMessage, assignedToId }) {
   const messageAt = lastMessage ? new Date(lastMessage.createdAt).getTime() : null;
   if (resolvedAt !== null && (!isHumanReply(lastMessage) || messageAt <= resolvedAt)) return 'resolved';
   if (isHumanReply(lastMessage)) return 'needs_reply';
-  return assignedToId ? 'assigned' : 'unassigned';
+  return lead.assignedMemberKey || assignedToId ? 'assigned' : 'unassigned';
 }
 
 /** Unrendered campaign sources are not evidence of the provider's sent copy. */

@@ -14,8 +14,8 @@ import {
   Phone,
   Plus,
   Trash2,
-  User,
 } from 'lucide-react'
+import { LeadAssignment } from './lead-assignment'
 import { leadsApi } from '@/api/endpoints/leads'
 import { notesApi, type LeadNoteType } from '@/api/endpoints/notes'
 import { tasksApi } from '@/api/endpoints/tasks'
@@ -221,7 +221,12 @@ export function LeadContextPanel({
           </Row>
         )}
         {lead?.company && !thread.leadCompany && <Row icon={Building2}>{lead.company}</Row>}
-        <Row icon={User}>{lead?.assignedTo?.name || 'Unassigned'}</Row>
+        <LeadAssignment
+          leadId={leadId}
+          member={lead?.assignedMember || thread.assignedMember}
+          legacyId={lead?.assignedToId ?? thread.assignedToId}
+          legacyName={lead?.assignedTo?.name}
+        />
       </div>
 
       {/* Tasks */}

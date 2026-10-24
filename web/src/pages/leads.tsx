@@ -59,6 +59,9 @@ import {
   Pause,
   Play,
 } from 'lucide-react'
+import { useAuthStore } from '@/stores/auth-store'
+import { useOnlineStatus } from '@/hooks/use-online-status'
+import { ErrorState } from '@/components/ui/error-state'
 import { useShortcuts } from '@/hooks/use-shortcuts'
 
 const STATUS_OPTIONS = [
@@ -137,6 +140,10 @@ function leadStatusDot(status: string): string {
 
 export default function LeadsPage() {
   const queryClient = useQueryClient()
+  const { user, dashboardScope } = useAuthStore()
+  const online = useOnlineStatus()
+  const canEdit = Boolean(user && user.role !== 'viewer' && online)
+  const canManage = Boolean(user && ['admin', 'manager'].includes(user.role) && online)
   const [searchParams, setSearchParams] = useSearchParams()
   const [filters, setFilters] = useState<LeadFilters>({
     page: 1,
@@ -150,7 +157,8 @@ export default function LeadsPage() {
   /* Saved views: named filter presets. Operators repeat the same few filter
      combinations daily; rebuilding them by hand each time is the tax this
      removes. */
-  const [views, setViews] = useState<SavedView[]>(() => loadViews())
+  const [views, setViews] = useState<SavedView[]>(() => loadViews(dashboardScope))
+  useEffect(() => setViews(loadViews(dashboardScope)), [dashboardScope])
   const [savingView, setSavingView] = useState(false)
   const [newViewName, setNewViewName] = useState('')
 
@@ -158,7 +166,7 @@ export default function LeadsPage() {
 
   const persistViews = (next: SavedView[]) => {
     setViews(next)
-    saveViews(next)
+    saveViews(next, dashboardScope)
   }
 
   const applyView = (view: SavedView) => {
@@ -230,13 +238,21 @@ export default function LeadsPage() {
     staleTime: 300_000,
   })
 
-  const { data, isLoading } = useQuery({
+  const {
+    data,
+    isLoading,
+    error: leadsError,
+    refetch: refetchLeads,
+    isPlaceholderData,
+  } = useQuery({
     queryKey: ['leads', pooledFilters],
     queryFn: () => leadsApi.getLeads(pooledFilters),
     placeholderData: (prev) => prev,
   })
 
   const bulkMutation = useMutation({
+    networkMode: 'always',
+    retry: false,
     mutationFn: ({
       ids,
       action,
@@ -245,24 +261,36 @@ export default function LeadsPage() {
       ids: number[]
       action: string
       payload?: Record<string, unknown>
-    }) => leadsApi.bulkAction(ids, action, payload),
-    onSuccess: (_data, variables) => {
+    }) => {
+      if (!canManage) throw new Error('A manager must be online to change multiple leads.')
+      return leadsApi.bulkAction(ids, action, payload)
+    },
+    onSuccess: (result, variables) => {
       invalidateLeadSurfaceQueries(queryClient)
-      const n = variables.ids.length
+      if (!result || !Number.isInteger(result.updated))
+        return toast.error('The affected lead count could not be confirmed.')
+      const n = result.updated!
       const verb =
         variables.action === 'pause'
           ? 'paused'
           : variables.action === 'resume'
             ? 'resumed'
             : 'updated'
-      toast.success(`${n} lead${n === 1 ? '' : 's'} ${verb}`)
+      toast.success(
+        `${n} lead${n === 1 ? '' : 's'} ${verb}${variables.ids.length > n ? ` · ${variables.ids.length - n} unchanged or not found` : ''}`,
+      )
       setSelectedIds(new Set())
     },
     onError: (e: Error) => toast.error(`Bulk action failed: ${e.message}`),
   })
 
   const deleteLeadMutation = useMutation({
-    mutationFn: (lead: Lead) => leadsApi.deleteLead(lead.id),
+    networkMode: 'always',
+    retry: false,
+    mutationFn: (lead: Lead) => {
+      if (!canManage) throw new Error('A manager must be online to delete leads.')
+      return leadsApi.deleteLead(lead.id)
+    },
     onSuccess: (_, lead) => {
       invalidateLeadSurfaceQueries(queryClient)
       toast.success('Lead deleted')
@@ -273,8 +301,12 @@ export default function LeadsPage() {
   })
 
   const leadAutomationMutation = useMutation({
-    mutationFn: ({ leadId, nextStatus }: { leadId: number; nextStatus: Lead['status'] }) =>
-      leadsApi.updateLead(leadId, { status: nextStatus }),
+    networkMode: 'always',
+    retry: false,
+    mutationFn: ({ leadId, nextStatus }: { leadId: number; nextStatus: Lead['status'] }) => {
+      if (!canEdit) throw new Error('Reconnect with a sales account to change automation.')
+      return leadsApi.updateLead(leadId, { status: nextStatus })
+    },
     // Optimistically flip the lead's status in the cache so the UI updates
     // instantly. Roll back on error.
     onMutate: ({ leadId, nextStatus }) =>
@@ -321,6 +353,7 @@ export default function LeadsPage() {
   }
 
   const toggleLeadAutomation = (lead: Lead) => {
+    if (!canEdit) return
     const action = getLeadAutomationAction(lead.status)
     leadAutomationMutation.mutate({ leadId: lead.id, nextStatus: action.nextStatus })
   }
@@ -505,15 +538,17 @@ export default function LeadsPage() {
 
         return (
           <div className="flex items-center justify-end gap-1">
-            <AiOutreachButton
-              iconOnly
-              leadId={lead.id}
-              leadName={lead.name}
-              leadMobile={lead.mobile}
-              leadEmail={lead.email}
-              variant="ghost"
-              size="sm"
-            />
+            {canEdit && (
+              <AiOutreachButton
+                iconOnly
+                leadId={lead.id}
+                leadName={lead.name}
+                leadMobile={lead.mobile}
+                leadEmail={lead.email}
+                variant="ghost"
+                size="sm"
+              />
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
@@ -532,11 +567,18 @@ export default function LeadsPage() {
                   <Eye className="h-4 w-4" />
                   View details
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => toggleLeadAutomation(lead)} disabled={pending}>
+                <DropdownMenuItem
+                  onClick={() => toggleLeadAutomation(lead)}
+                  disabled={!canEdit || pending}
+                >
                   {action.isPaused ? <Play className="h-4 w-4" /> : <Pause className="h-4 w-4" />}
                   {action.label}
                 </DropdownMenuItem>
-                <DropdownMenuItem destructive onClick={() => setDeleteConfirmLead(lead)}>
+                <DropdownMenuItem
+                  destructive
+                  disabled={!canManage}
+                  onClick={() => setDeleteConfirmLead(lead)}
+                >
                   <Trash2 className="h-4 w-4" />
                   Delete
                 </DropdownMenuItem>
@@ -571,7 +613,7 @@ export default function LeadsPage() {
 
   const table = useReactTable({
     data: leads,
-    columns,
+    columns: canManage ? columns : columns.filter((column) => column.id !== 'select'),
     getCoreRowModel: getCoreRowModel(),
     manualPagination: true,
     pageCount: pages,
@@ -595,7 +637,7 @@ export default function LeadsPage() {
             <p className="mt-1 text-[13px] text-text-secondary">
               <span className="tabular-nums">{total.toLocaleString()}</span>{' '}
               {total === 1 ? 'lead' : 'leads'}
-              {selectedIds.size > 0 && (
+              {canManage && selectedIds.size > 0 && (
                 <>
                   {' · '}
                   <span className="tabular-nums text-text-primary">{selectedIds.size}</span>{' '}
@@ -659,7 +701,7 @@ export default function LeadsPage() {
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-64">
-                  <DropdownMenuLabel>Saved views</DropdownMenuLabel>
+                  <DropdownMenuLabel>Saved views · this browser</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   {views.length === 0 ? (
                     <p className="px-2 py-1.5 text-[12px] text-text-muted">
@@ -768,7 +810,7 @@ export default function LeadsPage() {
               </DropdownMenu>
             </div>
 
-            {selectedIds.size > 0 && (
+            {canManage && selectedIds.size > 0 && (
               <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-surface-raised px-3 py-2">
                 <span className="text-sm text-text-muted">{selectedIds.size} selected</span>
                 <button
@@ -880,11 +922,28 @@ export default function LeadsPage() {
         </div>
       )}
 
+      {leadsError && (
+        <ErrorState
+          compact
+          title="Could not refresh leads"
+          description={
+            data
+              ? 'The displayed results may be out of date. Retry before acting on this list.'
+              : 'Lead data is unavailable. This is not an empty workspace.'
+          }
+          onRetry={() => void refetchLeads()}
+        />
+      )}
+      {isPlaceholderData && (
+        <p role="status" className="text-xs text-text-muted">
+          Updating filters · previous results remain visible
+        </p>
+      )}
       {/* Table */}
       <div className="glass rounded-lg overflow-hidden">
         {isLoading ? (
           <SkeletonTable rows={10} className="border-0 rounded-none shadow-none" />
-        ) : leads.length === 0 ? (
+        ) : leadsError && !data ? null : leads.length === 0 ? (
           <EmptyLeadsState
             hasActiveFilters={hasActiveFilters}
             onReset={() => {
@@ -916,6 +975,7 @@ export default function LeadsPage() {
                       <input
                         type="checkbox"
                         checked={isSelected}
+                        disabled={!canManage}
                         onChange={(e) => {
                           const next = new Set(selectedIds)
                           if (e.target.checked) next.add(lead.id)
@@ -989,8 +1049,9 @@ export default function LeadsPage() {
                             type="button"
                             onClick={() => toggleLeadAutomation(lead)}
                             disabled={
-                              leadAutomationMutation.isPending &&
-                              leadAutomationMutation.variables?.leadId === lead.id
+                              !canEdit ||
+                              (leadAutomationMutation.isPending &&
+                                leadAutomationMutation.variables?.leadId === lead.id)
                             }
                             className={cn(
                               'inline-flex items-center gap-2 rounded-md px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50',

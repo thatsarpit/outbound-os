@@ -3,7 +3,7 @@ import type { LeadFilters } from '@/api/endpoints/leads'
 /**
  * Saved views — named filter presets for the Leads table.
  *
- * Stored per browser rather than per account: there is no server-side route for
+ * Stored per account in this browser: there is no server-side route for
  * them, and an operator's working set ("my hot leads this week") is personal
  * anyway. If a route appears later, this module is the only thing that has to
  * change.
@@ -16,7 +16,7 @@ export interface SavedView {
   filters: Omit<LeadFilters, 'page'>
 }
 
-const STORAGE_KEY = 'outboundos_leads_views'
+const storageKey = (scope: string) => `outboundos_leads_views:v2:${encodeURIComponent(scope)}`
 
 /** Fields that make up a view. `page` is deliberately excluded. */
 export function viewFiltersFrom(filters: LeadFilters): Omit<LeadFilters, 'page'> {
@@ -25,9 +25,9 @@ export function viewFiltersFrom(filters: LeadFilters): Omit<LeadFilters, 'page'>
   return rest
 }
 
-export function loadViews(): SavedView[] {
+export function loadViews(scope: string): SavedView[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(storageKey(scope))
     if (!raw) return []
     const parsed: unknown = JSON.parse(raw)
     // Anything could be in storage — another tab, an older build, a person
@@ -47,9 +47,9 @@ export function loadViews(): SavedView[] {
   }
 }
 
-export function saveViews(views: SavedView[]): void {
+export function saveViews(views: SavedView[], scope: string): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(views))
+    localStorage.setItem(storageKey(scope), JSON.stringify(views))
   } catch {
     // Storage blocked or full — views stay in memory for this session.
   }

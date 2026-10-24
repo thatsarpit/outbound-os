@@ -3,6 +3,7 @@ import prisma from '../utils/prismaClient.js';
 import { requireRole } from '../auth/index.js';
 import { getAccessiblePoolIds } from '../auth/rbac.js';
 import { buildNewLeadDateWhere } from '../utils/reportingTime.js';
+import { memberAssignmentWhere } from '../utils/workspaceMember.js';
 import { analyticsWindow } from '../utils/analyticsWindow.js';
 
 const router = Router();
@@ -28,9 +29,21 @@ router.get('/analytics/team', requireRole('manager'), async (req, res) => {
   try {
     // Existing API clients keep their all-time view when no period is supplied.
     const base = await leadWindow(req, null);
-    const users = await prisma.user.findMany({ where: { role: { not: 'viewer' } }, select: { id: true, name: true, email: true, role: true, lastLoginAt: true }, orderBy: { name: 'asc' } });
+    const [localUsers, snapshots] = await Promise.all([
+      prisma.user.findMany({ where: { role: { not: 'viewer' } }, select: { id: true, name: true, email: true, role: true, lastLoginAt: true }, orderBy: { name: 'asc' } }),
+      prisma.workspaceMember.findMany({ where: { provider: 'clerk' }, select: { key: true, provider: true, externalId: true, orgId: true, name: true, role: true, lastVerifiedAt: true } }),
+    ]);
+    // This report describes recorded lead ownership, not an authorization directory.
+    // Historical assignments remain visible even after a teammate leaves.
+    const users = [
+      ...localUsers.map(user => ({ ...user, provider: 'local', key: `local:local:${user.id}` })),
+      ...snapshots.map(member => ({ ...member, id: member.key })),
+    ];
     const stats = await Promise.all(users.map(async (user) => {
-      const where = { ...base, assignedToId: user.id };
+      const owner = user.provider === 'local'
+        ? memberAssignmentWhere({ id: user.id, orgId: 'local' }, { AUTH_PROVIDER: 'local' })
+        : { assignedMemberKey: user.key };
+      const where = { AND: [base, owner] };
       const [assigned, replied, engaged, closed, score] = await Promise.all([
         prisma.lead.count({ where }),
         prisma.lead.count({ where: { ...where, status: 'replied' } }),

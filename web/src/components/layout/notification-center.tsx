@@ -4,6 +4,9 @@ import { Link, useLocation } from 'react-router-dom'
 import { Bell, CheckCircle2, Info, Loader2, Pause, TriangleAlert, XCircle } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { leadsApi } from '@/api/endpoints/leads'
+import { api } from '@/api/client'
+import { useAuthStore } from '@/stores/auth-store'
+import { useOnlineStatus } from '@/hooks/use-online-status'
 import { getChannel } from '@/lib/channels'
 import { invalidateLeadSurfaceQueries } from '@/lib/lead-automation'
 import {
@@ -44,6 +47,7 @@ function buildInboxHref(item: DashboardNotification) {
   if (item.leadId) params.set('leadId', String(item.leadId))
   if (item.channel) params.set('channel', item.channel)
   if (item.threadKey) params.set('threadKey', item.threadKey)
+  if (item.accountId) params.set('accountId', String(item.accountId))
   const query = params.toString()
   const base = location.pathname.startsWith('/m') ? '/m/inbox' : '/inbox'
   return query ? `${base}?${query}` : base
@@ -83,6 +87,8 @@ function getNotificationDestination(item: DashboardNotification) {
     normalized.includes('task') ||
     normalized.includes('intervention')
   ) {
+    if (normalized.includes('task'))
+      return { href: location.pathname.startsWith('/m') ? '/m/tasks' : '/tasks', cta: 'Open tasks' }
     return { href: location.pathname.startsWith('/m') ? '/m/leads' : '/leads', cta: 'Open leads' }
   }
   if (normalized.includes('campaign')) {
@@ -99,6 +105,7 @@ function getNotificationDestination(item: DashboardNotification) {
 }
 
 function canPauseLead(item: DashboardNotification) {
+  if (useAuthStore.getState().user?.role === 'viewer') return false
   if (!item.leadId) return false
   const normalized = item.kind.toLowerCase()
   if (normalized.includes('manual_reply') || normalized.includes('email_sent')) return false
@@ -217,6 +224,9 @@ export function NotificationCenter() {
   const panelRef = useRef<HTMLDivElement | null>(null)
   const queryClient = useQueryClient()
   const [isOpen, setIsOpen] = useState(false)
+  const [savingReads, setSavingReads] = useState(false)
+  const online = useOnlineStatus()
+  const hasCapability = useAuthStore((state) => state.hasCapability)
   const {
     items,
     unreadCount,
@@ -227,12 +237,44 @@ export function NotificationCenter() {
     markOneRead,
   } = useNotificationStore()
 
+  async function saveRead(id: string) {
+    const scope = useNotificationStore.getState().scopeKey
+    try {
+      if (/^[1-9]\d*$/.test(id)) await api.patch(`/notifications/${id}/read`)
+      if (useNotificationStore.getState().scopeKey === scope) markOneRead(id)
+    } catch {
+      toast.error('Could not save notification read. It will remain unread.')
+    }
+  }
+
+  async function saveAllReads() {
+    const throughId = Math.max(
+      0,
+      ...items.map((item) => (/^\d+$/.test(item.id) ? Number(item.id) : 0)),
+    )
+    if (!throughId) return
+    const scope = useNotificationStore.getState().scopeKey
+    setSavingReads(true)
+    try {
+      await api.patch('/notifications/read-all', { throughId })
+      if (useNotificationStore.getState().scopeKey === scope) markAllRead(throughId)
+    } catch {
+      toast.error('Could not save notification reads. Try again.')
+    } finally {
+      setSavingReads(false)
+    }
+  }
+
   const pauseLeadMutation = useMutation({
-    mutationFn: ({ leadId }: { leadId: number; itemId: string }) =>
-      leadsApi.updateLead(leadId, { status: 'paused' }),
+    networkMode: 'always',
+    retry: false,
+    mutationFn: ({ leadId }: { leadId: number; itemId: string }) => {
+      if (!online) throw new Error('Reconnect before pausing this lead.')
+      return leadsApi.updateLead(leadId, { status: 'paused' })
+    },
     onSuccess: (_updatedLead, variables) => {
       invalidateLeadSurfaceQueries(queryClient)
-      markOneRead(variables.itemId)
+      void saveRead(variables.itemId)
       toast.warning('Lead automation paused')
     },
     onError: (error: Error) => {
@@ -310,8 +352,8 @@ export function NotificationCenter() {
             )}
             <button
               type="button"
-              onClick={markAllRead}
-              disabled={unreadCount === 0}
+              onClick={() => void saveAllReads()}
+              disabled={unreadCount === 0 || savingReads}
               className="ml-auto rounded-sm px-1 py-0.5 text-[11px] font-medium text-text-secondary transition-colors hover:text-text-primary disabled:pointer-events-none disabled:text-text-muted disabled:opacity-50"
             >
               Mark all read
@@ -332,7 +374,7 @@ export function NotificationCenter() {
                     pauseLeadMutation.isPending && pauseLeadMutation.variables?.itemId === item.id
                   }
                   onOpen={(id) => {
-                    markOneRead(id)
+                    void saveRead(id)
                     setIsOpen(false)
                   }}
                   onPause={(target) =>
@@ -360,11 +402,17 @@ export function NotificationCenter() {
               )}
             </span>
             <Link
-              to="/overview"
+              to={
+                hasCapability('page.activity')
+                  ? '/activity'
+                  : location.pathname.startsWith('/m')
+                    ? '/m/inbox'
+                    : '/inbox'
+              }
               onClick={() => setIsOpen(false)}
               className="ml-auto shrink-0 text-[11px] font-medium text-text-secondary transition-colors hover:text-text-primary"
             >
-              All activity
+              {hasCapability('page.activity') ? 'Recorded activity' : 'Open inbox'}
             </Link>
           </div>
         </div>

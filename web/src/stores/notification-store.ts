@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ActivityLog, InboxChannel } from '@/api/types'
 import { CHANNEL_ORDER } from '@/lib/channels'
+import { mergeNotificationFeed, readNotificationFeedThrough } from '@/lib/notification-feed'
 
 export type NotificationSeverity = 'info' | 'success' | 'warning' | 'error'
 export type NotificationChannel = InboxChannel
@@ -17,6 +18,7 @@ export interface DashboardNotification {
   channel?: NotificationChannel | null
   threadKey?: string | null
   read: boolean
+  persisted?: boolean
 }
 
 interface NotificationState {
@@ -31,7 +33,7 @@ interface NotificationState {
   setNotifications: (items: DashboardNotification[]) => void
   addNotification: (item: DashboardNotification) => void
   hydrateFromActivity: (items: ActivityLog[]) => void
-  markAllRead: () => void
+  markAllRead: (throughId?: number) => void
   markOneRead: (id: string) => void
   clear: () => void
   resetSession: () => void
@@ -184,7 +186,8 @@ function normalizeActivity(item: ActivityLog): DashboardNotification {
     accountId,
     channel,
     threadKey,
-    read: false,
+    read: item.read ?? false,
+    persisted: typeof item.read === 'boolean',
   }
 }
 
@@ -199,7 +202,7 @@ function applyReadState(items: DashboardNotification[], scopeKey: string) {
   if (Number.isNaN(seenTime)) return items
   return items.map((item) => ({
     ...item,
-    read: item.read || new Date(item.timestamp).getTime() <= seenTime,
+    read: item.read || (!item.persisted && new Date(item.timestamp).getTime() <= seenTime),
   }))
 }
 
@@ -236,12 +239,7 @@ export const useNotificationStore = create<NotificationState>((set) => ({
 
   addNotification: (item) =>
     set((state) => {
-      const existing = state.items.find((entry) => entry.id === item.id)
-      const items = existing
-        ? state.items.map((entry) =>
-            entry.id === item.id ? { ...entry, ...item, read: entry.read } : entry,
-          )
-        : [item, ...state.items].slice(0, 12)
+      const items = mergeNotificationFeed(state.items, [item])
 
       return {
         items,
@@ -252,16 +250,7 @@ export const useNotificationStore = create<NotificationState>((set) => ({
 
   hydrateFromActivity: (items) =>
     set((state) => {
-      const seenIds = new Set(state.items.map((item) => item.id))
-      const normalized = items.map(normalizeActivity)
-      const merged = [...state.items, ...normalized.filter((item) => !seenIds.has(item.id))]
-        .slice(0, 12)
-        .map((item) => ({
-          ...item,
-          read: seenIds.has(item.id)
-            ? (state.items.find((entry) => entry.id === item.id)?.read ?? false)
-            : item.read,
-        }))
+      const merged = mergeNotificationFeed(state.items, items.map(normalizeActivity))
 
       const withReadState = applyReadState(merged, state.scopeKey)
       return {
@@ -271,16 +260,17 @@ export const useNotificationStore = create<NotificationState>((set) => ({
       }
     }),
 
-  markAllRead: () =>
+  markAllRead: (throughId) =>
     set((state) => {
-      const lastSeenAt = state.items[0]?.timestamp ?? null
-      setLastSeenAt(state.scopeKey, lastSeenAt)
-
-      return {
-        items: state.items.map((item) => ({ ...item, read: true })),
-        unreadCount: 0,
-        lastSyncedAt: lastSeenAt,
-      }
+      const eligible = (item: DashboardNotification) =>
+        throughId === undefined || (/^[1-9]\d*$/.test(item.id) && Number(item.id) <= throughId)
+      const lastSeenAt = state.items.find(eligible)?.timestamp ?? null
+      if (throughId === undefined) setLastSeenAt(state.scopeKey, lastSeenAt)
+      const items =
+        throughId === undefined
+          ? state.items.map((item) => ({ ...item, read: true }))
+          : readNotificationFeedThrough(state.items, throughId)
+      return { items, unreadCount: computeUnread(items) }
     }),
 
   markOneRead: (id) =>
@@ -325,7 +315,7 @@ export const notificationActions = {
     useNotificationStore.getState().hydrateFromActivity(items),
   addNotification: (item: DashboardNotification) =>
     useNotificationStore.getState().addNotification(item),
-  markAllRead: () => useNotificationStore.getState().markAllRead(),
+  markAllRead: (throughId?: number) => useNotificationStore.getState().markAllRead(throughId),
   markOneRead: (id: string) => useNotificationStore.getState().markOneRead(id),
   clear: () => useNotificationStore.getState().clear(),
   resetSession: () => useNotificationStore.getState().resetSession(),

@@ -6,6 +6,38 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+### Dashboard reliability and daily sales
+
+- Fix CSV parsing, import result counts, removed-pool requirements and exact audience tags.
+- Preserve campaign sender identity and approved template names, recheck lead eligibility
+  before dispatch, retain provider IDs, and distinguish skipped recipients from failed sends.
+- Paginate Pipeline, Campaigns, Orders, Customers and recorded Activity with complete counts.
+- Add desktop Tasks, ownership filters, accessible stage changes, account/device management
+  and shared Clerk/local teammate assignment without inventing authentication users.
+- Persist personal notification reads, use committed event identities and retain later
+  notifications when marking an older displayed batch read.
+- Keep financial totals separate by stored currency and product unit; label lifetime
+  invoice figures independently from the selected order period.
+- Show stale/error/permission states explicitly and stop offering unauthorized lead actions.
+
+### Opt-in integrations
+
+- Add dashboard-sign-in MCP consent, read-only personal grants, immediate revocation,
+  rotating credentials and operation-bound API authorization. Legacy mode stays the default.
+- Add a shared inbound email receipt pipeline, encrypted immutable originals, administrator
+  review/reprocessing, and an inactive Cloudflare R2/Queue relay. Existing receiving routes
+  and sending providers remain in place until an explicit, verified cutover.
+- Include retained encrypted MIME objects in companion database backups. Instance secrets
+  still require a separate operator backup.
+
+See [upgrade and acceptance](docs/dashboard-repair-upgrade.md) for the migrations,
+changed response contracts, conservative defaults and release checks still required.
+
+### Security
+
+- Rate-limit dashboard assets and SPA routes with one shared per-client budget.
+  Keep API limits separate and exclude provider webhooks and health probes.
+
 ## [0.3.0] — Inbox reliability, mobile sales and direct Meta
 
 ### Inbox and mobile

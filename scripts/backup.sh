@@ -4,6 +4,7 @@
 # Keeps 7 daily backups automatically.
 
 set -e
+umask 077
 
 REMOTE_DIR="${REMOTE_DIR:-$(dirname "$(dirname "$(realpath "$0")")")}"
 # Defaults to the path in .env.example (DATABASE_URL=file:../data/outboundos.db,
@@ -41,10 +42,27 @@ fi
 gzip "$BACKUP_FILE"
 echo "✅ Backup created: ${BACKUP_FILE}.gz ($(du -sh "${BACKUP_FILE}.gz" | cut -f1))"
 
+# Retained email originals are encrypted, but they are still needed to replay
+# held receipts. Preserve them alongside the database snapshot. Keep the
+# instance encryption key in the operator's separate secret backup.
+PRIVATE_MAIL_DIR="$(dirname "$DB_FILE")/private/inbound-email"
+MAIL_BACKUP="${BACKUP_FILE%.db}.inbound-mail.tar.gz"
+if [ -d "$PRIVATE_MAIL_DIR" ]; then
+  if ! tar -czf "$MAIL_BACKUP.tmp" -C "$(dirname "$DB_FILE")" private/inbound-email; then
+    rm -f "$MAIL_BACKUP.tmp"
+    echo "❌ Private email backup failed; database snapshot exists but this backup set is incomplete" >&2
+    exit 1
+  fi
+  mv "$MAIL_BACKUP.tmp" "$MAIL_BACKUP"
+  echo "✅ Encrypted inbound originals included in backup set"
+fi
+
 # Prune old backups — keep only the newest MAX_BACKUPS
 BACKUP_COUNT=$(ls -1 "$BACKUP_DIR"/*.db.gz 2>/dev/null | wc -l)
 if [ "$BACKUP_COUNT" -gt "$MAX_BACKUPS" ]; then
-  ls -1t "$BACKUP_DIR"/*.db.gz | tail -n +$((MAX_BACKUPS + 1)) | xargs rm -f
+  while IFS= read -r old_backup; do
+    rm -f "$old_backup" "${old_backup%.db.gz}.inbound-mail.tar.gz"
+  done < <(ls -1t "$BACKUP_DIR"/*.db.gz | tail -n +$((MAX_BACKUPS + 1)))
   echo "🗑  Pruned old backups (kept $MAX_BACKUPS)"
 fi
 

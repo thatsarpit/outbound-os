@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mcpReferenceConfiguration, mcpSetupCommand } from '../web/src/lib/mcp-setup.ts';
+import { mcpReferenceConfiguration, mcpSetupCommand, mcpSetupPrompt } from '../web/src/lib/mcp-setup.ts';
 
 test('copied MCP commands preserve the URL as one inert shell argument', () => {
   for (const url of [
@@ -28,4 +28,21 @@ test('reference configuration uses a client-side placeholder and preserves an es
   assert.equal(config.mcpServers['outbound-os'].type, 'http');
   assert.equal(config.mcpServers['outbound-os'].headers.Authorization, 'Bearer <MCP_CLIENT_TOKEN>');
   assert.doesNotMatch(JSON.stringify(config), /MCP_SERVICE_TOKEN|MCP_BEARER_TOKEN|OAUTH_PASSWORD/);
+});
+
+test('setup prompts distinguish OpenAI clients and leave installation, approval and credentials under user control', () => {
+  const url = 'https://mcp.example.test/mcp';
+  const codex = mcpSetupPrompt('codex', url);
+  const chatgpt = mcpSetupPrompt('chatgpt', url);
+  assert.ok(codex.includes('Codex'));
+  assert.ok(chatgpt.includes('ChatGPT'));
+  assert.notEqual(codex, chatgpt);
+  for (const prompt of [codex, chatgpt]) {
+    assert.ok(prompt.includes(url));
+    assert.match(prompt, /personally review/);
+    assert.match(prompt, /Do not ask me to paste passwords/);
+    assert.match(prompt, /cannot install a connection from a prompt/);
+    assert.match(prompt, /Do not send messages/);
+    assert.doesNotMatch(prompt, /MCP_SERVICE_TOKEN|MCP_BEARER_TOKEN|OAUTH_PASSWORD/);
+  }
 });

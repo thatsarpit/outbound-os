@@ -1,13 +1,16 @@
 import { withDefaultCountryCode } from '../utils/phoneDefaults.js';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
-import { formatPhoneForWA } from '../utils/delay.js';
+import { parse } from 'csv-parse/sync';
 
 /**
  * CSV Import Engine
  * Parses CSV data, deduplicates by mobile number, and creates leads.
  */
-class CSVImporter {
+export class CSVImporter {
+  constructor({ db = prisma } = {}) {
+    this.db = db;
+  }
 
   /**
    * Column names recognised in common CRM and marketplace exports
@@ -27,6 +30,7 @@ class CSVImporter {
     dealValue: ['estimated value', 'estimated value ($ usd)', 'order value', 'deal value'],
     source: ['source'],
     status: ['status'],
+    notes: ['notes', 'note'],
     memberSince: ['member since'],
     assignedTo: ['assigned to'],
     remarks: ['conversation remarks', 'remarks'],
@@ -46,50 +50,26 @@ class CSVImporter {
    */
   parseCSV(csvText) {
     if (typeof csvText !== 'string') throw new TypeError('CSV input must be text');
-    const lines = csvText.split('\n').filter(l => l.trim().replace(/,/g, '').trim());
-    if (lines.length < 2) return { headers: [], rows: [] };
-
-    // Parse header row
-    const headers = this._parseLine(lines[0]).map(h => h.trim().toLowerCase());
-
-    // Parse data rows
-    const rows = [];
-    for (let i = 1; i < lines.length; i++) {
-      const values = this._parseLine(lines[i]);
-      if (values.length > 0) {
-        const row = Object.create(null);
-        headers.forEach((header, idx) => {
-          row[header] = (values[idx] || '').trim();
-        });
-        rows.push(row);
-      }
+    let records;
+    try {
+      records = parse(csvText, { bom: true, skip_empty_lines: true, trim: true });
+    } catch (error) {
+      const location = Number.isInteger(error.lines) ? ` at line ${error.lines}` : '';
+      const field = typeof error.column === 'string' || Number.isInteger(error.column)
+        ? `, column ${error.column}` : '';
+      throw new Error(`Invalid CSV${location}${field}: ${error.message}`, { cause: error });
     }
-
+    records = records.filter((record) => record.some((value) => value.trim()));
+    if (!records.length) return { headers: [], rows: [] };
+    const headers = records[0].map((header) => header.trim().toLowerCase());
+    if (headers.some((header) => !header)) throw new Error('CSV headers must not be empty');
+    if (new Set(headers).size !== headers.length) throw new Error('CSV headers must be unique (ignoring case and whitespace)');
+    const rows = records.slice(1).map((values) => {
+      const row = Object.create(null);
+      headers.forEach((header, index) => { row[header] = values[index].trim(); });
+      return row;
+    });
     return { headers, rows };
-  }
-
-  /**
-   * Parse a single CSV line, handling quoted fields
-   */
-  _parseLine(line) {
-    if (typeof line !== 'string') throw new TypeError('CSV lines must be text');
-    const values = [];
-    let current = '';
-    let inQuotes = false;
-
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (char === '"') {
-        inQuotes = !inQuotes;
-      } else if (char === ',' && !inQuotes) {
-        values.push(current);
-        current = '';
-      } else {
-        current += char;
-      }
-    }
-    values.push(current);
-    return values;
   }
 
   /**
@@ -119,10 +99,12 @@ class CSVImporter {
    * @returns {object} Import results
    */
   async importCSV(csvText, filename, { poolId = null, tags = [] } = {}) {
-    const { headers, rows } = this.parseCSV(csvText);
+    let headers, rows;
+    try { ({ headers, rows } = this.parseCSV(csvText)); }
+    catch (error) { return { success: false, error: error.message, errors: [error.message] }; }
 
     if (rows.length === 0) {
-      return { success: false, error: 'No data rows found in CSV' };
+      return { success: false, error: 'No data rows found in CSV', errors: ['No data rows found in CSV'] };
     }
 
     const columnMapping = this._mapColumns(headers);
@@ -131,6 +113,7 @@ class CSVImporter {
       return {
         success: false,
         error: 'Could not identify mobile/phone column. Found headers: ' + headers.join(', '),
+        errors: ['Could not identify mobile/phone column. Found headers: ' + headers.join(', ')],
         detectedHeaders: headers,
       };
     }
@@ -162,7 +145,7 @@ class CSVImporter {
 
   async _runImport(rows, columnMapping, filename, { poolId = null, tags: extraTags = [] } = {}) {
     // Create import batch tracker
-    const batch = await prisma.importBatch.create({
+    const batch = await this.db.importBatch.create({
       data: { filename, totalRows: rows.length, status: 'processing' },
     });
 
@@ -202,7 +185,7 @@ class CSVImporter {
 
     try {
       // 2. Batch fetch existing leads
-      const existingLeads = await prisma.lead.findMany({
+      const existingLeads = await this.db.lead.findMany({
         where: { mobile: { in: allMobiles } },
         select: { id: true, mobile: true, company: true, email: true, product: true, country: true, quantity: true }
       });
@@ -238,7 +221,7 @@ class CSVImporter {
           if (!existing.quantity && row[columnMapping.quantity]) updates.quantity = row[columnMapping.quantity];
 
           if (Object.keys(updates).length > 0) {
-            updatePromises.push(prisma.lead.update({ where: { id: existing.id }, data: updates }));
+            updatePromises.push(this.db.lead.update({ where: { id: existing.id }, data: updates }));
           }
           duplicates++;
         } else {
@@ -272,6 +255,7 @@ class CSVImporter {
 
           // Notes from assigned-to and remarks
           const noteParts = [];
+          if (row[columnMapping.notes]) noteParts.push(row[columnMapping.notes]);
           const assignedTo = row[columnMapping.assignedTo];
           if (assignedTo) noteParts.push(`Originally assigned to: ${assignedTo}`);
 
@@ -342,7 +326,7 @@ class CSVImporter {
         // CockroachDB, and this deployment is SQLite — passing it makes the
         // whole call throw, which took the entire import down with it. The
         // de-duplication it was standing in for is done explicitly above.
-        const res = await prisma.lead.createMany({ data: uniqueNewLeads });
+        const res = await this.db.lead.createMany({ data: uniqueNewLeads });
         imported += res.count;
         failed += (uniqueNewLeads.length - res.count);
       }
@@ -352,7 +336,7 @@ class CSVImporter {
       if (rowsWithNotes.length > 0) {
         // Look up the newly created leads by mobile to get their IDs
         const noteMobiles = rowsWithNotes.map(r => r._cleanMobile);
-        const noteLeads = await prisma.lead.findMany({
+        const noteLeads = await this.db.lead.findMany({
           where: { mobile: { in: noteMobiles } },
           select: { id: true, mobile: true },
         });
@@ -366,7 +350,7 @@ class CSVImporter {
           }
         }
         if (noteData.length > 0) {
-          await prisma.leadNote.createMany({ data: noteData });
+          await this.db.leadNote.createMany({ data: noteData });
           logger.info(`📝 Created ${noteData.length} LeadNotes from CSV import`);
         }
       }
@@ -378,7 +362,7 @@ class CSVImporter {
         }
       }
 
-      await prisma.importBatch.update({
+      await this.db.importBatch.update({
         where: { id: batch.id },
         data: { imported, duplicates, failed, status: 'completed' },
       });
@@ -386,11 +370,11 @@ class CSVImporter {
       logger.info(`📥 CSV Import complete: ${imported} imported, ${duplicates} duplicates, ${failed} failed`);
     } catch (e) {
       logger.error(`CSV Import Batch failed: ${e.message}`);
-      await prisma.importBatch.update({
+      await this.db.importBatch.update({
         where: { id: batch.id },
         data: { imported, duplicates, failed, status: 'failed' },
       });
-      return { success: false, error: e.message };
+      return { success: false, batchId: batch.id, imported, duplicates, skipped: duplicates, failed, error: e.message, errors: [e.message] };
     }
 
     return {
@@ -399,13 +383,15 @@ class CSVImporter {
       totalRows: rows.length,
       imported,
       duplicates,
+      skipped: duplicates,
       failed,
+      errors: [],
       columnMapping,
     };
   }
 
   async getBatches() {
-    return prisma.importBatch.findMany({
+    return this.db.importBatch.findMany({
       orderBy: { createdAt: 'desc' },
       take: 20,
     });

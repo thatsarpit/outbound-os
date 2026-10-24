@@ -1,4 +1,8 @@
 import log from './logger.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { personalControl } from './personalOAuth.js';
+
+export const mcpRequestContext = new AsyncLocalStorage();
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:3001';
 const SERVICE_TOKEN = process.env.MCP_SERVICE_TOKEN;
@@ -27,8 +31,18 @@ export async function api(method, path, opts = {}) {
     }
   }
 
+  const context = mcpRequestContext.getStore();
+  let credential = SERVICE_TOKEN;
+  if (context?.personalToken) {
+    // Resource tokens never authenticate directly at the backend. The private
+    // control channel issues a short-lived, operation-bound delegation instead.
+    const delegated = await personalControl('delegate', {
+      token: context.personalToken, tool: context.tool, method: method.toUpperCase(), path: url.pathname,
+    });
+    credential = delegated.assertion;
+  }
   const headers = {
-    Authorization: `Bearer ${SERVICE_TOKEN}`,
+    Authorization: `Bearer ${credential}`,
     'Content-Type': 'application/json',
   };
 
