@@ -1,18 +1,26 @@
 # Dashboard repair upgrade and acceptance
 
-Status: unreleased source changes. This document does not confirm a deployment,
-real-client OAuth connection, email-routing cutover or iPhone acceptance.
+Status: broader dashboard repairs remain in draft PR #53. The branch includes
+main through `cc53e72` (#57), preserving the shared inbound-email work released
+separately in #55/#56 and the receipt reader/attachment handling from #57.
+This document does not confirm promotion of the draft, real-client OAuth,
+all-address email-routing cutover or iPhone acceptance.
 
 ## Apply safely
 
 Back up the SQLite database, media, retained private email originals, the instance
-secret and current deployment environment before upgrading. Apply all three new
-migrations through `prisma migrate deploy`; never use `db push`:
+secret and current deployment environment before upgrading. Apply every pending
+migration through `prisma migrate deploy`; never use `db push`. The recent chain
+contains:
 
 - `20261024010000_audit_workflow_repairs`: typed campaign sender IDs, skip reasons,
   personal notification reads and the opt-in MCP authorization ledger.
 - `20261024020000_inbound_email_receipts`: receipt identity and processing history.
 - `20261024030000_workspace_member_assignment`: provider-scoped assignment snapshots.
+
+The inbound-email receipt migration is already on main. The audit workflow and
+workspace assignment migrations are the two additional migrations in this draft
+relative to main at `cc53e72`.
 
 Existing local user assignments and message history are preserved. Clerk assignment
 requires the installation's existing `CLERK_ORGANIZATION_ID` to be pinned in production.
@@ -43,16 +51,19 @@ Activity view paginates recorded events; it cannot reconstruct historical action
 that were never logged. A background failure keeps loaded results visibly stale
 rather than treating it as a successful empty result.
 
-## Features that remain off until accepted
+## Configuration and acceptance boundaries
 
 - `MCP_AUTH_MODE=legacy` is unchanged by default. Follow
   [personal authorization](mcp-personal-authorization.md) before opting into the
   administrator-only, read-only mode. Real Clerk, ChatGPT and Codex consent,
   proxy, restart and rollback checks remain required. Personal message sending
   and campaign management are not implemented by this read-only grant.
-- `EMAIL_INGRESS_ENABLED=false` and the Cloudflare adapter's relay flag remain off.
-  Follow [inbound email setup](inbound-email-receiver.md). No MX change, cloud
-  resource creation, new spending or removal of the Gmail/IMAP path is automatic.
+- Ingress and relay flags default off for new installations. The existing
+  private KV/Queues pilot is enabled for one owned test alias; customer sender
+  aliases still forward to Gmail/IMAP. Follow
+  [inbound email setup](inbound-email-receiver.md) before any broader cutover.
+  Storage monitoring, retention, recovery and all-address routing acceptance
+  remain open. Verified forced downloads do not provide malware scanning.
 - Keep the free email sign-in path. Google sign-in and Gmail/Outlook OAuth mailbox
   connectors still need their own implementation/configuration and acceptance.
   Passkeys remain deferred. Production Clerk cutover is tracked separately in #19.
@@ -76,12 +87,12 @@ Use owned addresses/numbers only for the separately reviewed provider acceptance
 
 ## Local verification record
 
-- 327 unit/fixture checks passed; four pre-existing TODO cases remain.
-- 127 API integration checks passed against the full SQLite migration chain.
+- Reconciliation on 25 October 2026: 352 unit/fixture checks passed; four pre-existing TODO cases remain.
+- 129 API integration checks passed against the full SQLite migration chain.
 - 16 MCP transport/OAuth checks passed.
 - Dashboard lint, typecheck, normal and demo builds passed; Home Screen PNG/manifest checks passed.
-- Migrating an empty database then comparing it to the Prisma schema produced an empty migration.
-- Private encrypted MIME backup/extraction/decryption was exercised on a throwaway fixture.
+- All 17 migrations applied to an empty fixture database; comparison to the Prisma schema produced an empty migration.
+- Retained-mail tests verified exact attachment bytes, encrypted-original integrity failures, route permissions and forced-download headers. The earlier private MIME backup/extraction/decryption fixture remains recorded.
 
 These checks did not use production data or contact customer providers. Bundle-size
 warnings remain; actual browser and iPhone checks are still outstanding.

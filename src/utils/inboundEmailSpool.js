@@ -1,7 +1,8 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, open, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { sqliteDatabaseUrl } from '../../prisma/database-url.mjs';
+import { EMAIL_INGRESS_MAX_BYTES } from './emailIngressSignature.js';
 
 const MAGIC = Buffer.from('OSEM1');
 export function inboundEmailSpoolDirectory() {
@@ -44,7 +45,21 @@ export class InboundEmailSpool {
     return name;
   }
   async read(name, dedupeKey) {
-    const encrypted = await readFile(this._path(name));
+    const file = await open(this._path(name), 'r');
+    let encrypted;
+    try {
+      const { size } = await file.stat();
+      if (size < 33 || size > EMAIL_INGRESS_MAX_BYTES + 33) throw new Error('Invalid encrypted email size');
+      const buffer = Buffer.alloc(size + 1);
+      let length = 0;
+      while (length < buffer.length) {
+        const { bytesRead } = await file.read(buffer, length, buffer.length - length, null);
+        if (!bytesRead) break;
+        length += bytesRead;
+      }
+      if (length !== size) throw new Error('Encrypted email size changed');
+      encrypted = buffer.subarray(0, length);
+    } finally { await file.close(); }
     if (encrypted.length < 33 || !encrypted.subarray(0, 5).equals(MAGIC)) throw new Error('Invalid encrypted email object');
     const decipher = createDecipheriv('aes-256-gcm', this._key(), encrypted.subarray(5, 17));
     decipher.setAAD(Buffer.from(dedupeKey));

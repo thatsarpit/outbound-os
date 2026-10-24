@@ -511,8 +511,6 @@ export async function handleInboxRequest(
     return ownership
   }
   if (path.pathname === '/api/workspace/members') return json({ members })
-  if (path.pathname === '/api/email/receipts')
-    return json({ items: [], total: 0, page: 1, pages: 0, receiverEnabled: false })
   const assignment = path.pathname.match(/^\/api\/leads\/(\d+)\/assign$/)
   if (assignment && method === 'POST') {
     const body = await readBody(init)
@@ -520,6 +518,37 @@ export async function handleInboxRequest(
       return json({ error: 'Choose a sample teammate' }, 400)
     const id = Number(assignment[1])
     return json({ id, ...assign(id, body.memberKey as string | null) })
+  }
+
+  const emailFiles = path.pathname.match(/^\/api\/messages\/(\d+)\/email-attachments(?:\/(\d+))?$/)
+  if (emailFiles && method === 'GET') {
+    const message = MESSAGES.find(
+      (row) =>
+        row.id === Number(emailFiles[1]) && row.channel === 'email' && row.direction === 'inbound',
+    )
+    if (!message) return json({ error: 'Inbound email message not found.' }, 404)
+    const hasFile =
+      message.id === MESSAGES.find((row) => row.leadId === 2 && row.direction === 'inbound')?.id
+    const content = 'Sample customer specification. This file contains demonstration data only.\n'
+    if (emailFiles[2] !== undefined)
+      return hasFile && emailFiles[2] === '0'
+        ? new Response(content, {
+            headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store' },
+          })
+        : json({ error: 'Email attachment not found.' }, 404)
+    return json({
+      retained: true,
+      items: hasFile
+        ? [
+            {
+              index: 0,
+              filename: 'sample-specification.txt',
+              contentType: 'text/plain',
+              size: new TextEncoder().encode(content).length,
+            },
+          ]
+        : [],
+    })
   }
 
   const media = path.pathname.match(/\/api\/messages\/(\d+)\/media$/)

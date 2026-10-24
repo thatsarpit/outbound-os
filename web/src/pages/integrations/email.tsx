@@ -37,6 +37,7 @@ export default function EmailSection() {
   const [confirmDelete, setConfirmDelete] = useState<EmailAccount | null>(null)
   const [inboxAccount, setInboxAccount] = useState<EmailAccount | null>(null)
   const canConfigure = useAuthStore((state) => state.user?.role === 'admin')
+  const dashboardScope = useAuthStore((state) => state.dashboardScope)
 
   const {
     data: rawAccounts,
@@ -44,7 +45,7 @@ export default function EmailSection() {
     error: accountsError,
     refetch,
   } = useQuery({
-    queryKey: ['email-accounts'],
+    queryKey: ['email-accounts', dashboardScope],
     queryFn: async () => {
       const res = await api.get<EmailAccount[]>('/email/accounts')
       if (!Array.isArray(res)) throw new Error('The email account response was incomplete.')
@@ -81,6 +82,17 @@ export default function EmailSection() {
       <div className="flex justify-center py-12">
         <Loader2 className="w-6 h-6 text-accent animate-spin" />
       </div>
+    )
+  }
+
+  if (accountsError && !rawAccounts) {
+    return (
+      <p role="alert" className="rounded-md border border-danger/30 p-4 text-sm text-danger">
+        Email accounts could not be loaded.{' '}
+        <button className="min-h-11 underline" onClick={() => void refetch()}>
+          Try again
+        </button>
+      </p>
     )
   }
 
@@ -156,7 +168,7 @@ export default function EmailSection() {
         />
       </div>
 
-      {canConfigure && <EmailReceipts accounts={accounts} />}
+      {canConfigure && <EmailReceipts key={dashboardScope} accounts={accounts} />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {accounts.map((acc) => {

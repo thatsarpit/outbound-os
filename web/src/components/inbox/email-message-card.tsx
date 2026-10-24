@@ -4,6 +4,7 @@ import { cn, formatRelativeTime } from '@/lib/utils'
 import { MessageMedia } from './message-media'
 import { ChannelBadge } from './channel-badge'
 import { describeEmailDelivery } from '@/lib/email-delivery'
+import { EmailMessageAttachments } from './email-attachments'
 
 export function EmailMessageCard({
   message,
@@ -99,6 +100,7 @@ export function EmailMessageCard({
           />
         )}
       </div>
+      {isInbound && <EmailMessageAttachments key={message.id} messageId={message.id} />}
     </article>
   )
 }

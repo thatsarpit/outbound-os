@@ -72,12 +72,20 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
 }
 
 /** A file behind authentication, as a Blob (images, voice notes, PDFs). */
-export async function apiFetchBlob(endpoint: string): Promise<Blob> {
+export async function apiFetchBlob(endpoint: string, signal?: AbortSignal): Promise<Blob> {
   const token = await getSessionToken()
   const response = await fetch(`${API_BASE}${endpoint}`, {
+    signal,
+    cache: 'no-store',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   })
-  if (!response.ok) throw new ApiClientError(response.statusText || 'Could not load file', response.status)
+  if (!response.ok) {
+    const error = (await response.json().catch(() => null)) as ApiError | null
+    throw new ApiClientError(
+      error?.error || response.statusText || 'Could not load file',
+      response.status,
+    )
+  }
   return response.blob()
 }
 

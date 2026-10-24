@@ -39,6 +39,7 @@ import activityRecordRoutes from './routes/activityRecords.js';
 import workspaceMemberRoutes from './routes/workspaceMembers.js';
 import workspaceMembers from './services/workspaceMembers.js';
 import { memberAssignmentWhere, leadAssignmentWhere, leadHasAssignee, memberAssignmentData, leadAssignedMember } from './utils/workspaceMember.js';
+import emailAttachmentRoutes from './routes/emailAttachments.js';
 import { sendManualWhatsApp, whatsappReplyContext } from './services/manualWhatsApp.js';
 import webPushRoutes from './routes/webPush.js';
 import inboxReadStateRoutes from './routes/inboxReadState.js';
@@ -840,6 +841,7 @@ app.use('/api', emailReceiptRoutes);
 app.use('/api', notificationRoutes);
 app.use('/api', activityRecordRoutes);
 app.use('/api', workspaceMemberRoutes);
+app.use('/api', emailAttachmentRoutes);
 // Pool scoping runs after auth — platform admins bypass, every other user is
 // 403'd if they reference a poolId they don't have a UserPool row for.
 app.use('/api', requirePoolAccess());

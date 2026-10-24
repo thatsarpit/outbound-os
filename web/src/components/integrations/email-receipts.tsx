@@ -5,6 +5,14 @@ import type { EmailAccount, Lead } from '@/api/types'
 import { useAuthStore } from '@/stores/auth-store'
 import { useOnlineStatus } from '@/hooks/use-online-status'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
+import { EmailAttachmentFiles, type EmailAttachment } from '@/components/inbox/email-attachments'
 import { formatRelativeTime } from '@/lib/utils'
 import { toast } from '@/stores/toast-store'
 
@@ -18,6 +26,7 @@ interface Receipt {
   reason: string | null
   canRetry: boolean
   canAssign: boolean
+  hasOriginal: boolean
 }
 interface ReceiptPage {
   items: Receipt[]
@@ -35,6 +44,7 @@ export function EmailReceipts({ accounts }: { accounts: EmailAccount[] }) {
   const [page, setPage] = useState(1)
   const [state, setState] = useState('attention')
   const [selected, setSelected] = useState<Receipt | null>(null)
+  const [preview, setPreview] = useState<Receipt | null>(null)
   const [search, setSearch] = useState('')
   const [leadId, setLeadId] = useState('')
   const [accountId, setAccountId] = useState('')
@@ -42,6 +52,16 @@ export function EmailReceipts({ accounts }: { accounts: EmailAccount[] }) {
     queryKey: ['email-receipts', dashboardScope, page, state],
     queryFn: () => api.get<ReceiptPage>(`/email/receipts?page=${page}&state=${state}`),
     refetchInterval: 30_000,
+    meta: { silent: true },
+  })
+  const content = useQuery({
+    queryKey: ['email-receipt-content', dashboardScope, preview?.id],
+    queryFn: () =>
+      api.get<{ subject: string; text: string; items: EmailAttachment[] }>(
+        `/email/receipts/${preview!.id}`,
+      ),
+    enabled: Boolean(preview),
+    retry: false,
     meta: { silent: true },
   })
   const candidates = useQuery({
@@ -74,6 +94,7 @@ export function EmailReceipts({ accounts }: { accounts: EmailAccount[] }) {
           : `Email retained for review: ${result.reason?.replace(/_/g, ' ') || result.state}`,
       )
       setSelected(null)
+      setPreview(null)
       void client.invalidateQueries({ queryKey: ['email-receipts'] })
       void client.invalidateQueries({ queryKey: ['inbox-threads'] })
       void client.invalidateQueries({ queryKey: ['inbox-thread'] })
@@ -104,7 +125,8 @@ export function EmailReceipts({ accounts }: { accounts: EmailAccount[] }) {
           </p>
           {receipts.data ? (
             <p className="mt-1 text-xs text-text-muted">
-              Cloudflare receiver {receipts.data.receiverEnabled ? 'enabled' : 'disabled'} ·{' '}
+              Direct email receiver{' '}
+              {receipts.data.receiverEnabled ? 'enabled on server' : 'disabled'} ·{' '}
               {receipts.data.total} receipts in this view
             </p>
           ) : null}
@@ -164,9 +186,20 @@ export function EmailReceipts({ accounts }: { accounts: EmailAccount[] }) {
                 )}
               </div>
               <div className="flex gap-2">
+                {receipt.hasOriginal && (
+                  <Button
+                    className="min-h-11"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => setPreview(receipt)}
+                  >
+                    Read email
+                  </Button>
+                )}
                 {receipt.canRetry && (
                   <Button
                     size="sm"
+                    className="min-h-11"
                     variant="secondary"
                     disabled={!online || retry.isPending}
                     onClick={() => retry.mutate({ receipt })}
@@ -177,6 +210,7 @@ export function EmailReceipts({ accounts }: { accounts: EmailAccount[] }) {
                 {receipt.canAssign && (
                   <Button
                     size="sm"
+                    className="min-h-11"
                     variant="secondary"
                     disabled={!online || retry.isPending}
                     onClick={() => choose(receipt)}
@@ -255,7 +289,13 @@ export function EmailReceipts({ accounts }: { accounts: EmailAccount[] }) {
             can update the lead’s reply state.
           </p>
           <div className="flex flex-wrap gap-2">
-            <Button type="submit" disabled={!online || !leadId || !accountId || retry.isPending}>
+            <Button
+              type="submit"
+              className="min-h-11"
+              pending={retry.isPending}
+              pendingLabel="Linking email…"
+              disabled={!online || !leadId || !accountId}
+            >
               Link and process email
             </Button>
             <Button
@@ -292,6 +332,65 @@ export function EmailReceipts({ accounts }: { accounts: EmailAccount[] }) {
           </Button>
         </div>
       )}
+      <Dialog
+        open={Boolean(preview)}
+        onOpenChange={(open) => {
+          if (!open) setPreview(null)
+        }}
+      >
+        <DialogContent className="max-h-[85dvh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Review received email</DialogTitle>
+            <DialogDescription className="break-all">
+              From {preview?.from || 'unknown sender'} · To{' '}
+              {preview?.to.join(', ') || 'unknown recipient'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 p-5">
+            {content.isPending ? (
+              <p role="status" className="text-sm text-text-muted">
+                Opening retained email…
+              </p>
+            ) : content.error ? (
+              <p role="alert" className="text-sm text-danger">
+                {content.error.message}{' '}
+                <button className="min-h-11 underline" onClick={() => void content.refetch()}>
+                  Try again
+                </button>
+              </p>
+            ) : content.data ? (
+              <>
+                <h3 className="break-words text-sm font-semibold">
+                  {content.data.subject || '(No subject)'}
+                </h3>
+                <p className="max-h-[40dvh] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border bg-background p-4 text-sm leading-6">
+                  {content.data.text || 'This email has no text body. Check its attachments below.'}
+                </p>
+                <EmailAttachmentFiles
+                  key={`${dashboardScope}:${preview?.id}`}
+                  endpoint={`/email/receipts/${preview?.id}/attachments`}
+                  items={content.data.items}
+                />
+                <p className="text-xs leading-5 text-text-muted">
+                  Reading does not link this mail or send a reply. Verify the sender and recipient
+                  before associating it with a customer.
+                </p>
+                {preview?.canAssign && (
+                  <Button
+                    className="min-h-11"
+                    onClick={() => {
+                      choose(preview)
+                      setPreview(null)
+                    }}
+                  >
+                    Choose matching lead
+                  </Button>
+                )}
+              </>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </section>
   )
 }
