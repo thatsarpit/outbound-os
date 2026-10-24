@@ -57,29 +57,66 @@
       if (loaded) gtag('consent', 'update', {analytics_storage: 'denied'});
       forgetCookies();
     }
+    const restoreFocus = panel.contains(document.activeElement);
     panel.hidden = true;
+    settings.setAttribute('aria-expanded', 'false');
+    if (restoreFocus) settings.focus();
   };
+  const styles = document.createElement('style');
+  styles.textContent = `
+    .site-privacy { position:fixed;left:16px;bottom:calc(76px + env(safe-area-inset-bottom, 0px));z-index:1000;width:min(380px, calc(100vw - 32px));padding:22px;background:var(--surface, #141419);color:var(--text, #f7f7f9);border:1px solid var(--border-strong, #383842);border-radius:10px;font:14px/1.6 var(--font-sans, system-ui);box-sizing:border-box;box-shadow:0 16px 48px rgb(0 0 0 / .4); }
+    .site-privacy__title { margin:0 0 8px;font-size:15px;font-weight:600;letter-spacing:-.015em; }
+    .site-privacy__message { margin:0 0 18px;color:var(--text-secondary, #a0a0ac);font-size:13px; }
+    .site-privacy__actions { display:flex;flex-wrap:wrap;gap:8px; }
+    .site-privacy-button { min-height:44px;padding:10px 14px;border:1px solid var(--border-strong, #383842);border-radius:7px;background:var(--surface-raised, #1c1c22);color:var(--text, #f7f7f9);cursor:pointer;font:500 13px/1.4 var(--font-sans, system-ui); }
+    .site-privacy-button:hover { background:var(--surface-overlay, #22222a); }
+    .site-privacy-button:focus-visible,.site-privacy a:focus-visible { outline:2px solid var(--focus, #8b99ff);outline-offset:3px; }
+    .site-privacy__link { display:inline-flex;align-items:center;min-height:40px;color:var(--text-secondary, #a0a0ac);text-decoration:underline;text-underline-offset:4px;font-size:12px;margin-top:6px; }
+    .site-privacy__settings { position:fixed;left:16px;bottom:calc(16px + env(safe-area-inset-bottom, 0px));z-index:999;padding-inline:13px;border-radius:999px;box-shadow:0 2px 10px rgb(0 0 0 / .18);font-size:11px; }
+    @media(max-width:480px) { .site-privacy { padding:20px; } }
+  `;
+  document.head.append(styles);
   const panel = document.createElement('section');
+  panel.id = 'site-analytics-preferences';
+  panel.className = 'site-privacy';
   panel.setAttribute('aria-label', 'Analytics preferences');
-  panel.style.cssText = 'position:fixed;left:16px;bottom:56px;z-index:1000;max-width:360px;width:calc(100vw - 32px);padding:16px;background:#fff;color:#17251d;border:1px solid #78867c;border-radius:8px;font:14px/1.5 system-ui;box-sizing:border-box';
+  const title = document.createElement('h2');
+  title.className = 'site-privacy__title';
+  title.textContent = 'Your choice of analytics';
   const message = document.createElement('p');
-  message.style.margin = '0 0 12px';
+  message.className = 'site-privacy__message';
   message.textContent = 'Allow Google Analytics to measure visits? This is optional. We do not send enquiry details or search text.';
   const button = (label, handler) => {
     const b = document.createElement('button');
     b.type = 'button'; b.textContent = label;
-    b.style.cssText = 'padding:8px 12px;margin:4px 8px 4px 0;border:1px solid #526456;border-radius:4px;background:#fff;color:#17251d;cursor:pointer;font:inherit';
+    b.className = 'site-privacy-button';
     b.addEventListener('click', handler);
     return b;
   };
-  panel.append(message, button('Allow analytics', () => setConsent('granted')), button('Decline', () => setConsent('denied')));
+  const actions = document.createElement('div');
+  actions.className = 'site-privacy__actions';
+  actions.append(button('Allow analytics', () => setConsent('granted')), button('Decline', () => setConsent('denied')));
+  panel.append(title, message, actions);
   const privacy = document.createElement('a');
   privacy.href = script.dataset.gaPrivacy || '/privacy'; privacy.textContent = 'Privacy notice';
-  privacy.style.cssText = 'display:block;color:#17251d;text-decoration:underline;margin-top:8px';
+  privacy.className = 'site-privacy__link';
   panel.append(privacy);
   panel.hidden = consent === 'granted' || consent === 'denied';
-  const settings = button('Analytics preferences', () => { panel.hidden = !panel.hidden; });
-  settings.style.cssText += ';position:fixed;left:16px;bottom:12px;z-index:999;font-size:12px;margin:0';
+  const settings = button('Analytics preferences', () => {
+    panel.hidden = !panel.hidden;
+    settings.setAttribute('aria-expanded', String(!panel.hidden));
+    if (!panel.hidden) actions.querySelector('button').focus();
+  });
+  settings.classList.add('site-privacy__settings');
+  settings.setAttribute('aria-controls', panel.id);
+  settings.setAttribute('aria-expanded', String(!panel.hidden));
+  panel.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      panel.hidden = true;
+      settings.setAttribute('aria-expanded', 'false');
+      settings.focus();
+    }
+  });
   document.body.append(panel, settings);
   const track = (name, params = {}) => {
     if (consent !== 'granted' || !loaded || !/^[a-z][a-z0-9_]{0,39}$/.test(name) || /^\/(admin|api)(\/|$)/.test(location.pathname)) return;

@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowRight, Check } from 'lucide-react'
+import { ArrowRight, Check, KeyRound } from 'lucide-react'
 import { buildMetadata } from '@/lib/metadata'
 import { site } from '@/lib/site-content'
 import { DemoForm } from '@/components/demo-form'
@@ -91,29 +91,27 @@ export default function ManagedHostingPage() {
               I&rsquo;ll self-host <ArrowRight size={14} />
             </Link>
           </div>
-          <div className="os-service-cards">
+          <div className="service-scopes" aria-label="Available service scopes">
             {services.map((service, i) => (
-              <article
-                className={`os-service-card ${i === 1 ? 'os-service-card--featured' : ''}`}
-                key={service.title}
-              >
-                <p className="eyebrow">{service.label}</p>
-                <h2>{service.title}</h2>
-                <p>{service.description}</p>
-                <ul>
-                  {service.items.map((item) => (
-                    <li key={item}>
-                      <Check size={13} />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-                <a href="#request" className={`btn ${i === 1 ? 'btn--primary' : 'btn--secondary'}`}>
-                  Discuss {service.title.toLowerCase()} <ArrowRight size={14} />
-                </a>
+              <article className="service-scope" key={service.title}>
+                <span className="service-scope__number" aria-hidden="true">0{i + 1}</span>
+                <div className="service-scope__intro">
+                  <p className="eyebrow">{service.label}</p>
+                  <h2>{service.title}</h2>
+                  <p>{service.description}</p>
+                </div>
+                <div className="service-scope__detail">
+                  <ul className="pricing-inclusions">
+                    {service.items.map((item) => (
+                      <li key={item}><Check size={14} aria-hidden="true" />{item}</li>
+                    ))}
+                  </ul>
+                  <a href="#request" className="cta-link">Discuss {service.title.toLowerCase()}<ArrowRight size={14} aria-hidden="true" /></a>
+                </div>
               </article>
             ))}
           </div>
+          <p className="service-account-note"><KeyRound size={15} aria-hidden="true" />Your Meta and email accounts stay yours. Provider approvals and usage fees are separate from our service scope.</p>
         </div>
       </section>
       <section className="section section--ruled section--raised os-request" id="request">
@@ -156,6 +154,10 @@ export default function ManagedHostingPage() {
             </p>
           </aside>
           <div className="panel">
+            <div className="service-request-intro">
+              <h3>Request a setup plan</h3>
+              <p>Tell us where you are starting. We&rsquo;ll reply by email to discuss the scope before any work begins.</p>
+            </div>
             <DemoForm toEmail={site.email} />
           </div>
         </div>

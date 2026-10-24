@@ -9,46 +9,48 @@ export default function WhatsAppCloudApiDoc() {
     <DocsShell slug="whatsapp-cloud-api">
       <p>
         The WhatsApp Cloud API is Meta&rsquo;s own hosted version of the WhatsApp Business Platform.
-        Connecting it to Outbound OS takes about fifteen minutes and needs no reseller: you create a
-        Meta app, generate a permanent token, paste two values into Settings, and point Meta&rsquo;s
-        webhook at your server so replies come back.
+        Connect it directly to Outbound OS using your Meta app, a system-user access token and
+        your registered number&rsquo;s identifiers. Configure the incoming webhook separately so
+        customer replies and delivery events reach your CRM.
       </p>
 
       <div className="note">
-        You need a Meta Business account, a phone number that is not registered on the WhatsApp or
-        WhatsApp Business app (or one you are willing to move), and your Outbound OS instance on a
-        public HTTPS address — see <Link href="/docs/install#https">Install → HTTPS</Link>.
+        You need a Meta business portfolio, a number eligible for your chosen Cloud API setup or
+        migration route, and your Outbound OS instance on a public HTTPS address — see <Link href="/docs/install#https">Install → HTTPS</Link>.
       </div>
 
       <h2 id="app">1. Create a Meta app with WhatsApp</h2>
       <ol>
         <li>
           Go to <a href="https://developers.facebook.com/apps">developers.facebook.com/apps</a> and
-          create an app of type <strong>Business</strong>, linked to your business portfolio.
+          create an app with the WhatsApp use case, linked to the business portfolio that owns
+          your messaging account.
         </li>
         <li>
           Add the <strong>WhatsApp</strong> product to the app.
         </li>
         <li>
           Under <strong>WhatsApp → API Setup</strong>, add your business phone number and verify it.
-          Copy its <strong>Phone number ID</strong> — this is not the phone number itself.
+          Copy its <strong>Phone number ID</strong> and <strong>WhatsApp Business Account ID</strong>.
+          The Phone number ID is not the phone number itself.
         </li>
       </ol>
 
-      <h2 id="token">2. Generate a permanent access token</h2>
+      <h2 id="token">2. Generate a system-user access token</h2>
       <p>
-        The temporary token on the API Setup page expires within a day. For a server, use a System
-        User token that does not expire:
+        A temporary API Setup token is unsuitable for a lasting server connection. Create a
+        dedicated system-user token and select a duration Meta makes available for your account:
       </p>
       <ol>
         <li>
-          In <strong>Meta Business Settings → Users → System users</strong>, add a system user with
-          the Admin role.
+          In <strong>Meta Business Settings → Users → System users</strong>, add a system user for
+          this integration.
         </li>
-        <li>Assign it your app and your WhatsApp account, with full control.</li>
+        <li>Grant access to the app and WhatsApp account the integration needs.</li>
         <li>
           Generate a token for the app with the <code>whatsapp_business_messaging</code> and{' '}
-          <code>whatsapp_business_management</code> permissions, and set it never to expire.
+          <code>whatsapp_business_management</code> permissions. Record its expiry and renewal
+          requirements for your installation.
         </li>
       </ol>
       <p>Treat the token like a password. Outbound OS stores it encrypted.</p>
@@ -56,13 +58,14 @@ export default function WhatsAppCloudApiDoc() {
       <h2 id="connect">3. Connect the number in Outbound OS</h2>
       <ol>
         <li>
-          Open <strong>Settings → WhatsApp</strong>, add a number and choose{' '}
+          Open <strong>Integrations → WhatsApp</strong>, add a number and choose{' '}
           <strong>Meta Cloud API</strong> as its provider.
         </li>
-        <li>Paste the Phone number ID and the permanent token.</li>
+        <li>Enter the Phone number ID, WhatsApp Business Account ID and access token.</li>
         <li>
           Press <strong>Test connection</strong>. It reads the number&rsquo;s verified name and
-          quality rating from Meta; if those appear, sending will work.
+          quality rating from Meta. This confirms credential access, not end-to-end delivery.
+          Verify incoming and outgoing messages using a number you own before customer outreach.
         </li>
       </ol>
 
@@ -93,8 +96,9 @@ export default function WhatsAppCloudApiDoc() {
       </ol>
       <p>
         Every delivery is checked against <code>META_APP_SECRET</code>; one with a wrong signature
-        is rejected. Replies now land in the inbox, and sent, delivered and read receipts update on
-        each message.
+        is rejected. After verifying the subscription, send an incoming message from a number you
+        own and confirm it appears in the inbox. Message states update from the delivery and read
+        receipts Meta reports; provider acceptance is not proof of delivery.
       </p>
 
       <h2 id="template">5. Set a first-contact template</h2>
@@ -109,9 +113,10 @@ export default function WhatsAppCloudApiDoc() {
         }
       </Code>
       <p>
-        Once it is approved, enter its name as the number&rsquo;s first-contact template in Settings
-        → WhatsApp, with its language code (for example <code>en</code> or <code>en_US</code>). New
-        leads now get it within seconds of arriving.
+        Once it is approved, select it as the number&rsquo;s first-contact template in
+        Integrations → WhatsApp, with its language code (for example <code>en</code> or{' '}
+        <code>en_US</code>). Eligible leads from enabled live sources can enter the configured
+        outreach flow when the sender is ready and limits permit. Importing a list does not send it.
       </p>
 
       <h2 id="rules">How the 24-hour window works</h2>
@@ -125,8 +130,8 @@ export default function WhatsAppCloudApiDoc() {
           </thead>
           <tbody>
             <tr>
-              <td>Within 24 hours of the lead&rsquo;s last message</td>
-              <td>Any free-text message, from the inbox</td>
+              <td>Within 24 hours of the customer&rsquo;s last message to that sending number</td>
+              <td>A free-text reply from the inbox, subject to account and provider rules</td>
             </tr>
             <tr>
               <td>First contact, or more than 24 hours since they wrote</td>
@@ -136,14 +141,12 @@ export default function WhatsAppCloudApiDoc() {
         </table>
       </div>
       <p>
-        Meta charges per message, by category and the recipient&rsquo;s country and applicable
-        service-window rules. Meta currently provides free service replies inside the
-        customer-service window. Configure billing on your WhatsApp Business account before billable
-        campaigns. Check{' '}
+        Messaging charges depend on category, destination and the applicable service-window rules.
+        Configure billing on your WhatsApp Business account before billable campaigns, and check{' '}
         <a href="https://developers.facebook.com/docs/whatsapp/pricing">
           Meta&rsquo;s current pricing
         </a>{' '}
-        before large campaigns.
+        for current rates, free-message rules and payment requirements.
       </p>
 
       <h2 id="troubleshooting">Troubleshooting</h2>
@@ -166,8 +169,10 @@ export default function WhatsAppCloudApiDoc() {
       </p>
       <h3>First contact is skipped</h3>
       <p>
-        The number has no first-contact template. Set one in Settings → WhatsApp, or set{' '}
-        <code>WA_FIRST_TOUCH_TEMPLATE</code> as a default for all numbers.
+        Check the recorded skip reason, lead consent and state, enabled outreach settings, sender
+        readiness and limits. Configure an approved first-contact template in Integrations → WhatsApp,
+        or set <code>WA_FIRST_TOUCH_TEMPLATE</code> as a default. Imported, paused, opted-out or
+        otherwise ineligible records should not receive automatic first contact.
       </p>
     </DocsShell>
   )

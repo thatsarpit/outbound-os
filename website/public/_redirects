@@ -1,5 +1,7 @@
 # Cloudflare Pages redirects. Old paths keep their links and rankings.
 # The live demo, a separate Pages project. 302 so the target can move.
+/demo/mobile       https://outboundos-demo.pages.dev/m/inbox 302
+/demo/mobile/      https://outboundos-demo.pages.dev/m/inbox 302
 /demo              https://outboundos-demo.pages.dev/  302
 /demo/             https://outboundos-demo.pages.dev/  302
 

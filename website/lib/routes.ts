@@ -26,7 +26,7 @@ const staticRoutes: Route[] = [
   {
     path: '/',
     eyebrow: 'Open-source WhatsApp CRM',
-    headline: 'Good conversations. Better business.',
+    headline: 'Every conversation, one place to act.',
     priority: 1,
     changeFrequency: 'weekly',
   },
@@ -82,7 +82,7 @@ const staticRoutes: Route[] = [
   {
     path: '/mcp',
     eyebrow: 'MCP server',
-    headline: 'Let Claude work your CRM, with a tool for every job.',
+    headline: 'Your CRM, connected to your AI tools.',
     priority: 0.8,
     changeFrequency: 'monthly',
   },

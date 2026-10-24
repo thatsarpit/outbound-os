@@ -24,12 +24,28 @@ export default function PrivacyPage() {
   return (
     <section className="section section--lead">
       <div className="page page--prose legal">
+        <nav className="legal__switch" aria-label="Legal documents">
+          <Link href="/privacy" aria-current="page">Privacy</Link>
+          <Link href="/terms">Terms</Link>
+        </nav>
         <p className="eyebrow">Legal</p>
         <h1>Privacy</h1>
         <p className="doc-meta">Last updated {updated}</p>
 
+        <nav className="legal__contents" aria-label="On this page">
+          <p>On this page</p>
+          <ol>
+            <li><a href="#website">This website</a></li>
+            <li><a href="#contact-form">Contact form</a></li>
+            <li><a href="#self-hosted">Self-hosted software</a></li>
+            <li><a href="#hosting">Managed hosting</a></li>
+            <li><a href="#github">GitHub</a></li>
+            <li><a href="#contact">Contact</a></li>
+          </ol>
+        </nav>
+
         <div className="legal__body flow-lg">
-          <section>
+          <section id="website">
             <h2>This website</h2>
             <p>
               outboundos.space is a static website. Google Analytics loads only
@@ -51,7 +67,7 @@ export default function PrivacyPage() {
             </p>
           </section>
 
-          <section>
+          <section id="contact-form">
             <h2>The contact form</h2>
             <p>
               If you use the form on the{' '}
@@ -73,7 +89,7 @@ export default function PrivacyPage() {
             </p>
           </section>
 
-          <section>
+          <section id="self-hosted">
             <h2>The software you host</h2>
             <p>
               When you run Outbound OS yourself, the data in it — your users,
@@ -85,7 +101,7 @@ export default function PrivacyPage() {
             </p>
           </section>
 
-          <section>
+          <section id="hosting">
             <h2>Managed hosting</h2>
             <p>
               If the maintainers host an instance for you, we process the data
@@ -95,7 +111,7 @@ export default function PrivacyPage() {
             </p>
           </section>
 
-          <section>
+          <section id="github">
             <h2>GitHub</h2>
             <p>
               The code, issues and discussions are hosted on GitHub. What you
@@ -104,7 +120,7 @@ export default function PrivacyPage() {
             </p>
           </section>
 
-          <section>
+          <section id="contact">
             <h2>Contact</h2>
             <p>
               Privacy questions:{' '}

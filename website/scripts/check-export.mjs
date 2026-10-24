@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 
 const root = path.resolve(process.argv[2] || 'out');
 function walk(dir) {
@@ -10,6 +11,14 @@ function walk(dir) {
   });
 }
 const files = walk(root);
+const captureManifest = JSON.parse(fs.readFileSync(path.join(root, 'screenshots/manifest.json'), 'utf8'));
+assert.equal(captureManifest.theme, 'dark', 'Product evidence must use the default dark theme');
+const captures = new Map(captureManifest.screens.map((screen) => [screen.file, screen]));
+for (const screen of captures.values()) {
+  const bytes = fs.readFileSync(path.join(root, 'screenshots', screen.file));
+  assert.equal(createHash('sha256').update(bytes).digest('hex'), screen.sha256, `${screen.file}: capture manifest is stale`);
+  assert(bytes.length < 500_000, `${screen.file}: product screenshot exceeds the image budget`);
+}
 const pages = files.filter((file) => file.endsWith('.html') && !['404.html', '_not-found.html'].includes(path.basename(file)));
 const titles = new Set();
 const descriptions = new Set();
@@ -55,6 +64,11 @@ for (const file of pages) {
     assert(/\balt="[^"]*"/.test(match[1]), `${route}: image missing alt text`);
     const src = match[1].match(/\bsrc="(\/[^"?#]*)/)?.[1];
     if (src) assert(resolves(src), `${route}: missing image ${src}`);
+    const capture = src?.startsWith('/screenshots/') ? captures.get(path.basename(src)) : undefined;
+    if (capture) {
+      assert.equal(Number(match[1].match(/\bwidth="(\d+)"/)?.[1]), capture.width, `${route}: incorrect capture width for ${src}`);
+      assert.equal(Number(match[1].match(/\bheight="(\d+)"/)?.[1]), capture.height, `${route}: incorrect capture height for ${src}`);
+    }
   }
   assert(!/aisensy|indiamart|engyne/i.test(html), `${route}: retired integration remains in rendered content`);
 }
@@ -69,4 +83,4 @@ for (const route of ['/integrations/aisensy', '/alternatives/aisensy', '/integra
     assert(!redirects.has(redirect.to) && resolves(redirect.to), `${from}: redirect must resolve without a chain`);
   }
 }
-console.log(JSON.stringify({ pages: pages.length, uniqueTitles: titles.size, uniqueDescriptions: descriptions.size, structuredBlocks, internalLinks, sitemapAndCards: 'matched', retiredRedirects: 8 }));
+console.log(JSON.stringify({ pages: pages.length, uniqueTitles: titles.size, uniqueDescriptions: descriptions.size, structuredBlocks, internalLinks, sitemapAndCards: 'matched', verifiedCaptures: captures.size, retiredRedirects: 8 }));

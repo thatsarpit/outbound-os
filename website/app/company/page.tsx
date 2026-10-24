@@ -1,3 +1,5 @@
+import Link from 'next/link'
+import { ArrowRight, ArrowUpRight } from 'lucide-react'
 import { Breadcrumbs, InstallBand } from '@/components/content'
 import { buildMetadata } from '@/lib/metadata'
 import { site } from '@/lib/site-content'
@@ -8,9 +10,6 @@ export const metadata = buildMetadata(
   '/company',
 )
 
-/** Unknown ownership and history facts stay as TODOs rather than becoming a
- * polished origin story. The page leads with what is true: product, market,
- * operating base and the product thesis. */
 export default function CompanyPage() {
   return (
     <>
@@ -23,16 +22,28 @@ export default function CompanyPage() {
             <p className="lede">
               Outbound OS started as the system behind a pharmaceutical export
               business answering buyers from marketplace, WhatsApp and email
-              around the world. It worked, so we made it general and released
-              it as open source under {site.license}.
+              across markets. The work behind that sales desk became a shared
+              inbox, lead records and follow-up workflows, released under {site.license}.
             </p>
+            <div className="company-hero__actions">
+              <a className="cta-link" href={site.githubUrl}>Meet the project on GitHub<ArrowUpRight size={14} aria-hidden="true" /></a>
+              <Link className="cta-link" href="/contact">Talk to the team<ArrowRight size={14} aria-hidden="true" /></Link>
+            </div>
           </div>
           <dl className="company-coordinates panel">
             <div><dt>Based in</dt><dd>India</dd></div>
-            <div><dt>Used</dt><dd>Worldwide</dd></div>
+            <div><dt>Built for</dt><dd>Teams handling customer conversations</dd></div>
             <div><dt>Open source since</dt><dd>2026</dd></div>
             <div><dt>License</dt><dd>{site.license}</dd></div>
           </dl>
+        </div>
+      </section>
+
+      <section className="section section--tight section--ruled">
+        <div className="page company-accountability">
+          <div><p className="eyebrow">Built in the open</p><h2>The work is visible.</h2></div>
+          <p>Read the source, follow releases and see how issues are handled. Setup and hosting are optional services from the people working on the project.</p>
+          <a className="cta-link" href={site.releasesUrl}>See the releases<ArrowUpRight size={14} aria-hidden="true" /></a>
         </div>
       </section>
 
@@ -57,10 +68,9 @@ export default function CompanyPage() {
           <p className="eyebrow">Who it is for</p>
           <h2>Businesses where customer conversation is operating work.</h2>
           <p>
-            Agencies, distributors, manufacturers, exporters, service
-            businesses, real estate, education, healthcare and B2B sales teams
-            all recognise the same gap: several channels, several owners and no
-            reliable view of what should happen next.
+            Built for teams whose sales day happens across WhatsApp, email and
+            other customer channels. The common need is practical: see the
+            conversation, know who owns it and keep the next action clear.
           </p>
         </div>
       </section>

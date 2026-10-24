@@ -32,7 +32,7 @@ const set = logoSet as unknown as {
 }
 
 type Brand =
-  | { kind: 'color'; title: string; body: string; w: number; h: number }
+  | { kind: 'color'; title: string; body: string; w: number; h: number; monochrome?: boolean }
   | { kind: 'glyph'; title: string; hex: string; path: string }
   | { kind: 'app'; title: string; hex: string; path: string }
   | { kind: 'mono'; title: string; hex: string; letters: string }
@@ -40,13 +40,14 @@ type Brand =
   | { kind: 'self'; title: string }
   | { kind: 'image'; title: string; src: string }
 
-function color(name: string, title: string): Brand {
+function color(name: string, title: string, monochrome = false): Brand {
   const icon = set.icons[name]
   if (!icon) throw new Error(`Logo not found: ${name}`)
   return {
     kind: 'color',
     title,
-    body: icon.body,
+    body: monochrome ? icon.body.replace(/fill="#[a-fA-F0-9]+"/g, 'fill="currentColor"') : icon.body,
+    monochrome,
     w: icon.width ?? set.width ?? 256,
     h: icon.height ?? set.height ?? 256,
   }
@@ -67,11 +68,11 @@ export const brands = {
   zapier: color('zapier-icon', 'Zapier'),
   n8n: color('n8n-icon', 'n8n'),
   claude: color('claude-icon', 'Claude'),
-  mcp: color('model-context-protocol-icon', 'Model Context Protocol'),
+  mcp: color('model-context-protocol-icon', 'Model Context Protocol', true),
   docker: color('docker-icon', 'Docker'),
-  github: color('github-icon', 'GitHub'),
-  wordpress: color('wordpress-icon', 'WordPress'),
-  framer: color('framer', 'Framer'),
+  github: color('github-icon', 'GitHub', true),
+  wordpress: color('wordpress-icon', 'WordPress', true),
+  framer: color('framer', 'Framer', true),
   sheets: glyph(siGooglesheets),
   make: glyph(siMake),
   brevo: glyph(siBrevo),
@@ -79,10 +80,10 @@ export const brands = {
   imessage: { kind: 'app', title: 'iMessage', hex: '#34DA50', path: siImessage.path },
   tradeindia: { kind: 'image', title: 'TradeIndia', src: '/logos/tradeindia.png' },
   justdial: { kind: 'mono', title: 'JustDial', hex: '#c2410c', letters: 'JD' },
-  email: { kind: 'icon', title: 'Email', hex: '#7c3aed', Icon: Mail },
-  webhooks: { kind: 'icon', title: 'Webhooks', hex: '#17171c', Icon: Webhook },
-  csv: { kind: 'icon', title: 'CSV', hex: '#15803d', Icon: FileSpreadsheet },
-  forms: { kind: 'icon', title: 'Website forms', hex: '#2c3fe0', Icon: FormInput },
+  email: { kind: 'icon', title: 'Email', hex: 'var(--email)', Icon: Mail },
+  webhooks: { kind: 'icon', title: 'Webhooks', hex: 'currentColor', Icon: Webhook },
+  csv: { kind: 'icon', title: 'CSV', hex: 'var(--success)', Icon: FileSpreadsheet },
+  forms: { kind: 'icon', title: 'Website forms', hex: 'var(--focus)', Icon: FormInput },
   outboundos: { kind: 'self', title: 'Outbound OS' },
 } satisfies Record<string, Brand>
 
@@ -101,7 +102,7 @@ export const integrationBrand: Record<string, BrandName> = {
   webhooks: 'webhooks',
   'csv-import': 'csv',
   'website-forms': 'forms',
-  mcp: 'claude',
+  mcp: 'mcp',
 }
 
 /* Logo bodies carry gradient ids. The same logo can appear several times on a
@@ -135,6 +136,7 @@ export function Logo({
         viewBox={`0 0 ${b.w} ${b.h}`}
         width={Math.round(b.w * scale)}
         height={Math.round(b.h * scale)}
+        fill={b.monochrome ? 'currentColor' : undefined}
         aria-hidden="true"
         dangerouslySetInnerHTML={{ __html: uniqueIds(b.body) }}
       />
@@ -195,7 +197,7 @@ export function LogoTile({
   const b: Brand = brands[brand]
   const solid = b.kind === 'app' || b.kind === 'mono' || b.kind === 'self'
   const ground =
-    b.kind === 'app' || b.kind === 'mono' ? b.hex : b.kind === 'self' ? '#0b0d10' : '#ffffff'
+    b.kind === 'app' || b.kind === 'mono' ? b.hex : 'var(--surface-raised)'
   const style = { '--tile': ground, width: size, height: size } as CSSProperties
   const a11y = label ? { role: 'img', 'aria-label': b.title } : { 'aria-hidden': true as const }
   const inner = Math.round(
