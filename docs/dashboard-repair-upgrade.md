@@ -76,7 +76,7 @@ Use owned addresses/numbers only for the separately reviewed provider acceptance
 
 ## Local verification record
 
-- 326 unit/fixture checks passed; four pre-existing TODO cases remain.
+- 327 unit/fixture checks passed; four pre-existing TODO cases remain.
 - 127 API integration checks passed against the full SQLite migration chain.
 - 16 MCP transport/OAuth checks passed.
 - Dashboard lint, typecheck, normal and demo builds passed; Home Screen PNG/manifest checks passed.

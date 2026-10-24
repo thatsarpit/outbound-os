@@ -12,6 +12,7 @@ import { notificationActions, useNotificationStore } from '@/stores/notification
 import type { ActivityLog } from '@/api/types'
 import { toast } from '@/stores/toast-store'
 import { handleInboxRequest } from './inbox'
+import { handleDemoMcpRequest } from './mcp'
 
 /**
  * Sample data for the dashboard without a backend: a workspace called Acme
@@ -2340,6 +2341,8 @@ export function installFixtureFetch() {
       )
     }
 
+    const mcp = handleDemoMcpRequest(url, init)
+    if (mcp) return mcp
     const mobileSales = handleMobileSalesRequest(url, init, FIXTURE_LEADS)
     if (mobileSales) return mobileSales
     const connector = handleConnectorRequest(url, init)
