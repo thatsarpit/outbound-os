@@ -1,4 +1,3 @@
-import Link from 'next/link'
 import { ArrowUpRight, Bell, CheckCheck, Inbox, Smartphone } from 'lucide-react'
 import { site } from '@/lib/site-content'
 
@@ -15,7 +14,7 @@ export function MobileShowcase() {
           <li><CheckCheck size={18} /><span><strong>Reply with the full picture.</strong> Message history, delivery status and the WhatsApp reply window.</span></li>
           <li><Bell size={18} /><span><strong>Keep the next step close.</strong> Follow-ups, leads and device notification settings.</span></li>
         </ul>
-        <Link href={site.mobileDemoUrl} className="btn btn--primary">Try the mobile workspace <ArrowUpRight size={15} /></Link>
+        <a href={site.mobileDemoUrl} className="btn btn--primary">Try the mobile workspace <ArrowUpRight size={15} /></a>
         <small>Runs in your browser. Add to your Home Screen on iPhone. Notifications require device permission and supported browser settings.</small>
       </div>
       <div className="mobile-proof__screens" data-reveal>
