@@ -184,6 +184,12 @@ export default function CampaignsPage() {
     for (const [key, val] of snapshot.entries) queryClient.setQueryData(key, val)
   }
 
+  const invalidateCampaignQueries = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['campaigns'] }),
+      queryClient.invalidateQueries({ queryKey: ['campaign-detail'] }),
+    ])
+
   const startMutation = useMutation({
     mutationFn: (id: number) => campaignsApi.start(id),
     onMutate: (id) => optimisticCampaignStatus(id, 'running'),
@@ -192,7 +198,7 @@ export default function CampaignsPage() {
       if (ctx) rollbackCampaignStatus(ctx)
       toast.error(`Failed to start: ${error.message}`)
     },
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['campaigns'] }),
+    onSettled: invalidateCampaignQueries,
   })
 
   const pauseMutation = useMutation({
@@ -203,13 +209,13 @@ export default function CampaignsPage() {
       if (ctx) rollbackCampaignStatus(ctx)
       toast.error(`Failed to pause: ${error.message}`)
     },
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['campaigns'] }),
+    onSettled: invalidateCampaignQueries,
   })
 
   const populateMutation = useMutation({
     mutationFn: (id: number) => campaignsApi.populate(id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['campaigns'] })
+      void invalidateCampaignQueries()
       toast.success('Leads populated')
     },
     onError: (error: Error) => toast.error(`Failed to populate: ${error.message}`),

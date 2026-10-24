@@ -443,7 +443,10 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
         email: form.email,
         smtpHost: form.provider === 'custom' ? form.smtpHost : providers?.[form.provider]?.smtpHost,
         smtpPort: form.provider === 'custom' ? form.smtpPort : providers?.[form.provider]?.smtpPort,
-        smtpSecure: form.provider === 'custom' ? false : providers?.[form.provider]?.smtpSecure,
+        smtpSecure:
+          form.provider === 'custom'
+            ? Number(form.smtpPort) === 465
+            : providers?.[form.provider]?.smtpSecure,
         smtpUser: form.smtpUser,
         smtpPass: form.smtpPass,
       }),
@@ -481,7 +484,9 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
     mutationFn: () =>
       api.post('/email/accounts', {
         ...form,
-        ...(form.provider === 'custom' ? {} : { smtpHost: undefined, smtpPort: undefined }),
+        ...(form.provider === 'custom'
+          ? { smtpSecure: Number(form.smtpPort) === 465 }
+          : { smtpHost: undefined, smtpPort: undefined }),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['email-accounts'] })

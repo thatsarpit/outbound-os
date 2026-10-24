@@ -13,5 +13,6 @@ export function metaInboundText(msg) {
         : msg?.type === 'audio' ? (msg.audio?.voice ? '[Voice message]' : '[Audio]')
           : msg?.type === 'document' ? `[Document] ${msg.document?.filename || ''}`.trim()
             : msg?.type === 'sticker' ? '[Sticker]'
+              : msg?.type === 'unsupported' ? '[Unsupported WhatsApp message]'
               : msg?.type ? `[${msg.type}]` : '');
 }

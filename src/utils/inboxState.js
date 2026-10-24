@@ -1,4 +1,5 @@
 import { isHumanReply } from './emailInbound.js';
+import { messageEventTime } from './messageTimeline.js';
 
 /** A read position belongs to a human identity, never to the shared MCP key. */
 export function inboxViewerKey(user) {
@@ -9,7 +10,7 @@ export function inboxViewerKey(user) {
 
 export function inboxThreadState({ lead, lastMessage, assignedToId }) {
   const resolvedAt = lead.inboxResolvedAt ? new Date(lead.inboxResolvedAt).getTime() : null;
-  const messageAt = lastMessage ? new Date(lastMessage.createdAt).getTime() : null;
+  const messageAt = lastMessage ? messageEventTime(lastMessage) : null;
   if (resolvedAt !== null && (!isHumanReply(lastMessage) || messageAt <= resolvedAt)) return 'resolved';
   if (isHumanReply(lastMessage)) return 'needs_reply';
   return lead.assignedMemberKey || assignedToId ? 'assigned' : 'unassigned';
@@ -23,7 +24,20 @@ export function inboxMessagePreview(message) {
     return 'Campaign email sent · open to view the archived template';
   }
   const text = String(message.content || '').replace(/\s+/g, ' ').trim();
+  if (message.channel === 'whatsapp' && message.direction === 'inbound'
+    && /^\[(unsupported|Unsupported WhatsApp message)\]$/i.test(text)) {
+    return 'WhatsApp message content unavailable';
+  }
   return message.direction === 'outbound' ? `You: ${text}` : text;
+}
+
+/** Legacy unsupported rows retain their original data while the inbox explains it. */
+export function inboxMessageContent(message) {
+  if (message.channel === 'whatsapp' && message.direction === 'inbound'
+    && /^\[(unsupported|Unsupported WhatsApp message)\]$/i.test(String(message.content || '').trim())) {
+    return 'WhatsApp could not provide this message’s content. Ask the customer to resend it as a standard text, photo or file.';
+  }
+  return message.content;
 }
 
 /** Local integer assignments cannot be inferred from an unrelated Clerk identity. */

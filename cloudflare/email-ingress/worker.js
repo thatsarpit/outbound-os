@@ -97,7 +97,9 @@ export async function reconcileStoredMail(env, { now = Date.now() } = {}) {
     const saved = await state.json();
     if (typeof saved.cursor === 'string') cursor = saved.cursor;
   }
-  const page = await env.MAIL_SPOOL.list({ prefix: 'incoming/', limit: 100, ...(cursor ? { cursor } : {}) });
+  // Ten entries leave room for recovery bookkeeping within Free Workers'
+  // 50-subrequest budget, including the queue write for every retained item.
+  const page = await env.MAIL_SPOOL.list({ prefix: 'incoming/', limit: 10, ...(cursor ? { cursor } : {}) });
   for (const object of page.objects) {
     const eventId = keyIdentity(object.key);
     // Give the normal object-created notification/queue retries an hour first.
@@ -129,6 +131,8 @@ export default {
       }
     }
   },
-  async scheduled(_controller, env) { await reconcileStoredMail(env); },
+  async scheduled(_controller, env) {
+    if (env.RELAY_ENABLED === 'true') await reconcileStoredMail(env);
+  },
   async fetch() { return new Response('Not found', { status: 404 }); },
 };

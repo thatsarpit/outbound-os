@@ -180,8 +180,10 @@ export default function TasksPage() {
       </div>
       {zone.ready ? (
         <p className="text-xs text-text-muted">
-          Dates use the workspace time zone: {zone.timezone}. Tasks are shared; this is not a
-          personal assignment queue.
+          Dates use the workspace time zone: {zone.timezone}.{' '}
+          {ownership === 'mine'
+            ? 'Showing follow-ups on leads assigned to you.'
+            : 'Showing follow-ups across the workspace.'}
         </p>
       ) : (
         <div className="flex flex-wrap items-center gap-2 text-xs text-text-secondary">

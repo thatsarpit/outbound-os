@@ -827,6 +827,37 @@ describe('Meta WhatsApp webhook', () => {
     assert.equal(receipt.status, 'read');
   });
 
+  test('both inbox endpoints order delayed webhook/media events by their original timestamp', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const lead = await prisma.lead.create({ data: { name: 'Timeline fixture', mobile: '15551239881', status: 'paused' } });
+    const records = [];
+    for (const [offset, arrival] of [[10, 11], [5, 12], [20, 4]]) {
+      records.push(await prisma.message.create({ data: {
+        leadId: lead.id, direction: offset === 20 ? 'outbound' : 'inbound', channel: 'whatsapp', status: 'delivered',
+        content: offset === 5 ? '[unsupported]' : `Fixture event ${offset}`,
+        providerCreatedAt: new Date(Date.UTC(2026, 9, 24, 10, 0, offset)),
+        sentAt: new Date(Date.UTC(2026, 9, 24, 10, 0, offset)),
+        createdAt: new Date(Date.UTC(2026, 9, 24, 10, 0, arrival)),
+      } }));
+    }
+    const expected = [records[1].id, records[0].id, records[2].id];
+    const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.77' };
+    const detail = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+    assert.equal(detail.status, 200);
+    assert.deepEqual(detail.body.messages.map(row => row.id), expected);
+    assert.equal(detail.body.lastMessage, records[2].content);
+    assert.equal(detail.body.replyNeeded, false);
+    assert.match(detail.body.messages[0].content, /could not provide/);
+    const messages = await request('GET', `/api/inbox/threads/${lead.id}/messages`, { headers });
+    assert.equal(messages.status, 200);
+    assert.deepEqual(messages.body.map(row => row.id), expected);
+    const queue = await request('GET', `/api/inbox/threads?leadId=${lead.id}&state=waiting`, { headers });
+    assert.equal(queue.status, 200);
+    assert.equal(queue.body.threads.length, 1);
+    assert.equal(queue.body.threads[0].lastMessage, records[2].content);
+    assert.equal(queue.body.threads[0].replyNeeded, false);
+  });
+
   const metaDelivery = (value) => ({
     object: 'whatsapp_business_account',
     entry: [{

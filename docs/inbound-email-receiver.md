@@ -55,7 +55,7 @@ Retry network failures/503 responses with the **same** event ID, envelope, origi
 
 ## Cloudflare adapter
 
-See [`cloudflare/email-ingress/`](../cloudflare/email-ingress/README.md). It contains an inactive Email Worker, R2 object-created Queue consumer, acknowledgement markers and bounded reconciliation. The Worker has no public raw-mail HTTP endpoint and never sends customer mail.
+See [`cloudflare/email-ingress/`](../cloudflare/email-ingress/README.md). It contains inactive R2 and private KV receiver variants, a Queue consumer, acknowledgement markers and bounded reconciliation. The KV variant targets a bounded Workers Free workload without an R2 billing subscription; limits and delayed visibility still require acceptance. The Worker has no public raw-mail HTTP endpoint and never sends customer mail.
 
 ## Operational work still required before live cutover
 

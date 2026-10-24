@@ -155,6 +155,12 @@ export default function OrdersPage() {
   })
 
   const orders = data?.data ?? []
+  const pages = data?.pages
+  const hasFilters = Boolean(search || statusFilter || originSupplierId)
+  useEffect(() => {
+    if (pages !== undefined) setPage((value) => Math.min(value, Math.max(1, pages)))
+  }, [pages])
+  useEffect(() => setPage(1), [originSupplierId])
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['orders'] })
     queryClient.invalidateQueries({ queryKey: ['order-stats'] })
@@ -254,14 +260,15 @@ export default function OrdersPage() {
             className={cn(inputClass, 'max-w-[240px]')}
             value={originSupplierId || ''}
             aria-label="Filter by lead supplier"
-            onChange={(event) =>
+            onChange={(event) => {
+              setPage(1)
               setSearchParams((current) => {
                 const next = new URLSearchParams(current)
                 if (event.target.value) next.set('originSupplierId', event.target.value)
                 else next.delete('originSupplierId')
                 return next
               })
-            }
+            }}
           >
             <option value="">All lead suppliers</option>
             {(originSuppliers?.data || []).map((supplier) => (
@@ -279,21 +286,27 @@ export default function OrdersPage() {
         ) : orders.length === 0 ? (
           <EmptyState
             icon={Package}
-            tone={search || statusFilter ? 'filtered' : 'waiting'}
-            title={search || statusFilter ? 'No matching orders' : 'No orders yet'}
+            tone={hasFilters ? 'filtered' : 'waiting'}
+            title={hasFilters ? 'No matching orders' : 'No orders yet'}
             description={
-              search || statusFilter
-                ? 'Try a different search or status.'
+              hasFilters
+                ? 'Try a different search, status or lead supplier.'
                 : 'Record an order to track its invoice and shipment.'
             }
             action={
-              search || statusFilter ? (
+              hasFilters ? (
                 <Button
                   size="sm"
                   variant="secondary"
                   onClick={() => {
                     setSearch('')
                     setStatusFilter('')
+                    setPage(1)
+                    setSearchParams((current) => {
+                      const next = new URLSearchParams(current)
+                      next.delete('originSupplierId')
+                      return next
+                    })
                   }}
                 >
                   Clear filters
