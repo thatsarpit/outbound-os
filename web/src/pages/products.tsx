@@ -37,6 +37,7 @@ export default function ProductsPage() {
   const chartTheme = useChartTheme()
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
+  const [performanceCurrency, setPerformanceCurrency] = useState('')
   const home = useHomeCurrency()
   const [draft, setDraft] = useState({ name: '', strength: '', unit: 'box', sell: '', cost: '' })
 
@@ -96,7 +97,11 @@ export default function ProductsPage() {
   })
 
   const products = data?.data ?? []
-  const rows = perf?.data ?? []
+  const performanceCurrencies = [...new Set((perf?.data ?? []).map((row) => row.currency))].sort()
+  const currentCurrency = performanceCurrencies.includes(performanceCurrency)
+    ? performanceCurrency
+    : performanceCurrencies[0] || ''
+  const rows = (perf?.data ?? []).filter((row) => row.currency === currentCurrency)
   const revenueRamp = chartTheme.sequential(Math.max(rows.length, 1)).reverse()
   const catalogued = products.length
   const withCost = products.filter((p) => p.costInr !== null).length
@@ -132,18 +137,32 @@ export default function ProductsPage() {
 
       {rows.length > 0 && (
         <SectionCard
-          title="What sells"
+          title={`What sells · ${currentCurrency}`}
+          action={
+            <select
+              aria-label="Product performance currency"
+              className="min-h-9 rounded-md border border-border bg-surface px-2 text-xs"
+              value={currentCurrency}
+              onChange={(event) => setPerformanceCurrency(event.target.value)}
+            >
+              {performanceCurrencies.map((currency) => (
+                <option key={currency} value={currency}>
+                  {currency}
+                </option>
+              ))}
+            </select>
+          }
           description={
             perf && perf.unlinkedLines > 0
-              ? `By revenue across confirmed orders. ${perf.unlinkedLines} line${perf.unlinkedLines === 1 ? '' : 's'} typed as free text are not counted.`
-              : 'By revenue across confirmed orders.'
+              ? `Order-line value in its stored order currency. ${perf.unlinkedLines} line${perf.unlinkedLines === 1 ? '' : 's'} typed as free text are not counted.`
+              : 'Order-line value in its stored order currency.'
           }
         >
           <BarList
             items={rows.slice(0, 8).map((r, i) => ({
-              label: `${r.product.name}${r.product.strength ? ` · ${r.product.strength}` : ''}`,
+              label: `${r.product.name}${r.product.strength ? ` · ${r.product.strength}` : ''} · ${r.unit}`,
               value: r.revenue,
-              display: `${formatMoney(r.revenue, r.product.sellCurrency)}  ·  ${r.quantity} ${r.product.defaultUnit}`,
+              display: `${formatMoney(r.revenue, r.currency)}  ·  ${r.quantity} ${r.unit}`,
               color: revenueRamp[i] ?? revenueRamp[0],
             }))}
           />

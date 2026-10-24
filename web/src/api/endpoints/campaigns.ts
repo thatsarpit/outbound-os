@@ -6,6 +6,13 @@ export interface CampaignListResponse {
   total: number
   page: number
   pages: number
+  summary?: {
+    byStatus: Record<string, number>
+    totalLeads: number
+    sentCount: number
+    replyCount: number
+    failedCount: number
+  }
 }
 
 export interface CampaignMutationPayload {
@@ -16,6 +23,9 @@ export interface CampaignMutationPayload {
   channel?: Campaign['channel']
   emailSubject?: string | null
   senderAccountId?: number | null
+  emailSenderAccountId?: number | null
+  whatsappSenderAccountId?: number | null
+  waCampaignName?: string | null
   emailTemplateId?: number | null
   variantBTemplate?: string | null
   variantBSubject?: string | null
@@ -42,7 +52,16 @@ export interface CampaignLeadsResponse {
 }
 
 export const campaignsApi = {
-  list: (filters: { page?: number; limit?: number; status?: string; search?: string } = {}) => {
+  list: (
+    filters: {
+      page?: number
+      limit?: number
+      status?: string
+      search?: string
+      sortBy?: string
+      sortOrder?: 'asc' | 'desc'
+    } = {},
+  ) => {
     const params = new URLSearchParams()
     Object.entries(filters).forEach(([key, value]) => {
       if (value === undefined || value === null || value === '') return
@@ -67,8 +86,8 @@ export const campaignsApi = {
 
   pause: (id: number) => api.post(`/campaigns/${id}/pause`),
 
-  previewLeads: (filter: Record<string, unknown> = {}) =>
-    api.post<CampaignPreviewLeadsResponse>('/campaigns/preview-leads', { filter }),
+  previewLeads: (filter: Record<string, unknown> = {}, channel: Campaign['channel'] = 'whatsapp') =>
+    api.post<CampaignPreviewLeadsResponse>('/campaigns/preview-leads', { filter, channel }),
 
   testSend: (id: number, testEmail?: string) =>
     api.post<{ success: boolean; sentTo: string; subject: string; messageId?: string }>(

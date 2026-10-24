@@ -38,7 +38,9 @@ class ActivityLog {
         const leadId   = typeof data.leadId   === 'number' ? data.leadId   : null;
         const accountId = typeof data.accountId === 'number' ? data.accountId : null;
         const meta = Object.keys(data).length > 0 ? JSON.stringify(data) : null;
-        return prisma.activityLog.create({ data: { type, message, leadId, accountId, meta } }).then(() => {
+        return prisma.activityLog.create({ data: { type, message, leadId, accountId, meta } }).then((row) => {
+          event.id = String(row.id);
+          event.timestamp = row.createdAt.toISOString();
           for (const listener of this.listeners) {
             try { listener(event); } catch { /* Activity persistence must not depend on a connected browser. */ }
           }
@@ -52,6 +54,22 @@ class ActivityLog {
   subscribe(listener) {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** Broadcast a row committed with its business transaction without writing it twice. */
+  publishPersisted(row) {
+    let data = {};
+    try { data = row.meta ? JSON.parse(row.meta) : {}; } catch { /* Keep malformed legacy metadata out of the live payload. */ }
+    const event = {
+      id: String(row.id), type: row.type, message: row.message, data,
+      timestamp: new Date(row.createdAt).toISOString(),
+    };
+    this.events = [event, ...this.events.filter(item => String(item.id) !== event.id)]
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, this.maxSize);
+    for (const listener of this.listeners) {
+      try { listener(event); } catch { /* A browser cannot affect committed activity. */ }
+    }
+    return event;
   }
 
   /** Get recent events, most recent first. */

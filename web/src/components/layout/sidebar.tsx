@@ -9,25 +9,29 @@ import { useQuery } from '@tanstack/react-query'
 import { systemApi } from '@/api/endpoints/system'
 
 export function Sidebar() {
-  const { hasCapability } = useAuthStore()
+  const { hasCapability, dashboardScope, isManagerOrAbove } = useAuthStore()
+  const canViewHealth = isManagerOrAbove()
   const { sidebarCollapsed, isMobileViewport, toggleSidebar, setSidebarCollapsed } = useUIStore()
   const location = useLocation()
   const { data: health, isError: healthError } = useQuery({
-    queryKey: ['system-health'],
+    queryKey: ['system-health', dashboardScope],
+    enabled: canViewHealth,
     queryFn: () => systemApi.getHealth(),
     refetchInterval: 60_000,
     staleTime: 30_000,
     meta: { silent: true },
   })
-  const healthLabel =
-    health?.health?.overall === 'ok'
-      ? 'System healthy'
-      : health?.health?.overall === 'down'
-        ? 'System issue'
-        : health?.health?.overall === 'degraded'
-          ? 'Needs attention'
-          : healthError
-            ? 'Status unavailable'
+  const overall = canViewHealth && !healthError ? health?.health?.overall : null
+  const healthLabel = !canViewHealth
+    ? 'Sales workspace'
+    : healthError
+      ? 'Status unavailable'
+      : overall === 'ok'
+        ? 'System healthy'
+        : overall === 'down'
+          ? 'System issue'
+          : overall === 'degraded'
+            ? 'Needs attention'
             : 'Checking system'
 
   // `sidebarCollapsed` does double duty: on desktop it means the icon rail, on
@@ -137,11 +141,13 @@ export function Sidebar() {
             <span
               className={cn(
                 'h-1.5 w-1.5 shrink-0 rounded-full',
-                health?.health?.overall === 'ok'
+                overall === 'ok'
                   ? 'bg-success'
-                  : health?.health?.overall === 'down'
+                  : overall === 'down'
                     ? 'bg-danger'
-                    : 'bg-warning',
+                    : overall === 'degraded' || healthError
+                      ? 'bg-warning'
+                      : 'bg-text-muted',
               )}
             />
             <span className="truncate">{healthLabel}</span>

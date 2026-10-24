@@ -19,7 +19,9 @@ export interface LeadFilters {
   sortBy?: string
   sortOrder?: 'asc' | 'desc'
   sortDir?: 'asc' | 'desc'
-  assignedToId?: number
+  assignedToId?: number | 'unassigned'
+  assignedMemberKey?: string
+  scope?: 'mine'
   poolId?: number | null
 }
 
@@ -44,17 +46,16 @@ export const leadsApi = {
       }
       params.set(key, String(val))
     })
-    return api.get<LeadListResponse>(`/leads?${params}`).then(
-      (res) =>
-        ({
-          // Array.isArray, not `?? []` — a non-array body (error object,
-          // changed shape) otherwise reaches callers and throws on .map/.filter.
-          data: Array.isArray(res?.leads) ? res.leads : [],
-          total: res?.total ?? 0,
-          page: res?.page ?? 1,
-          pages: res?.pages ?? 1,
-        }) satisfies PaginatedResponse<Lead>,
-    )
+    return api.get<LeadListResponse>(`/leads?${params}`).then((res) => {
+      if (!res || !Array.isArray(res.leads) || !Number.isFinite(res.total))
+        throw new Error('The lead response was incomplete.')
+      return {
+        data: res.leads,
+        total: res.total,
+        page: res.page,
+        pages: res.pages,
+      } satisfies PaginatedResponse<Lead>
+    })
   },
 
   getLead: (id: number) => api.get<Lead>(`/leads/${id}`),
@@ -98,7 +99,11 @@ export const leadsApi = {
   deleteLead: (id: number) => api.delete(`/leads/${id}`),
 
   bulkAction: (ids: number[], action: string, payload?: Record<string, unknown>) =>
-    api.post('/leads/bulk', { ids, action, payload }),
+    api.post<{ updated?: number; deleted?: number; action: string }>('/leads/bulk', {
+      ids,
+      action,
+      payload,
+    }),
 
   // Draft a first-contact WhatsApp message from the tier-aware templates and pick
   // the next round-robin sender account (server skips the client-relations

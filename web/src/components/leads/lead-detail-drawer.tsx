@@ -1,5 +1,8 @@
 /** The lead detail drawer. Extracted from leads.tsx. */
 import { useState, useEffect } from 'react'
+import { useAuthStore } from '@/stores/auth-store'
+import { useOnlineStatus } from '@/hooks/use-online-status'
+import { LeadAssignment } from '@/components/inbox/lead-assignment'
 import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { leadsApi } from '@/api/endpoints/leads'
@@ -62,13 +65,14 @@ export function LeadDetailDrawer({
   automationPending,
 }: LeadDetailDrawerProps) {
   const queryClient = useQueryClient()
+  const role = useAuthStore((state) => state.user?.role)
+  const online = useOnlineStatus()
+  const canEdit = Boolean(role && role !== 'viewer' && online)
+  const canManage = Boolean(role && ['admin', 'manager'].includes(role) && online)
 
   const { data: leadDetail } = useQuery({
     queryKey: ['lead-detail', lead?.id],
-    queryFn: () =>
-      leadsApi.getLead(lead!.id) as Promise<
-        { customer?: { id: number; name: string; totalOrders: number } | null } | undefined
-      >,
+    queryFn: () => leadsApi.getLead(lead!.id),
     enabled: !!lead,
   })
 
@@ -201,7 +205,13 @@ export function LeadDetailDrawer({
             </div>
             <div className="flex shrink-0 items-center gap-1">
               {!editMode ? (
-                <Button variant="ghost" size="sm" onClick={handleStartEdit} aria-label="Edit lead">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!canEdit}
+                  onClick={handleStartEdit}
+                  aria-label="Edit lead"
+                >
                   <Pencil className="h-4 w-4" />
                 </Button>
               ) : (
@@ -209,6 +219,7 @@ export function LeadDetailDrawer({
                   size="sm"
                   onClick={() => saveMutation.mutate(editForm)}
                   isLoading={saveMutation.isPending}
+                  disabled={!canEdit}
                   aria-label="Save changes"
                 >
                   <Save className="h-4 w-4" />
@@ -230,6 +241,7 @@ export function LeadDetailDrawer({
                   size="sm"
                   onClick={() => setConfirmDeleteOpen(true)}
                   className="hover:bg-danger-muted hover:text-danger"
+                  disabled={!canManage}
                   aria-label="Delete lead"
                 >
                   <Trash2 className="h-4 w-4" />
@@ -294,6 +306,7 @@ export function LeadDetailDrawer({
               </div>
               <Button
                 className="w-full"
+                disabled={!canEdit}
                 onClick={() => saveMutation.mutate(editForm)}
                 isLoading={saveMutation.isPending}
                 leftIcon={<Check className="h-4 w-4" />}
@@ -310,17 +323,26 @@ export function LeadDetailDrawer({
                     <Phone className="w-4 h-4 text-text-muted" />
                     <div className="min-w-0">
                       <span className="text-text-secondary">
-                        {lead.mobile && !lead.mobile.startsWith('no-phone:') ? lead.mobile : 'No phone number'}
+                        {lead.mobile && !lead.mobile.startsWith('no-phone:')
+                          ? lead.mobile
+                          : 'No phone number'}
                       </span>
-                      {lead.mobile.startsWith('no-phone:') && (lead.waUsername || lead.waUserId) && (
-                        <p className="text-xs text-text-muted">WhatsApp replies use their WhatsApp identity.</p>
-                      )}
+                      {lead.mobile.startsWith('no-phone:') &&
+                        (lead.waUsername || lead.waUserId) && (
+                          <p className="text-xs text-text-muted">
+                            WhatsApp replies use their WhatsApp identity.
+                          </p>
+                        )}
                     </div>
                   </div>
                   {lead.waUsername && (
                     <div className="flex items-center gap-3 text-sm">
-                      <span className="w-4 text-center text-text-muted" aria-hidden="true">@</span>
-                      <span className="text-text-secondary">@{lead.waUsername.replace(/^@/, '')}</span>
+                      <span className="w-4 text-center text-text-muted" aria-hidden="true">
+                        @
+                      </span>
+                      <span className="text-text-secondary">
+                        @{lead.waUsername.replace(/^@/, '')}
+                      </span>
                     </div>
                   )}
                   {lead.email && (
@@ -365,7 +387,7 @@ export function LeadDetailDrawer({
                       <button
                         type="button"
                         onClick={() => onToggleAutomation(lead)}
-                        disabled={automationPending}
+                        disabled={!canEdit || automationPending}
                         className={cn(
                           'inline-flex items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-colors disabled:opacity-50',
                           automationAction.isPaused
@@ -384,6 +406,15 @@ export function LeadDetailDrawer({
                       </button>
                     </div>
                   </div>
+                </div>
+
+                <div className="border-b border-border px-4 py-4 sm:px-6">
+                  <LeadAssignment
+                    leadId={lead.id}
+                    member={leadDetail ? leadDetail.assignedMember : lead.assignedMember}
+                    legacyId={leadDetail ? leadDetail.assignedToId : lead.assignedToId}
+                    legacyName={lead.assignedTo?.name}
+                  />
                 </div>
 
                 {/* The lead-to-customer link. Without it the drawer dead-ends
@@ -432,6 +463,7 @@ export function LeadDetailDrawer({
                           size="sm"
                           variant="secondary"
                           pending={convertMutation.isPending}
+                          disabled={!canEdit}
                           onClick={() => convertMutation.mutate()}
                         >
                           Convert to customer

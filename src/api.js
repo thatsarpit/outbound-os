@@ -2,6 +2,8 @@ import websiteEnquiries from './routes/websiteEnquiries.js';
 import connectorIntake from './routes/connectorIntake.js';
 import connectorAdmin from './routes/connectorAdmin.js';
 import mcpSetup from './routes/mcpSetup.js';
+import mcpAuthorizationRouter from './routes/mcpAuthorization.js';
+import { isDashboardFileRequest } from './utils/dashboardRequest.js';
 import { withDefaultCountryCode } from './utils/phoneDefaults.js';
 import express from 'express';
 import cors from 'cors';
@@ -30,10 +32,17 @@ import settlementRoutes from './routes/settlement.js';
 import productRoutes from './routes/products.js';
 import telegramRoutes from './routes/telegram.js';
 import emailInboxRoutes from './routes/emailInbox.js';
+import emailIngressRoutes from './routes/emailIngress.js';
+import emailReceiptRoutes from './routes/emailReceipts.js';
+import notificationRoutes from './routes/notifications.js';
+import activityRecordRoutes from './routes/activityRecords.js';
+import workspaceMemberRoutes from './routes/workspaceMembers.js';
+import workspaceMembers from './services/workspaceMembers.js';
+import { memberAssignmentWhere, leadAssignmentWhere, leadHasAssignee, memberAssignmentData, leadAssignedMember } from './utils/workspaceMember.js';
 import { sendManualWhatsApp, whatsappReplyContext } from './services/manualWhatsApp.js';
 import webPushRoutes from './routes/webPush.js';
 import inboxReadStateRoutes from './routes/inboxReadState.js';
-import { inboxViewerKey, inboxThreadState, inboxMessagePreview, localInboxAssigneeId } from './utils/inboxState.js';
+import { inboxViewerKey, inboxThreadState, inboxMessagePreview } from './utils/inboxState.js';
 import config from './config.js';
 import logger from './utils/logger.js';
 import activityLog, { EVENT_TYPES } from './utils/activityLog.js';
@@ -46,6 +55,8 @@ import leadScorer from './services/leadScorer.js';
 import csvImporter from './services/csvImporter.js';
 import csvExporter from './services/csvExporter.js';
 import campaignEngine from './services/campaignEngine.js';
+import { campaignInput } from './services/campaignInput.js';
+import { hasAllLeadTags } from './utils/campaignAudience.js';
 import replyDetector from './services/replyDetector.js';
 import leadStateService, { LEAD_STATUS } from './domain/leadStateService.js';
 import emailService from './services/emailService.js';
@@ -157,8 +168,9 @@ const INBOX_VISIBLE_MESSAGE_WHERE = { AND: [{ OR: [
 ] }] };
 
 function parsePositiveInt(value) {
-  const parsed = Number.parseInt(String(value), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  if (!['string', 'number'].includes(typeof value) || !/^[1-9]\d*$/.test(String(value))) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 function sanitizeSenderAccount(account) {
@@ -230,7 +242,8 @@ function buildInboxThreadSummary(lead, emailAccountsById = {}, telegramAccountsB
     lastOutboundAt: actionable?.direction === 'outbound' ? actionable.createdAt : null,
     unread: (readState.latestInboundMessageId || 0) > (readState.lastReadMessageId || 0),
     replyNeeded: threadState === 'needs_reply',
-    assignmentState: lead.assignedToId ? 'assigned' : 'unassigned',
+    assignedMember: leadAssignedMember(lead),
+    assignmentState: leadHasAssignee(lead) ? 'assigned' : 'unassigned',
     threadState,
     messageCount: lead._count?.messages || (Array.isArray(lead.messages) ? lead.messages.length : 0),
   };
@@ -412,7 +425,8 @@ export function broadcastEvent(type, data) {
 }
 
 activityLog.subscribe((event) => {
-  if (['reply_received', 'email_reply', 'message_failed'].includes(event.type)) broadcastEvent('inbox_changed', { leadId: event.data?.leadId, channel: event.data?.channel });
+  // Only persisted activity creates a bell entry; direct provider/SSE signals refresh it.
+  broadcastEvent('activity', { activityId: event.id, leadId: event.data?.leadId, channel: event.data?.channel });
 });
 
 /**
@@ -495,6 +509,7 @@ app.use('/api', browserMutationGuard(ALLOWED_ORIGINS));
 // Populates req.auth() / getAuth(req) for every request below. requireRole()
 // reads from it; nothing else in the chain does the verification itself.
 app.use(authMiddleware());
+app.use('/api/webhooks/email-ingress', emailIngressRoutes);
 // Retain the raw body so webhook signatures can be verified over the exact
 // bytes we received — re-serializing the parsed object would change key order
 // and whitespace, and the HMAC would never match.
@@ -511,6 +526,9 @@ app.use(express.json({
   verify: (req, _res, buf) => { req.rawBody = buf; },
 }));
 
+// Authenticate private MCP control calls and personal approvals after parsing JSON.
+app.use('/api', mcpAuthorizationRouter);
+
 // Health check (no auth)
 app.get('/health', async (req, res) => {
   try {
@@ -523,6 +541,18 @@ app.get('/health', async (req, res) => {
 
 // Serve the React dashboard from web/dist (built into the Docker image)
 const WEB_DIST = path.join(__dirname, '..', 'web', 'dist');
+// Assets and client-side routes share one generous file-serving budget. Mount
+// this once so a static miss followed by the SPA fallback costs one request.
+// API, provider callbacks and health probes retain their own independent rules.
+const dashboardLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => !isDashboardFileRequest(req),
+  message: { error: 'Too many dashboard requests. Please try again shortly.' },
+});
+app.use(dashboardLimiter);
 app.use(express.static(WEB_DIST));
 
 // ======================== AUTHENTICATION ========================
@@ -812,6 +842,10 @@ app.use('/api', productRoutes);
 // Telegram connected-account authentication and manual messaging.
 app.use('/api', telegramRoutes);
 app.use('/api', emailInboxRoutes);
+app.use('/api', emailReceiptRoutes);
+app.use('/api', notificationRoutes);
+app.use('/api', activityRecordRoutes);
+app.use('/api', workspaceMemberRoutes);
 // Pool scoping runs after auth — platform admins bypass, every other user is
 // 403'd if they reference a poolId they don't have a UserPool row for.
 app.use('/api', requirePoolAccess());
@@ -1187,37 +1221,6 @@ app.get('/api/stats/activity', (req, res) => {
   res.json(activityLog.getRecent(count));
 });
 
-// ── Persisted Notifications (survive restarts) ────────────────────────────────
-// Returns the last N ActivityLog rows from the DB, shaped as ActivityLog items.
-app.get('/api/notifications', async (req, res) => {
-  try {
-    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
-    const rows = await prisma.activityLog.findMany({
-      orderBy: { createdAt: 'desc' },
-      take: limit,
-    });
-    const items = rows.map((row) => ({
-      id: row.id,
-      type: row.type,
-      message: row.message,
-      accountId: row.accountId ?? null,
-      leadId: row.leadId ?? null,
-      data: row.meta ? (() => { try { return JSON.parse(row.meta); } catch { return null; } })() : null,
-      createdAt: row.createdAt.toISOString(),
-      timestamp: row.createdAt.toISOString(),
-    }));
-    res.json(items);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Mark all notifications read — read state is tracked client-side in localStorage;
-// this endpoint exists as the API surface for future server-side read tracking.
-app.patch('/api/notifications/read-all', (_req, res) => {
-  res.json({ ok: true });
-});
-
 app.get('/api/stats/charts', async (req, res) => {
   try {
     const days = Math.min(
@@ -1518,7 +1521,7 @@ app.get('/api/leads', async (req, res) => {
       status, search, page = 1, limit = 25,
       sortBy = 'createdAt', sortOrder = 'desc',
       minScore, maxScore, source, tags, engagement,
-      dateFrom, dateTo, assignedToId, poolId, originSupplierId,
+      dateFrom, dateTo, assignedToId, assignedMemberKey, scope, poolId, originSupplierId,
     } = req.query;
 
     // Build the where clause with AND composition so search and statusFilter can coexist
@@ -1542,8 +1545,7 @@ app.get('/api/leads', async (req, res) => {
         andClauses.push({ isOnWhatsApp: false });
       } else {
         andClauses.push({ status });
-        // Exclude confirmed invalid numbers from normal status queues
-        andClauses.push({ OR: [{ isOnWhatsApp: null }, { isOnWhatsApp: true }] });
+        // Sales stage is independent of channel reachability.
       }
     }
     if (source) andClauses.push({ source });
@@ -1553,9 +1555,18 @@ app.get('/api/leads', async (req, res) => {
       andClauses.push({ originSupplierId: supplierId });
     }
     if (engagement) andClauses.push({ engagementLevel: engagement });
-    if (assignedToId === 'unassigned') andClauses.push({ assignedToId: null });
-    else if (assignedToId) andClauses.push({ assignedToId: parseInt(assignedToId) });
-    if (tags) andClauses.push({ tags: { contains: tags } });
+    if (scope === 'mine') andClauses.push(memberAssignmentWhere(req.user));
+    else if (assignedMemberKey) andClauses.push({ assignedMemberKey: String(assignedMemberKey) });
+    else if (assignedToId === 'unassigned') andClauses.push(leadAssignmentWhere(false));
+    else if (assignedToId) {
+      const localId = parsePositiveInt(assignedToId);
+      if (!localId) return res.status(400).json({ error: 'Valid assignee required' });
+      andClauses.push({ assignedToId: localId });
+    }
+    if (tags) {
+      const candidates = await prisma.lead.findMany({ where: { AND: andClauses }, select: { id: true, tags: true } });
+      andClauses.push({ id: { in: candidates.filter(lead => hasAllLeadTags(lead.tags, tags)).map(lead => lead.id) } });
+    }
     if (minScore) andClauses.push({ score: { gte: parseInt(minScore) } });
     if (maxScore) andClauses.push({ score: { lte: parseInt(maxScore) } });
     if (dateFrom) {
@@ -1581,18 +1592,20 @@ app.get('/api/leads', async (req, res) => {
 
     const where = andClauses.length > 0 ? { AND: andClauses } : {};
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const pageNumber = parsePositiveInt(page), pageLimit = parsePositiveInt(limit);
+    if (!pageNumber || !pageLimit || pageLimit > 100) return res.status(400).json({ error: 'Choose a valid page and a limit from 1 to 100.' });
+    const skip = (pageNumber - 1) * pageLimit;
     const allowedSortFields = ['createdAt', 'updatedAt', 'name', 'score', 'status', 'source', 'followupCount', 'lastMessageAt', 'repliedAt'];
     const safeSortBy = allowedSortFields.includes(sortBy) ? sortBy : 'createdAt';
     const safeSortOrder = sortOrder === 'asc' ? 'asc' : 'desc';
-    const orderBy = { [safeSortBy]: safeSortOrder };
+    const orderBy = [{ [safeSortBy]: safeSortOrder }, { id: safeSortOrder }];
 
     const [leads, total] = await Promise.all([
       prisma.lead.findMany({
         where,
         orderBy,
         skip,
-        take: parseInt(limit),
+        take: pageLimit,
         include: {
           originSupplier: { select: { id: true, name: true } },
           messages: {
@@ -1601,19 +1614,20 @@ app.get('/api/leads', async (req, res) => {
             select: { content: true, direction: true, createdAt: true, status: true },
           },
           assignedTo: { select: { id: true, name: true, email: true } },
+          assignedMember: true,
         },
       }),
       prisma.lead.count({ where }),
     ]);
 
     res.json({
-      leads,
+      leads: leads.map(lead => ({ ...lead, assignedMember: leadAssignedMember(lead) })),
       total,
-      page: parseInt(page),
-      pages: Math.ceil(total / parseInt(limit)),
+      page: pageNumber,
+      pages: Math.ceil(total / pageLimit),
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -1630,6 +1644,7 @@ app.get('/api/leads/:id', async (req, res, next) => {
         messages: { orderBy: { createdAt: 'asc' } },
         campaignLeads: { include: { campaign: { select: { name: true, id: true } } } },
         assignedTo: { select: { id: true, name: true, email: true } },
+        assignedMember: true,
         leadNotes: { orderBy: { createdAt: 'desc' } },
         leadTasks: { orderBy: { createdAt: 'desc' } },
         // Surfaced so the drawer can link to the buying relationship rather
@@ -1643,7 +1658,7 @@ app.get('/api/leads/:id', async (req, res, next) => {
       },
     });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
-    res.json(lead);
+    res.json({ ...lead, assignedMember: leadAssignedMember(lead) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -1810,7 +1825,7 @@ app.get('/api/leads/:id/timeline', async (req, res) => {
     const lead = await prisma.lead.findUnique({
       where: { id },
       include: {
-        messages:  { orderBy: { createdAt: 'asc' }, select: { id: true, content: true, direction: true, status: true, createdAt: true, channel: true } },
+        messages:  { orderBy: { createdAt: 'asc' }, select: { id: true, content: true, direction: true, status: true, createdAt: true, sentAt: true, channel: true, emailSubject: true, emailAccountId: true, waAccount: true } },
         leadNotes: { orderBy: { createdAt: 'asc' }, select: { id: true, content: true, type: true, createdAt: true } },
         leadTasks: { orderBy: { createdAt: 'asc' }, select: { id: true, title: true, done: true, dueAt: true, createdAt: true } },
       },
@@ -1826,8 +1841,8 @@ app.get('/api/leads/:id/timeline', async (req, res) => {
     lead.messages.forEach((m) => {
       events.push({
         type: 'message',
-        at: m.createdAt,
-        data: { direction: m.direction, content: m.content?.slice(0, 120), status: m.status, channel: m.channel || 'whatsapp' },
+        at: m.sentAt || m.createdAt,
+        data: { id: m.id, direction: m.direction, content: m.content?.slice(0, 200), status: m.status, channel: m.channel || 'whatsapp', subject: m.emailSubject, accountId: m.channel === 'email' ? m.emailAccountId : m.waAccount },
       });
     });
 
@@ -1854,20 +1869,27 @@ app.get('/api/leads/:id/timeline', async (req, res) => {
 app.post('/api/leads/:id/assign', requireRole('manager'), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { userId } = req.body; // null to unassign
-    if (userId !== null && userId !== undefined) {
-      const user = await prisma.user.findUnique({ where: { id: parseInt(userId) }, select: { id: true, enabled: true } });
-      if (!user) return res.status(404).json({ error: 'User not found' });
-      if (!user.enabled) return res.status(400).json({ error: 'Cannot assign to disabled user' });
+    if (!parsePositiveInt(req.params.id)) return res.status(400).json({ error: 'Valid lead ID required' });
+    const actor = await workspaceMembers.self(req.user);
+    if (!['manager', 'admin'].includes(actor.role)) return res.status(403).json({ error: 'Only a manager can reassign a teammate.' });
+    let key = req.body.memberKey;
+    if (key === undefined && Object.hasOwn(req.body, 'userId')) {
+      if (actor.provider !== 'local') return res.status(400).json({ error: 'Choose a workspace member for Clerk assignments.' });
+      if (req.body.userId === null) key = null;
+      else {
+        const localId = parsePositiveInt(req.body.userId);
+        if (!localId) return res.status(400).json({ error: 'Valid local member ID required' });
+        key = `local:local:${localId}`;
+      }
     }
-    const lead = await prisma.lead.update({
-      where: { id },
-      data: { assignedToId: userId ? parseInt(userId) : null },
-    });
-    res.json({ id, assignedToId: lead.assignedToId });
+    if (key === undefined) return res.status(400).json({ error: 'Choose a member, or null to unassign.' });
+    const member = key === null ? null : await workspaceMembers.resolve(req.user, key);
+    const lead = await prisma.lead.update({ where: { id }, data: memberAssignmentData(member), include: { assignedMember: true } });
+    broadcastEvent('lead_assigned', { leadId: id });
+    res.json({ id, assignedToId: lead.assignedToId, assignedMemberKey: lead.assignedMemberKey, assignedMember: leadAssignedMember(lead) });
   } catch (error) {
     if (error.code === 'P2025') return res.status(404).json({ error: 'Lead not found' });
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
   }
 });
 
@@ -2092,8 +2114,8 @@ app.post('/api/import/csv', requireRole('manager'), upload.single('file'), async
 
     const csvText = req.file.buffer.toString('utf-8');
     const poolId = req.body.poolId ? parseInt(req.body.poolId) : null;
-    if (!poolId) return res.status(400).json({ error: 'poolId is required for CSV import — choose a lead pool to import into.' });
-    if (!(await userCanAccessPool(req, poolId))) {
+    if (req.body.poolId && (!Number.isSafeInteger(poolId) || poolId < 1)) return res.status(400).json({ error: 'Invalid lead pool.' });
+    if (poolId && !(await userCanAccessPool(req, poolId))) {
       return res.status(403).json({ error: 'You do not have access to this lead pool.' });
     }
     const result = await csvImporter.importCSV(csvText, req.file.originalname, { poolId });
@@ -2105,7 +2127,7 @@ app.post('/api/import/csv', requireRole('manager'), upload.single('file'), async
       );
     }
 
-    res.json(result);
+    res.status(result.success ? 200 : 400).json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -2155,7 +2177,8 @@ app.post('/api/leads/bulk', requireRole('manager'), async (req, res) => {
     }
     if (!action) return res.status(400).json({ error: 'action is required' });
 
-    const intIds = ids.map(Number).filter((n) => !isNaN(n));
+    if (ids.length > 20000 || ids.some(id => !parsePositiveInt(id))) return res.status(400).json({ error: 'Provide at most 20000 valid lead IDs.' });
+    const intIds = [...new Set(ids.map(Number))];
 
     switch (action) {
       case 'tag': {
@@ -2197,13 +2220,13 @@ app.post('/api/leads/bulk', requireRole('manager'), async (req, res) => {
         if (!allowed.includes(payload.status)) {
           return res.status(400).json({ error: `payload.status must be one of: ${allowed.join(', ')}` });
         }
-        await prisma.lead.updateMany({ where: { id: { in: intIds } }, data: { status: payload.status } });
-        return res.json({ updated: intIds.length, action });
+        const result = await prisma.lead.updateMany({ where: { id: { in: intIds } }, data: { status: payload.status } });
+        return res.json({ updated: result.count, action });
       }
 
       case 'pause': {
-        await prisma.lead.updateMany({ where: { id: { in: intIds } }, data: { status: 'paused' } });
-        return res.json({ updated: intIds.length, action });
+        const result = await prisma.lead.updateMany({ where: { id: { in: intIds } }, data: { status: 'paused' } });
+        return res.json({ updated: result.count, action });
       }
 
       case 'resume': {
@@ -2217,26 +2240,26 @@ app.post('/api/leads/bulk', requireRole('manager'), async (req, res) => {
 
       case 'assign_wa': {
         if (payload.accountId === undefined) return res.status(400).json({ error: 'payload.accountId required' });
-        await prisma.lead.updateMany({ where: { id: { in: intIds } }, data: { assignedAccount: Number(payload.accountId) } });
-        return res.json({ updated: intIds.length, action });
+        const result = await prisma.lead.updateMany({ where: { id: { in: intIds } }, data: { assignedAccount: Number(payload.accountId) } });
+        return res.json({ updated: result.count, action });
       }
 
       case 'assign_email': {
         if (payload.accountId === undefined) return res.status(400).json({ error: 'payload.accountId required' });
-        await prisma.lead.updateMany({ where: { id: { in: intIds } }, data: { assignedEmailAccountId: payload.accountId ? Number(payload.accountId) : null } });
-        return res.json({ updated: intIds.length, action });
+        const result = await prisma.lead.updateMany({ where: { id: { in: intIds } }, data: { assignedEmailAccountId: payload.accountId ? Number(payload.accountId) : null } });
+        return res.json({ updated: result.count, action });
       }
 
       case 'delete': {
         // Delete leads and all associated data in a transaction
-        await prisma.$transaction(async (tx) => {
+        const removed = await prisma.$transaction(async (tx) => {
           await tx.message.deleteMany({ where: { leadId: { in: intIds } } });
           await tx.leadNote.deleteMany({ where: { leadId: { in: intIds } } });
           await tx.leadTask.deleteMany({ where: { leadId: { in: intIds } } });
           await tx.campaignLead.deleteMany({ where: { leadId: { in: intIds } } });
-          await tx.lead.deleteMany({ where: { id: { in: intIds } } });
+          return tx.lead.deleteMany({ where: { id: { in: intIds } } });
         });
-        return res.json({ deleted: intIds.length, action });
+        return res.json({ deleted: removed.count, action });
       }
 
       case 'export': {
@@ -2288,6 +2311,9 @@ app.get('/api/campaigns', requireRole('manager'), async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 25));
+    const allowedSort = ['name', 'channel', 'status', 'totalLeads', 'sentCount', 'replyCount', 'createdAt'];
+    const sortBy = allowedSort.includes(req.query.sortBy) ? req.query.sortBy : 'createdAt';
+    const sortOrder = req.query.sortOrder === 'asc' ? 'asc' : 'desc';
     const status = req.query.status;
     const search = req.query.search;
 
@@ -2295,16 +2321,22 @@ app.get('/api/campaigns', requireRole('manager'), async (req, res) => {
     if (status) where.status = status;
     if (search) where.name = { contains: search };
 
-    const [campaigns, total] = await Promise.all([
+    const [campaigns, total, groups] = await Promise.all([
       prisma.campaign.findMany({
         where,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ [sortBy]: sortOrder }, { id: 'desc' }],
         skip: (page - 1) * limit,
         take: limit,
       }),
       prisma.campaign.count({ where }),
+      prisma.campaign.groupBy({ by: ['status'], where, _count: { _all: true }, _sum: { totalLeads: true, sentCount: true, replyCount: true, failedCount: true } }),
     ]);
-    res.json({ campaigns, total, page, pages: Math.ceil(total / limit) });
+    const summary = { byStatus: {}, totalLeads: 0, sentCount: 0, replyCount: 0, failedCount: 0 };
+    for (const group of groups) {
+      summary.byStatus[group.status] = group._count._all;
+      for (const key of ['totalLeads', 'sentCount', 'replyCount', 'failedCount']) summary[key] += group._sum[key] || 0;
+    }
+    res.json({ campaigns, total, page, pages: Math.ceil(total / limit), summary });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -2312,53 +2344,18 @@ app.get('/api/campaigns', requireRole('manager'), async (req, res) => {
 
 app.post('/api/campaigns', requireRole('manager'), async (req, res) => {
   try {
-    const { name, description, messageTemplate, targetFilter, channel, emailSubject, senderAccountId, variantBTemplate, variantBSubject, poolId, waCampaignName } = req.body;
-    if (!name || !messageTemplate) {
-      return res.status(400).json({ error: 'Name and message template are required' });
-    }
-    if (channel && !VALID_CHANNELS.includes(channel)) {
-      return res.status(400).json({ error: `Invalid channel. Must be one of: ${VALID_CHANNELS.join(', ')}` });
-    }
-    if (name.length > 200) return res.status(400).json({ error: 'Campaign name too long (max 200 chars)' });
-    if ((channel === 'email' || channel === 'both') && !emailSubject) {
-      return res.status(400).json({ error: 'Email subject is required for email/both campaigns' });
-    }
+    const input = await campaignInput(req.body, { db: prisma });
+    const { poolId } = req.body;
+    // This installation is one workspace; only an explicit legacy pool narrows its audience.
+    const resolvedPoolId = poolId == null ? null : Number(poolId);
+    if (poolId != null && (!Number.isSafeInteger(resolvedPoolId) || resolvedPoolId < 1)) return res.status(400).json({ error: 'Invalid lead pool.' });
+    if (resolvedPoolId && !(await userCanAccessPool(req, resolvedPoolId))) return res.status(403).json({ error: 'You do not have access to this lead pool.' });
 
-    // Pool resolution: explicit poolId from the request (must be one the
-    // user has access to) or fall back. Pool scoping is what stops a
-    // partner-team manager from spinning up a campaign that quietly targets
-    // team-pool leads.
-    let resolvedPoolId = poolId ? parseInt(poolId) : null;
-    if (resolvedPoolId && !(await userCanAccessPool(req, resolvedPoolId))) {
-      return res.status(403).json({ error: 'You do not have access to this lead pool.' });
-    }
-    if (!resolvedPoolId) {
-      const accessible = await getAccessiblePoolIds(req);
-      // Platform admin (null) or no pools seeded yet: fall back to the
-      // default pool if one exists, otherwise allow null poolId so initial
-      // setup before pool seeding doesn't break.
-      if (accessible === null || accessible.length !== 1) {
-        const def = await prisma.leadPool.findFirst({ where: { isDefault: true }, select: { id: true } });
-        resolvedPoolId = def?.id ?? null;
-        if (!resolvedPoolId && accessible !== null && accessible.length > 1) {
-          return res.status(400).json({ error: 'poolId is required when you have access to multiple lead pools.' });
-        }
-      } else {
-        resolvedPoolId = accessible[0];
-      }
-    }
-
-    const campaign = await campaignEngine.createCampaign({
-      name, description, messageTemplate, targetFilter, channel, emailSubject, senderAccountId,
-      waCampaignName: waCampaignName ? String(waCampaignName).trim() : null,
-      variantBTemplate: variantBTemplate || null,
-      variantBSubject: variantBSubject || null,
-      poolId: resolvedPoolId,
-    });
-    activityLog.add(EVENT_TYPES.CAMPAIGN_STARTED, `Campaign "${name}" (${channel || 'whatsapp'}) created`);
+    const campaign = await campaignEngine.createCampaign({ ...input, poolId: resolvedPoolId });
+    activityLog.add('campaign_created', `Campaign "${input.name}" (${input.channel}) created`);
     res.json(campaign);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -2407,19 +2404,12 @@ app.patch('/api/campaigns/:id', requireRole('manager'), async (req, res) => {
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     if (campaign.status !== 'draft') return res.status(400).json({ error: 'Can only edit draft campaigns' });
 
-    const allowed = ['name', 'description', 'messageTemplate', 'emailSubject', 'channel', 'targetFilter', 'senderAccountId', 'variantBTemplate', 'variantBSubject', 'waCampaignName'];
-    const updates = {};
-    for (const key of allowed) {
-      if (req.body[key] !== undefined) updates[key] = req.body[key];
-    }
-    if (updates.targetFilter && typeof updates.targetFilter === 'object') {
-      updates.targetFilter = JSON.stringify(updates.targetFilter);
-    }
+    const updates = await campaignInput(req.body, { db: prisma, existing: campaign });
 
     const updated = await prisma.campaign.update({ where: { id }, data: updates });
     res.json(updated);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -2479,9 +2469,11 @@ app.post('/api/campaigns/preview-leads', requireRole('manager'), async (req, res
     }
     if (!previewPoolId) {
       const accessible = await getAccessiblePoolIds(req);
-      previewPoolId = accessible.length === 1 ? accessible[0] : null;
+      previewPoolId = accessible?.length === 1 ? accessible[0] : null;
     }
-    const leads = await campaignEngine.getMatchingLeads(req.body.filter || {}, previewPoolId);
+    const channel = req.body.channel || 'whatsapp';
+    if (!VALID_CHANNELS.includes(channel)) return res.status(400).json({ error: 'Invalid campaign channel.' });
+    const leads = await campaignEngine.getMatchingLeads(req.body.filter || {}, previewPoolId, channel);
     res.json({ count: leads.length, sample: leads.slice(0, 10), poolId: previewPoolId });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -3074,15 +3066,8 @@ app.get('/api/inbox/threads', async (req, res) => {
       if (accessiblePools !== null) where.poolId = { in: accessiblePools };
     }
     if (leadId) where.id = leadId;
-    if (assignedToMe) {
-      const assigneeId = localInboxAssigneeId(req.user);
-      if (!assigneeId) return res.status(409).json({ error: 'Personal assignment requires a local user. Clerk assignment identities are not mapped yet.', code: 'assignment_unavailable' });
-      where.assignedToId = assigneeId;
-    } else if (assigned === true) {
-      where.assignedToId = { not: null };
-    } else if (assigned === false) {
-      where.assignedToId = null;
-    }
+    if (assignedToMe) where.AND = [memberAssignmentWhere(req.user)];
+    else if (assigned !== null) where.AND = [leadAssignmentWhere(assigned)];
 
     if (search) {
       where.OR = [
@@ -3122,7 +3107,7 @@ app.get('/api/inbox/threads', async (req, res) => {
         orderBy: { id: 'asc' },
         take: scanSize,
         select: {
-          id: true, status: true, inboxResolvedAt: true, assignedToId: true, lastMessageAt: true, updatedAt: true,
+          id: true, status: true, inboxResolvedAt: true, assignedToId: true, assignedMemberKey: true, lastMessageAt: true, updatedAt: true,
           messages: { where: visibleMessageWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
             select: { direction: true, channel: true, emailInboundKind: true, status: true, createdAt: true } },
         },
@@ -3163,8 +3148,8 @@ app.get('/api/inbox/threads', async (req, res) => {
     const queue = scopedQueue.filter((lead) => {
       if (state === 'waiting') return lead.threadState !== 'resolved' && lead.lastActionableMessage?.direction === 'outbound';
       if (state === 'needs_reply') return lead.threadState === 'needs_reply';
-      if (state === 'assigned') return Boolean(lead.assignedToId);
-      if (state === 'unassigned') return !lead.assignedToId;
+      if (state === 'assigned') return leadHasAssignee(lead);
+      if (state === 'unassigned') return !leadHasAssignee(lead);
       if (state === 'resolved') return lead.threadState === 'resolved';
       if (state === 'open') return lead.threadState !== 'resolved';
       return true;
@@ -3177,6 +3162,7 @@ app.get('/api/inbox/threads', async (req, res) => {
         include: {
           messages: { where: visibleMessageWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1 },
           _count: { select: { messages: { where: INBOX_VISIBLE_MESSAGE_WHERE } } },
+          assignedMember: true, assignedTo: { select: { name: true, role: true } },
         },
       }),
       prisma.emailAccount.findMany({ where: { enabled: true }, orderBy: { id: 'asc' } }),
@@ -3191,7 +3177,7 @@ app.get('/api/inbox/threads', async (req, res) => {
     const unread = scopedQueue.filter(lead => (inboundByLead.get(lead.id) || 0) > (readByLead.get(lead.id) || 0)).length;
     res.json({ threads, total, page, pages: Math.ceil(total / limit), counts, needsReply: counts.needsReply, unread });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
   }
 });
 
@@ -3203,6 +3189,7 @@ async function sendInboxThreadDetail(req, res) {
     const lead = await prisma.lead.findUnique({
       where: { id: leadId },
       include: {
+        assignedMember: true, assignedTo: { select: { name: true, role: true } },
         messages: {
           where: INBOX_VISIBLE_MESSAGE_WHERE,
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
@@ -3258,7 +3245,7 @@ async function sendInboxThreadDetail(req, res) {
       availableSenderAccounts: availableSenderAccounts.map(sanitizeSenderAccount),
       threadStatus: summary.threadState === 'resolved' ? 'resolved' : summary.replyNeeded ? 'waiting' : 'open',
       assignedUserId: lead.assignedToId || null,
-      assignedUserName: null,
+      assignedUserName: leadAssignedMember(lead)?.name || null,
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -3326,20 +3313,23 @@ app.post('/api/inbox/threads/:leadId/reopen', requireRole('agent'), async (req, 
 // POST /api/inbox/threads/:leadId/assign-self — assign thread to the current user
 app.post('/api/inbox/threads/:leadId/assign-self', requireRole('agent'), async (req, res) => {
   try {
-    const leadId = parseInt(req.params.leadId);
+    const leadId = parsePositiveInt(req.params.leadId);
     if (!leadId) return res.status(400).json({ error: 'Valid lead ID required' });
 
-    const userId = localInboxAssigneeId(req.user);
-    if (!userId) return res.status(409).json({ error: 'Personal assignment requires a local user. Clerk assignment identities are not mapped yet.', code: 'assignment_unavailable' });
-
+    const member = await workspaceMembers.self(req.user);
     const lead = await prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
-
-    await prisma.lead.update({ where: { id: leadId }, data: { assignedToId: userId } });
-
-    res.json({ id: leadId, assignedToId: userId, threadState: 'assigned' });
+    // Claim unassigned work atomically; sales agents cannot silently take a
+    // teammate's conversation if two people open it at the same time.
+    const ownership = member.role === 'agent' ? { OR: [memberAssignmentWhere(req.user), leadAssignmentWhere(false)] } : {};
+    const claimed = await prisma.lead.updateMany({ where: { id: leadId, ...ownership }, data: memberAssignmentData(member) });
+    if (!claimed.count) return res.status(409).json({ error: 'This lead already belongs to a teammate. Ask a manager to reassign it.' });
+    const updated = await prisma.lead.findUnique({ where: { id: leadId }, include: { assignedMember: true } });
+    broadcastEvent('lead_assigned', { leadId });
+    const lastMessage = await prisma.message.findFirst({ where: { leadId, AND: [INBOX_VISIBLE_MESSAGE_WHERE, ACTIONABLE_CONVERSATION_WHERE] }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+    res.json({ id: leadId, assignedToId: updated.assignedToId, assignedMemberKey: updated.assignedMemberKey, assignedMember: leadAssignedMember(updated), threadState: normalizeInboxThreadState({ lead: updated, lastMessage, assignedToId: updated.assignedToId }) });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
   }
 });
 
@@ -4717,70 +4707,6 @@ app.get('/api/leads/:id/insights', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /api/leads/:id/timeline — chronological event log
-app.get('/api/leads/:id/timeline', async (req, res) => {
-  try {
-    const id = parseInt(req.params.id);
-    const lead = await prisma.lead.findUnique({ where: { id } });
-    if (!lead) return res.status(404).json({ error: 'Lead not found' });
-
-    const [messages, notes, tasks] = await Promise.all([
-      prisma.message.findMany({
-        where: { leadId: id },
-        orderBy: { createdAt: 'asc' },
-        select: {
-          id: true, direction: true, channel: true, content: true,
-          status: true, sentAt: true, createdAt: true,
-          emailSubject: true, waAccount: true,
-        },
-      }),
-      prisma.leadNote.findMany({
-        where: { leadId: id },
-        orderBy: { createdAt: 'asc' },
-        select: { id: true, content: true, type: true, createdAt: true },
-      }),
-      prisma.leadTask.findMany({
-        where: { leadId: id },
-        orderBy: { createdAt: 'asc' },
-        select: { id: true, title: true, dueAt: true, done: true, createdAt: true },
-      }),
-    ]);
-
-    // Merge into unified timeline
-    const events = [
-      // Lead created
-      { type: 'lead_created', ts: lead.createdAt, data: { source: lead.source, tier: lead.leadTier } },
-      // Messages
-      ...messages.map((m) => ({
-        type: m.direction === 'outbound' ? 'message_sent' : 'message_received',
-        ts: m.sentAt || m.createdAt,
-        data: { id: m.id, channel: m.channel, content: m.content.slice(0, 200), status: m.status, subject: m.emailSubject, account: m.waAccount },
-      })),
-      // Notes
-      ...notes.map((n) => ({
-        type: 'note_added',
-        ts: n.createdAt,
-        data: { id: n.id, content: n.content, noteType: n.type },
-      })),
-      // Tasks
-      ...tasks.map((t) => ({
-        type: t.done ? 'task_completed' : 'task_created',
-        ts: t.createdAt,
-        data: { id: t.id, title: t.title, dueAt: t.dueAt, done: t.done },
-      })),
-      // Status milestones
-      ...(lead.repliedAt ? [{ type: 'status_change', ts: lead.repliedAt, data: { status: 'replied' } }] : []),
-      ...(lead.convertedAt ? [{ type: 'deal_closed', ts: lead.convertedAt, data: { status: 'closed', dealValue: lead.dealValue } }] : []),
-    ];
-
-    // Sort by timestamp
-    events.sort((a, b) => new Date(a.ts) - new Date(b.ts));
-
-    res.json({ leadId: id, total: events.length, events });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ======================== MEDIA FILE LIBRARY ========================
 // POST /api/media/upload — upload an image/PDF/video for WA sending
 app.post('/api/media/upload', requireRole('agent'), mediaUpload.single('file'), async (req, res) => {
   try {
@@ -5593,7 +5519,7 @@ app.post('/api/email/accounts/test-config', requireRole('manager'), async (req, 
 // Enables client-side routing on the dashboard.
 // Placed after all /api/* routes so API paths are never caught here.
 app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api/') || req.path.startsWith('/webhook/')) return next();
+  if (!isDashboardFileRequest(req)) return next();
   res.sendFile(path.join(WEB_DIST, 'index.html'));
 });
 

@@ -13,6 +13,18 @@ export interface Alert {
 }
 
 export const activityApi = {
+  records: (filters: { page?: number; type?: string } = {}) => {
+    const params = new URLSearchParams({ page: String(filters.page || 1), limit: '50' })
+    if (filters.type && filters.type !== 'all') params.set('type', filters.type)
+    return api.get<{
+      items: ActivityLog[]
+      total: number
+      page: number
+      pages: number
+      types: string[]
+    }>(`/activity/records?${params}`)
+  },
+
   list: (filters: { limit?: number; type?: string; leadId?: number } = {}) => {
     const params = new URLSearchParams()
     if (filters.limit != null) params.set('count', String(filters.limit))

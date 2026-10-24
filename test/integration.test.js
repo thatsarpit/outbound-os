@@ -107,6 +107,56 @@ after(async () => {
 
 // ── Leads Tests ──────────────────────────────────────────────────────────────
 
+test('dashboard assets and SPA routes share one limit while API, health and webhooks stay independent', async () => {
+  const directory = path.join(__dirname, '..', 'web', 'dist');
+  const index = path.join(directory, 'index.html');
+  const asset = path.join(directory, '__rate-limit-fixture.svg');
+  let temporaryIndex = false;
+  fs.mkdirSync(directory, { recursive: true });
+  try {
+    fs.writeFileSync(index, '<!doctype html><title>Isolated dashboard fixture</title>', { flag: 'wx' });
+    temporaryIndex = true;
+  } catch (error) { if (error.code !== 'EEXIST') throw error; }
+  fs.writeFileSync(asset, '<svg xmlns="http://www.w3.org/2000/svg"/>', { flag: 'wx' });
+  const headers = { 'X-Forwarded-For': '192.0.2.199' };
+  try {
+    for (let count = 0; count < 300; count++) {
+      const result = await request('GET', count % 2 ? '/m/inbox' : '/__rate-limit-fixture.svg', { headers });
+      assert.equal(result.status, 200, `Dashboard request ${count + 1}`);
+      assert.equal(result.headers['ratelimit-limit'], '300');
+      assert.equal(Number(result.headers['ratelimit-remaining']), 299 - count, 'each static hit or fallback is charged exactly once');
+    }
+    for (const route of ['/m/inbox', '/__rate-limit-fixture.svg']) {
+      const blocked = await request('GET', route, { headers });
+      assert.equal(blocked.status, 429);
+      assert.match(blocked.body.error, /Too many dashboard requests/);
+      assert.ok(Number(blocked.headers['retry-after']) > 0);
+      assert.equal(blocked.headers['x-ratelimit-limit'], undefined);
+    }
+    const api = await request('GET', '/api/auth/config', { headers });
+    assert.equal(api.status, 200);
+    assert.equal(api.headers['ratelimit-limit'], '100', 'existing API budget is unchanged');
+    assert.equal(api.headers['ratelimit-remaining'], '99', 'dashboard files never consume API capacity');
+    for (const route of ['/health', '/healthz', '/HEALTHZ/']) {
+      const probe = await request('GET', route, { headers });
+      assert.equal(probe.status, 200, route);
+      assert.equal(probe.headers['ratelimit-limit'], undefined, route);
+    }
+    const webhook = await request('GET', '/webhook/meta?hub.mode=subscribe&hub.verify_token=test-meta-verify-token&hub.challenge=fixture-challenge', { headers });
+    assert.equal(webhook.status, 200);
+    assert.equal(webhook.body, 'fixture-challenge');
+    assert.equal(webhook.headers['ratelimit-limit'], undefined);
+    for (const route of ['/webhook', '/webhook/not-a-provider']) {
+      const missing = await request('GET', route, { headers });
+      assert.equal(missing.status, 404, 'reserved callbacks never serve dashboard HTML');
+      assert.equal(missing.headers['ratelimit-limit'], undefined);
+    }
+  } finally {
+    fs.unlinkSync(asset);
+    if (temporaryIndex) fs.unlinkSync(index);
+  }
+});
+
 describe('GET /api/leads', () => {
   test('returns empty leads list initially', async () => {
     const res = await request('GET', '/api/leads', { headers: authHeader() });
@@ -3065,4 +3115,134 @@ describe('MCP dashboard connection setup', () => {
       assert.equal((await request('GET', '/api/integrations/mcp', { headers: { 'X-Forwarded-For': '192.0.2.193' } })).status, 401);
     } finally { await db.user.deleteMany({ where: { id: { in: users } } }); }
   });
+});
+
+describe('Audit workflow repairs', () => {
+  test('CSV upload works without removed pool fields and preview accepts unrestricted scope', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const name = 'CSV multiline audit fixture';
+    try {
+      const form = new FormData();
+      form.set('file', new Blob(['name,mobile,notes\r\n"CSV multiline audit fixture",447700900811,"line one\nline two"\r\n'], { type: 'text/csv' }), 'audit-fixture.csv');
+      const result = await fetch(`${baseUrl}/api/import/csv`, { method: 'POST', headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.210' }, body: form });
+      assert.equal(result.status, 200, JSON.stringify(await result.clone().json()));
+      const saved = await db.lead.findFirst({ where: { name } });
+      assert.ok(saved);
+      assert.equal(saved.notes, 'line one\nline two');
+      const preview = await request('POST', '/api/campaigns/preview-leads', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.211' }, body: { filter: { status: 'new' }, channel: 'whatsapp' } });
+      assert.equal(preview.status, 200);
+      assert.equal(typeof preview.body.count, 'number');
+    } finally {
+      await db.lead.deleteMany({ where: { name } });
+      await db.importBatch.deleteMany({ where: { filename: 'audit-fixture.csv' } });
+    }
+  });
+
+  test('sales stages include email contacts without WhatsApp and tags match whole tokens', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const lead = await db.lead.create({ data: { name: 'Stage audit fixture', mobile: 'no-phone:stage-audit', email: 'stage-audit@example.test', status: 'replied', isOnWhatsApp: false, tags: 'bulk, UK-retail' } });
+    const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.212' };
+    try {
+      const result = await request('GET', '/api/leads?status=replied&search=Stage%20audit%20fixture', { headers });
+      assert.equal(result.status, 200);
+      assert.equal(result.body.leads[0]?.id, lead.id);
+      assert.equal((await request('GET', '/api/leads?tags=uk&search=Stage%20audit%20fixture', { headers })).body.total, 0);
+      assert.equal((await request('GET', '/api/leads?tags=uk-retail&search=Stage%20audit%20fixture', { headers })).body.total, 1);
+      const timeline = await request('GET', `/api/leads/${lead.id}/timeline`, { headers });
+      assert.equal(timeline.status, 200);
+      assert.ok(Array.isArray(timeline.body.events));
+    } finally { await db.lead.delete({ where: { id: lead.id } }); }
+  });
+
+  test('notification reads persist per person and a read-all watermark does not consume later events', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const { signToken } = await import('../src/auth/rbac.js');
+    const users = await Promise.all(['a', 'b'].map(key => db.user.create({ data: { name: `Bell ${key}`, email: `bell-${key}@example.test`, role: 'viewer', passwordHash: 'fixture' } })));
+    const headers = index => ({ Authorization: `Bearer ${signToken(users[index])}`, 'X-Forwarded-For': `192.0.2.${213 + index}` });
+    const events = [];
+    try {
+      events.push(await db.activityLog.create({ data: { type: 'fixture', message: 'Notification one' } }));
+      const id = events[0].id;
+      assert.equal((await request('PATCH', `/api/notifications/${id}/read`, { headers: headers(0) })).status, 200);
+      const list = async index => (await request('GET', '/api/notifications', { headers: headers(index) })).body;
+      assert.equal((await list(0)).find(row => row.id === id).read, true);
+      assert.equal((await list(1)).find(row => row.id === id).read, false);
+      assert.equal((await request('PATCH', '/api/notifications/read-all', { headers: headers(1), body: { throughId: id } })).status, 200);
+      events.push(await db.activityLog.create({ data: { type: 'fixture', message: 'Notification two' } }));
+      assert.equal((await list(1)).find(row => row.id === events[1].id).read, false);
+      assert.equal((await request('PATCH', '/api/notifications/read-all', { headers: headers(1), body: { throughId: -1 } })).status, 400);
+      assert.equal((await request('PATCH', `/api/notifications/${id}/read`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.215' } })).status, 403);
+    } finally {
+      const viewerKeys = users.map(user => `local:${user.id}`);
+      await db.notificationRead.deleteMany({ where: { viewerKey: { in: viewerKeys } } });
+      await db.notificationCursor.deleteMany({ where: { viewerKey: { in: viewerKeys } } });
+      await db.activityLog.deleteMany({ where: { id: { in: events.map(event => event.id) } } });
+      await db.user.deleteMany({ where: { id: { in: users.map(user => user.id) } } });
+    }
+  });
+});
+
+test('recorded activity paginates persisted events and applies type filters before pagination', async () => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const rows = await Promise.all(Array.from({ length: 4 }, (_, index) => db.activityLog.create({ data: { type: 'audit_pagination_fixture', message: `Recorded ${index}` } })));
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.216' };
+  try {
+    const first = await request('GET', '/api/activity/records?type=audit_pagination_fixture&limit=2&page=1', { headers });
+    const second = await request('GET', '/api/activity/records?type=audit_pagination_fixture&limit=2&page=2', { headers });
+    assert.equal(first.status, 200);
+    assert.equal(first.body.total, 4);
+    assert.equal(first.body.pages, 2);
+    assert.equal(first.body.items.length, 2);
+    assert.equal(new Set([...first.body.items, ...second.body.items].map(row => row.id)).size, 4);
+  } finally { await db.activityLog.deleteMany({ where: { id: { in: rows.map(row => row.id) } } }); }
+});
+
+
+test('assignment validates live members and keeps Mine, Inbox and Tasks ownership consistent', async () => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const people = await Promise.all(['admin', 'agent', 'viewer'].map((role, index) => db.user.create({ data: {
+    name: `Assignment fixture ${role}`, email: `assignment-${index}@example.test`, passwordHash: 'fixture', role,
+  } })));
+  const heads = people.map((user, i) => ({ Authorization: `Bearer ${signToken(user)}`, 'X-Forwarded-For': `192.0.2.${210 + i}` }));
+  const leads = await Promise.all([0, 1, 2].map(index => db.lead.create({ data: { name: `Owner fixture ${index}`, mobile: `no-phone:assignment-${index}`,
+    assignedToId: index === 1 ? people[1].id : null,
+    messages: { create: { direction: 'outbound', channel: 'email', content: 'Fixture sent message', status: 'sent' } },
+    leadTasks: { create: { title: `Ownership follow-up ${index}`, dueAt: new Date('2020-01-01T12:00:00Z') } },
+  } })));
+  const memberKey = `local:local:${people[1].id}`;
+  try {
+    assert.equal((await request('GET', '/api/workspace/members', { headers: heads[2] })).status, 403);
+    assert.equal((await request('POST', `/api/leads/${leads[0].id}/assign`, { headers: heads[0], body: {} })).status, 400);
+    assert.equal((await request('POST', `/api/leads/${leads[0].id}/assign`, { headers: heads[0], body: { userId: '1junk' } })).status, 400);
+    const assigned = await request('POST', `/api/leads/${leads[0].id}/assign`, { headers: heads[0], body: { memberKey } });
+    assert.equal(assigned.status, 200); assert.equal(assigned.body.assignedMember.key, memberKey);
+    assert.equal(assigned.body.assignedToId, people[1].id);
+    const detail = await request('GET', `/api/inbox/threads/${leads[0].id}`, { headers: heads[1] });
+    assert.equal(detail.body.assignedMember.name, people[1].name); assert.equal(detail.body.threadState, 'assigned');
+    const mine = await request('GET', '/api/inbox/threads?assignedToMe=true&search=Owner%20fixture', { headers: heads[1] });
+    assert.deepEqual(mine.body.threads.map(row => row.leadId).sort(), [leads[0].id, leads[1].id].sort(), 'legacy local ownership is preserved');
+    const taskQueue = await request('GET', '/api/tasks?scope=mine', { headers: heads[1] });
+    assert.equal(taskQueue.status, 200); assert.equal(taskQueue.body.total, 2); assert.equal(taskQueue.body.overdueCount, 2);
+    assert.deepEqual(taskQueue.body.tasks.map(task => task.leadId).sort(), [leads[0].id, leads[1].id].sort());
+    const noServiceIdentity = await request('POST', `/api/inbox/threads/${leads[2].id}/assign-self`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.213' } });
+    assert.equal(noServiceIdentity.status, 403);
+    const takeover = await request('POST', `/api/inbox/threads/${leads[0].id}/assign-self`, { headers: heads[2] });
+    assert.equal(takeover.status, 403, 'read-only users cannot claim conversations');
+    await db.lead.update({ where: { id: leads[2].id }, data: { status: 'paused' } });
+    const resumed = await request('POST', '/api/leads/bulk', { headers: heads[0], body: { ids: [leads[1].id, leads[2].id, 999999999], action: 'resume' } });
+    assert.equal(resumed.status, 200); assert.equal(resumed.body.updated, 1, 'bulk results count affected rows');
+    assert.equal((await request('POST', '/api/leads/bulk', { headers: heads[0], body: { ids: ['1junk'], action: 'pause' } })).status, 400);
+    await db.user.update({ where: { id: people[1].id }, data: { enabled: false } });
+    const unavailable = await request('POST', `/api/leads/${leads[2].id}/assign`, { headers: heads[0], body: { memberKey } });
+    assert.equal(unavailable.status, 409);
+    assert.equal((await db.lead.findUnique({ where: { id: leads[2].id } })).assignedMemberKey, null);
+    const cleared = await request('POST', `/api/leads/${leads[0].id}/assign`, { headers: heads[0], body: { memberKey: null } });
+    assert.equal(cleared.status, 200); assert.equal(cleared.body.assignedToId, null); assert.equal(cleared.body.assignedMemberKey, null);
+    assert.equal((await request('GET', '/api/tasks?scope=anything', { headers: heads[0] })).status, 400);
+  } finally {
+    await db.lead.deleteMany({ where: { id: { in: leads.map(lead => lead.id) } } });
+    await db.workspaceMember.deleteMany({ where: { externalId: { in: people.map(user => String(user.id)) }, provider: 'local' } });
+    await db.user.deleteMany({ where: { id: { in: people.map(user => user.id) } } });
+  }
 });

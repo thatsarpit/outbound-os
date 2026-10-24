@@ -1,4 +1,5 @@
 import type { Lead, LeadNote, LeadTask } from '@/api/types'
+import { taskDateInput } from '@/lib/task-date'
 
 // Interactive preview data stays in memory and never contacts a CRM server.
 const tasks: LeadTask[] = [
@@ -35,14 +36,42 @@ let nextId = 9300
 export function handleMobileSalesRequest(
   url: string,
   init: RequestInit | undefined,
-  leads: Pick<Lead, 'id' | 'name'>[],
+  leads: Array<
+    Pick<Lead, 'id' | 'name'> & Partial<Pick<Lead, 'assignedToId' | 'assignedMemberKey'>>
+  >,
 ): Response | null {
   const path = new URL(url, location.origin)
   const method = (init?.method || 'GET').toUpperCase()
   const body = init?.body && typeof init.body === 'string' ? JSON.parse(init.body) : {}
   if (path.pathname === '/api/tasks') {
-    const pending = tasks.filter((task) => !task.done)
-    const selected = path.searchParams.get('done') === 'true' ? tasks : pending
+    const scoped =
+      path.searchParams.get('scope') === 'mine'
+        ? tasks.filter((task) => {
+            const lead = leads.find((row) => row.id === task.leadId)
+            return (
+              lead?.assignedMemberKey === 'local:local:1' ||
+              (!lead?.assignedMemberKey && lead?.assignedToId === 1)
+            )
+          })
+        : tasks
+    const pending = scoped.filter((task) => !task.done)
+    const due = path.searchParams.get('due')
+    const now = new Date()
+    const today = taskDateInput(now.toISOString(), 'Europe/London').slice(0, 10)
+    const selected = (path.searchParams.get('done') === 'true' ? scoped : pending)
+      .filter((task) => {
+        if (!due) return true
+        if (due === 'unscheduled') return !task.dueAt
+        if (!task.dueAt) return false
+        if (due === 'overdue') return !task.done && new Date(task.dueAt) < now
+        const day = taskDateInput(task.dueAt, 'Europe/London').slice(0, 10)
+        return due === 'today' ? day === today : due === 'upcoming' ? day > today : false
+      })
+      .sort(
+        (a, b) =>
+          (a.dueAt ? new Date(a.dueAt).getTime() : Infinity) -
+            (b.dueAt ? new Date(b.dueAt).getTime() : Infinity) || a.id - b.id,
+      )
     const page = Math.max(1, Number(path.searchParams.get('page')) || 1)
     const limit = Math.max(1, Number(path.searchParams.get('limit')) || 50)
     return json({
@@ -52,6 +81,7 @@ export function handleMobileSalesRequest(
         overdue: !task.done && !!task.dueAt && new Date(task.dueAt).getTime() < Date.now(),
       })),
       total: selected.length,
+      pendingCount: pending.length,
       page,
       pages: Math.ceil(selected.length / limit),
       overdueCount: pending.filter(

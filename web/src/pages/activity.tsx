@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { activityApi } from '@/api/endpoints/activity'
 import type { ActivityLog } from '@/api/types'
+import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionCard } from '@/components/ui/section-card'
 import { LoadingState } from '@/components/ui/loading-state'
@@ -20,7 +21,7 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { cn, formatRelativeTime } from '@/lib/utils'
 
 /**
- * Workspace activity — the audit trail.
+ * Recorded workspace events. Coverage is explicit rather than an invented audit trail.
  *
  * `activityApi` shipped complete and was imported by nothing, so the question
  * "who changed this, and when" had no answer anywhere in the product. It is
@@ -89,31 +90,27 @@ function dayLabel(iso: string): string {
 
 export default function ActivityPage() {
   const [typeFilter, setTypeFilter] = useState<string>('all')
+  const [page, setPage] = useState(1)
 
   const {
-    data: activity = [],
+    data: response,
     isLoading,
     isError,
     refetch,
   } = useQuery({
-    queryKey: ['activity'],
+    queryKey: ['activity-records', page, typeFilter],
     queryFn: async () => {
-      const res = await activityApi.list({ limit: 100 })
-      return Array.isArray(res) ? res : []
+      const result = await activityApi.records({ page, type: typeFilter })
+      if (!result || !Array.isArray(result.items))
+        throw new Error('Recorded activity is unavailable.')
+      return result
     },
     refetchInterval: 60_000,
   })
 
-  const availableTypes = useMemo(() => {
-    const seen = new Set<string>()
-    for (const item of activity) seen.add(item.type)
-    return [...seen].filter((t) => TYPE_META[t])
-  }, [activity])
-
-  const filtered = useMemo(
-    () => (typeFilter === 'all' ? activity : activity.filter((a) => a.type === typeFilter)),
-    [activity, typeFilter],
-  )
+  const activity = useMemo(() => response?.items ?? [], [response])
+  const availableTypes = response?.types ?? []
+  const filtered = activity
 
   const grouped = useMemo(() => {
     const groups = new Map<string, ActivityLog[]>()
@@ -130,20 +127,21 @@ export default function ActivityPage() {
     <div className="animate-fade-in space-y-6">
       <PageHeader
         title="Activity"
-        description="Every lead captured, message sent and reply received across the workspace."
+        description="Persisted workspace events. Older actions and event types without logging may not appear here."
       />
 
       <SectionCard
         title="Recent events"
-        description={
-          isLoading ? undefined : `${filtered.length} event${filtered.length === 1 ? '' : 's'}`
-        }
+        description={isLoading ? undefined : `${response?.total ?? 0} recorded events`}
         action={
           availableTypes.length > 1 ? (
             <div className="flex max-w-full flex-wrap items-center gap-1">
               <button
                 type="button"
-                onClick={() => setTypeFilter('all')}
+                onClick={() => {
+                  setTypeFilter('all')
+                  setPage(1)
+                }}
                 aria-pressed={typeFilter === 'all'}
                 className={cn(
                   'rounded-md px-2 py-1 text-[11px] transition-colors',
@@ -158,7 +156,10 @@ export default function ActivityPage() {
                 <button
                   key={type}
                   type="button"
-                  onClick={() => setTypeFilter(type)}
+                  onClick={() => {
+                    setTypeFilter(type)
+                    setPage(1)
+                  }}
                   aria-pressed={typeFilter === type}
                   className={cn(
                     'rounded-md px-2 py-1 text-[11px] transition-colors',
@@ -167,7 +168,7 @@ export default function ActivityPage() {
                       : 'text-text-muted hover:text-text-primary',
                   )}
                 >
-                  {TYPE_META[type].label}
+                  {TYPE_META[type]?.label || type.replace(/_/g, ' ')}
                 </button>
               ))}
             </div>
@@ -247,6 +248,32 @@ export default function ActivityPage() {
               </section>
             ))}
           </div>
+        )}
+        {(response?.pages ?? 1) > 1 && (
+          <nav
+            aria-label="Activity pages"
+            className="mt-4 flex items-center justify-between gap-3 text-xs"
+          >
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((value) => value - 1)}
+            >
+              Previous
+            </Button>
+            <span>
+              Page {page} of {response?.pages}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page >= (response?.pages ?? 1)}
+              onClick={() => setPage((value) => value + 1)}
+            >
+              Next
+            </Button>
+          </nav>
         )}
       </SectionCard>
     </div>

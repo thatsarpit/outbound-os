@@ -9,23 +9,12 @@ import { api } from '../client'
  */
 
 export type OrderStatus =
-  | 'draft'
-  | 'confirmed'
-  | 'in_production'
-  | 'ready_to_ship'
-  | 'shipped'
-  | 'delivered'
-  | 'cancelled'
+  'draft' | 'confirmed' | 'in_production' | 'ready_to_ship' | 'shipped' | 'delivered' | 'cancelled'
 
 export type InvoiceStatus = 'draft' | 'issued' | 'paid' | 'partially_paid' | 'void'
 
 export type ShipmentStatus =
-  | 'pending'
-  | 'in_transit'
-  | 'out_for_delivery'
-  | 'delivered'
-  | 'exception'
-  | 'returned'
+  'pending' | 'in_transit' | 'out_for_delivery' | 'delivered' | 'exception' | 'returned'
 
 export interface PaymentMethod {
   id: number
@@ -194,7 +183,8 @@ export interface OrderListResponse {
 
 export interface OrderStats {
   byStatus: Array<{ status: string; _count: { id: number }; _sum: { total: number | null } }>
-  totalRevenue: number
+  totalRevenue: number | null
+  revenueByCurrency: Array<{ currency: string; total: number }>
   orderCount: number
   openShipments: number
 }

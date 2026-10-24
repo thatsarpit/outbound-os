@@ -1,4 +1,5 @@
 import prisma from '../utils/prismaClient.js';
+import { customerOrderValues } from '../utils/moneyGroups.js';
 import emailService from './emailService.js';
 import whatsappManager from './whatsapp.js';
 import logger from '../utils/logger.js';
@@ -210,19 +211,21 @@ class OrderNotifier {
   /** Recompute a customer's rollups from their orders. Never edited by hand. */
   async refreshCustomerRollups(customerId) {
     if (!customerId) return null;
-    const agg = await prisma.salesOrder.aggregate({
-      where: { customerId, status: { notIn: ['draft', 'cancelled'] } },
-      _sum: { total: true },
-      _count: { id: true },
-      _max: { createdAt: true },
-    });
+    const [customer, orders] = await Promise.all([
+      prisma.customer.findUnique({ where: { id: customerId }, select: { currency: true } }),
+      prisma.salesOrder.findMany({
+        where: { customerId, status: { notIn: ['draft', 'cancelled'] } },
+        select: { total: true, currency: true, createdAt: true },
+      }),
+    ]);
+    if (!customer) return null;
+    const values = customerOrderValues(orders);
+    // The legacy integer column is a subtotal in the customer's default currency.
+    // Read DTOs expose all historical currency groups directly from orders.
+    const defaultValue = values.lifetimeValueByCurrency.find(row => row.currency === customer.currency.toUpperCase())?.total || 0;
     return prisma.customer.update({
       where: { id: customerId },
-      data: {
-        totalOrders: agg._count.id || 0,
-        lifetimeValue: agg._sum.total || 0,
-        lastOrderAt: agg._max.createdAt || null,
-      },
+      data: { totalOrders: values.totalOrders, lifetimeValue: defaultValue, lastOrderAt: values.lastOrderAt },
     });
   }
 

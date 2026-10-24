@@ -12,7 +12,8 @@ import whatsappManager from './whatsapp.js';
 import leadStateService from '../domain/leadStateService.js';
 import leadScorer from './leadScorer.js';
 import { isSameZonedDay } from '../utils/workspaceTime.js';
-import { classifyInboundEmail, HUMAN_REPLY_WHERE } from '../utils/emailInbound.js';
+import inboundEmailIngestion from './inboundEmailIngestion.js';
+import { EMAIL_INGRESS_MAX_BYTES } from '../utils/emailIngressSignature.js';
 
 /**
  * Unsubscribe requests go to the mailbox that sent the email, which is the one
@@ -984,7 +985,6 @@ class EmailService {
           ? new Date(account.lastSyncAt.getTime() - 5 * 60 * 1000) // 5min overlap for safety
           : new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-        const senderAccounts = await prisma.emailAccount.findMany({ select: { id: true, email: true } });
         const uids = await client.search({ since }, { uid: true });
         if (!Array.isArray(uids)) throw new Error('Inbox search failed; sync will retry');
         for (let offset = 0; offset < uids.length; offset += 100) {
@@ -1008,168 +1008,57 @@ class EmailService {
               msg.internalDate || msg.envelope?.date || null, String(msg.headers || ''),
             ])).digest('hex')}`;
 
-            if (!from || senderAccounts.some(sender => sender.email.trim().toLowerCase() === from.trim().toLowerCase())) continue;
-
-            // Match reply to a lead by In-Reply-To or sender email
-            let lead = null;
-            let replyAccountId = account.id;
-
-            // Method 1: Match via In-Reply-To header → find our outbound message
-            const references = [inReplyTo, ...[].concat(headers.references || []).reverse()].filter(Boolean);
-            for (const reference of references) {
-              const ourMsg = await prisma.message.findFirst({
-                where: { emailMessageId: reference, direction: 'outbound', channel: 'email' },
-                select: { leadId: true, emailAccountId: true },
-              });
-              if (ourMsg) {
-                lead = await prisma.lead.findUnique({ where: { id: ourMsg.leadId } });
-                replyAccountId = ourMsg.emailAccountId || account.id;
-                break;
-              }
-            }
-
-            // Method 2: Match by sender email → find lead with that email
-            // Use LOWER() for case-insensitive matching (SQLite doesn't support Prisma mode:'insensitive')
-            if (!lead && from) {
-              const recipients = (msg.envelope?.to || []).map(address => String(address.address || '').toLowerCase());
-              replyAccountId = senderAccounts.find(sender => recipients.includes(sender.email.toLowerCase()))?.id || account.id;
-              const matched = await prisma.$queryRawUnsafe(
-                `SELECT id FROM "Lead" WHERE LOWER(email) = LOWER(?) LIMIT 1`,
-                from
-              );
-              if (matched?.length > 0) {
-                lead = await prisma.lead.findUnique({ where: { id: matched[0].id } });
-              }
-            }
-
-            if (!lead) continue; // No matching lead found
-
-            // Dedup: check if we already saved this message. If we previously saved
-            // it as 'partial' (download failed), allow this iteration to retry the
-            // download and upgrade the row instead of skipping.
-            const inboundIdentity = { channel: 'email', direction: 'inbound', OR: [
-              ...(messageId ? [{ emailMessageId: messageId }] : []), { idempotencyKey: inboundKey },
-            ] };
-            let existingPartial = null;
-            if (messageId || msg.uid) {
-              const existing = await prisma.message.findFirst({
-                where: inboundIdentity,
-              });
-              if (existing && existing.status !== 'partial') continue;
-              if (existing && existing.status === 'partial') existingPartial = existing;
-            }
-
-            // Fetch body text for the reply content. If the IMAP download fails,
-            // retain a pending message and hold queued follow-ups, without
-            // inventing a human reply before the next sync recovers its body.
-            let bodyText = null;
-            let downloadOk = false;
-            let parsedBody = null;
+            // Persist every receipt, including unknown senders, through the
+            // same pipeline as the optional Cloudflare receiver. Transport
+            // failure is distinct from a valid empty or attachment-only MIME.
+            let rawMime = msg.headers?.length ? Buffer.from(msg.headers) : Buffer.from(`Subject: ${subject}\r\n`);
+            let parsed = headers;
+            let complete = false;
             try {
               const download = await client.download(msg.uid, undefined, { uid: true });
-              if (download?.content) {
-                const chunks = [];
-                for await (const chunk of download.content) chunks.push(chunk);
-                const parsed = await simpleParser(Buffer.concat(chunks), { skipTextToHtml: true });
-                parsedBody = parsed;
-                if (parsed.text?.trim() || classifyInboundEmail(parsed) !== 'human') {
-                  bodyText = parsed.text?.trim().substring(0, 2000) || `[${classifyInboundEmail(parsed) === 'delivery_report' ? 'Delivery report' : 'Automatic reply'}] ${subject}`;
-                  downloadOk = true;
-                }
+              if (!download?.content) throw new Error('The IMAP server returned no MIME stream');
+              const chunks = [];
+              let size = 0;
+              for await (const chunk of download.content) {
+                const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+                size += bytes.length;
+                if (size > EMAIL_INGRESS_MAX_BYTES) throw new Error('Email exceeds the inbound MIME size limit');
+                chunks.push(bytes);
               }
-            } catch (dlErr) {
-              logger.warn(`Could not download email body for message ${messageId || msg.seq}: ${dlErr.message}`);
-            }
-
-            if (!downloadOk) {
-              // Keep the sync cursor behind this message until its body is
-              // recovered, even if the next attempt is over five minutes later.
+              const downloaded = Buffer.concat(chunks);
+              if (!downloaded.length) throw new Error('The IMAP server returned an empty MIME stream');
+              parsed = await simpleParser(downloaded, { skipTextToHtml: true });
+              // Some servers omit selected envelope fields from downloaded
+              // MIME. Keep header classifications and stable thread IDs.
+              parsed.headers = new Map([...headers.headers, ...parsed.headers]);
+              rawMime = downloaded;
+              complete = true;
+            } catch (error) {
               failedMessages++;
-              bodyText = `[Email reply from ${from}] Subject: ${subject} — body not yet downloaded`;
-              logger.warn(`📭 Saving inbound email ${messageId || '(no id)'} as 'partial' — body retrieval failed; will retry next sync`);
+              logger.warn(`Could not download email body for message ${messageId || msg.uid}: ${error.message}`);
             }
-
-            const headerKind = classifyInboundEmail({ headers: headers.headers, subject });
-            const bodyKind = parsedBody ? classifyInboundEmail(parsedBody) : null;
-            const inboundKind = headerKind !== 'human' ? headerKind : bodyKind && bodyKind !== 'human'
-              ? bodyKind : downloadOk ? 'human' : 'pending';
-            const rawEventAt = msg.internalDate || msg.envelope?.date || parsedBody?.date;
+            parsed.from ||= { value: [{ address: from }] };
+            parsed.subject ||= subject;
+            parsed.messageId ||= messageId;
+            parsed.inReplyTo ||= inReplyTo;
+            parsed.references ||= headers.references;
+            const rawEventAt = msg.internalDate || msg.envelope?.date || parsed.date;
             const parsedEventAt = rawEventAt ? new Date(rawEventAt) : null;
             const eventAt = parsedEventAt && Number.isFinite(parsedEventAt.getTime()) ? parsedEventAt : new Date();
-            const saved = await prisma.$transaction(async tx => {
-              // Another inbox may carry the same forwarded message. Recheck
-              // identity under the write transaction after downloading MIME.
-              const current = await tx.message.findFirst({ where: inboundIdentity });
-              if (current && current.status !== 'partial') return { inbound: current, humanReply: false };
-              const partial = current || existingPartial;
-              // The old importer already ran reply side effects for partial
-              // rows. Recover their bodies without emitting the reply again.
-              const legacyPartial = partial && partial.emailInboundKind == null;
-              const data = {
-                content: bodyText, status: downloadOk ? 'delivered' : 'partial', emailInboundKind: inboundKind,
-                ...(legacyPartial ? { emailReplyProcessedAt: new Date() } : {}),
-              };
-              const inbound = partial
-                ? await tx.message.update({ where: { id: partial.id }, data })
-                : await tx.message.create({ data: {
-                    ...data, leadId: lead.id, direction: 'inbound', channel: 'email', waAccount: 0,
-                    emailAccountId: replyAccountId, emailSubject: subject, emailMessageId: messageId,
-                    idempotencyKey: inboundKey,
-                    emailInReplyTo: inReplyTo, providerCreatedAt: eventAt, sentAt: eventAt,
-                  } });
-              // Hold uncertain matched mail without inventing engagement. A
-              // recovered human body is processed once in the same transaction.
-              if (inboundKind === 'pending' || inboundKind === 'human') {
-                await tx.message.updateMany({
-                  where: { leadId: lead.id, direction: 'outbound', status: 'queued' },
-                  data: { status: 'cancelled', providerStatusReason: inboundKind === 'pending' ? 'inbound_email_pending_review' : 'human_reply_received' },
-                });
-              }
-              if (inboundKind !== 'human' || inbound.emailReplyProcessedAt) return { inbound, humanReply: false };
-              await tx.message.update({ where: { id: inbound.id }, data: { emailReplyProcessedAt: new Date() } });
-              const inboundCount = await tx.message.count({ where: { leadId: lead.id, ...HUMAN_REPLY_WHERE } });
-              const currentLead = await tx.lead.findUnique({ where: { id: lead.id } });
-              const newStatus = inboundCount >= 2 ? 'engaged' : 'replied';
-              if (['new', 'contacted', 'replied'].includes(currentLead.status)) {
-                await tx.lead.update({ where: { id: lead.id }, data: {
-                  status: newStatus, repliedAt: currentLead.repliedAt || eventAt,
-                  emailStatus: currentLead.emailOptOut || ['bounced', 'complained', 'unsubscribed', 'suppressed'].includes(currentLead.emailStatus)
-                    ? currentLead.emailStatus : 'replied',
-                  lastMessageAt: currentLead.lastMessageAt && currentLead.lastMessageAt > eventAt ? currentLead.lastMessageAt : eventAt,
-                } });
-              }
-              return { inbound, humanReply: true };
-            });
-            if (!saved.humanReply) continue;
-            const inboundMessage = saved.inbound;
-
-            activityLog.add(EVENT_TYPES.EMAIL_REPLY, `Email reply from ${lead.name} (${from})`, {
-              leadId: lead.id,
-              accountId: replyAccountId,
-              channel: 'email',
+            const saved = await inboundEmailIngestion.ingest({
+              provider: 'imap', dedupeKey: inboundKey, accountId: account.id,
+              rawMime, parsed, complete, receivedAt: eventAt, envelopeFrom: from,
+              envelopeTo: (msg.envelope?.to || []).map(address => address.address).filter(Boolean),
               subject,
-              threadKey: `email:${lead.id}`,
-              messageId: inboundMessage.emailMessageId || messageId || null,
             });
-            await emitDashboardEvent('email_reply', {
-              leadId: lead.id,
-              accountId: replyAccountId,
-              channel: 'email',
-              subject,
-              threadKey: `email:${lead.id}`,
-              messageId: inboundMessage.emailMessageId || messageId || null,
-            });
+            if (saved.humanReply) {
+              newReplies++;
+              logger.info(`📧 New email reply matched to Lead ${saved.leadId}`);
+            }
 
-            // Recalculate score immediately — don't wait for nightly batch
-            leadScorer.calculateScore(lead.id).catch((err) =>
-              logger.warn(`Score recalc failed for Lead ${lead.id}: ${err.message}`)
-            );
-
-            newReplies++;
-            logger.info(`📧 New email reply from ${from} matched to Lead ${lead.id} (${lead.name})`);
           } catch (msgErr) {
             failedMessages++;
-            logger.warn(`IMAP message processing error: ${msgErr.message}`);
+            logger.warn('An IMAP receipt was not processed; inbox sync will retry.');
           }
         }
         }

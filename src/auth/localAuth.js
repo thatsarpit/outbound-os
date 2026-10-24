@@ -1,3 +1,4 @@
+import { resolveMcpDelegation } from './mcpPersonal.js';
 /**
  * Built-in sign-in: email + password against the User table, with a signed
  * session token (JWT). This is the default, so a self-hosted install needs no
@@ -72,6 +73,7 @@ export function requireRole(minRole) {
   if (minLevel === undefined) throw new Error(`requireRole: unknown role "${minRole}"`);
 
   return async (req, res, next) => {
+    if (await resolveMcpDelegation(req, res, next, minRole)) return;
     const bearer = bearerFrom(req);
     if (matchesServiceToken(bearer)) {
       req.user = { id: 'mcp-service', orgId: 'service', role: 'admin' };

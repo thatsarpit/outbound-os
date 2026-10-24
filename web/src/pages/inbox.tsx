@@ -98,7 +98,7 @@ function InboxInner() {
     return () => media.removeEventListener('change', sync)
   }, [])
   const [replyText, setReplyText] = useState('')
-  const assignmentAvailable = useAuthStore((state) => state.provider === 'local')
+  const assignmentAvailable = Boolean(user && user.role !== 'viewer')
   const requestIds = useRef(new Map<string, string>())
   const pendingFingerprint = useRef<string | null>(null)
   const [htmlBody, setHtmlBody] = useState('')

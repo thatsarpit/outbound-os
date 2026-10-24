@@ -67,6 +67,15 @@ export function ThreadHeader({
               </span>
             </p>
           )}
+          {thread && (
+            <p className="mt-2 truncate text-xs text-text-muted">
+              {thread.assignedMember?.name
+                ? `Assigned to ${thread.assignedMember.name}`
+                : thread.assignedToId
+                  ? 'Assigned to a teammate'
+                  : 'Unassigned'}
+            </p>
+          )}
         </div>
 
         <div className="flex items-center justify-between gap-3 lg:justify-end">

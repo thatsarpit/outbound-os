@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, RefreshCw, XCircle } from 'lucide-react'
 import { systemApi } from '@/api/endpoints/system'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 
 /**
  * App-wide health banner. Polls /api/system/health every 60s and renders only
@@ -11,14 +12,37 @@ import { cn } from '@/lib/utils'
  * unnoticed for weeks. Invisible (renders null) when everything is healthy.
  */
 export function SystemHealthBanner() {
-  const { data } = useQuery({
-    queryKey: ['system-health'],
+  const { dashboardScope, isManagerOrAbove } = useAuthStore()
+  const canViewHealth = isManagerOrAbove()
+  const { data, isError, refetch } = useQuery({
+    queryKey: ['system-health', dashboardScope],
+    enabled: canViewHealth,
     queryFn: () => systemApi.getHealth(),
     refetchInterval: 60_000,
     staleTime: 30_000,
     // Background widget — never surface its own fetch errors as toasts.
     meta: { silent: true },
   })
+
+  if (!canViewHealth) return null
+  if (isError)
+    return (
+      <div
+        role="status"
+        className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/30 bg-surface px-4 py-3 text-sm"
+      >
+        <span className="text-text-secondary">
+          System status could not be checked. The last result may be out of date.
+        </span>
+        <button
+          type="button"
+          onClick={() => void refetch()}
+          className="rounded-md px-2 py-1 font-medium text-text-primary hover:bg-surface-raised"
+        >
+          Retry check
+        </button>
+      </div>
+    )
 
   const health = data?.health
   const recovery = data?.recovery
@@ -60,7 +84,8 @@ export function SystemHealthBanner() {
           <div>
             <p className="text-sm font-semibold text-success">Automation resumed successfully</p>
             <p className="text-xs leading-5 text-text-secondary">
-              Repaired {repaired} channel queue{repaired === 1 ? '' : 's'} left over from the last restart.
+              Repaired {repaired} channel queue{repaired === 1 ? '' : 's'} left over from the last
+              restart.
             </p>
           </div>
         </div>
