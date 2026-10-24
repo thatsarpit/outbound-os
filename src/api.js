@@ -32,6 +32,7 @@ import telegramRoutes from './routes/telegram.js';
 import emailInboxRoutes from './routes/emailInbox.js';
 import emailIngressRoutes from './routes/emailIngress.js';
 import emailReceiptRoutes from './routes/emailReceipts.js';
+import emailAttachmentRoutes from './routes/emailAttachments.js';
 import { sendManualWhatsApp, whatsappReplyContext } from './services/manualWhatsApp.js';
 import webPushRoutes from './routes/webPush.js';
 import inboxReadStateRoutes from './routes/inboxReadState.js';
@@ -810,6 +811,7 @@ app.use('/api', productRoutes);
 app.use('/api', telegramRoutes);
 app.use('/api', emailInboxRoutes);
 app.use('/api', emailReceiptRoutes);
+app.use('/api', emailAttachmentRoutes);
 // Pool scoping runs after auth — platform admins bypass, every other user is
 // 403'd if they reference a poolId they don't have a UserPool row for.
 app.use('/api', requirePoolAccess());

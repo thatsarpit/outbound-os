@@ -463,6 +463,37 @@ export async function handleInboxRequest(
   const method = (init?.method || 'GET').toUpperCase()
   const path = new URL(url, window.location.origin)
 
+  const emailFiles = path.pathname.match(/^\/api\/messages\/(\d+)\/email-attachments(?:\/(\d+))?$/)
+  if (emailFiles && method === 'GET') {
+    const message = MESSAGES.find(
+      (row) =>
+        row.id === Number(emailFiles[1]) && row.channel === 'email' && row.direction === 'inbound',
+    )
+    if (!message) return json({ error: 'Inbound email message not found.' }, 404)
+    const hasFile =
+      message.id === MESSAGES.find((row) => row.leadId === 2 && row.direction === 'inbound')?.id
+    const content = 'Sample customer specification. This file contains demonstration data only.\n'
+    if (emailFiles[2] !== undefined)
+      return hasFile && emailFiles[2] === '0'
+        ? new Response(content, {
+            headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store' },
+          })
+        : json({ error: 'Email attachment not found.' }, 404)
+    return json({
+      retained: true,
+      items: hasFile
+        ? [
+            {
+              index: 0,
+              filename: 'sample-specification.txt',
+              contentType: 'text/plain',
+              size: new TextEncoder().encode(content).length,
+            },
+          ]
+        : [],
+    })
+  }
+
   const media = path.pathname.match(/\/api\/messages\/(\d+)\/media$/)
   if (media) {
     const blob = files.get(Number(media[1]))

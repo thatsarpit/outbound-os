@@ -12,6 +12,7 @@ import { notificationActions, useNotificationStore } from '@/stores/notification
 import type { ActivityLog } from '@/api/types'
 import { toast } from '@/stores/toast-store'
 import { handleInboxRequest } from './inbox'
+import { handleEmailReceiptRequest } from './email-receipts'
 
 /**
  * Sample data for the dashboard without a backend: a workspace called Acme
@@ -2259,6 +2260,8 @@ export function installFixtureFetch() {
     if (mobileSales) return mobileSales
     const connector = handleConnectorRequest(url, init)
     if (connector) return connector
+    const receipt = handleEmailReceiptRequest(url, init)
+    if (receipt) return receipt
     const inbox = await handleInboxRequest(url, init)
     if (inbox) return inbox
 

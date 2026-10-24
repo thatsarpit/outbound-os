@@ -2,13 +2,34 @@ import { Router } from 'express';
 import prisma from '../utils/prismaClient.js';
 import { requireRole } from '../auth/index.js';
 import inboundEmailIngestion from '../services/inboundEmailIngestion.js';
+import inboundEmailAttachments from '../services/inboundEmailAttachments.js';
+import { emailAttachmentDisposition } from '../utils/emailAttachments.js';
 
 const states = ['pending', 'partial', 'unmatched', 'invalid', 'conflict', 'matched'];
 const positive = value => ['string', 'number'].includes(typeof value) && /^[1-9]\d*$/.test(String(value)) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
 
-export function createEmailReceiptRouter({ db = prisma, service = inboundEmailIngestion, guard = requireRole } = {}) {
+export function createEmailReceiptRouter({ db = prisma, service = inboundEmailIngestion, originals = inboundEmailAttachments, guard = requireRole } = {}) {
   const router = Router();
-  router.use('/email/receipts', guard('admin'));
+  router.use('/email/receipts', guard('admin'), (_req, res, next) => {
+    res.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "sandbox; default-src 'none'" });
+    next();
+  });
+  const unavailable = (res, error) => res.status(error.statusCode || 503).json({ error: error.statusCode ? error.message : 'The original email could not be verified. It remains retained for review.' });
+  router.get('/email/receipts/:id', async (req, res) => {
+    const id = positive(req.params.id);
+    if (!id) return res.status(400).json({ error: 'Valid receipt ID required.' });
+    try { res.json(await originals.previewReceipt(id)); }
+    catch (error) { unavailable(res, error); }
+  });
+  router.get('/email/receipts/:id/attachments/:index', async (req, res) => {
+    const id = positive(req.params.id), index = req.params.index;
+    if (!id || !/^(0|[1-9]\d*)$/.test(index) || !Number.isSafeInteger(Number(index))) return res.status(400).json({ error: 'Valid receipt ID and attachment index required.' });
+    try {
+      const file = await originals.downloadReceipt(id, Number(index));
+      res.set({ 'Content-Type': 'application/octet-stream', 'Content-Disposition': emailAttachmentDisposition(file.filename) });
+      res.send(file.bytes);
+    } catch (error) { unavailable(res, error); }
+  });
   router.get('/email/receipts', async (req, res) => {
     try {
       const page = positive(req.query.page) || 1;
