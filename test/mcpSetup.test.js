@@ -38,7 +38,9 @@ test('setup prompts distinguish OpenAI clients and leave installation, approval 
   assert.ok(chatgpt.includes('ChatGPT'));
   assert.notEqual(codex, chatgpt);
   for (const prompt of [codex, chatgpt]) {
-    assert.ok(prompt.includes(url));
+    const serverLine = prompt.split('\n').find(line => line.startsWith('MCP server: '));
+    assert.equal(serverLine, `MCP server: ${url}`);
+    assert.equal(new URL(serverLine.slice('MCP server: '.length)).href, url);
     assert.match(prompt, /personally review/);
     assert.match(prompt, /Do not ask me to paste passwords/);
     assert.match(prompt, /cannot install a connection from a prompt/);

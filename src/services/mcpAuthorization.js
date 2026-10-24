@@ -6,6 +6,10 @@ const FAMILY_TTL = 30 * 24 * 60 * 60_000;
 const REFRESH_IDLE_TTL = 7 * 24 * 60 * 60_000;
 const random = () => randomBytes(32).toString('base64url');
 export const mcpHash = value => createHash('sha256').update(String(value)).digest('hex');
+function requestKey(id) {
+  if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(id)) throw mcpError('Invalid connection request.');
+  return mcpHash(id);
+}
 const safeEqual = (a, b) => typeof a === 'string' && typeof b === 'string'
   && a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b));
 
@@ -184,11 +188,11 @@ export class McpAuthorization {
     const parsed = parseMcpAuthorization(input, this.config.resource);
     if (typeof browserNonce !== 'string' || !/^[\w-]{43}$/.test(browserNonce)) throw mcpError('Invalid browser transaction.');
     return this.update((state, now) => {
-      const client = state.clients[parsed.clientId];
+      const client = Object.hasOwn(state.clients, parsed.clientId) ? state.clients[parsed.clientId] : null;
       if (!client || !client.redirects.includes(parsed.redirectUri)) throw mcpError('The exact callback is not registered.', 400, 'invalid_redirect_uri');
       if (Object.keys(state.requests).length >= 1000) throw mcpError('Too many pending connections. Try again later.', 429);
       const id = random();
-      state.requests[id] = { ...parsed, clientName: client.name, status: 'pending',
+      state.requests[requestKey(id)] = { ...parsed, clientName: client.name, status: 'pending',
         browserHash: mcpHash(browserNonce), expires: now + REQUEST_TTL };
       return { id, expiresAt: now + REQUEST_TTL,
         consentUrl: `${this.config.dashboard}/integrations/mcp/authorize?request_id=${id}` };
@@ -198,7 +202,7 @@ export class McpAuthorization {
   async details(id, owner) {
     const person = await this.person(owner);
     return this.update((state, now) => {
-      const request = state.requests[id];
+      const request = state.requests[requestKey(id)];
       if (!request || request.status !== 'pending') throw mcpError('This connection request expired or was already used. Start again in your AI client.', 410);
       const nonce = random();
       request.decisionHash = mcpHash(nonce);
@@ -214,7 +218,7 @@ export class McpAuthorization {
     fields(input, ['decision', 'decisionNonce']);
     if (!['allow', 'deny'].includes(input.decision)) throw mcpError('Choose Allow access or Cancel.');
     return this.update((state, now) => {
-      const request = state.requests[id];
+      const request = state.requests[requestKey(id)];
       if (!request || request.status !== 'pending' || String(request.owner?.id) !== String(person.id)
         || request.owner?.provider !== person.provider || request.owner?.orgId !== person.orgId
         || !safeEqual(request.decisionHash, mcpHash(input.decisionNonce || ''))) {
@@ -228,11 +232,11 @@ export class McpAuthorization {
   }
 
   async complete(id, browserNonce) {
-    const request = await this.update(state => state.requests[id] ? structuredClone(state.requests[id]) : null);
+    const request = await this.update(state => state.requests[requestKey(id)] ? structuredClone(state.requests[requestKey(id)]) : null);
     if (!request || !safeEqual(request.browserHash, mcpHash(browserNonce || ''))) throw mcpError('Use the same browser that started this connection.', 403);
     if (request.status === 'approved') await this.person(request.owner);
     return this.update((state, now) => {
-      const current = state.requests[id];
+      const current = state.requests[requestKey(id)];
       if (!current || !['approved', 'denied'].includes(current.status)
         || !safeEqual(current.browserHash, mcpHash(browserNonce || ''))) throw mcpError('Connection request expired or was already completed.', 410);
       const redirect = new URL(current.redirectUri);
@@ -244,7 +248,7 @@ export class McpAuthorization {
       }
       if (current.state !== null) redirect.searchParams.set('state', current.state);
       redirect.searchParams.set('iss', this.config.issuer);
-      delete state.requests[id];
+      delete state.requests[requestKey(id)];
       return { redirectUrl: redirect.href };
     });
   }
@@ -335,6 +339,7 @@ export class McpAuthorization {
   }
 
   async revoke(id, owner) {
+    if (typeof id !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(id)) throw mcpError('Connection not found.', 404);
     const person = await this.person(owner);
     return this.update((state, now) => {
       const grant = state.grants[id];

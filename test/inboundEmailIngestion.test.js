@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, readFileSync, existsSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, existsSync, rmSync, statSync, openSync, fstatSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -159,8 +159,11 @@ test('unknown senders and ambiguous addresses are held as private receipts rathe
   assert.equal(await db.activityLog.count(), 0);
   assert.deepEqual(await spool.read(unmatched.receipt.rawPath, unmatched.receipt.dedupeKey), Buffer.from(raw));
   const file = path.join(directory, 'private-mail', unmatched.receipt.rawPath);
-  assert.equal(statSync(file).mode & 0o777, 0o600);
-  assert.equal(readFileSync(file).includes(Buffer.from('new-customer@example.test')), false);
+  const descriptor = openSync(file, 'r');
+  try {
+    assert.equal(fstatSync(descriptor).mode & 0o777, 0o600);
+    assert.equal(readFileSync(descriptor).includes(Buffer.from('new-customer@example.test')), false);
+  } finally { closeSync(descriptor); }
   await assert.rejects(spool.read(unmatched.receipt.rawPath, 'wrong-identity'), /authenticate/);
   await assert.rejects(spool.read('../escape.mime.enc', unmatched.receipt.dedupeKey), /Invalid inbound/);
   await db.lead.create({ data: { name: 'Second contact', mobile: 'no-phone:ambiguous-inbound', email: ` ${lead.email.toUpperCase()} ` } });

@@ -111,10 +111,13 @@ test('dashboard assets and SPA routes share one limit while API, health and webh
   const directory = path.join(__dirname, '..', 'web', 'dist');
   const index = path.join(directory, 'index.html');
   const asset = path.join(directory, '__rate-limit-fixture.svg');
-  const temporaryIndex = !fs.existsSync(index);
+  let temporaryIndex = false;
   fs.mkdirSync(directory, { recursive: true });
-  if (temporaryIndex) fs.writeFileSync(index, '<!doctype html><title>Isolated dashboard fixture</title>');
-  fs.writeFileSync(asset, '<svg xmlns="http://www.w3.org/2000/svg"/>');
+  try {
+    fs.writeFileSync(index, '<!doctype html><title>Isolated dashboard fixture</title>', { flag: 'wx' });
+    temporaryIndex = true;
+  } catch (error) { if (error.code !== 'EEXIST') throw error; }
+  fs.writeFileSync(asset, '<svg xmlns="http://www.w3.org/2000/svg"/>', { flag: 'wx' });
   const headers = { 'X-Forwarded-For': '192.0.2.199' };
   try {
     for (let count = 0; count < 300; count++) {

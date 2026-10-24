@@ -43,7 +43,7 @@ export class CampaignEngine {
         status: 'draft', variantBTemplate, variantBSubject,
       },
     });
-    logger.info(`Campaign "${name}" (${channel}) created (ID: ${campaign.id})`);
+    logger.info(`Campaign created (ID: ${Number(campaign.id)})`);
     return campaign;
   }
 

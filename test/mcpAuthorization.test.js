@@ -225,3 +225,19 @@ test('regular refreshes cannot extend the absolute grant lifetime and final acce
   assert.equal((await f.service.inventory(f.owner)).grants.length, 0);
   assert.equal(Object.keys(f.state().refresh).length, 0, 'expired family replay records prune together');
 });
+
+
+test('authorization handles cannot address inherited object properties', async () => {
+  const f = fixture();
+  const { pending, parameters } = await f.request();
+  await assert.rejects(f.service.createRequest({ ...parameters, client_id: 'constructor' }, f.browserNonce), /not registered/);
+  for (const id of ['__proto__', 'constructor', 'prototype', 'toString', ['request'], null]) {
+    await assert.rejects(f.service.details(id, f.owner), /Invalid connection request/);
+    await assert.rejects(f.service.complete(id, f.browserNonce), /Invalid connection request/);
+    await assert.rejects(f.service.revoke(id, f.owner), /Connection not found/);
+  }
+  assert.equal(Object.hasOwn(f.state().requests, pending.id), false, 'public handles are hashed before record lookup');
+  assert.equal(Object.hasOwn(f.state().requests, mcpHash(pending.id)), true);
+  assert.equal((await f.service.details(pending.id, f.owner)).id, pending.id);
+  assert.equal(Object.prototype.status, undefined);
+});
