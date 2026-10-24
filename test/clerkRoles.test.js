@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { appRoleFromOrgRole, clerkInvitationRole } from '../shared/clerkRoles.js';
 import { clerkWorkspaceIdentity, clerkSessionIdentity } from '../src/auth/clerkIdentity.js';
 import { requireRole, verifyQueryToken } from '../src/auth/clerkAuth.js';
@@ -78,11 +79,11 @@ test('production preflight checks the current favicon and requires a pinned prod
   const base = 'DATABASE_URL=file:fixture.db\nCLERK_SECRET_KEY=sk_live_fixture\nCLERK_PUBLISHABLE_KEY=pk_live_fixture\n';
   try {
     writeFileSync(file, base);
-    const denied = spawnSync(process.execPath, ['scripts/preflight.mjs', file], { encoding: 'utf8' });
+    const denied = spawnSync(process.execPath, ['scripts/preflight.mjs', file], { encoding: 'utf8', cwd: fileURLToPath(new URL('../', import.meta.url)) });
     assert.equal(denied.status, 1);
     assert.match(denied.stderr, /CLERK_ORGANIZATION_ID/);
     writeFileSync(file, base + 'CLERK_ORGANIZATION_ID=org_fixture\n');
-    const allowed = spawnSync(process.execPath, ['scripts/preflight.mjs', file], { encoding: 'utf8' });
+    const allowed = spawnSync(process.execPath, ['scripts/preflight.mjs', file], { encoding: 'utf8', cwd: fileURLToPath(new URL('../', import.meta.url)) });
     assert.equal(allowed.status, 0, allowed.stderr);
     assert.match(allowed.stdout, /Preflight OK/);
   } finally { rmSync(folder, { recursive: true, force: true }); }

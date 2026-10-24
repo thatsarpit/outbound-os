@@ -1,0 +1,26 @@
+{
+  "name": "outboundos-email-ingress",
+  "main": "kv-worker.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "vars": {
+    "RELAY_ENABLED": "false",
+    "EMAIL_INGRESS_URL": "https://api.example.test/api/webhooks/email-ingress"
+  },
+  "kv_namespaces": [
+    { "binding": "MAIL_SPOOL_KV", "id": "replace-with-private-namespace-id" }
+  ],
+  "queues": {
+    "producers": [{ "binding": "MAIL_DELIVERIES", "queue": "outboundos-inbound-email" }],
+    "consumers": [{
+      "queue": "outboundos-inbound-email",
+      "max_batch_size": 1,
+      "max_batch_timeout": 1,
+      "max_retries": 8,
+      "dead_letter_queue": "outboundos-inbound-email-dlq"
+    }]
+  },
+  "triggers": { "crons": ["*/10 * * * *"] }
+}

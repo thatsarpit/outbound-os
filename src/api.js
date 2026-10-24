@@ -30,10 +30,13 @@ import settlementRoutes from './routes/settlement.js';
 import productRoutes from './routes/products.js';
 import telegramRoutes from './routes/telegram.js';
 import emailInboxRoutes from './routes/emailInbox.js';
+import emailIngressRoutes from './routes/emailIngress.js';
+import emailReceiptRoutes from './routes/emailReceipts.js';
 import { sendManualWhatsApp, whatsappReplyContext } from './services/manualWhatsApp.js';
 import webPushRoutes from './routes/webPush.js';
 import inboxReadStateRoutes from './routes/inboxReadState.js';
-import { inboxViewerKey, inboxThreadState, inboxMessagePreview, localInboxAssigneeId } from './utils/inboxState.js';
+import { inboxViewerKey, inboxThreadState, inboxMessagePreview, inboxMessageContent, localInboxAssigneeId } from './utils/inboxState.js';
+import { sortConversationMessages, messageEventTime } from './utils/messageTimeline.js';
 import config from './config.js';
 import logger from './utils/logger.js';
 import activityLog, { EVENT_TYPES } from './utils/activityLog.js';
@@ -190,6 +193,7 @@ function buildInboxMessage(message, emailAccountsById = {}, telegramAccountsById
   const telegramAccount = message.telegramAccountId ? telegramAccountsById[message.telegramAccountId] : null;
   return {
     ...message,
+    content: inboxMessageContent(message),
     channel: message.channel || 'whatsapp',
     subject: message.emailSubject || null,
     senderAccountId: message.emailAccountId || message.imessageAccountId || message.telegramAccountId || message.waAccount || null,
@@ -225,9 +229,9 @@ function buildInboxThreadSummary(lead, emailAccountsById = {}, telegramAccountsB
     assignedEmailAccountId: lead.assignedEmailAccountId || null,
     lastMessage: lastMessage?.content || '',
     lastMessagePreview: inboxMessagePreview(lastMessage),
-    lastMessageAt: lastMessage?.createdAt || lead.lastMessageAt || lead.updatedAt,
-    lastInboundAt: isHumanReply(actionable) ? actionable.createdAt : null,
-    lastOutboundAt: actionable?.direction === 'outbound' ? actionable.createdAt : null,
+    lastMessageAt: lastMessage ? new Date(messageEventTime(lastMessage)) : lead.lastMessageAt || lead.updatedAt,
+    lastInboundAt: isHumanReply(actionable) ? new Date(messageEventTime(actionable)) : null,
+    lastOutboundAt: actionable?.direction === 'outbound' ? new Date(messageEventTime(actionable)) : null,
     unread: (readState.latestInboundMessageId || 0) > (readState.lastReadMessageId || 0),
     replyNeeded: threadState === 'needs_reply',
     assignmentState: lead.assignedToId ? 'assigned' : 'unassigned',
@@ -495,6 +499,7 @@ app.use('/api', browserMutationGuard(ALLOWED_ORIGINS));
 // Populates req.auth() / getAuth(req) for every request below. requireRole()
 // reads from it; nothing else in the chain does the verification itself.
 app.use(authMiddleware());
+app.use('/api/webhooks/email-ingress', emailIngressRoutes);
 // Retain the raw body so webhook signatures can be verified over the exact
 // bytes we received — re-serializing the parsed object would change key order
 // and whitespace, and the HMAC would never match.
@@ -812,6 +817,7 @@ app.use('/api', productRoutes);
 // Telegram connected-account authentication and manual messaging.
 app.use('/api', telegramRoutes);
 app.use('/api', emailInboxRoutes);
+app.use('/api', emailReceiptRoutes);
 // Pool scoping runs after auth — platform admins bypass, every other user is
 // 403'd if they reference a poolId they don't have a UserPool row for.
 app.use('/api', requirePoolAccess());
@@ -3104,9 +3110,9 @@ app.get('/api/inbox/threads', async (req, res) => {
       ];
     }
 
-    // Determine queue membership before pagination. Only the newest message's
-    // metadata is needed here; full history and message bodies stay out of this
-    // workspace-wide scan. Fetch the visible page with its previews afterwards.
+    // Determine queue membership from event time before pagination. Compare
+    // timestamp metadata so delayed webhooks cannot replace a newer reply.
+    // Message bodies stay out of the scan; hydrate only the visible previews.
     // Prisma loads these related messages with an IN parameter per parent.
     // Bound each scan below SQLite's parameter limit; keep scanning the whole
     // queue so older replies and totals are still correct before pagination.
@@ -3123,25 +3129,16 @@ app.get('/api/inbox/threads', async (req, res) => {
         take: scanSize,
         select: {
           id: true, status: true, inboxResolvedAt: true, assignedToId: true, lastMessageAt: true, updatedAt: true,
-          messages: { where: visibleMessageWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
-            select: { direction: true, channel: true, emailInboundKind: true, status: true, createdAt: true } },
+          messages: { where: visibleMessageWhere,
+            select: { id: true, direction: true, channel: true, emailInboundKind: true, status: true, createdAt: true, sentAt: true, providerCreatedAt: true } },
         },
       });
-      // Preserve latest-visible ordering, while determining reply ownership
-      // from customer/outbound messages. Automatic notices remain in history.
-      const needsPrevious = batch.filter(lead => !isActionableConversationMessage(lead.messages[0]));
-      const actionableRows = needsPrevious.length ? await prisma.lead.findMany({
-        where: { id: { in: needsPrevious.map(lead => lead.id) } },
-        select: { id: true, messages: {
-          where: { AND: [visibleMessageWhere, ACTIONABLE_CONVERSATION_WHERE] },
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1,
-          select: { direction: true, channel: true, emailInboundKind: true, status: true, createdAt: true },
-        } },
-      }) : [];
-      const actionable = new Map([
-        ...batch.filter(lead => isActionableConversationMessage(lead.messages[0])).map(lead => [lead.id, lead.messages[0]]),
-        ...actionableRows.map(lead => [lead.id, lead.messages[0] || null]),
-      ]);
+      const actionable = new Map();
+      for (const lead of batch) {
+        const ordered = sortConversationMessages(lead.messages);
+        actionable.set(lead.id, ordered.findLast(isActionableConversationMessage) || null);
+        lead.messages = ordered.slice(-1);
+      }
       if (viewerKey && batch.length) {
         const leadIds = batch.map(lead => lead.id);
         const [readStates, inboundHeads] = await Promise.all([
@@ -3158,7 +3155,7 @@ app.get('/api/inbox/threads', async (req, res) => {
     const scopedQueue = candidates.map((lead) => ({
       ...lead,
       threadState: normalizeInboxThreadState({ lead, lastMessage: lead.lastActionableMessage, assignedToId: lead.assignedToId }),
-      latestAt: lead.messages[0]?.createdAt || lead.lastMessageAt || lead.updatedAt,
+      latestAt: lead.messages[0] ? new Date(messageEventTime(lead.messages[0])) : lead.lastMessageAt || lead.updatedAt,
     }));
     const queue = scopedQueue.filter((lead) => {
       if (state === 'waiting') return lead.threadState !== 'resolved' && lead.lastActionableMessage?.direction === 'outbound';
@@ -3171,11 +3168,12 @@ app.get('/api/inbox/threads', async (req, res) => {
     }).sort((a, b) => new Date(b.latestAt) - new Date(a.latestAt) || b.id - a.id);
     const total = queue.length;
     const ids = queue.slice((page - 1) * limit, page * limit).map((lead) => lead.id);
+    const previewIds = queue.slice((page - 1) * limit, page * limit).map((lead) => lead.messages[0]?.id).filter(Boolean);
     const [leads, emailAccounts, telegramSenderAccounts] = await Promise.all([
       prisma.lead.findMany({
         where: { id: { in: ids } },
         include: {
-          messages: { where: visibleMessageWhere, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 1 },
+          messages: { where: { AND: [visibleMessageWhere, { id: { in: previewIds } }] }, take: 1 },
           _count: { select: { messages: { where: INBOX_VISIBLE_MESSAGE_WHERE } } },
         },
       }),
@@ -3239,15 +3237,16 @@ async function sendInboxThreadDetail(req, res) {
 
     const emailAccountsById = Object.fromEntries(emailAccounts.map((account) => [account.id, account]));
     const telegramAccountsById = Object.fromEntries(telegramSenderAccounts.map((account) => [account.id, account]));
-    const mappedMessages = lead.messages.map((message) => buildInboxMessage(message, emailAccountsById, telegramAccountsById));
-    const lastMessage = lead.messages[lead.messages.length - 1] || null;
+    const orderedMessages = sortConversationMessages(lead.messages);
+    const mappedMessages = orderedMessages.map((message) => buildInboxMessage(message, emailAccountsById, telegramAccountsById));
+    const lastMessage = orderedMessages.at(-1) || null;
     const viewerKey = inboxViewerKey(req.user);
     const readState = viewerKey ? await prisma.inboxReadState.findUnique({ where: { leadId_viewerKey: { leadId, viewerKey } }, select: { lastReadMessageId: true } }) : null;
     const latestInboundMessageId = viewerKey ? lead.messages.reduce((latest, message) => isHumanReply(message) ? Math.max(latest, message.id) : latest, 0) : 0;
     const summary = buildInboxThreadSummary({
       ...lead,
       messages: lastMessage ? [lastMessage] : [],
-    }, emailAccountsById, telegramAccountsById, lead.messages.findLast(isActionableConversationMessage) || null, { lastReadMessageId: readState?.lastReadMessageId, latestInboundMessageId });
+    }, emailAccountsById, telegramAccountsById, orderedMessages.findLast(isActionableConversationMessage) || null, { lastReadMessageId: readState?.lastReadMessageId, latestInboundMessageId });
 
     res.json({
       ...summary,
@@ -3289,7 +3288,7 @@ app.get('/api/inbox/threads/:leadId/messages', async (req, res) => {
     ]);
     const emailAccountsById = Object.fromEntries(emailAccounts.map((account) => [account.id, account]));
     const telegramAccountsById = Object.fromEntries(telegramSenderAccounts.map((account) => [account.id, account]));
-    res.json(messages.map((message) => buildInboxMessage(message, emailAccountsById, telegramAccountsById)));
+    res.json(sortConversationMessages(messages).map((message) => buildInboxMessage(message, emailAccountsById, telegramAccountsById)));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -3317,7 +3316,8 @@ app.post('/api/inbox/threads/:leadId/reopen', requireRole('agent'), async (req, 
     const lead = await prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
     const updated = await prisma.lead.update({ where: { id: leadId }, data: { inboxResolvedAt: null } });
-    const lastMessage = await prisma.message.findFirst({ where: { leadId, AND: [INBOX_VISIBLE_MESSAGE_WHERE, ACTIONABLE_CONVERSATION_WHERE] }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+    const history = await prisma.message.findMany({ where: { leadId, AND: [INBOX_VISIBLE_MESSAGE_WHERE, ACTIONABLE_CONVERSATION_WHERE] } });
+    const lastMessage = sortConversationMessages(history).at(-1) || null;
     broadcastEvent('inbox_reopened', { leadId });
     res.json({ id: leadId, status: lead.status, threadState: normalizeInboxThreadState({ lead: updated, lastMessage, assignedToId: lead.assignedToId }) });
   } catch (error) { res.status(500).json({ error: error.message }); }
