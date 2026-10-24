@@ -35,6 +35,8 @@ The default/unset `MCP_AUTH_MODE` is `legacy`; existing tokens and logins are un
 
 Legacy tokens have no trustworthy individual owner or granular permission history. They are not displayed as personal grants and remain shared administrator access. The UI labels this difference. Do not claim that the read-only grant limits these old credentials. After a personal owner connection works in the real clients, set `MCP_LEGACY_COMPAT=false` in the MCP container to stop accepting legacy credentials. Preserve the old OAuth store for an explicit rollback; do not silently erase it.
 
+Legacy `list_users` discovers provider-scoped `memberKey` values from the workspace directory. Pass one as `lead_assign.member_key`, or pass `member_key: null` to unassign. Numeric `user_id` remains supported only with local sign-in. Clerk installations require the existing organization to be pinned; each explicit target is checked against current membership and user status. Shared service administrators cannot claim a conversation as themselves, authorize personal grants or acquire a personal identity. During a staggered API upgrade, discovery falls back to the older local user list only when the workspace directory returns 404, never on a permission or provider failure.
+
 Rolling back to legacy mode disables personal control routes and personal delegated API access. Personal grants stay in the database but cannot be used while the mode is disabled. Keep canonical URLs, installation ID and keys stable across restarts; changing the installation ID invalidates old grants rather than attaching them to a different workspace.
 
 ## Security and lifecycle

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { get, post } from '../client.js';
+import { get, post, mcpRequestContext } from '../client.js';
 import { ok, err } from '../schemas/common.js';
 
 /** @param {import("@modelcontextprotocol/sdk/server/mcp.js").McpServer} server */
@@ -72,10 +72,25 @@ export function registerSystemTools(server) {
   // ── list_users ──
   server.tool(
     'list_users',
-    'List all enabled team members (for assignment and team management)',
+    'List workspace members. In legacy mode, memberKey identifies the exact provider-scoped target for lead_assign; local members also retain numeric IDs. Personal read-only connections list existing local users and cannot assign leads.',
     {},
     async () => {
       try {
+        if (!mcpRequestContext.getStore()?.personalToken) {
+          try {
+            const { data } = await get('/api/workspace/members');
+            if (!Array.isArray(data?.members)) throw new Error('The workspace member response was incomplete. Try again after checking the API version.');
+            return ok(data.members.map(member => ({
+              id: member.provider === 'local' ? Number(member.externalId) : member.externalId,
+              memberKey: member.key, provider: member.provider, orgId: member.orgId,
+              name: member.name, email: member.email, role: member.role,
+            })));
+          } catch (error) {
+            // A staggered rollout may still run an API without the directory.
+            // Permission or provider failures must not fall back to a different identity list.
+            if (error.status !== 404) throw error;
+          }
+        }
         const { data } = await get('/api/users');
         // The API returns an array. Accept the older envelope as well so a
         // staggered API/MCP upgrade does not turn a successful read into an

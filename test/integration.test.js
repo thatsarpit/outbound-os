@@ -3292,3 +3292,98 @@ test('assignment validates live members and keeps Mine, Inbox and Tasks ownershi
     await db.user.deleteMany({ where: { id: { in: people.map(user => user.id) } } });
   }
 });
+
+test('trusted legacy service assignment validates explicit local targets while personal claim stays forbidden', async () => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const people = await Promise.all(['agent', 'viewer'].map(role => db.user.create({ data: {
+    name: `Service assignment ${role}`, email: `service-assignment-${role}@example.test`, passwordHash: 'fixture', role,
+  } })));
+  const lead = await db.lead.create({ data: { name: 'Service assignment fixture', mobile: 'no-phone:service-assignment' } });
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.217' };
+  const endpoint = `/api/leads/${lead.id}/assign`;
+  const memberKey = `local:local:${people[0].id}`;
+  try {
+    assert.equal((await request('POST', endpoint, { headers: { 'X-Forwarded-For': '192.0.2.219' }, body: { memberKey } })).status, 401);
+    for (const [index, person] of people.entries()) {
+      assert.equal((await request('POST', endpoint, { headers: { Authorization: `Bearer ${signToken(person)}`, 'X-Forwarded-For': `192.0.2.${220 + index}` }, body: { memberKey } })).status, 403);
+    }
+    const directory = await request('GET', '/api/workspace/members', { headers });
+    assert.equal(directory.status, 200);
+    assert.ok(directory.body.members.some(member => member.key === memberKey));
+    for (const [body, status] of [
+      [{}, 400], [{ memberKey, userId: people[0].id }, 400], [{ memberKey: 'clerk:org_fixture:user_agent' }, 403],
+      [{ memberKey: 'local:local:999999999' }, 409], [{ memberKey: `local:local:${people[1].id}` }, 409], [{ userId: '1junk' }, 400],
+    ]) assert.equal((await request('POST', endpoint, { headers, body })).status, status);
+    assert.equal((await db.lead.findUnique({ where: { id: lead.id } })).assignedMemberKey, null);
+    assert.equal((await request('POST', endpoint, { headers, body: { memberKey } })).status, 200);
+    let saved = await db.lead.findUnique({ where: { id: lead.id } });
+    assert.equal(saved.assignedMemberKey, memberKey);
+    assert.equal(saved.assignedToId, people[0].id);
+    assert.equal((await request('POST', endpoint, { headers, body: { memberKey: null } })).status, 200);
+    const legacy = await request('POST', endpoint, { headers, body: { userId: people[0].id } });
+    assert.equal(legacy.status, 200);
+    assert.equal(legacy.body.assignedMemberKey, memberKey);
+    await db.user.update({ where: { id: people[0].id }, data: { enabled: false } });
+    assert.equal((await request('POST', endpoint, { headers, body: { memberKey } })).status, 409);
+    assert.equal((await request('POST', `/api/inbox/threads/${lead.id}/assign-self`, { headers })).status, 403);
+    assert.equal((await request('POST', endpoint, { headers, body: { userId: null } })).status, 200);
+    saved = await db.lead.findUnique({ where: { id: lead.id } });
+    assert.equal(saved.assignedMemberKey, null);
+    assert.equal(saved.assignedToId, null);
+  } finally {
+    await db.lead.delete({ where: { id: lead.id } });
+    await db.workspaceMember.deleteMany({ where: { key: memberKey } });
+    await db.user.deleteMany({ where: { id: { in: people.map(person => person.id) } } });
+  }
+});
+
+test('legacy service Clerk assignment uses pinned provider keys and never matches local users by email', async () => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const { default: members } = await import('../src/services/workspaceMembers.js');
+  const previous = { env: members.env, client: members.client };
+  const key = 'clerk:org_service_fixture:user_target';
+  const target = { id: 'user_target', firstName: 'Service target', banned: false, locked: false, primaryEmailAddress: { emailAddress: 'service-clerk@example.test' } };
+  const membership = { role: 'org:member', publicUserData: { userId: target.id, firstName: target.firstName, identifier: target.primaryEmailAddress.emailAddress } };
+  let present = true;
+  const calls = [];
+  members.env = { AUTH_PROVIDER: 'clerk', NODE_ENV: 'production', CLERK_ORGANIZATION_ID: 'org_service_fixture' };
+  members.client = { organizations: { getOrganizationMembershipList: async input => {
+    calls.push(input);
+    assert.equal(input.organizationId, 'org_service_fixture');
+    const data = present && (!input.userId || input.userId.includes(target.id)) ? [membership] : [];
+    return { data, totalCount: data.length };
+  } }, users: { getUser: async id => id === target.id ? target : null } };
+  const local = await db.user.create({ data: { name: 'Same-address local fixture', email: target.primaryEmailAddress.emailAddress, passwordHash: 'fixture', role: 'admin' } });
+  const lead = await db.lead.create({ data: { name: 'Clerk service assignment fixture', mobile: 'no-phone:clerk-service-assignment' } });
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.218' };
+  const endpoint = `/api/leads/${lead.id}/assign`;
+  try {
+    const directory = await request('GET', '/api/workspace/members', { headers });
+    assert.equal(directory.status, 200);
+    assert.equal(directory.body.members[0].key, key);
+    const numeric = await request('POST', endpoint, { headers, body: { userId: local.id } });
+    assert.equal(numeric.status, 400);
+    assert.match(numeric.body.error, /memberKey.*list_users/);
+    assert.equal((await request('POST', endpoint, { headers, body: { memberKey: `local:local:${local.id}` } })).status, 403);
+    assert.equal((await request('POST', endpoint, { headers, body: { memberKey: 'clerk:org_other:user_target' } })).status, 403);
+    assert.equal((await request('POST', endpoint, { headers, body: { memberKey: 'clerk:org_service_fixture:user_missing' } })).status, 409);
+    assert.equal((await request('POST', endpoint, { headers, body: { memberKey: key } })).status, 200);
+    const saved = await db.lead.findUnique({ where: { id: lead.id } });
+    assert.equal(saved.assignedMemberKey, key);
+    assert.equal(saved.assignedToId, null);
+    target.banned = true;
+    assert.equal((await request('POST', endpoint, { headers, body: { memberKey: key } })).status, 409);
+    target.banned = false;
+    present = false;
+    assert.equal((await request('POST', endpoint, { headers, body: { memberKey: key } })).status, 409);
+    assert.equal((await request('POST', endpoint, { headers, body: { memberKey: null } })).status, 200);
+    assert.equal((await request('POST', `/api/inbox/threads/${lead.id}/assign-self`, { headers })).status, 403);
+    assert.ok(calls.length > 0);
+  } finally {
+    Object.assign(members, previous);
+    await db.lead.delete({ where: { id: lead.id } });
+    await db.workspaceMember.deleteMany({ where: { key } });
+    await db.user.delete({ where: { id: local.id } });
+  }
+});

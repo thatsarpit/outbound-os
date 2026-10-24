@@ -219,14 +219,17 @@ export function registerLeadTools(server) {
   // ── lead_assign ──
   server.tool(
     'lead_assign',
-    'Assign a lead to a team member (by user ID) or unassign by passing null',
+    'Assign a lead using member_key from list_users, or pass member_key:null to unassign. Legacy numeric user_id works only on local-sign-in installations. Provide exactly one target field.',
     {
       lead_id: LeadId,
-      user_id: z.number().int().nullable().describe('User ID to assign, or null to unassign'),
+      member_key: z.string().min(1).max(420).nullable().optional().describe('Exact memberKey from list_users, or null to unassign'),
+      user_id: z.number().int().positive().nullable().optional().describe('Legacy local user ID, or null to unassign; local sign-in only'),
     },
-    async ({ lead_id, user_id }) => {
+    async ({ lead_id, member_key, user_id }) => {
       try {
-        const { data } = await post(`/api/leads/${lead_id}/assign`, { userId: user_id });
+        if ((member_key === undefined) === (user_id === undefined)) return err('Provide exactly one of member_key or legacy user_id. Use list_users to discover memberKey values.');
+        const target = member_key !== undefined ? { memberKey: member_key } : { userId: user_id };
+        const { data } = await post(`/api/leads/${lead_id}/assign`, target);
         return ok(data);
       } catch (e) { return err(e.message); }
     },

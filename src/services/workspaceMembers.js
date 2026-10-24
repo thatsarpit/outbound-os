@@ -19,13 +19,27 @@ export class WorkspaceMembers {
     return identity;
   }
 
+  /** Shared legacy administrators act on an explicit target, never as a teammate. */
+  serviceWorkspace(user) {
+    if (user?.id !== 'mcp-service' && user?.orgId !== 'service') return null;
+    if (user.id !== 'mcp-service' || user.orgId !== 'service' || user.role !== 'admin' || user.delegated) {
+      throw memberAssignmentError('A trusted legacy service administrator is required.', 403, 'assignment_forbidden');
+    }
+    const provider = (this.env.AUTH_PROVIDER || (this.env.CLERK_SECRET_KEY ? 'clerk' : 'local')).toLowerCase() === 'clerk' ? 'clerk' : 'local';
+    const orgId = provider === 'local' ? 'local' : String(this.env.CLERK_ORGANIZATION_ID || '').trim();
+    if (provider === 'clerk' && !/^org_[A-Za-z0-9_-]{1,196}$/.test(orgId)) {
+      throw memberAssignmentError('Pin CLERK_ORGANIZATION_ID before assigning workspace members.', 503, 'member_workspace_unconfigured');
+    }
+    return { provider, orgId, role: 'admin', service: true };
+  }
+
   async clerk() {
     return this.client || (await import('@clerk/express')).clerkClient;
   }
 
   async list(user) {
-    const actor = this.identity(user);
-    await this.live(actor);
+    const actor = this.serviceWorkspace(user) || this.identity(user);
+    if (!actor.service) await this.live(actor);
     if (actor.provider === 'local') {
       const users = await this.db.user.findMany({ where: { enabled: true, role: { in: ['agent', 'manager', 'admin'] } }, orderBy: { name: 'asc' } });
       return users.map(member => profile(workspaceMemberIdentity({ id: member.id, orgId: 'local' }, this.env), member, member.role, this.now()));
@@ -57,15 +71,15 @@ export class WorkspaceMembers {
   self(user) { return this.resolve(user, this.identity(user).key); }
 
   async resolve(user, memberKey) {
-    const actor = this.identity(user);
+    const actor = this.serviceWorkspace(user) || this.identity(user);
     if (typeof memberKey !== 'string' || memberKey.length > 420) throw memberAssignmentError('Choose a workspace member.');
     const parts = memberKey.split(':');
     const target = parts.length === 3 && parts[0] === actor.provider && parts[1] === actor.orgId
       ? workspaceMemberIdentity({ id: parts[2], orgId: parts[1] }, this.env) : null;
     if (!target || target.key !== memberKey) throw memberAssignmentError('Choose a member of this workspace.', 403, 'wrong_member_workspace');
-    const currentActor = await this.live(actor);
-    if (actor.key !== target.key && !['manager', 'admin'].includes(currentActor.role)) throw memberAssignmentError('Only a manager can assign another teammate.', 403, 'assignment_forbidden');
-    const member = actor.key === target.key ? currentActor : await this.live(target);
+    const currentActor = actor.service ? null : await this.live(actor);
+    if (!actor.service && actor.key !== target.key && !['manager', 'admin'].includes(currentActor.role)) throw memberAssignmentError('Only a manager can assign another teammate.', 403, 'assignment_forbidden');
+    const member = !actor.service && actor.key === target.key ? currentActor : await this.live(target);
     const { localUserId: _localUserId, ...data } = member;
     return this.db.workspaceMember.upsert({ where: { key: member.key }, create: data, update: data });
   }

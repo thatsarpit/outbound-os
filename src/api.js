@@ -1866,11 +1866,12 @@ app.post('/api/leads/:id/assign', requireRole('manager'), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (!parsePositiveInt(req.params.id)) return res.status(400).json({ error: 'Valid lead ID required' });
-    const actor = await workspaceMembers.self(req.user);
+    const actor = workspaceMembers.serviceWorkspace(req.user) || await workspaceMembers.self(req.user);
     if (!['manager', 'admin'].includes(actor.role)) return res.status(403).json({ error: 'Only a manager can reassign a teammate.' });
+    if (Object.hasOwn(req.body, 'memberKey') && Object.hasOwn(req.body, 'userId')) return res.status(400).json({ error: 'Choose memberKey or a legacy local userId, not both.' });
     let key = req.body.memberKey;
     if (key === undefined && Object.hasOwn(req.body, 'userId')) {
-      if (actor.provider !== 'local') return res.status(400).json({ error: 'Choose a workspace member for Clerk assignments.' });
+      if (actor.provider !== 'local') return res.status(400).json({ error: 'For Clerk assignments, use memberKey from the workspace member directory (MCP list_users), or memberKey: null to unassign. Numeric userId is supported only with local sign-in.' });
       if (req.body.userId === null) key = null;
       else {
         const localId = parsePositiveInt(req.body.userId);

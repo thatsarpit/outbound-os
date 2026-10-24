@@ -23,11 +23,13 @@ test('team reads accept the real API array, preserve legacy compatibility and om
   const enabled = { id: 1, name: 'Fixture member', enabled: true };
   const disabled = { id: 2, name: 'Disabled fixture member', enabled: false };
   for (const response of [[enabled, disabled], { users: [enabled, disabled] }]) {
-    const mock = t.mock.method(globalThis, 'fetch', async () => Response.json(response));
+    const mock = t.mock.method(globalThis, 'fetch', async url => new URL(url).pathname === '/api/workspace/members'
+      ? Response.json({ error: 'Not found' }, { status: 404 }) : Response.json(response));
     assert.deepEqual(payload(await invoke('list_users', {})), [enabled]);
     mock.mock.restore();
   }
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ unexpected: true }));
+  t.mock.method(globalThis, 'fetch', async url => new URL(url).pathname === '/api/workspace/members'
+    ? Response.json({ error: 'Not found' }, { status: 404 }) : Response.json({ unexpected: true }));
   const invalid = await invoke('list_users', {});
   assert.equal(invalid.isError, true);
   assert.match(invalid.content[0].text, /team response was incomplete/);

@@ -7,6 +7,7 @@ const localEnv = { AUTH_PROVIDER: 'local' };
 const clerkEnv = { AUTH_PROVIDER: 'clerk', CLERK_SECRET_KEY: 'sk_test_fixture', CLERK_ORGANIZATION_ID: 'org_fixture' };
 const localActor = { id: 1, orgId: 'local', role: 'admin' };
 const clerkActor = { id: 'user_owner', orgId: 'org_fixture', role: 'admin' };
+const serviceActor = { id: 'mcp-service', orgId: 'service', role: 'admin' };
 const validLocal = (id, role = 'agent') => ({ id, role, enabled: true, name: `Fixture ${id}`, email: `member${id}@example.test` });
 
 function fixture({ clerk = false } = {}) {
@@ -127,4 +128,38 @@ test('the assignment directory paginates the current Clerk organization and excl
   assert.deepEqual(new Set(listed.map(member => member.externalId)), new Set(['user_owner', 'user_agent', 'user_other']));
   assert.deepEqual(f.calls.filter(item => item[0] === 'clerk_memberships' && !item[1].userId).map(item => item[1].offset), [0, 2, 4]);
   assert.equal(f.stored.size, 0, 'browsing the directory does not populate authorization or membership caches');
+});
+
+test('legacy service administrators discover and assign explicit local targets without a personal identity', async () => {
+  const f = fixture();
+  assert.equal(workspaceMemberIdentity(serviceActor, localEnv), null);
+  assert.equal((await f.service.list(serviceActor)).length, 2);
+  assert.equal((await f.service.resolve(serviceActor, 'local:local:2')).key, 'local:local:2');
+  assert.deepEqual(f.calls, [['local', 2]], 'a service actor never becomes a local authentication user');
+  await assert.rejects(async () => f.service.self(serviceActor), error => error.statusCode === 403);
+  for (const bad of [{ ...serviceActor, role: 'manager' }, { ...serviceActor, orgId: 'local' }, { ...serviceActor, delegated: true }]) {
+    await assert.rejects(f.service.list(bad), error => error.statusCode === 403);
+    await assert.rejects(f.service.resolve(bad, 'local:local:2'), error => error.statusCode === 403);
+  }
+  for (const key of ['clerk:org_fixture:user_agent', 'local:local:999', 'local:local:3', 'local:local:02']) {
+    await assert.rejects(f.service.resolve(serviceActor, key));
+  }
+  f.users.get(2).enabled = false;
+  await assert.rejects(f.service.resolve(serviceActor, 'local:local:2'), error => error.statusCode === 409);
+  assert.equal(f.stored.size, 1);
+});
+
+test('legacy Clerk service assignments require the pinned workspace and recheck the target provider', async () => {
+  const f = fixture({ clerk: true });
+  assert.equal((await f.service.list(serviceActor)).length, 3);
+  const member = await f.service.resolve(serviceActor, 'clerk:org_fixture:user_agent');
+  assert.equal(member.provider, 'clerk');
+  assert.equal(memberAssignmentData(member).assignedToId, null);
+  assert.ok(f.calls.every(call => call[0] !== 'local'), 'matching emails never substitute local users');
+  await assert.rejects(f.service.resolve(serviceActor, 'clerk:org_other:user_agent'), error => error.statusCode === 403);
+  f.memberships.delete('user_agent');
+  await assert.rejects(f.service.resolve(serviceActor, member.key), error => error.statusCode === 409);
+  f.service.env = { AUTH_PROVIDER: 'clerk', NODE_ENV: 'production' };
+  await assert.rejects(f.service.list(serviceActor), error => error.statusCode === 503 && error.code === 'member_workspace_unconfigured');
+  assert.equal(f.stored.size, 1);
 });

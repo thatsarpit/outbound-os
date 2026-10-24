@@ -46,6 +46,12 @@ fields. Agents can atomically claim unassigned work or their own work; a manager
 must reassign another person's lead. Tasks `scope=mine` means tasks on that
 person's assigned leads, not a separate task-owner field.
 
+Trusted legacy MCP administrators can discover explicit provider-scoped targets
+with `list_users` and assign through `lead_assign.member_key`; an explicit null
+unassigns. They cannot use personal self-claim. Local installations retain
+numeric `user_id` compatibility; Clerk installations require a current member
+key from the pinned organization and never map accounts by matching emails.
+
 Notifications use committed activity IDs and per-person read state. The new
 Activity view paginates recorded events; it cannot reconstruct historical actions
 that were never logged. A background failure keeps loaded results visibly stale
@@ -87,9 +93,9 @@ Use owned addresses/numbers only for the separately reviewed provider acceptance
 
 ## Local verification record
 
-- Reconciliation on 25 October 2026: 352 unit/fixture checks passed; four pre-existing TODO cases remain.
-- 129 API integration checks passed against the full SQLite migration chain.
-- 16 MCP transport/OAuth checks passed.
+- Reconciliation and legacy MCP assignment repair on 25 October 2026: 354 unit/fixture checks passed; four pre-existing TODO cases remain.
+- 131 API integration checks passed against the full SQLite migration chain.
+- 20 MCP transport/OAuth/assignment checks passed.
 - Dashboard lint, typecheck, normal and demo builds passed; Home Screen PNG/manifest checks passed.
 - All 17 migrations applied to an empty fixture database; comparison to the Prisma schema produced an empty migration.
 - Retained-mail tests verified exact attachment bytes, encrypted-original integrity failures, route permissions and forced-download headers. The earlier private MIME backup/extraction/decryption fixture remains recorded.
