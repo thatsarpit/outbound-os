@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ArrowRight, Check } from 'lucide-react'
+import { ArrowRight, Check, Code2, Server, Wrench } from 'lucide-react'
 import { Breadcrumbs, Faq } from '@/components/content'
 import { buildMetadata } from '@/lib/metadata'
 import { site } from '@/lib/site-content'
@@ -9,48 +9,27 @@ export const metadata = buildMetadata(
   'Self-host the complete Outbound OS CRM for free. Get a quote for installation, Meta WhatsApp setup, managed hosting or ongoing support. Provider fees are separate.',
   '/pricing',
 )
-const options = [
+const services = [
   {
-    eyebrow: 'Do it yourself',
-    name: 'Self-hosted',
-    price: '$0',
-    suffix: ' software licence',
-    text: 'The complete product, on infrastructure you control.',
-    items: [
-      'Every open-source feature',
-      'No per-seat software fee',
-      'Your Meta and email accounts',
-      'Community support on GitHub',
-    ],
-    href: '/docs/install',
-    cta: 'Install Outbound OS',
-  },
-  {
-    eyebrow: 'Let us get you started',
+    icon: Wrench,
     name: 'Setup & launch',
-    price: 'Custom quote',
-    suffix: ' one-time project',
+    billing: 'One-time project',
     text: 'A working setup, connected to the way your team sells.',
     items: [
-      'Installation and channel setup',
-      'Contact import assistance',
-      'Lead-source configuration',
-      'Testing and a team walkthrough',
+      'Installation, channels and lead sources',
+      'Imports, testing and a team walkthrough',
     ],
     href: '/managed-hosting#request',
     cta: 'Get a setup quote',
   },
   {
-    eyebrow: 'Let us help run it',
+    icon: Server,
     name: 'Managed & supported',
-    price: 'Custom quote',
-    suffix: ' agreed service plan',
+    billing: 'Recurring service, agreed in advance',
     text: 'Hosting and practical help as your workflow grows.',
     items: [
-      'A separate team instance',
-      'Agreed hosting and backups',
-      'Update management',
-      'Ongoing support within your scope',
+      'A separate instance, hosting and backups',
+      'Updates and support within your scope',
     ],
     href: '/managed-hosting#request',
     cta: 'Discuss a service plan',
@@ -90,36 +69,40 @@ export default function PricingPage() {
             Every product feature is open source. Pay for the work you want us to handle: setup,
             hosting, support or a combination that fits your team.
           </p>
-          <div className="os-service-cards">
-            {options.map((option, i) => (
-              <article
-                className={`os-service-card ${i === 1 ? 'os-service-card--featured' : ''}`}
-                key={option.name}
-              >
-                <p className="eyebrow">{option.eyebrow}</p>
-                <h2>{option.name}</h2>
-                <p>{option.text}</p>
-                <p className="os-price">
-                  {option.price}
-                  <small>{option.suffix}</small>
-                </p>
-                <ul>
-                  {option.items.map((item) => (
-                    <li key={item}>
-                      <Check size={13} />
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-                <Link
-                  href={option.href}
-                  className={`btn ${i === 1 ? 'btn--primary' : 'btn--secondary'}`}
-                >
-                  {option.cta}
-                  <ArrowRight size={14} />
-                </Link>
-              </article>
-            ))}
+          <div className="pricing-choice">
+            <article className="pricing-license" aria-labelledby="self-hosted-heading">
+              <span className="pricing-choice__icon"><Code2 size={21} aria-hidden="true" /></span>
+              <p className="eyebrow">The software</p>
+              <h2 id="self-hosted-heading">Self-hosted. Complete.</h2>
+              <p className="pricing-license__price">$0 <span>software licence</span></p>
+              <p>Run Outbound OS on infrastructure you control, using your own business accounts.</p>
+              <ul className="pricing-inclusions">
+                {['Every open-source feature', 'No per-seat software fee', 'Your database and channel accounts', 'Community help on GitHub'].map((item) => (
+                  <li key={item}><Check size={15} aria-hidden="true" />{item}</li>
+                ))}
+              </ul>
+              <Link href="/docs/install" className="btn btn--primary">Install Outbound OS <ArrowRight size={15} aria-hidden="true" /></Link>
+              <p className="pricing-license__note">Infrastructure and provider usage are separate. Released under {site.license}.</p>
+            </article>
+            <div className="pricing-help">
+              <div className="pricing-help__intro">
+                <p className="eyebrow">Optional services</p>
+                <h2>Choose the work you want help with.</h2>
+                <p>Both options use the same open-source product. We quote for the scope of the work.</p>
+              </div>
+              {services.map((service) => {
+                const Icon = service.icon
+                return (
+                  <article className="pricing-service" key={service.name}>
+                    <div className="pricing-service__heading"><Icon size={18} aria-hidden="true" /><h3>{service.name}</h3></div>
+                    <p className="pricing-service__billing">{service.billing}</p>
+                    <p>{service.text}</p>
+                    <ul className="pricing-inclusions">{service.items.map((item) => <li key={item}><Check size={14} aria-hidden="true" />{item}</li>)}</ul>
+                    <Link href={service.href} className="cta-link">{service.cta}<ArrowRight size={14} aria-hidden="true" /></Link>
+                  </article>
+                )
+              })}
+            </div>
           </div>
         </div>
       </section>

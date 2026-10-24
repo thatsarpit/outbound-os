@@ -2,6 +2,7 @@ import Link from 'next/link'
 import type { ReactNode } from 'react'
 import { ArrowRight, CircleCheck } from 'lucide-react'
 import { CopyButton } from './copy-button'
+import { productScreens } from '@/lib/product-screens'
 import { JsonLd } from './json-ld'
 import { breadcrumbLd, faqLd, graph } from '@/lib/structured-data'
 import { installCommands, site } from '@/lib/site-content'
@@ -151,8 +152,8 @@ export function InstallBand({
 /* ── Screenshot ───────────────────────────────────────────────────────────
    Real product screenshots, taken from the dashboard's preview mode with
    made-up sample data. Width and height are set so the page never shifts
-   while the image loads. The site is light-only, so the light captures are
-   used everywhere. */
+   while the image loads. All captures use the real dark sample workspace;
+   provenance is recorded in public/screenshots/manifest.json. */
 
 export function Screenshot({
   name,
@@ -169,11 +170,11 @@ export function Screenshot({
     <figure className="screenshot">
       <img
         src={`/screenshots/${name}.webp?v=${site.screenshotVersion}`}
-        srcSet={`/screenshots/${name}-800.webp?v=${site.screenshotVersion} 800w, /screenshots/${name}.webp?v=${site.screenshotVersion} 1600w`}
+        srcSet={`/screenshots/${name}-800.webp?v=${site.screenshotVersion} 800w, /screenshots/${name}.webp?v=${site.screenshotVersion} ${productScreens[name].width}w`}
         sizes="(min-width: 1200px) 1120px, 100vw"
         alt={alt}
-        width={1600}
-        height={1000}
+        width={productScreens[name].width}
+        height={productScreens[name].height}
         loading={priority ? 'eager' : 'lazy'}
         fetchPriority={priority ? 'high' : 'auto'}
         decoding="async"

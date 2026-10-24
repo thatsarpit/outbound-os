@@ -24,12 +24,28 @@ export default function TermsPage() {
   return (
     <section className="section section--lead">
       <div className="page page--prose legal">
+        <nav className="legal__switch" aria-label="Legal documents">
+          <Link href="/privacy">Privacy</Link>
+          <Link href="/terms" aria-current="page">Terms</Link>
+        </nav>
         <p className="eyebrow">Legal</p>
         <h1>Terms</h1>
         <p className="doc-meta">Last updated {updated}</p>
 
+        <nav className="legal__contents" aria-label="On this page">
+          <p>On this page</p>
+          <ol>
+            <li><a href="#software">The software</a></li>
+            <li><a href="#responsible-sending">Responsible sending</a></li>
+            <li><a href="#third-parties">Third-party services</a></li>
+            <li><a href="#hosting">Managed hosting</a></li>
+            <li><a href="#website">This website</a></li>
+            <li><a href="#contact">Contact</a></li>
+          </ol>
+        </nav>
+
         <div className="legal__body flow-lg">
-          <section>
+          <section id="software">
             <h2>The software</h2>
             <p>
               Outbound OS is licensed under the{' '}
@@ -43,7 +59,7 @@ export default function TermsPage() {
             </p>
           </section>
 
-          <section>
+          <section id="responsible-sending">
             <h2>Sending messages responsibly</h2>
             <p>
               Whoever runs an install is the sender of every message it sends.
@@ -56,7 +72,7 @@ export default function TermsPage() {
             </p>
           </section>
 
-          <section>
+          <section id="third-parties">
             <h2>Third-party services</h2>
             <p>
               WhatsApp, email providers, marketplace and the other services
@@ -65,7 +81,7 @@ export default function TermsPage() {
             </p>
           </section>
 
-          <section>
+          <section id="hosting">
             <h2>Managed hosting</h2>
             <p>
               Hosting or setup provided by the maintainers is governed by a
@@ -78,7 +94,7 @@ export default function TermsPage() {
             </p>
           </section>
 
-          <section>
+          <section id="website">
             <h2>This website</h2>
             <p>
               The site&rsquo;s text and documentation may be quoted and linked
@@ -92,7 +108,7 @@ export default function TermsPage() {
             </p>
           </section>
 
-          <section>
+          <section id="contact">
             <h2>Contact</h2>
             <p>
               <a className="link" href={`mailto:${site.email}`}>

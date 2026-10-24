@@ -19,11 +19,11 @@ export default function WebsiteFormsDoc() {
   return (
     <DocsShell slug="website-forms">
       <p>
-        Every way a lead gets into Outbound OS — a website form, Zapier, a
-        marketplace, your own code — is a <strong>lead source</strong>: a web
-        address with its own key and field map. A lead that arrives through
-        one is deduplicated and contacted on your connected channels within
-        seconds.
+        A live enquiry from a website form, automation or external system enters through a{' '}
+        <strong>lead source</strong>: a web address with its own key and field map.
+        Outbound OS creates or merges the record, then evaluates it for the first-contact
+        flow you enabled. Outreach depends on consent, lead state, sender readiness,
+        templates and account limits. Historical imports are separate and do not send messages.
       </p>
 
       <h2 id="create">1. Create a source</h2>
@@ -32,6 +32,13 @@ export default function WebsiteFormsDoc() {
         <strong>Quick add from presets</strong> for a known sender (website
         form, Facebook Lead Ads, marketplace, TradeIndia, JustDial, Typeform, Tally, Google Forms), or <strong>Add webhook source</strong> for anything else. You
         get an address and a key:
+      </p>
+      <p className="callout">
+        Prefer a server-side form handler or a builder&rsquo;s server-side webhook
+        to keep source keys private. A key embedded in a public HTML action is
+        visible to every visitor and may be used to create leads and trigger
+        eligible outreach. For direct HTML forms, use a dedicated source,
+        review its automation rules, monitor abuse and rotate exposed keys.
       </p>
       <Code label="Address">{'https://your-host/api/webhooks/inbound/<source>'}</Code>
       <p>
@@ -132,7 +139,7 @@ export default function WebsiteFormsDoc() {
 
       <h2 id="wordpress">WordPress: Contact Form 7 and CF7 to Webhook</h2>
       <p>
-        This free route uses <a href="https://wordpress.org/plugins/contact-form-7/">Contact Form 7</a>
+        This route uses <a href="https://wordpress.org/plugins/contact-form-7/">Contact Form 7</a>
         {' '}and <a href="https://wordpress.org/plugins/cf7-to-zapier/">CF7 to Webhook</a>.
         The add-on sends JSON from WordPress to your public HTTPS webhook endpoint.
       </p>
@@ -160,7 +167,8 @@ export default function WebsiteFormsDoc() {
       <h2 id="wordpress-wpforms">WordPress alternative: WPForms webhook addon</h2>
       <p>
         This route needs WPForms&rsquo; <a href="https://wpforms.com/docs/how-to-install-and-use-the-webhooks-addon-with-wpforms/">Webhooks addon</a>,
-        currently included in its Elite license.
+        with webhook access enabled for your license. Check the provider&rsquo;s current
+        plan requirements before choosing this route.
       </p>
       <ol>
         <li>Create a <strong>Website Contact Form</strong> source in Outbound OS.</li>
@@ -177,7 +185,7 @@ export default function WebsiteFormsDoc() {
         <li>Create a <strong>Tally</strong> source from Outbound OS&rsquo;s presets.</li>
         <li>Use question labels <code>Name</code>, <code>Email</code>, <code>Phone</code> and <code>Message</code>; Company and Country are optional. Require at least Email or Phone.</li>
         <li>Publish the form. In Tally, open <strong>Integrations → Webhooks</strong> and add the copied source URL.</li>
-        <li>Add an HTTP header named <code>x-api-key</code> with the source key, then connect the webhook. Webhooks are currently available on Tally&rsquo;s free plan.</li>
+        <li>Add an HTTP header named <code>x-api-key</code> with the source key, then connect the webhook. Confirm webhook access and limits for your current Tally plan.</li>
         <li>Submit the published form. Check Tally&rsquo;s webhook delivery and the new lead in Outbound OS. Replay or repeat the submission and verify that no second lead appears.</li>
       </ol>
       <p>

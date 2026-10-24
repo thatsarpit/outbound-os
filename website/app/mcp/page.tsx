@@ -1,265 +1,358 @@
 import Link from 'next/link'
-import { ArrowRight } from 'lucide-react'
-import { AgentExchange } from '@/components/visuals/agent-exchange'
-import { Breadcrumbs, Code, Faq, InstallBand, Related } from '@/components/content'
+import {
+  ArrowRight,
+  Check,
+  CircleCheck,
+  Eye,
+  Fingerprint,
+  MessageSquare,
+  ShieldCheck,
+  Terminal,
+} from 'lucide-react'
+import { Breadcrumbs, Code, Faq, Related } from '@/components/content'
+import { Logo } from '@/components/brand-logo'
 import { buildMetadata } from '@/lib/metadata'
-import { LogoPair } from '@/components/logo-pair'
 import { mcpToolCount, mcpToolGroups } from '@/lib/mcp-tools'
 
 export const metadata = buildMetadata(
-  'CRM MCP server — connect Claude to your leads',
-  'Outbound OS ships an open-source MCP server: Claude and other MCP clients can search leads, import lists, run campaigns and read analytics on your live CRM.',
+  'CRM MCP server — connect your AI client to Outbound OS',
+  'Connect an MCP-compatible AI client to Outbound OS. Search leads, read conversations, prepare campaigns and inspect CRM data with explicit tools.',
   '/mcp',
 )
 
-const toolGroups = mcpToolGroups
-const toolCount = mcpToolCount
-
 const faq = [
   {
-    q: 'What is an MCP server?',
-    a: 'MCP (Model Context Protocol) is an open standard that lets AI assistants call tools in other software. The Outbound OS MCP server gives Claude and other MCP clients a defined set of CRM tools instead of a pasted export.',
+    q: 'What does the MCP connection add?',
+    a: 'It gives a compatible AI client tools that read or change records in your Outbound OS installation. The assistant requests a tool, the server calls the CRM API, and the result returns to your client. It is not a separate copy of the CRM.',
   },
   {
-    q: 'Which AI clients work with it?',
-    a: 'Any client that supports remote MCP servers over Streamable HTTP. Claude Code connects with a bearer token; claude.ai and the Claude apps connect as a custom connector through OAuth.',
+    q: 'Can I connect ChatGPT, Codex or Claude?',
+    a: 'Use a client that supports a remote Streamable HTTP MCP server and your configured authentication mode. Client editions and workspace policies can restrict custom servers. The setup guide explains the server endpoint, bearer-token connection and OAuth flow; check your client’s current requirements.',
   },
   {
-    q: 'Can the AI send messages on its own?',
-    a: 'Only if you let it. send_whatsapp, send_email and start_campaign are real actions. Keep your client set to ask before running write tools, and check the recipients before approving.',
+    q: 'Can an AI client send messages?',
+    a: 'The server includes send and campaign-control tools, which can change real data or send through your connected accounts. Authentication is not approval for an individual send. Configure your client to ask before write actions and review the recipient, sender and content.',
   },
   {
-    q: 'Does my CRM data go to the AI provider?',
-    a: 'The results of the tools the assistant calls are sent to the model you are using, as with anything you show an assistant. Nothing is sent until a tool is called, and only what that tool returns.',
+    q: 'Is my dashboard role automatically the MCP role?',
+    a: 'Do not assume it is. The service-credential connection uses the server’s configured CRM access, rather than inheriting your dashboard session. Your administrator must choose and secure the authentication mode. Treat a shared service credential as privileged.',
+  },
+  {
+    q: 'What reaches the AI provider?',
+    a: 'Tool results are returned to the AI client and can become context for its model. Connect only a client and provider you trust with the data it requests. Keep service tokens out of prompts, public pages and source control.',
   },
 ]
 
-/**
- * MCP deserves a product page because it is an operating surface, not a small
- * integration badge. The page distinguishes read, draft and action workflows
- * and states plainly where a tool can change real CRM state.
- */
+const readPrompt =
+  'Use Outbound OS to list the first 3 contacted leads, sorted by lastMessageAt ascending. Show their names, status and last activity. Read only; do not send messages or change any records.'
+
 export default function McpPage() {
   return (
     <>
       <section className="section section--lead hero-ground">
         <div className="page">
           <Breadcrumbs trail={[{ name: 'MCP server', path: '/mcp' }]} />
-        </div>
-        <div className="page split mcp-hero">
-          <div className="section-head">
-            <LogoPair brands={['outboundos', 'mcp', 'claude']} />
-            <p className="eyebrow">MCP server for AI agents</p>
-            <h1>Let Claude work your CRM, with a tool for every job.</h1>
-            <p className="lede">
-              Outbound OS ships an open-source MCP server with {toolCount}{' '}
-              tools. Claude and other MCP clients can find leads, read
-              timelines, import a list, build and start campaigns and pull
-              analytics from your live data — without exporting anything first.
-            </p>
-            <div className="mcp-hero__actions">
-              <Link href="/docs/mcp" className="btn btn--primary btn--lg">
-                Set up the MCP server
-              </Link>
-              <a href="#examples" className="cta-link">
-                See concrete workflows
-                <ArrowRight size={15} />
-              </a>
+          <div className="mcp-hero">
+            <div className="mcp-hero__copy">
+              <div className="mcp-wordmark">
+                <Logo brand="mcp" size={26} />
+                <span>Model Context Protocol</span>
+              </div>
+              <p className="eyebrow">Your CRM, in your AI workflow</p>
+              <h1>
+                Ask your CRM.
+                <br />
+                Work from the answer.
+              </h1>
+              <p className="lede">
+                Find a lead, read the conversation, prepare the next step. Connect your AI client to{' '}
+                {mcpToolCount} explicit tools in your own Outbound OS installation.
+              </p>
+              <div className="mcp-hero__actions">
+                <Link href="/docs/mcp" className="btn btn--primary btn--lg">
+                  Connect your AI client <ArrowRight size={16} aria-hidden="true" />
+                </Link>
+                <a href="#mcp-tools" className="cta-link">
+                  Browse the tools <ArrowRight size={15} aria-hidden="true" />
+                </a>
+              </div>
+              <p className="mcp-hero__clients">
+                ChatGPT · Codex · Claude · compatible remote MCP clients
+              </p>
             </div>
-          </div>
-
-          <aside className="panel mcp-surface" aria-label="MCP capability summary">
-            <div className="mcp-surface__head">
-              <span className="badge badge--live"><span className="badge__dot" />Available now</span>
-              <span className="mono">Outbound OS MCP</span>
-            </div>
-            <dl>
-              <div><dt>Read</dt><dd>Leads, messages, timelines, campaigns and analytics</dd></div>
-              <div><dt>Prepare</dt><dd>Reply suggestions and campaigns that remain in draft</dd></div>
-              <div><dt>Act</dt><dd>Assign leads, update status, send and control campaigns</dd></div>
-              <div><dt>Inspect</dt><dd>Connected sender health and automated sending state</dd></div>
-            </dl>
-          </aside>
-        </div>
-      </section>
-
-      {/* One exchange does more than the capability list above it. "Your
-          assistant can query the CRM" reads as either obvious or fantastical
-          until you see the question, the tool it reaches for, and the rows
-          that come back. */}
-      <section className="section section--ruled">
-        <div className="page split split--even mcp-demo">
-          <div className="section-head">
-            <p className="eyebrow">What it looks like</p>
-            <h2>Ask in words. It reads your actual data.</h2>
-            <p>
-              The assistant is not guessing from a summary you pasted in. It
-              calls the same API the dashboard uses, against the live
-              workspace, through the MCP server&rsquo;s own service
-              credential &mdash; so treat a connection like an admin login.
-            </p>
-            <p>
-              Campaigns are created as drafts, and your client can ask before
-              every tool that sends or deletes.
-            </p>
-          </div>
-          <AgentExchange />
-        </div>
-      </section>
-
-      <section id="examples" className="section section--ruled mcp-anchor">
-        <div className="page split">
-          <div className="section-head split__sticky">
-            <p className="eyebrow">What it unlocks</p>
-            <h2>Natural-language requests, grounded in current records.</h2>
-            <p>
-              The useful part is not chatting about a CRM. It is letting the
-              client call explicit tools against the workspace and show what it
-              used.
-            </p>
-          </div>
-
-          <div className="stack mcp-workflows">
-            <article>
-              <p className="mcp-prompt">“Which open deals went quiet this week?”</p>
-              <h3>Review the pipeline from live activity.</h3>
-              <p>
-                The client can list relevant leads, open their timelines and
-                compare current status with recent activity. The answer comes
-                from CRM records rather than a spreadsheet copied yesterday.
-              </p>
-              <code>list_leads · get_lead · lead_timeline</code>
-            </article>
-            <article>
-              <p className="mcp-prompt">“Import these trade-show contacts and draft a follow-up.”</p>
-              <h3>Prepare the work without pretending it was approved.</h3>
-              <p>
-                The client can import the list with the same merging rules as a
-                CSV upload, preview who a campaign would reach and create it as
-                a draft. A person reviews the recipients and template before
-                starting it.
-              </p>
-              <code>import_leads · campaign_preview_leads · create_campaign</code>
-            </article>
-            <article>
-              <p className="mcp-prompt">“Pause automated sending and show me sender health.”</p>
-              <h3>Use operational controls during a real incident.</h3>
-              <p>
-                An approved client can stop the automated queue, inspect
-                WhatsApp sender readiness and see the current system state. That
-                is a real write operation, not a recommendation in chat.
-              </p>
-              <code>system_pause_resume · whatsapp_accounts · system_status</code>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section className="section section--ruled section--raised">
-        <div className="page">
-          <div className="section-head">
-            <p className="eyebrow">Tool coverage</p>
-            <h2>The same operating model, exposed as explicit tools.</h2>
-          </div>
-
-          <div className="mcp-tool-register status-ledger">
-            <article>
-              <div><h3>Leads</h3><span className="badge">Read and write</span></div>
-              <p>List, search, inspect, create, update, assign, change status and work with lead timelines.</p>
-            </article>
-            <article>
-              <div><h3>Messages</h3><span className="badge">Read and write</span></div>
-              <p>Read WhatsApp and email history, request a suggested reply and send through connected accounts.</p>
-            </article>
-            <article>
-              <div><h3>Campaigns</h3><span className="badge">Read and write</span></div>
-              <p>Create and edit drafts, preview matching leads, start or pause campaigns and inspect results.</p>
-            </article>
-            <article>
-              <div><h3>Analytics</h3><span className="badge">Read</span></div>
-              <p>Pull current overview, funnel, campaign and email-performance data held by the product.</p>
-            </article>
-            <article>
-              <div><h3>System</h3><span className="badge">Read and control</span></div>
-              <p>Inspect sending and account state, list team members, and pause or resume automated sending.</p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section className="section section--ruled">
-        <div className="page">
-          <div className="section-head">
-            <p className="eyebrow">All {toolCount} tools</p>
-            <h2>Every tool the server exposes.</h2>
-            <p>Names as your client will show them.</p>
-          </div>
-          <div className="grid grid--3 mcp-tools">
-            {toolGroups.map((group) => (
-              <div key={group.name}>
-                <h3>{group.name}</h3>
+            <figure className="mcp-example">
+              <figcaption>
+                <span>
+                  <Terminal size={15} aria-hidden="true" />
+                  Outbound OS MCP
+                </span>
+                <span>Example · sample records</span>
+              </figcaption>
+              <div className="mcp-example__request">
+                <span>You ask</span>
+                <p>Which contacted leads have been quiet the longest?</p>
+              </div>
+              <div className="mcp-example__call">
+                <div>
+                  <Eye size={14} aria-hidden="true" />
+                  <span>Read tool</span>
+                  <code>list_leads</code>
+                </div>
+                <pre>
+                  <code>
+                    {
+                      '{\n  "status": "contacted",\n  "sortBy": "lastMessageAt",\n  "sortOrder": "asc",\n  "limit": 3\n}'
+                    }
+                  </code>
+                </pre>
+              </div>
+              <div className="mcp-example__result">
+                <span>Returned records</span>
                 <ul>
-                  {group.tools.map((tool) => (
-                    <li key={tool}>
-                      <code>{tool}</code>
-                    </li>
-                  ))}
+                  <li>
+                    <strong>Meridian Distributors</strong>
+                    <span>Contacted · 9 days ago</span>
+                  </li>
+                  <li>
+                    <strong>Adler Handel</strong>
+                    <span>Contacted · 8 days ago</span>
+                  </li>
+                  <li>
+                    <strong>Northwind Supply</strong>
+                    <span>Contacted · 6 days ago</span>
+                  </li>
                 </ul>
               </div>
-            ))}
+              <div className="mcp-example__foot">
+                <Check size={14} aria-hidden="true" />
+                Read the records. No message sent.
+              </div>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section className="section section--ruled mcp-work-section">
+        <div className="page">
+          <div className="section-head">
+            <p className="eyebrow">From context to next action</p>
+            <h2>Three useful ways to put it to work.</h2>
+          </div>
+          <div className="mcp-jobs">
+            <article>
+              <span className="mcp-jobs__number">01 / Read</span>
+              <h3>Get back into a conversation.</h3>
+              <p>
+                Find the lead, read message history and inspect the timeline before writing a reply.
+              </p>
+              <div>
+                <code>list_leads</code>
+                <code>list_messages</code>
+                <code>lead_timeline</code>
+              </div>
+            </article>
+            <article>
+              <span className="mcp-jobs__number">02 / Prepare</span>
+              <h3>Build a campaign to review.</h3>
+              <p>
+                Inspect the audience and create a draft. Starting the campaign is a separate action
+                with real consequences.
+              </p>
+              <div>
+                <code>campaign_preview_leads</code>
+                <code>create_campaign</code>
+              </div>
+            </article>
+            <article>
+              <span className="mcp-jobs__number">03 / Inspect</span>
+              <h3>Check the state of the system.</h3>
+              <p>
+                Read sender readiness and sending state. Investigate reported activity before
+                deciding what to change.
+              </p>
+              <div>
+                <code>whatsapp_accounts</code>
+                <code>system_status</code>
+              </div>
+            </article>
           </div>
         </div>
       </section>
 
       <section className="section section--ruled">
-        <div className="page split">
+        <div className="page split mcp-control">
           <div className="section-head">
-            <p className="eyebrow">Set up</p>
-            <h2>Two settings, one command, one client.</h2>
+            <p className="eyebrow">Know what you connect</p>
+            <h2>Reading context and sending a message are different permissions.</h2>
             <p>
-              The MCP server is a second container that talks to your
-              Outbound OS API. It stays off until you start it.
+              The client proposes tools. Your installation controls access. Your client’s approval
+              settings decide when it asks you to continue.
             </p>
-            <Link href="/docs/mcp" className="cta-link">
-              Full MCP setup guide
-              <ArrowRight size={15} />
+            <Link href="/security" className="cta-link">
+              Read the security model <ArrowRight size={15} aria-hidden="true" />
             </Link>
           </div>
-          <div className="stack">
-            <Code label=".env — generate each with: openssl rand -hex 32">{'MCP_SERVICE_TOKEN=<random>\nMCP_BEARER_TOKEN=<random>'}</Code>
-            <Code label="Start it">{'docker compose --profile mcp up -d'}</Code>
-            <Code label="Connect Claude Code">
-              {'claude mcp add --transport http outbound-os \\\n  https://mcp.your-host.com/mcp \\\n  --header "Authorization: Bearer <MCP_BEARER_TOKEN>"'}
-            </Code>
+          <div className="mcp-boundaries">
+            <article>
+              <Eye size={20} aria-hidden="true" />
+              <div>
+                <h3>A read returns CRM data.</h3>
+                <p>
+                  Leads, messages and analytics can become context for the model you use. Connect a
+                  provider you trust with that information.
+                </p>
+              </div>
+            </article>
+            <article>
+              <MessageSquare size={20} aria-hidden="true" />
+              <div>
+                <h3>A write changes the workspace.</h3>
+                <p>
+                  Send tools and campaign controls are live operations. Review recipients, content
+                  and sender before approving. Provider acceptance does not prove delivery.
+                </p>
+              </div>
+            </article>
+            <article>
+              <ShieldCheck size={20} aria-hidden="true" />
+              <div>
+                <h3>Provider rules still apply.</h3>
+                <p>
+                  The WhatsApp service window, approved templates, opt-outs and account limits apply
+                  to tool calls just as they do in the dashboard.
+                </p>
+              </div>
+            </article>
           </div>
         </div>
       </section>
 
-      <section className="section section--ruled">
-        <div className="page split">
+      <section className="section section--ruled" id="mcp-connect">
+        <div className="page split mcp-connect">
           <div className="section-head">
-            <p className="eyebrow">Where the line is</p>
-            <h2>It is a tool interface, not an autonomous salesperson.</h2>
+            <p className="eyebrow">Make the connection</p>
+            <h2>Start with one read. Verify the whole path.</h2>
+            <p>
+              The optional MCP container connects to your CRM API. Give it an HTTPS endpoint,
+              configure authentication, then add that endpoint in your AI client.
+            </p>
+            <Link href="/docs/mcp" className="cta-link">
+              Server & client setup guide <ArrowRight size={15} aria-hidden="true" />
+            </Link>
           </div>
-          <div className="stack mcp-limits">
-            <article><h3>It does not know facts you have not stored</h3><p>Price, scope, terms and relationship context still need a reliable source in the CRM or an explicit person in the loop.</p></article>
-            <article><h3>It does not make sending harmless</h3><p>Some tools send immediately or change campaign state. Client approval settings and credential control matter.</p></article>
-            <article><h3>It does not bypass WhatsApp or email policy</h3><p>The same provider rules apply whether a person clicked the action or an approved MCP client called the tool.</p></article>
+          <div>
+            <ol className="mcp-connect__steps">
+              <li>
+                <span>01</span>
+                <div>
+                  <h3>Run the MCP service.</h3>
+                  <p>Start the Docker MCP profile with separate service and client credentials.</p>
+                </div>
+              </li>
+              <li>
+                <span>02</span>
+                <div>
+                  <h3>Add your server to the client.</h3>
+                  <p>
+                    Use your own HTTPS URL ending in <code>/mcp</code>. Authenticate with the mode
+                    your administrator configured.
+                  </p>
+                </div>
+              </li>
+              <li>
+                <span>03</span>
+                <div>
+                  <h3>Run a read-only request.</h3>
+                  <p>
+                    A returned tool result verifies more than a successful health check. Do this
+                    before approving any write.
+                  </p>
+                </div>
+              </li>
+            </ol>
+            <Code label="Your first read-only request">{readPrompt}</Code>
+            <p className="mcp-credential-note">
+              <Fingerprint size={16} aria-hidden="true" />
+              The server URL is not a credential. Keep tokens in the client’s credential
+              configuration, never in a prompt.
+            </p>
           </div>
         </div>
       </section>
 
-      <Faq items={faq} heading="MCP questions" />
-
+      <section className="section section--ruled mcp-register-section" id="mcp-tools">
+        <div className="page">
+          <details className="mcp-register">
+            <summary>
+              <div>
+                <p className="eyebrow">Tool reference</p>
+                <h2>All {mcpToolCount} tools, by job.</h2>
+                <p>Exact names exposed by the server. Read and write tools share this catalogue.</p>
+              </div>
+              <span className="mcp-register__toggle">
+                Browse tools <ArrowRight size={17} aria-hidden="true" />
+              </span>
+            </summary>
+            <div className="mcp-tools">
+              {mcpToolGroups.map((group) => (
+                <section key={group.name}>
+                  <h3>
+                    {group.name}
+                    <span>{group.tools.length}</span>
+                  </h3>
+                  <ul>
+                    {group.tools.map((tool) => (
+                      <li key={tool}>
+                        <code>{tool}</code>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ))}
+            </div>
+          </details>
+          <p className="mcp-register-note">
+            <CircleCheck size={15} aria-hidden="true" />
+            The website’s tool catalogue is checked against the MCP server in CI.
+          </p>
+        </div>
+      </section>
+      <Faq items={faq} heading="Connecting your AI client" />
       <Related
+        heading="Set up with confidence"
         links={[
-          { href: '/docs/mcp', title: 'MCP setup guide', body: 'Tokens, HTTPS, Claude Code and claude.ai connectors.' },
-          { href: '/integrations/csv-import', title: 'Importing leads', body: 'The merging rules import_leads follows.' },
-          { href: '/capabilities', title: 'Capabilities', body: 'What the tools act on: inbox, sequences, campaigns, pipeline.' },
+          {
+            href: '/docs/mcp',
+            title: 'MCP connection guide',
+            body: 'Service setup, client credentials, HTTPS and OAuth.',
+          },
+          {
+            href: '/integrations',
+            title: 'Connect your channels',
+            body: 'The accounts and data routes your tools operate on.',
+          },
+          {
+            href: '/security',
+            title: 'Security & ownership',
+            body: 'Access, credentials and your responsibility as the operator.',
+          },
         ]}
       />
-
-      <InstallBand />
+      <section className="section section--ruled">
+        <div className="page mcp-close">
+          <div>
+            <p className="eyebrow">Keep the CRM where you run it</p>
+            <h2>Your workspace. Another way to work.</h2>
+            <p>
+              Run Outbound OS on your infrastructure, connect the channels you need, and add the MCP
+              service when you are ready.
+            </p>
+          </div>
+          <Link href="/docs/install" className="btn btn--primary btn--lg">
+            Run Outbound OS <ArrowRight size={16} aria-hidden="true" />
+          </Link>
+        </div>
+      </section>
     </>
   )
 }

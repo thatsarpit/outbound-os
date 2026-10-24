@@ -1,0 +1,60 @@
+{
+  "source": "https://f2ea98a5.outboundos-demo.pages.dev",
+  "applicationCommit": "6ba9cd2196919dbaea3a35ba07ff32e6cc895019",
+  "applicationStatus": "Dashboard repair preview (PR #53); not a production certification",
+  "capturedOn": "2026-10-24",
+  "theme": "dark",
+  "records": "Acme Supplies sample fixtures only; no customer data",
+  "capture": "Browser viewport screenshots. No content replacement, recolouring or compositing. JPEG capture transcoded to WebP; desktop responsive variants proportionally resized.",
+  "screens": [
+    {
+      "file": "inbox.webp",
+      "route": "/inbox?leadId=2&channel=email&threadKey=em-2",
+      "width": 1440,
+      "height": 960,
+      "sha256": "a3d2148f38eb7857967c23bbf9a5f83d6adfedcf022fc7518e822a329b77047f"
+    },
+    {
+      "file": "overview.webp",
+      "route": "/overview",
+      "width": 1430,
+      "height": 953,
+      "sha256": "c11107018ab6233683050b0e6e0dfe6f5ff2e50b579da03d085c25de55c40ccc"
+    },
+    {
+      "file": "integrations.webp",
+      "route": "/integrations/all",
+      "width": 1430,
+      "height": 953,
+      "sha256": "0bfc63b30389cb14c0a7a2da11cc6465f06be2f6c844c6cb624d715b730a11da"
+    },
+    {
+      "file": "setup.webp",
+      "route": "/setup?step=business",
+      "width": 1440,
+      "height": 960,
+      "sha256": "478d2a5ab7abeb1cd944a96e24593d1c2ac327172f139d20b179bcf5ab1fb9b6"
+    },
+    {
+      "file": "whatsapp-settings.webp",
+      "route": "/integrations/whatsapp/configure",
+      "width": 1430,
+      "height": 953,
+      "sha256": "c157a5428c32c6780fbf6cea2f65651a339bd9c191b2885dc0057249c8121a4d"
+    },
+    {
+      "file": "mobile-inbox.webp",
+      "route": "/m/inbox",
+      "width": 390,
+      "height": 844,
+      "sha256": "b8e952bc1c2560551b2c7a0117e67fd360f900794d5380b066e2acd8fa26d278"
+    },
+    {
+      "file": "mobile-conversation.webp",
+      "route": "/m/inbox?leadId=1&channel=whatsapp",
+      "width": 390,
+      "height": 844,
+      "sha256": "72f09f99fad98849bf5649f0a396e0c2a453b1440c5c346924cf67ffabb7e51c"
+    }
+  ]
+}

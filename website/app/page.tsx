@@ -10,7 +10,8 @@ import { Logo } from '@/components/brand-logo'
 import { ProductHero } from '@/components/product-hero'
 import { ProductTour } from '@/components/product-tour'
 import { Faq } from '@/components/content'
-import { StoryScroller } from '@/components/story-scroller'
+import { WorkflowStory } from '@/components/workflow-story'
+import { MobileShowcase } from '@/components/mobile-showcase'
 import { CaptureVisual, FollowVisual, ReplyVisual } from '@/components/visuals/story-visuals'
 import { IntegrationHub } from '@/components/visuals/integration-hub'
 import { AgentExchange } from '@/components/visuals/agent-exchange'
@@ -44,21 +45,21 @@ export default function HomePage() {
     <>
       <section className="os-hero" aria-labelledby="home-heading">
         <div className="page">
-          <div className="os-hero__intro" data-reveal>
+          <div className="os-hero__intro">
             <div>
               <p className="eyebrow">
                 Outbound OS / The open-source WhatsApp CRM
               </p>
               <h1 id="home-heading">
-                Your sales desk,
+                Every conversation,
                 <br />
-                <span>wherever you work.</span>
+                <span>one place to act.</span>
               </h1>
             </div>
             <div className="os-hero__right">
               <p>
                 WhatsApp, email and customer records in one shared workspace.
-                The full picture at your desk. A focused inbox on your phone.
+                Read the history. Find the next step. Keep the conversation moving, at your desk or on your phone.
               </p>
               <div className="os-actions">
                 <a href={site.demoUrl} className="btn btn--primary btn--lg">
@@ -118,129 +119,12 @@ export default function HomePage() {
             <div><p className="eyebrow">From first enquiry to the next reply</p><h2 id="story-heading">A workflow that keeps<br />the conversation moving.</h2></div>
             <p>Bring in the lead, follow up with control, and hand the conversation to a person when the customer answers.</p>
           </div>
-          <StoryScroller steps={[
-            { eyebrow: 'Capture', title: 'Every enquiry starts with context.', body: <p>Connect forms, Facebook Lead Ads and signed webhooks. Keep source details with the customer record, and merge a repeat enquiry into the existing lead.</p>, visual: <CaptureVisual />, inline: <CaptureVisual /> },
-            { eyebrow: 'Follow up', title: 'Set the rhythm. Keep the controls.', body: <p>Configure follow-up steps, sending hours and connected channels. Templates, consent, opt-outs and provider rules determine what is eligible to send.</p>, visual: <FollowVisual />, inline: <FollowVisual /> },
-            { eyebrow: 'Take over', title: 'They reply. Your team takes it from here.', body: <p>A customer reply stops scheduled follow-ups and appears in the shared inbox. Open the thread, read the history and reply from desktop or your phone.</p>, visual: <ReplyVisual />, inline: <ReplyVisual /> },
+          <WorkflowStory steps={[
+            { label: 'Capture', title: 'A customer record, from the first hello.', text: 'Bring in enquiries from forms, Facebook Lead Ads and signed webhooks. Keep source details with the record, and merge a repeat enquiry into the existing lead.', visual: <CaptureVisual /> },
+            { label: 'Follow up', title: 'A clear next step. A sensible rhythm.', text: 'Set your follow-up steps, sending hours and connected channels. Consent, opt-outs, approved templates and provider rules determine what can send.', visual: <FollowVisual /> },
+            { label: 'Take over', title: 'They reply. Your team takes it from here.', text: 'A customer reply stops scheduled follow-ups and appears in the inbox. Read the history, pick up the thread and keep the customer’s context close.', visual: <ReplyVisual /> },
           ]} />
           <p className="os-visual-note">Workflow examples shown with sample records. Your configured rules control sending.</p>
-        </div>
-      </section>
-
-      <section
-        className="section os-workflow"
-        aria-labelledby="workflow-heading"
-      >
-        <div className="page os-workflow__layout">
-          <div className="os-workflow__intro">
-            <p className="eyebrow">The work, connected</p>
-            <h2 id="workflow-heading">
-              More context.
-              <br />
-              Fewer loose ends.
-            </h2>
-            <p>
-              An enquiry becomes a conversation. A conversation becomes an
-              order. Keep the details together, so the next person knows where
-              to start.
-            </p>
-            <Link href="/platform" className="cta-link">
-              Explore the platform <ArrowRight size={15} />
-            </Link>
-          </div>
-          <ol className="os-workflow__list">
-            {[
-              {
-                number: '01',
-                title: 'A shared inbox, with the customer attached.',
-                text: 'Read WhatsApp and email alongside notes, ownership and previous orders. A reply stops scheduled follow-ups.',
-                href: '/platform',
-                link: 'Inside the workspace',
-              },
-              {
-                number: '02',
-                title: 'Your WhatsApp number. A direct Meta connection.',
-                text: 'Use your own Business account, approved templates and delivery receipts. Keep control of the connection.',
-                href: '/integrations/whatsapp-cloud-api',
-                link: 'How WhatsApp connects',
-              },
-              {
-                number: '03',
-                title: 'The next step, wherever the day takes you.',
-                text: 'Reply from your phone, check a lead or work through your tasks. Add the web app to your Home Screen for quick access.',
-                href: '#product-heading',
-                link: 'See the product screens',
-              },
-            ].map((item) => (
-              <li key={item.number}>
-                <span className="os-workflow__number">{item.number}</span>
-                <div>
-                  <h3>{item.title}</h3>
-                  <p>{item.text}</p>
-                  <Link href={item.href} className="cta-link">
-                    {item.link} <ArrowUpRight size={14} />
-                  </Link>
-                </div>
-              </li>
-            ))}
-          </ol>
-        </div>
-      </section>
-
-      <section
-        className="section os-service-section"
-        aria-labelledby="services-heading"
-      >
-        <div className="page">
-          <div className="os-service-panel">
-            <div className="os-service-panel__intro">
-              <p className="eyebrow">Built by us. Set up for you.</p>
-              <h2 id="services-heading">
-                You run the business.
-                <br />
-                We&rsquo;ll handle the setup.
-              </h2>
-              <p>
-                You don&rsquo;t need to become a server administrator to use
-                open-source software. Tell us how your team works. We&rsquo;ll
-                help make Outbound OS fit.
-              </p>
-              <Link href="/managed-hosting" className="btn btn--lime btn--lg">
-                Let&rsquo;s plan your setup <ArrowUpRight size={17} />
-              </Link>
-              <span className="os-service-note">
-                Clear scope. A quote before work starts.
-              </span>
-            </div>
-            <div className="os-service-list">
-              {[
-                {
-                  n: '01',
-                  title: 'Setup & launch',
-                  text: 'Installation, channel connections, lead imports and a walkthrough for your team.',
-                },
-                {
-                  n: '02',
-                  title: 'Managed hosting',
-                  text: 'A separate instance for your team, with hosting, backups and upgrades agreed in your plan.',
-                },
-                {
-                  n: '03',
-                  title: 'Ongoing assistance',
-                  text: 'Help with templates, workflow configuration, troubleshooting and future improvements.',
-                },
-              ].map((service) => (
-                <div key={service.n}>
-                  <span>{service.n}</span>
-                  <div>
-                    <h3>{service.title}</h3>
-                    <p>{service.text}</p>
-                  </div>
-                  <ArrowUpRight size={19} />
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
       </section>
 
@@ -250,9 +134,9 @@ export default function HomePage() {
             <div>
               <p className="eyebrow">Look inside</p>
               <h2 id="product-heading">
-                Get a feel for
+                Your working day.
                 <br />
-                your next workspace.
+                In full view.
               </h2>
             </div>
             <p>
@@ -262,6 +146,10 @@ export default function HomePage() {
           </div>
           <ProductTour />
         </div>
+      </section>
+
+      <section className="section section--ruled os-mobile-section" aria-label="Outbound OS on your phone">
+        <div className="page"><MobileShowcase /></div>
       </section>
 
       <section className="section section--ruled os-connections-section" aria-labelledby="connections-heading">
@@ -329,6 +217,9 @@ export default function HomePage() {
             </div>
           </div>
         </div>
+      </section>
+      <section className="section os-setup-strip" aria-labelledby="setup-heading">
+        <div className="page"><div className="setup-strip"><div><p className="eyebrow">A little help getting started</p><h2 id="setup-heading">Your business. Your instance.<br />We can handle the setup.</h2><p>Installation, channel connections, contact imports and a team walkthrough. Hosting and ongoing support are optional, with a scope and quote agreed first.</p></div><Link href="/managed-hosting" className="btn btn--primary btn--lg">Plan your setup <ArrowUpRight size={16} /></Link></div></div>
       </section>
       <Faq items={questions} heading="Before you get started." />
       <section className="os-final">

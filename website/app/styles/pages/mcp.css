@@ -1,47 +1,89 @@
-/* ════════════════════════════════════════════════════════════════════════════
-   MCP
-
-   Tool names use monospace because they are literal API surface. Everything
-   else remains in Inter so the page reads as product guidance, not a terminal
-   costume.
-════════════════════════════════════════════════════════════════════════════ */
-
-.mcp-hero { align-items: center; }
-.mcp-hero .section-head h1 { max-width: 17ch; }
-.mcp-hero__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 22px; margin-top: 30px; }
-
-.mcp-surface { padding: 0; overflow: hidden; }
-.mcp-surface__head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; background: var(--surface-raised); border-bottom: var(--rule); }
-.mcp-surface__head .mono { color: var(--text-muted); font-size: 11px; }
-.mcp-surface dl > div { display: grid; grid-template-columns: 5rem 1fr; gap: 18px; padding: 17px 20px; border-bottom: var(--rule-subtle); }
-.mcp-surface dl > div:last-child { border-bottom: 0; }
-.mcp-surface dt { color: var(--text); font-size: 13px; font-weight: 560; }
-.mcp-surface dd { color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
-
-.mcp-anchor { scroll-margin-top: 60px; }
-.mcp-workflows article { padding-block: 28px; }
-.mcp-prompt { color: var(--text); font-size: 1.0625rem; font-weight: 500; line-height: 1.45; }
-.mcp-workflows h3 { margin-top: 14px; }
-.mcp-workflows h3 + p { margin-top: 7px; }
-.mcp-workflows code { display: block; margin-top: 14px; color: var(--text-muted); font-size: 11px; overflow-wrap: anywhere; }
-
-.mcp-tool-register > article > div { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
-.mcp-tool-register p { font-size: 14px; }
-
-.mcp-setup li { display: grid; grid-template-columns: 2.5rem 1fr; gap: 16px; }
-.mcp-setup li > span { color: var(--text-muted); font-size: 12px; }
-.mcp-setup h3 + p,
-.mcp-limits h3 + p { margin-top: 7px; }
-
-.mcp-close { display: grid; gap: 28px; }
-.mcp-close h2 { max-width: 22ch; }
-.mcp-close p { margin-top: 12px; max-width: 48ch; }
+/* Literal calls stay legible and separate from the product conversation.
+   This page illustrates a read; it never simulates a working user session. */
+.mcp-hero { display: grid; gap: 40px; align-items: center; }
+.mcp-wordmark { display: flex; align-items: center; gap: 11px; color: var(--text-secondary); font-size: 12px; margin-bottom: 27px; }
+.mcp-hero__copy .eyebrow { margin-bottom: 18px; }
+.mcp-hero h1 { max-width: 17ch; font-size: clamp(2.5rem, 5vw, 4.3rem); }
+.mcp-hero .lede { margin-top: 24px; max-width: 43ch; }
+.mcp-hero__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px 24px; margin-top: 30px; }
+.mcp-hero__clients { color: var(--text-muted); font-size: 11px; line-height: 1.8; margin-top: 22px; }
+.mcp-example { border: var(--rule); background: var(--surface); border-radius: var(--r-lg); box-shadow: var(--shadow-lg); overflow: hidden; }
+.mcp-example > figcaption { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 15px; align-items: center; border-bottom: var(--rule); padding: 17px 23px; font-size: 11px; color: var(--text-muted); background: var(--surface-raised); }
+.mcp-example > figcaption > span:first-child { display: flex; gap: 8px; align-items: center; color: var(--text-secondary); }
+.mcp-example__request { padding: 24px 25px 20px; }
+.mcp-example__request > span, .mcp-example__result > span { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .08em; }
+.mcp-example__request p { margin-top: 10px; color: var(--text); font-size: 17px; line-height: 1.55; max-width: 30ch; }
+.mcp-example__call { margin: 0 24px; border: var(--rule); border-radius: var(--r-md); background: var(--bg); overflow: hidden; }
+.mcp-example__call > div { display: flex; align-items: center; gap: 8px; border-bottom: var(--rule); padding: 12px 15px; color: var(--text-muted); font-size: 11px; }
+.mcp-example__call > div > code { margin-left: auto; color: var(--text); font-size: 12px; }
+.mcp-example__call pre { padding: 15px; font-size: 12px; line-height: 1.7; color: var(--text-secondary); overflow-x: auto; }
+.mcp-example__result { padding: 23px 25px 12px; }
+.mcp-example__result ul { list-style: none; margin-top: 11px; }
+.mcp-example__result li { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 16px; padding-block: 11px; border-bottom: var(--rule-subtle); }
+.mcp-example__result li:last-child { border: 0; }
+.mcp-example__result strong { color: var(--text); font-size: 13px; font-weight: 500; }
+.mcp-example__result li > span { color: var(--text-muted); font-size: 11px; margin-left: auto; }
+.mcp-example__foot { display: flex; align-items: center; gap: 8px; padding: 15px 25px; border-top: var(--rule); color: var(--text-secondary); font-size: 11px; background: var(--surface-raised); }
+.mcp-work-section .section-head h2 { max-width: 25ch; }
+.mcp-jobs { display: grid; gap: 0; border: var(--rule); border-radius: var(--r-lg); overflow: hidden; margin-top: 35px; background: var(--surface); }
+.mcp-jobs article { padding: 28px; border-bottom: var(--rule); }
+.mcp-jobs article:last-child { border: 0; }
+.mcp-jobs__number { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); }
+.mcp-jobs h3 { margin-top: 28px; font-size: 18px; max-width: 21ch; }
+.mcp-jobs p { margin-top: 12px; font-size: 14px; color: var(--text-secondary); line-height: 1.7; }
+.mcp-jobs article > div { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 23px; }
+.mcp-jobs code { font-size: 10px; color: var(--text-muted); background: var(--surface-raised); border: var(--rule); border-radius: var(--r-sm); padding: 4px 7px; overflow-wrap: anywhere; }
+.mcp-control .section-head > .cta-link, .mcp-connect .section-head > .cta-link { margin-top: 24px; }
+.mcp-boundaries { border-top: var(--rule); }
+.mcp-control > .mcp-boundaries, .mcp-connect > .section-head + div { margin-top: 0; }
+.mcp-boundaries article { display: flex; gap: 19px; border-bottom: var(--rule); padding-block: 25px; }
+.mcp-boundaries svg { flex-shrink: 0; color: var(--text-muted); margin-top: 1px; }
+.mcp-boundaries h3 { font-size: 16px; }
+.mcp-boundaries p { margin-top: 9px; font-size: 14px; line-height: 1.7; color: var(--text-secondary); }
+#mcp-connect, #mcp-tools { scroll-margin-top: 76px; }
+.mcp-connect__steps { list-style: none; margin-bottom: 26px; border-top: var(--rule); }
+.mcp-connect__steps li { display: grid; grid-template-columns: 29px 1fr; gap: 15px; border-bottom: var(--rule); padding-block: 22px; }
+.mcp-connect__steps li > span { color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; line-height: 24px; }
+.mcp-connect__steps h3 { font-size: 15px; }
+.mcp-connect__steps p { margin-top: 7px; font-size: 14px; color: var(--text-secondary); }
+.mcp-connect .code pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.mcp-credential-note { display: flex; align-items: flex-start; gap: 10px; margin-top: 18px; font-size: 12px; color: var(--text-muted); line-height: 1.65; }
+.mcp-credential-note svg { flex-shrink: 0; margin-top: 2px; }
+.mcp-register { border: var(--rule); border-radius: var(--r-lg); background: var(--surface); }
+.mcp-register > summary { display: flex; align-items: center; justify-content: space-between; gap: 30px; padding: 30px; cursor: pointer; }
+.mcp-register summary .eyebrow { margin-bottom: 12px; }
+.mcp-register summary h2 { font-size: 24px; }
+.mcp-register summary p:not(.eyebrow) { color: var(--text-secondary); font-size: 13px; margin-top: 10px; }
+.mcp-register__toggle { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 12px; flex-shrink: 0; }
+.mcp-register[open] .mcp-register__toggle svg { transform: rotate(90deg); }
+.mcp-tools { display: grid; gap: 28px; padding: 27px 30px 32px; border-top: var(--rule); }
+.mcp-tools h3 { display: flex; align-items: center; gap: 12px; font-size: 13px; margin-bottom: 15px; }
+.mcp-tools h3 > span { font-size: 10px; color: var(--text-muted); font-weight: 400; }
+.mcp-tools ul { list-style: none; display: grid; gap: 8px; }
+.mcp-tools code { font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.mcp-register-note { display: flex; align-items: center; gap: 9px; margin-top: 17px; color: var(--text-muted); font-size: 11px; }
+.mcp-register-note svg { flex-shrink: 0; }
+.mcp-close { display: grid; align-items: center; gap: 30px; }
+.mcp-close .eyebrow { margin-bottom: 15px; }
+.mcp-close h2 { max-width: 24ch; }
+.mcp-close p:not(.eyebrow) { margin-top: 14px; color: var(--text-secondary); max-width: 56ch; }
 .mcp-close .btn { justify-self: start; }
 @media (min-width: 780px) {
-  .mcp-close { grid-template-columns: 1fr auto; align-items: center; gap: 48px; }
+  .mcp-hero { grid-template-columns: 1fr 1fr; gap: 7%; }
+  .mcp-jobs { grid-template-columns: repeat(3, 1fr); }
+  .mcp-jobs article { border-bottom: 0; border-right: var(--rule); }
+  .mcp-jobs article:last-child { border: 0; }
+  .mcp-tools { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; }
+  .mcp-close { grid-template-columns: 1fr auto; gap: 45px; }
 }
-
-/* Full tool register. */
-.mcp-tools h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; }
-.mcp-tools ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.mcp-tools code { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-secondary); }
+@media (max-width: 480px) {
+  .mcp-example > figcaption { padding-inline: 20px; }
+  .mcp-example__request { padding-inline: 20px; }
+  .mcp-example__call { margin-inline: 19px; }
+  .mcp-example__result { padding-inline: 20px; }
+  .mcp-example__result li { display: grid; }
+  .mcp-example__result li > span { margin-left: 0; }
+  .mcp-jobs article { padding: 24px; }
+  .mcp-register > summary { display: grid; padding: 24px; gap: 20px; }
+  .mcp-tools { padding: 25px; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 30px 15px; }
+}

@@ -8,7 +8,7 @@ import {
   Screenshot,
 } from '@/components/content'
 import { buildMetadata } from '@/lib/metadata'
-import { HeroScene } from '@/components/visuals/hero-scene'
+import { MobileShowcase } from '@/components/mobile-showcase'
 import { site } from '@/lib/site-content'
 
 export const metadata = buildMetadata(
@@ -51,51 +51,33 @@ const faq = [
 export default function WhatsAppCrmPage() {
   return (
     <>
-      <section className="stage-wrap">
-        <div className="stage">
-          <div className="page stage__inner">
-            <div className="stage__copy">
-              <Breadcrumbs
-                trail={[{ name: 'WhatsApp CRM', path: '/whatsapp-crm' }]}
-              />
-              <span className="stage__badge">
-                <b>WhatsApp CRM</b>
-                Official Cloud API · free and open source
-              </span>
-              <h1 className="stage__h1--wide">
-                Your open-source WhatsApp CRM.{' '}
-                <span>From first enquiry to next reply.</span>
-              </h1>
-              <p className="stage__lede">
-                Outbound OS connects your WhatsApp Business number through
-                Meta&rsquo;s official Cloud API. Keep your shared inbox,
-                customer context and follow-ups together, with a focused mobile
-                workspace for the replies that need you.
-              </p>
-              <div className="stage__actions">
-                <Link href="/docs/install" className="btn btn--brand btn--lg">
-                  Install free
-                </Link>
-                <Link
-                  href="/docs/whatsapp-cloud-api"
-                  className="btn btn--glass btn--lg"
-                >
-                  Read the Meta setup guide
-                </Link>
+      <section className="section section--lead crm-hero">
+        <div className="page">
+          <Breadcrumbs trail={[{ name: 'WhatsApp CRM', path: '/whatsapp-crm' }]} />
+          <div className="crm-hero__intro">
+            <div>
+              <p className="eyebrow">WhatsApp CRM · official Cloud API</p>
+              <h1>Your WhatsApp CRM. The whole customer story.</h1>
+            </div>
+            <div className="crm-hero__copy">
+              <p className="lede">Connect your WhatsApp Business number directly to Meta.
+                Work from a shared inbox with customer context, follow-ups and a
+                focused mobile workspace for the conversations that need you.</p>
+              <div className="hero__actions">
+                <a href={site.demoUrl} className="btn btn--primary btn--lg">Explore the inbox<ArrowRight size={15} aria-hidden="true" /></a>
+                <Link href="/docs/whatsapp-cloud-api" className="cta-link">Read the Meta setup guide<ArrowRight size={14} aria-hidden="true" /></Link>
               </div>
             </div>
-            <HeroScene />
           </div>
-        </div>
-      </section>
-
-      <section className="section section--tight">
-        <div className="page landing-shot">
-          <Screenshot
-            name="inbox"
-            alt="Outbound OS shared inbox showing WhatsApp, email, Telegram and iMessage conversations on each lead"
-            caption="The shared inbox: every channel on the lead it belongs to. Sample data."
-          />
+          <div className="crm-hero__product">
+            <div className="crm-hero__product-label"><span>Outbound OS / Shared inbox</span><span>One customer record. Every connected channel.</span></div>
+            <Screenshot name="inbox" priority alt="Outbound OS dark shared inbox with customer conversations, channel selection and a reply composer" caption="The Outbound OS inbox, with sample records." />
+          </div>
+          <div className="crm-hero__facts" aria-label="WhatsApp connection essentials">
+            <p><strong>Your number.</strong> Your Meta business account.</p>
+            <p><strong>Shared history.</strong> Separate teammate logins.</p>
+            <p><strong>Open source.</strong> Self-host without a seat fee.</p>
+          </div>
         </div>
       </section>
 
@@ -115,7 +97,7 @@ export default function WhatsAppCrmPage() {
           </div>
           <div className="points">
             <div>
-              <h3>Instant first contact</h3>
+              <h3>First contact, with your rules</h3>
               <p>
                 Configured live sources can queue an approved first-contact
                 template, using the lead’s name and country. Limits, eligibility
@@ -126,7 +108,7 @@ export default function WhatsAppCrmPage() {
               <h3>Follow-ups that stop on reply</h3>
               <p>
                 Sequences are timed for the lead&rsquo;s morning in their own
-                country and end the moment they reply, opt out or close.
+                country and stop when they reply, opt out or close.
               </p>
             </div>
             <div>
@@ -299,26 +281,7 @@ export default function WhatsAppCrmPage() {
       </section>
 
       <section className="section section--ruled os-ownership">
-        <div className="page os-section-heading">
-          <div>
-            <p className="eyebrow">A sales day, beyond your desk</p>
-            <h2>Your customer inbox, on your phone.</h2>
-          </div>
-          <p>
-            Add Outbound OS to your Home Screen. Open conversations, work
-            through tasks and check customer context without navigating the full
-            desktop dashboard. Device notifications need a supported browser and
-            permission on that device.
-          </p>
-        </div>
-        <div className="page os-actions">
-          <a href={site.demoUrl} className="btn btn--primary">
-            Try the sample workspace <ArrowRight size={15} />
-          </a>
-          <Link href="/managed-hosting" className="cta-link">
-            Get help with your setup <ArrowRight size={15} />
-          </Link>
-        </div>
+        <div className="page"><MobileShowcase /></div>
       </section>
 
       <Faq items={faq} heading="WhatsApp CRM questions" />

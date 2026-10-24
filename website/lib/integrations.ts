@@ -20,6 +20,13 @@ export type Integration = {
   /** One-line summary for directory cards. */
   summary: string
   intro: string[]
+  connection: {
+    method: string
+    prerequisites: string[]
+    flow: { title: string; body: string }[]
+    checkpoint: string
+    boundary: string
+  }
   capabilities: string[]
   steps: { title: string; body: string }[]
   code?: { label: string; body: string }
@@ -34,14 +41,30 @@ export const integrations: Integration[] = [
     kind: 'Channel',
     title: 'WhatsApp Cloud API CRM — connect Meta directly',
     description:
-      "Send WhatsApp templates and replies through Meta's official Cloud API, no middleman. Open-source, self-hosted CRM. Set up in about 15 minutes.",
+      'Connect Meta’s WhatsApp Cloud API directly to Outbound OS for approved templates, customer replies and reported delivery status. Open source and self hosted.',
     h1: 'The WhatsApp Cloud API, connected straight to your CRM.',
-    summary:
-      "Meta's official API, no reseller in between. Templates, replies and read receipts.",
+    summary: "Meta's official API, no reseller in between. Templates, replies and read receipts.",
     intro: [
-      "Outbound OS talks to Meta's WhatsApp Cloud API directly. You create a Meta developer app, add your business number, and paste two values into Settings: the phone number ID and a permanent access token. Messages are submitted from your server to Meta for delivery.",
-      'A new lead is contacted with an approved template the moment it arrives. When the lead writes back, the reply lands in the shared inbox and every scheduled follow-up for that lead stops. Inside the 24-hour customer-service window your team answers in free text; outside it, the system uses a template, because that is what WhatsApp requires.',
+      "Outbound OS talks to Meta's WhatsApp Cloud API directly. You create a Meta developer app, add your business number, and configure the number and access token in Integrations → WhatsApp. Messages are submitted from your server to Meta for delivery.",
+      'For eligible leads from an enabled live source, first contact can use an approved template. When the lead writes back, the reply lands in the shared inbox and every scheduled follow-up for that lead stops. Inside the 24-hour customer-service window your team answers in free text; outside it, choose an approved template to re-engage the customer.',
     ],
+    connection: {
+      method: 'Direct Meta API',
+      prerequisites: [
+        'A Meta business portfolio, developer app and registered WhatsApp number',
+        'A system-user token with access to the WhatsApp account',
+        'A public HTTPS webhook and an approved outreach template',
+      ],
+      flow: [
+        { title: 'Your business number', body: 'Registered in Meta’s WhatsApp Manager' },
+        { title: 'Meta Cloud API', body: 'Submits messages and reports delivery events' },
+        { title: 'Shared inbox', body: 'Customer replies and provider status, on the lead' },
+      ],
+      checkpoint:
+        'Read the number’s identity with the connection test, then send an incoming message from a number you own and confirm it appears in the inbox.',
+      boundary:
+        'A successful connection test is not proof of message delivery. Free-text replies require a customer message to that sending number within the last 24 hours; otherwise use an approved template.',
+    },
     capabilities: [
       'First contact with an approved template, filled with the lead’s first name and country',
       'Free-text replies from the inbox inside the 24-hour window',
@@ -57,12 +80,12 @@ export const integrations: Integration[] = [
         body: 'At developers.facebook.com, create an app, add the WhatsApp product and register your business number under API Setup.',
       },
       {
-        title: 'Generate a permanent token',
-        body: 'In Meta Business Settings create a System User, give it the whatsapp_business_messaging permission and generate a token that does not expire.',
+        title: 'Generate a system-user token',
+        body: 'In Meta Business Settings create a system user, assign the WhatsApp asset and generate a token with the required WhatsApp messaging and management permissions. Choose the duration Meta makes available for your account.',
       },
       {
-        title: 'Paste two values into Outbound OS',
-        body: 'Settings → WhatsApp → Meta Cloud API: the phone number ID and the token. Press Test connection; it shows the number’s verified name.',
+        title: 'Connect the sending account',
+        body: 'Integrations → WhatsApp: add the Meta phone number ID, WhatsApp Business Account ID and access token. Test the connection to read the number’s identity.',
       },
       {
         title: 'Point Meta’s webhook at your server',
@@ -105,12 +128,28 @@ export const integrations: Integration[] = [
     description:
       'Send outreach and follow-ups from your own mailboxes over SMTP, sync replies over IMAP, and stop sequences on reply. Open-source and self-hosted.',
     h1: 'Email that sends from your mailbox and stops when they answer.',
-    summary:
-      'Any mailbox over SMTP, replies synced over IMAP, sequences that stop on reply.',
+    summary: 'SMTP sending and IMAP reply sync for mailboxes that permit these connections.',
     intro: [
-      'Connect Google Workspace, Microsoft 365, Zoho or any mailbox that speaks SMTP and IMAP. Outbound OS sends outreach and follow-ups from it, and syncs replies back so the thread sits on the lead next to WhatsApp.',
-      'A reply removes the lead from its sequence. Daily limits per mailbox and rotation across several senders protect your domain’s reputation, and every message carries a List-Unsubscribe header.',
+      'Connect a mailbox that permits authenticated SMTP sending and IMAP access. Outbound OS sends from that identity and syncs matched replies into the lead’s conversation alongside WhatsApp. Provider and organisation policies determine which credentials you can use.',
+      'A reply removes the lead from its sequence. Daily limits per mailbox and rotation across several senders let you control volume, and every message carries a List-Unsubscribe header.',
     ],
+    connection: {
+      method: 'SMTP + IMAP',
+      prerequisites: [
+        'A mailbox provider that permits SMTP sending and IMAP access',
+        'Provider-approved credentials and server details',
+        'A sending domain with the authentication your provider requires',
+      ],
+      flow: [
+        { title: 'Sending identity', body: 'Your mailbox submits email through SMTP' },
+        { title: 'Reply mailbox', body: 'IMAP synchronises incoming replies' },
+        { title: 'Lead conversation', body: 'Sent messages and matched replies share a thread' },
+      ],
+      checkpoint:
+        'Send to an address you own, reply from that mailbox, and confirm both directions appear against the correct lead.',
+      boundary:
+        'Sending and receiving are separate connections. A working SMTP test does not verify replies. Provider authentication policies apply; this connection is not a one-click Google or Microsoft OAuth integration.',
+    },
     capabilities: [
       'Several mailboxes with per-sender daily limits and rotation',
       'Reply sync over IMAP, threaded on the lead',
@@ -121,11 +160,11 @@ export const integrations: Integration[] = [
     steps: [
       {
         title: 'Add a mailbox',
-        body: 'Settings → Email → Add account. Enter the SMTP and IMAP details; for Gmail and Microsoft 365 use an app password.',
+        body: 'Integrations → Email → Add account. Enter the SMTP and IMAP server details and the credentials your provider permits. App passwords depend on the provider and account policy; they are not a universal Microsoft 365 solution.',
       },
       {
         title: 'Set a daily limit',
-        body: 'Start low on a new domain and raise it as replies come in. Rotation spreads volume across mailboxes.',
+        body: 'Choose a limit appropriate for the sender and provider. Rotation spreads volume; it does not guarantee inbox placement or permission to contact an audience.',
       },
       {
         title: 'Write a template',
@@ -139,7 +178,7 @@ export const integrations: Integration[] = [
       },
       {
         q: 'Can I use Brevo instead of my own mailbox?',
-        a: 'Yes. Brevo is supported for sending and for scheduled marketing email to leads who opted in.',
+        a: 'Yes. Brevo is supported for sending and reviewed marketing batches to eligible leads who opted in. Incoming replies need a separate receiving route.',
       },
     ],
     related: ['brevo', 'whatsapp-cloud-api', 'csv-import'],
@@ -158,6 +197,23 @@ export const integrations: Integration[] = [
       'Outbound OS can send through Brevo instead of a plain mailbox. Administrators choose countries, a saved template and senders, preview the exact audience, then explicitly launch each marketing batch. Restarts do not select new marketing recipients.',
       'Brevo’s webhook reports deliveries, bounces and unsubscribes back to the lead, so an unsubscribe in Brevo is an opt-out in the CRM.',
     ],
+    connection: {
+      method: 'Brevo API + webhook',
+      prerequisites: [
+        'A Brevo API key and verified sending identity',
+        'An HTTPS endpoint and a secret for delivery webhooks',
+        'A saved template, selected senders and a reviewed audience',
+      ],
+      flow: [
+        { title: 'Reviewed audience', body: 'Choose countries, senders, template and limits' },
+        { title: 'Explicit launch', body: 'Submit the batch through your Brevo account' },
+        { title: 'Delivery events', body: 'Track reported delivery, bounces and opt-outs' },
+      ],
+      checkpoint:
+        'Verify the sender, review the exact recipients, and use an address you own to check sending and webhook delivery before a customer batch.',
+      boundary:
+        'A delivery webhook is not a reply mailbox. Configure the incoming email route separately. Provider acceptance is distinct from delivered, and each marketing batch needs a deliberate launch.',
+    },
     capabilities: [
       'Brevo as an email sender alongside SMTP mailboxes',
       'Reviewed manual marketing batches to eligible consented leads, off by default',
@@ -167,7 +223,7 @@ export const integrations: Integration[] = [
     steps: [
       {
         title: 'Add Brevo as a sender',
-        body: 'Settings → Email → Add account → Brevo, with your API key and a verified sender.',
+        body: 'Integrations → Email → Add account → Brevo, with your API key and a verified sender.',
       },
       {
         title: 'Set the webhook',
@@ -194,12 +250,28 @@ export const integrations: Integration[] = [
     description:
       'Connect your own Telegram account to Outbound OS and message leads by username or phone number, with replies in the shared inbox. Open-source.',
     h1: 'Telegram conversations in the same inbox as WhatsApp and email.',
-    summary:
-      'Your own Telegram account, for one-to-one conversations with leads.',
+    summary: 'Your own Telegram account, for one-to-one conversations with leads.',
     intro: [
       'Some buyers live on Telegram. Connect your own Telegram account and message a lead by @username or phone number; replies land in the same inbox, on the same lead, as their WhatsApp and email threads.',
       'Telegram is for deliberate one-to-one conversation. It is not used for bulk outreach, which Telegram does not allow for personal accounts.',
     ],
+    connection: {
+      method: 'Personal account connection',
+      prerequisites: [
+        'A Telegram account you control',
+        'Telegram API credentials for your installation',
+        'The recipient’s username, phone number or known peer ID',
+      ],
+      flow: [
+        { title: 'Your Telegram account', body: 'Authenticate the account in your installation' },
+        { title: 'One-to-one message', body: 'Choose the lead and message deliberately' },
+        { title: 'Shared conversation', body: 'Replies are associated with the lead' },
+      ],
+      checkpoint:
+        'Confirm account readiness and exchange a message with a contact you own before using the channel for a customer conversation.',
+      boundary:
+        'This is a personal-account channel for individual conversations. It is not a bulk campaign service or a Telegram bot integration.',
+    },
     capabilities: [
       'Sign in with your own Telegram account',
       'Message leads by @username, phone number or peer ID',
@@ -234,8 +306,25 @@ export const integrations: Integration[] = [
     h1: 'iMessage for the buyers who never open WhatsApp.',
     summary: 'Through a Mac running BlueBubbles, reached over an HTTPS tunnel.',
     intro: [
-      'In the US and UK many buyers answer a blue bubble faster than an email. Outbound OS sends iMessages through a Mac running BlueBubbles Server, reached over a secure tunnel, and threads replies on the lead.',
+      'For customers who use iMessage, keep their conversation alongside your other channels. Outbound OS sends iMessages through a Mac running BlueBubbles Server, reached over a secure tunnel, and threads replies on the lead.',
     ],
+    connection: {
+      method: 'BlueBubbles on your Mac',
+      prerequisites: [
+        'An always-on Mac signed into iMessage',
+        'BlueBubbles Server and its connection password',
+        'Secure HTTPS access and the inbound webhook secret',
+      ],
+      flow: [
+        { title: 'Outbound OS', body: 'Sends through the configured relay URL' },
+        { title: 'Your Mac', body: 'BlueBubbles relays through the Messages app' },
+        { title: 'Customer iMessage', body: 'Replies return through the protected webhook' },
+      ],
+      checkpoint:
+        'Check the relay connection, send to an Apple account you own, and confirm an incoming reply reaches the same lead.',
+      boundary:
+        'Your Mac is part of the delivery path and must remain available. Outbound OS does not provide a browser-native iMessage API or replace the Apple account.',
+    },
     capabilities: [
       'Send and receive iMessages through BlueBubbles',
       'Several Macs, each its own sender',
@@ -248,7 +337,7 @@ export const integrations: Integration[] = [
       },
       {
         title: 'Add the server',
-        body: 'Settings → iMessage → Add server, with its URL and password.',
+        body: 'Integrations → iMessage → Add server, with its URL and password.',
       },
       {
         title: 'Secure the webhook',
@@ -269,18 +358,35 @@ export const integrations: Integration[] = [
     kind: 'Lead source',
     title: 'Facebook Lead Ads — connect your CRM',
     description:
-      'Send Facebook and Instagram Lead Ads into Outbound OS through Zapier, Make or n8n and message every lead on WhatsApp within seconds.',
+      'Connect Facebook and Instagram Lead Ads through Zapier, Make or n8n. Map contact details, record consent and route eligible leads to outreach.',
     h1: 'Message your Facebook ad leads while they still remember the ad.',
     summary:
-      'Meta instant-form leads through Zapier, Make or n8n, contacted in seconds.',
+      'Meta instant-form leads through an automation provider, with mapped contact details and consent.',
     intro: [
-      'A lead from a Facebook or Instagram instant form is warmest in the first few minutes. Send each one to Outbound OS through Zapier, Make or n8n and it is on WhatsApp and email before the prospect has closed the app.',
+      'Send Facebook and Instagram instant-form submissions to Outbound OS through Zapier, Make or n8n. The CRM records the lead and evaluates it for your configured first-contact flow.',
       'The Facebook preset already understands the field names instant forms use (full_name, phone_number, email), so most forms need no mapping.',
     ],
+    connection: {
+      method: 'Through Zapier, Make or n8n',
+      prerequisites: [
+        'Access to the Meta Page and instant form',
+        'An automation tool authorised to read the form’s leads',
+        'An Outbound OS source URL, source key and field mapping',
+      ],
+      flow: [
+        { title: 'Meta instant form', body: 'A person submits your Facebook or Instagram form' },
+        { title: 'Automation step', body: 'Zapier, Make or n8n maps and posts the lead' },
+        { title: 'CRM source', body: 'Validates, merges and evaluates contact eligibility' },
+      ],
+      checkpoint:
+        'Run a mapping test without creating a lead, then use Meta’s test-lead tool and check the source, contact fields and consent recorded in the CRM.',
+      boundary:
+        'This path uses an external automation provider, not a native direct subscription to Meta Lead Ads. First contact depends on the enabled channel, consent, sender readiness and outreach settings.',
+    },
     capabilities: [
       'Works with Zapier, Make, n8n or any tool that can POST JSON',
       'Understands Facebook’s default instant-form field names',
-      'Instant first contact on every connected channel',
+      'First-contact routing for eligible leads when outreach is enabled',
       'Consent checkboxes recorded as marketing consent',
     ],
     steps: [
@@ -294,7 +400,7 @@ export const integrations: Integration[] = [
       },
       {
         title: 'Send a test lead',
-        body: 'Use Meta’s Lead Ads Testing Tool; the lead appears in Outbound OS within seconds.',
+        body: 'Use Meta’s Lead Ads Testing Tool, then verify the resulting record and source in Outbound OS. Use a dry-run mapping test before enabling outreach.',
       },
     ],
     faq: [
@@ -311,12 +417,29 @@ export const integrations: Integration[] = [
     kind: 'Lead source',
     title: 'CRM webhooks for Zapier, Make & n8n',
     description:
-      'Send leads from any app into Outbound OS with one webhook step in Zapier, Make or n8n, and contact them on WhatsApp and email instantly.',
+      'Connect Zapier, Make or n8n with an incoming webhook. Map lead fields, test without creating a record, and configure eligible first contact.',
     h1: 'Any app that Zapier, Make or n8n connects to is a lead source.',
     summary: 'One webhook step turns any app into a lead source.',
     intro: [
-      'Every lead source in Outbound OS is a signed webhook. If a tool can send an HTTP POST — Zapier, Make, n8n, Pipedream, your own code — it can create leads, with common field names recognised automatically.',
+      'Incoming webhook sources in Outbound OS use separate source keys. If a tool can send an HTTP POST — Zapier, Make, n8n, Pipedream, your own code — it can create leads, with common field names recognised automatically.',
     ],
+    connection: {
+      method: 'Keyed incoming webhook',
+      prerequisites: [
+        'A trigger in Zapier, Make, n8n or your own HTTP client',
+        'A separate source URL and key from Outbound OS',
+        'Mapped contact fields and the source’s consent requirements',
+      ],
+      flow: [
+        { title: 'Your trigger', body: 'A form, booking or another lead event' },
+        { title: 'HTTP POST', body: 'JSON or form fields plus the source key' },
+        { title: 'Mapped CRM record', body: 'Create or merge, then evaluate outreach eligibility' },
+      ],
+      checkpoint:
+        'Include “test”: true in the payload to inspect the mapped values without creating a record or sending a message.',
+      boundary:
+        'The source key is private. Use it from an automation or server, not public browser code. A historical import should use the import route instead of pretending to be a live lead.',
+    },
     capabilities: [
       'JSON or form-encoded posts',
       'Common field names recognised without mapping; anything else mapped per source',
@@ -339,7 +462,7 @@ export const integrations: Integration[] = [
     ],
     code: {
       label: 'POST /api/webhooks/inbound/<source>',
-      body: 'curl -X POST https://your-host/api/webhooks/inbound/<source> \\\n  -H "Content-Type: application/json" \\\n  -H "x-api-key: <key>" \\\n  -d \'{"name":"Jane Doe","phone":"+44 7700 900123","email":"jane@example.com","product":"500 units"}\'',
+      body: 'curl -X POST https://your-host/api/webhooks/inbound/<source> \\\n  -H "Content-Type: application/json" \\\n  -H "x-api-key: <key>" \\\n  -d \'{"test":true,"name":"Jane Doe","phone":"+44 7700 900123","email":"jane@example.test","product":"500 units"}\'',
     },
     faq: [
       {
@@ -357,11 +480,27 @@ export const integrations: Integration[] = [
     description:
       'Send every new lead, reply and engaged lead from Outbound OS to a Google Sheet in real time with a small Apps Script. No OAuth, no add-on.',
     h1: 'A Google Sheet that fills itself as leads arrive.',
-    summary:
-      'A live row for every new lead and reply, through a small Apps Script.',
+    summary: 'A live row for every new lead and reply, through a small Apps Script.',
     intro: [
       'Some people will always live in a spreadsheet. Outbound OS posts each event — new lead, reply, engaged — to a Google Apps Script web app you deploy on your own sheet, which writes it as a row under your header names.',
     ],
+    connection: {
+      method: 'Outbound events + Apps Script',
+      prerequisites: [
+        'A Google Sheet you control',
+        'The supplied Apps Script deployed as a web app',
+        'The deployment URL saved in Outbound OS',
+      ],
+      flow: [
+        { title: 'CRM event', body: 'A lead is created, replies or becomes engaged' },
+        { title: 'Apps Script', body: 'Receives the event and matches sheet headers' },
+        { title: 'New sheet row', body: 'Adds the event’s lead data to your spreadsheet' },
+      ],
+      checkpoint:
+        'Use the connection test and check that a sample row arrives under the expected column headings in your sheet.',
+      boundary:
+        'This is event export, not a bidirectional spreadsheet CRM. Editing a row does not update the lead, and enabling new events does not backfill every historical record.',
+    },
     capabilities: [
       'Rows for lead.created, lead.replied and lead.engaged',
       'Columns matched by header name, so you can reorder or add columns',
@@ -402,13 +541,29 @@ export const integrations: Integration[] = [
     description:
       'Connect forms and external systems to your CRM. Import leads with source keys, then send signed lead and message events to your other tools.',
     h1: 'Leads come in. Your other systems stay in sync.',
-    summary:
-      'Source-key lead intake, reviewed imports and signed outgoing events.',
+    summary: 'Source-key lead intake, reviewed imports and signed outgoing events.',
     intro: [
       'Incoming lead sources receive JSON or form posts at /api/webhooks/inbound/<source>, authenticated with the source API key. Map your fields, test the connection and configure first contact before enabling live intake. Website forms and external systems use the same source settings.',
       'Historical exports use the separate connector import endpoint. A configured supplier and source ID preserve attribution; records are deduplicated and conflicts held for review. Imports remain paused and do not queue outreach.',
       'Subscribe a URL to events such as lead.created, lead.replied, lead.engaged and lead.status_changed. Each request carries an X-Webhook-Signature header — an HMAC-SHA256 of the body with your secret — so the receiver can prove it came from your install.',
     ],
+    connection: {
+      method: 'Incoming keys + outgoing signatures',
+      prerequisites: [
+        'An HTTPS source or destination that you control',
+        'A separate key for each incoming lead source',
+        'A signing secret and event selection for outgoing subscriptions',
+      ],
+      flow: [
+        { title: 'Incoming lead', body: 'Source key authenticates a mapped live event' },
+        { title: 'CRM record', body: 'Import history stays distinct from live intake' },
+        { title: 'Outgoing event', body: 'HMAC signature lets your receiver verify delivery' },
+      ],
+      checkpoint:
+        'Test incoming field mapping without creating a record; for outgoing events, receive a test delivery and verify its raw-body signature.',
+      boundary:
+        'Incoming live sources, historical imports and outgoing subscriptions have different send behaviour and credentials. Never reuse an incoming source key as an outgoing signing secret.',
+    },
     capabilities: [
       'Incoming JSON and HTML forms, with a separate key for each source',
       'Historical connector imports with replay protection and attribution review',
@@ -454,12 +609,28 @@ export const integrations: Integration[] = [
     description:
       'Import leads into Outbound OS from a CSV or another CRM export. Common columns are detected, duplicates merge by phone or email, nothing is sent.',
     h1: 'Bring your existing list. Duplicates merge instead of doubling.',
-    summary:
-      'CSV upload with column detection and merging; export back to CSV any time.',
+    summary: 'CSV upload with column detection and merging; export back to CSV any time.',
     intro: [
       'Moving from a spreadsheet or another CRM? Upload the export: common column names — name, mobile, phone, email, company, product, country — are detected automatically, and rows that match an existing lead by phone or email merge into it.',
       'An import never messages anyone by itself. Reaching an imported list is a campaign you start on purpose, with approved templates for anyone outside the 24-hour window.',
     ],
+    connection: {
+      method: 'File import',
+      prerequisites: [
+        'A CSV export with a header row',
+        'Contact fields that can identify a lead',
+        'A reviewed source list you are authorised to store and contact',
+      ],
+      flow: [
+        { title: 'CSV file', body: 'Bring contacts from your spreadsheet or CRM' },
+        { title: 'Column detection', body: 'Match common fields and merge existing identities' },
+        { title: 'Import summary', body: 'Review created, merged and skipped rows' },
+      ],
+      checkpoint:
+        'Check the import summary and a sample of the resulting lead records before preparing any outreach.',
+      boundary:
+        'Importing does not send messages. Outreach is a separate campaign you review and start; WhatsApp templates are required outside the customer-service window.',
+    },
     capabilities: [
       'Column detection for common CRM and marketplace exports',
       'Merging by phone and email, including within the same file',
@@ -485,7 +656,7 @@ export const integrations: Integration[] = [
     faq: [
       {
         q: 'Will importing send messages?',
-        a: 'No. Only leads arriving through a live source get automatic first contact. Imported leads wait for a campaign you start.',
+        a: 'No. Imported leads wait for a campaign you review and start. Live-source first contact is a separate flow that depends on eligibility and your outreach settings.',
       },
       {
         q: 'Can AI agents import leads too?',
@@ -503,6 +674,7 @@ export const directoryExtras = [
     href: '/form-backend',
     name: 'Website forms',
     kind: 'Lead source' as IntegrationKind,
+    method: 'HTML form endpoint',
     summary:
       'Plain HTML, Webflow, WordPress or Framer forms, with a spam trap and a thank-you page.',
   },
@@ -511,8 +683,8 @@ export const directoryExtras = [
     href: '/mcp',
     name: 'AI agents (MCP)',
     kind: 'Data out' as IntegrationKind,
-    summary:
-      'Claude and other MCP clients search leads, import lists and run campaigns.',
+    method: 'Remote MCP server',
+    summary: 'Connect an MCP-compatible AI client to CRM tools for reads and approved actions.',
   },
 ]
 

@@ -6,27 +6,36 @@
    subordinate to the reason for contacting the company.
 ════════════════════════════════════════════════════════════════════════════ */
 
-.contact-hero { max-width: 46rem; }
+.contact-hero { max-width: 48rem; }
 .contact-hero .eyebrow { margin-bottom: 20px; }
 .contact-hero h1 { max-width: 18ch; }
 .contact-hero .lede { margin-top: 22px; }
 
 .contact-route {
   display: grid;
-  gap: 22px 32px;
+  gap: 22px 28px;
+  padding: 28px 0;
 }
+.contact-directory { border-top: 0; }
+.contact-route--featured { padding: 26px; margin-bottom: 8px; background: var(--surface); border: var(--rule); border-radius: var(--r-lg); }
+.contact-route--featured + .contact-route { border-top: 0; }
 
 .contact-route__label {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 8px;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
 }
+.contact-route__icon { display: inline-flex; color: var(--text-secondary); }
 
 .contact-route h3 + p { margin-top: 7px; }
 .contact-route p { font-size: 14px; }
 .contact-route > .btn { justify-self: start; }
+.contact-route :is(.btn, .cta-link) { min-height: 44px; }
+.contact-body .section-head a { overflow-wrap: anywhere; }
 
 .contact-route__actions {
   display: flex;
@@ -37,12 +46,18 @@
 
 @media (min-width: 720px) {
   .contact-route {
-    grid-template-columns: 1fr auto;
-    align-items: center;
+    grid-template-columns: 1fr;
   }
 
   .contact-route__actions {
     flex-direction: column;
     align-items: flex-start;
   }
+}
+@media (min-width: 1100px) {
+  .contact-route { grid-template-columns: 1fr auto; align-items: center; }
+}
+@media (max-width: 480px) {
+  .contact-route--featured { padding: 22px; }
+  .contact-route--featured > .btn { width: 100%; white-space: normal; height: auto; padding-block: 13px; line-height: 1.4; }
 }

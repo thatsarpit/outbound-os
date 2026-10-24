@@ -3,6 +3,18 @@
    should look like documents. */
 
 .legal h1 { margin-top: 14px; }
+.legal__switch { display: inline-flex; gap: 4px; padding: 4px; margin-bottom: 34px; background: var(--surface); border: var(--rule); border-radius: var(--r-md); }
+.legal__switch a { min-height: 40px; display: inline-flex; align-items: center; padding-inline: 16px; border-radius: var(--r-sm); color: var(--text-secondary); font-size: 13px; }
+.legal__switch a[aria-current='page'] { background: var(--surface-overlay); color: var(--text); }
+.legal__switch a:hover { color: var(--text); }
+.legal__contents { margin-top: 32px; padding-block: 22px; border-block: var(--rule); }
+.legal__contents > p { color: var(--text-muted); font-size: 12px; font-weight: 500; }
+.legal__contents ol { list-style: none; padding: 0; margin: 12px 0 0; display: grid; grid-template-columns: 1fr 1fr; column-gap: 24px; }
+.legal__contents a { display: flex; align-items: center; min-height: 40px; color: var(--text-secondary); font-size: 13px; }
+.legal__contents a:hover { color: var(--text); text-decoration: underline; text-underline-offset: 4px; }
+.legal__body section { scroll-margin-top: 108px; }
+.legal__body p { line-height: 1.85; }
+.legal .doc-meta { margin-top: 14px; }
 
 .legal__notice {
   margin-top: 28px;
@@ -18,3 +30,6 @@
 .legal__body h2 { font-size: 1.0625rem; letter-spacing: -0.014em; }
 .legal__body h2 + p { margin-top: 10px; }
 .legal__body > section + section { border-top: var(--rule-subtle); padding-top: 28px; }
+@media (max-width: 480px) {
+  .legal__contents ol { grid-template-columns: 1fr; }
+}
