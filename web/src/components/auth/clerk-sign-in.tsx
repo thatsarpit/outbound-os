@@ -5,8 +5,8 @@ import { SignIn } from '@clerk/react'
 /**
  * Clerk's prebuilt sign-in retains all enabled strategies and recovery steps.
  * Only rendered when the server's provider is Clerk (it needs ClerkProvider).
- * Social controls are hidden as a defence-in-depth UI rule; the providers are
- * disabled in Clerk too.
+ * Clerk controls which social providers are available; enabled providers stay
+ * visible alongside email sign-in without opening public sign-up.
  */
 export function ClerkSignIn() {
   const location = useLocation()
@@ -54,9 +54,14 @@ export function ClerkSignIn() {
             boxShadow: 'none',
           },
           header: { display: 'none' },
-          socialButtons: { display: 'none' },
-          socialButtonsBlockButton: { display: 'none' },
-          dividerRow: { display: 'none' },
+          socialButtons: 'gap-3',
+          socialButtonsBlockButton:
+            'min-h-11! rounded-md! border-border! bg-surface-raised! text-text-primary! shadow-none! hover:bg-surface! focus-visible:ring-2 focus-visible:ring-focus-muted',
+          socialButtonsBlockButtonText: 'text-sm! font-medium! text-text-primary!',
+          socialButtonsIconButton:
+            'min-h-11! min-w-11! rounded-md! border-border! bg-surface-raised! shadow-none! hover:bg-surface! focus-visible:ring-2 focus-visible:ring-focus-muted',
+          dividerLine: 'bg-border',
+          dividerText: 'text-xs text-text-muted',
           // Keep Clerk's branding and development notice visible. Only the
           // sign-up action is suppressed for this existing-member entry page.
           footer: { background: 'transparent', border: 0 },
