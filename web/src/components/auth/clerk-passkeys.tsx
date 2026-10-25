@@ -1,9 +1,8 @@
 import { useState } from 'react'
 import { useClerk, useReverification, useUser } from '@clerk/react'
 import { useQuery } from '@tanstack/react-query'
-import { Check, Fingerprint, KeyRound, Plus, RefreshCw } from 'lucide-react'
+import { Check, Fingerprint, KeyRound, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { SectionCard } from '@/components/ui/section-card'
 import {
   loadPasskeyCapability,
   passkeyAvailability,
@@ -15,11 +14,11 @@ const UNAVAILABLE_COPY = {
   unknown:
     'Passkey settings could not be verified. You can keep signing in with email while your workspace admin checks the identity configuration.',
   disabled:
-    'Passkeys are not enabled for this workspace. Email sign-in remains available. Your workspace admin must enable a supported production configuration first.',
+    'Passkeys are not enabled for this workspace. Keep using your existing sign-in method; availability depends on the workspace’s Clerk plan and configuration.',
   unsupported:
     'This browser cannot create passkeys here. Use a current browser on a secure connection, or keep using email sign-in.',
   production_setup_needed:
-    'Passkeys will be available after this workspace’s production identity setup is complete. Keep using email sign-in for now.',
+    'Passkeys are unavailable in this workspace’s current identity setup. They also require a supported Clerk plan. Keep using your existing sign-in method.',
 }
 
 /** Only mounted inside ClerkProvider, after the personal account is signed in. */
@@ -73,11 +72,41 @@ export function ClerkPasskeys() {
     }
   }
 
+  if (availability !== 'available') {
+    return (
+      <div className="flex items-start gap-3">
+        <Fingerprint aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-text-muted" />
+        <div className="min-w-0">
+          <h3 className="text-[13px] font-medium">Passkeys</h3>
+          <p className="mt-1 text-xs leading-5 text-text-muted">
+            {isPending && availability === 'unknown'
+              ? 'Checking availability…'
+              : UNAVAILABLE_COPY[availability]}
+          </p>
+          {passkeys.length > 0 && (
+            <p className="mt-1 text-xs text-text-secondary">
+              {passkeys.length} registered on your account. Manage them in sign-in settings.
+            </p>
+          )}
+          {availability === 'unknown' && !isPending && (
+            <Button
+              className="mt-2"
+              variant="ghost"
+              size="sm"
+              onClick={() => void refetch()}
+              pending={isFetching}
+              pendingLabel="Checking…"
+            >
+              Check availability
+            </Button>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <SectionCard
-      title="Passkeys"
-      description="Use Face ID, Touch ID or your device lock to sign in."
-    >
+    <div>
       <div className="space-y-4">
         <div className="flex items-start gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-surface-raised">
@@ -116,15 +145,6 @@ export function ClerkPasskeys() {
           </ul>
         )}
 
-        {isPending && availability === 'unknown' ? (
-          <p className="text-xs text-text-muted">Checking passkey availability…</p>
-        ) : (
-          availability !== 'available' && (
-            <p className="rounded-md border border-border bg-surface-raised p-3 text-xs leading-5 text-text-secondary">
-              {UNAVAILABLE_COPY[availability]}
-            </p>
-          )
-        )}
         {error && (
           <p
             role="alert"
@@ -150,18 +170,6 @@ export function ClerkPasskeys() {
           <Button variant="secondary" size="sm" onClick={() => clerk.openUserProfile()}>
             Security settings
           </Button>
-          {availability === 'unknown' && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => void refetch()}
-              pending={isFetching}
-              pendingLabel="Checking…"
-            >
-              <RefreshCw aria-hidden="true" className="h-3.5 w-3.5" />
-              Check again
-            </Button>
-          )}
         </div>
         {passkeys.length >= 10 && (
           <p className="text-[11px] leading-5 text-text-muted">
@@ -174,6 +182,6 @@ export function ClerkPasskeys() {
           them on the site you use every day.
         </p>
       </div>
-    </SectionCard>
+    </div>
   )
 }

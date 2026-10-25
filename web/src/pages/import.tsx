@@ -1,3 +1,4 @@
+import { invalidateLeadSurfaceQueries } from '@/lib/lead-automation'
 import { getSessionToken } from '@/stores/auth-store'
 import { useState, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -132,6 +133,8 @@ export default function ImportPage() {
         },
       )
       queryClient.invalidateQueries({ queryKey: ['import-batches'] })
+      invalidateLeadSurfaceQueries(queryClient)
+      void queryClient.invalidateQueries({ queryKey: ['lead-tags'] })
     } catch (err) {
       setLastResult({
         success: false,
@@ -179,6 +182,7 @@ export default function ImportPage() {
           <div>
             <h1 className="text-xl font-semibold tracking-tight">Import</h1>
             <p className="mt-1 text-[13px] text-text-secondary">
+              <span>Latest 20 batches · </span>
               <span className="tabular-nums">{batches.length}</span>{' '}
               {batches.length === 1 ? 'batch' : 'batches'} &middot;{' '}
               <span className="tabular-nums">{formatNumber(importedTotal)}</span> leads imported

@@ -7,6 +7,7 @@ import {
   Megaphone,
   FileText,
   CalendarClock,
+  ListTodo,
   Package,
   Package2,
   Contact,
@@ -26,6 +27,7 @@ export const NAVIGATION_GROUPS: Array<{ label: string; items: NavigationItem[] }
     items: [
       { to: '/overview', label: 'Overview', icon: LayoutDashboard, capability: 'page.overview' },
       { to: '/inbox', label: 'Inbox', icon: MessageSquare, capability: 'page.inbox' },
+      { to: '/tasks', label: 'Tasks', icon: ListTodo, capability: 'page.leads' },
       { to: '/leads', label: 'Leads', icon: Users, capability: 'page.leads' },
       { to: '/pipeline', label: 'Pipeline', icon: Kanban, capability: 'page.pipeline' },
     ],

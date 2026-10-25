@@ -4,6 +4,7 @@ import { requireRole } from '../auth/index.js';
 import logger from '../utils/logger.js';
 import orderNotifier from '../services/orderNotifier.js';
 import { computeSettlement } from '../services/settlement.js';
+import { orderStatsValues } from '../utils/moneyGroups.js';
 
 /**
  * Sales: orders, customer invoices, shipments.
@@ -145,7 +146,7 @@ router.get('/orders', requireRole('agent'), async (req, res) => {
     }
     const where = and.length ? { AND: and } : {};
     const allowedSort = ['createdAt', 'updatedAt', 'orderNumber', 'total', 'status', 'confirmedAt'];
-    const take = Math.min(100, toInt(limit, 25));
+    const take = Math.max(1, Math.min(100, toInt(limit, 25)));
     const skip = (Math.max(1, toInt(page, 1)) - 1) * take;
 
     const [orders, total] = await Promise.all([
@@ -164,7 +165,7 @@ router.get('/orders', requireRole('agent'), async (req, res) => {
       }),
       prisma.salesOrder.count({ where }),
     ]);
-    res.json({ data: orders, total, page: toInt(page, 1), pages: Math.ceil(total / take) || 1 });
+    res.json({ data: orders, total, page: Math.max(1, toInt(page, 1)), pages: Math.ceil(total / take) || 1 });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -172,21 +173,11 @@ router.get('/orders', requireRole('agent'), async (req, res) => {
 
 router.get('/orders/stats', requireRole('agent'), async (_req, res) => {
   try {
-    const [byStatus, revenue, openShipments] = await Promise.all([
-      prisma.salesOrder.groupBy({ by: ['status'], _count: { id: true }, _sum: { total: true } }),
-      prisma.salesOrder.aggregate({
-        where: { status: { notIn: ['draft', 'cancelled'] } },
-        _sum: { total: true },
-        _count: { id: true },
-      }),
+    const [orders, openShipments] = await Promise.all([
+      prisma.salesOrder.findMany({ select: { status: true, total: true, currency: true } }),
       prisma.shipment.count({ where: { status: { notIn: ['delivered', 'returned'] } } }),
     ]);
-    res.json({
-      byStatus,
-      totalRevenue: revenue._sum.total || 0,
-      orderCount: revenue._count.id || 0,
-      openShipments,
-    });
+    res.json({ ...orderStatsValues(orders), openShipments });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }

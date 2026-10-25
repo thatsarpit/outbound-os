@@ -1,6 +1,8 @@
 import { SearchInput } from '@/components/ui/search-input'
 import { ErrorState } from '@/components/ui/error-state'
 import { useHomeCurrency } from '@/hooks/use-home-currency'
+import { formatCurrencyTotals } from '@/lib/money-groups'
+import { CurrencyTotals } from '@/components/ui/currency-totals'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -102,6 +104,7 @@ export default function OrdersPage() {
   const queryClient = useQueryClient()
   const [statusFilter, setStatusFilter] = useState('')
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
   /**
    * The open drawer lives in the URL, not component state, so another page can
    * link straight to one order — Revenue's unpaid invoices and a customer's
@@ -134,12 +137,14 @@ export default function OrdersPage() {
     : null
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['orders', statusFilter, search, originSupplierId],
+    queryKey: ['orders', statusFilter, search, originSupplierId, page],
     queryFn: () =>
       salesApi.listOrders({
         status: statusFilter || undefined,
         search: search || undefined,
         originSupplierId,
+        page,
+        limit: 25,
       }),
   })
 
@@ -150,6 +155,12 @@ export default function OrdersPage() {
   })
 
   const orders = data?.data ?? []
+  const pages = data?.pages
+  const hasFilters = Boolean(search || statusFilter || originSupplierId)
+  useEffect(() => {
+    if (pages !== undefined) setPage((value) => Math.min(value, Math.max(1, pages)))
+  }, [pages])
+  useEffect(() => setPage(1), [originSupplierId])
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['orders'] })
     queryClient.invalidateQueries({ queryKey: ['order-stats'] })
@@ -181,9 +192,15 @@ export default function OrdersPage() {
         />
         <MetricCard
           icon={Receipt}
-          label="Booked value"
-          value={stats ? formatMoney(stats.totalRevenue, orders[0]?.currency || 'USD') : '—'}
-          hint="Across all confirmed orders"
+          label="Non-draft order value"
+          value={
+            stats
+              ? stats.revenueByCurrency.length > 1
+                ? `${stats.revenueByCurrency.length} currencies`
+                : formatCurrencyTotals(stats.revenueByCurrency)
+              : '—'
+          }
+          hint="Lifetime; stored order currencies"
         />
         <MetricCard
           icon={Truck}
@@ -203,18 +220,33 @@ export default function OrdersPage() {
         />
       </div>
 
+      {(stats?.revenueByCurrency.length ?? 0) > 1 && (
+        <SectionCard
+          title="Order values by currency"
+          description="Lifetime non-draft orders, without currency conversion."
+        >
+          <CurrencyTotals totals={stats?.revenueByCurrency} />
+        </SectionCard>
+      )}
+
       <SectionCard title="All orders" description="Newest first.">
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <SearchInput
             label="Search orders"
             placeholder="Order number, customer or company…"
             value={search}
-            onChange={setSearch}
+            onChange={(value) => {
+              setSearch(value)
+              setPage(1)
+            }}
           />
           <select
             className={cn(inputClass, 'max-w-[200px]')}
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => {
+              setStatusFilter(e.target.value)
+              setPage(1)
+            }}
             aria-label="Filter by status"
           >
             <option value="">All statuses</option>
@@ -228,14 +260,15 @@ export default function OrdersPage() {
             className={cn(inputClass, 'max-w-[240px]')}
             value={originSupplierId || ''}
             aria-label="Filter by lead supplier"
-            onChange={(event) =>
+            onChange={(event) => {
+              setPage(1)
               setSearchParams((current) => {
                 const next = new URLSearchParams(current)
                 if (event.target.value) next.set('originSupplierId', event.target.value)
                 else next.delete('originSupplierId')
                 return next
               })
-            }
+            }}
           >
             <option value="">All lead suppliers</option>
             {(originSuppliers?.data || []).map((supplier) => (
@@ -253,21 +286,27 @@ export default function OrdersPage() {
         ) : orders.length === 0 ? (
           <EmptyState
             icon={Package}
-            tone={search || statusFilter ? 'filtered' : 'waiting'}
-            title={search || statusFilter ? 'No matching orders' : 'No orders yet'}
+            tone={hasFilters ? 'filtered' : 'waiting'}
+            title={hasFilters ? 'No matching orders' : 'No orders yet'}
             description={
-              search || statusFilter
-                ? 'Try a different search or status.'
+              hasFilters
+                ? 'Try a different search, status or lead supplier.'
                 : 'Record an order to track its invoice and shipment.'
             }
             action={
-              search || statusFilter ? (
+              hasFilters ? (
                 <Button
                   size="sm"
                   variant="secondary"
                   onClick={() => {
                     setSearch('')
                     setStatusFilter('')
+                    setPage(1)
+                    setSearchParams((current) => {
+                      const next = new URLSearchParams(current)
+                      next.delete('originSupplierId')
+                      return next
+                    })
                   }}
                 >
                   Clear filters
@@ -370,6 +409,32 @@ export default function OrdersPage() {
               </tbody>
             </table>
           </div>
+        )}
+        {(data?.pages ?? 1) > 1 && (
+          <nav
+            aria-label="Order pages"
+            className="mt-4 flex items-center justify-between gap-3 text-xs"
+          >
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((value) => value - 1)}
+            >
+              Previous
+            </Button>
+            <span>
+              Page {page} of {data?.pages} · {data?.total} orders
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page >= (data?.pages ?? 1)}
+              onClick={() => setPage((value) => value + 1)}
+            >
+              Next
+            </Button>
+          </nav>
         )}
       </SectionCard>
 

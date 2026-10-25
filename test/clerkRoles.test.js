@@ -46,26 +46,26 @@ test('production identities are pinned to one workspace for both session token f
   assert.equal(clerkSessionIdentity({ v: 2, sub: 'user_fixture', o: { id: 'org_other', rol: 'admin' } }, env), null);
 });
 
-function guard(auth, minRole) {
+async function guard(auth, minRole) {
   const req = { headers: {}, auth: Object.assign(() => auth, { [Symbol.for('@clerk/express.auth')]: true }) };
   let status = 200, error, allowed = false;
   const res = { status(value) { status = value; return this; }, json(value) { error = value; return this; } };
-  requireRole(minRole)(req, res, () => { allowed = true; });
+  await requireRole(minRole)(req, res, () => { allowed = true; });
   return { status, allowed, user: req.user, error };
 }
 
-test('the real Clerk HTTP guard rejects unsigned-out, wrong-workspace and downgraded sessions', () => {
+test('the real Clerk HTTP guard rejects unsigned-out, wrong-workspace and downgraded sessions', async () => {
   const before = { key: process.env.CLERK_SECRET_KEY, org: process.env.CLERK_ORGANIZATION_ID };
   process.env.CLERK_SECRET_KEY = env.CLERK_SECRET_KEY;
   process.env.CLERK_ORGANIZATION_ID = env.CLERK_ORGANIZATION_ID;
   try {
-    assert.equal(guard({ ...identity, userId: null }, 'viewer').status, 401);
-    assert.equal(guard({ ...identity, orgId: 'org_other', orgRole: 'org:admin' }, 'viewer').status, 403);
-    for (const orgRole of ['org:member', 'org:viewer', 'toString']) assert.equal(guard({ ...identity, orgRole }, 'admin').status, 403);
-    assert.equal(guard(identity, 'agent').allowed, true);
-    assert.equal(guard(identity, 'manager').status, 403);
-    assert.equal(guard({ ...identity, orgRole: 'org:admin' }, 'admin').allowed, true);
-    assert.equal(guard(identity, 'admin').status, 403, 'each request uses the current downgraded membership');
+    assert.equal((await guard({ ...identity, userId: null }, 'viewer')).status, 401);
+    assert.equal((await guard({ ...identity, orgId: 'org_other', orgRole: 'org:admin' }, 'viewer')).status, 403);
+    for (const orgRole of ['org:member', 'org:viewer', 'toString']) assert.equal((await guard({ ...identity, orgRole }, 'admin')).status, 403);
+    assert.equal((await guard(identity, 'agent')).allowed, true);
+    assert.equal((await guard(identity, 'manager')).status, 403);
+    assert.equal((await guard({ ...identity, orgRole: 'org:admin' }, 'admin')).allowed, true);
+    assert.equal((await guard(identity, 'admin')).status, 403, 'each request uses the current downgraded membership');
     assert.throws(() => requireRole('constructor'), /unknown role/);
   } finally {
     if (before.key === undefined) delete process.env.CLERK_SECRET_KEY; else process.env.CLERK_SECRET_KEY = before.key;
@@ -77,13 +77,14 @@ test('production preflight checks the current favicon and requires a pinned prod
   const folder = mkdtempSync(path.join(tmpdir(), 'outboundos-clerk-preflight-'));
   const file = path.join(folder, 'fixture.env');
   const base = 'DATABASE_URL=file:fixture.db\nCLERK_SECRET_KEY=sk_live_fixture\nCLERK_PUBLISHABLE_KEY=pk_live_fixture\n';
+  const spawnOptions = { encoding: 'utf8', cwd: fileURLToPath(new URL('../', import.meta.url)) };
   try {
     writeFileSync(file, base);
-    const denied = spawnSync(process.execPath, ['scripts/preflight.mjs', file], { encoding: 'utf8', cwd: fileURLToPath(new URL('../', import.meta.url)) });
+    const denied = spawnSync(process.execPath, ['scripts/preflight.mjs', file], spawnOptions);
     assert.equal(denied.status, 1);
     assert.match(denied.stderr, /CLERK_ORGANIZATION_ID/);
     writeFileSync(file, base + 'CLERK_ORGANIZATION_ID=org_fixture\n');
-    const allowed = spawnSync(process.execPath, ['scripts/preflight.mjs', file], { encoding: 'utf8', cwd: fileURLToPath(new URL('../', import.meta.url)) });
+    const allowed = spawnSync(process.execPath, ['scripts/preflight.mjs', file], spawnOptions);
     assert.equal(allowed.status, 0, allowed.stderr);
     assert.match(allowed.stdout, /Preflight OK/);
   } finally { rmSync(folder, { recursive: true, force: true }); }

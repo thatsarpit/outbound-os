@@ -6,6 +6,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Users, Repeat, Wallet, X, Mail, MessageSquare, ChevronRight } from 'lucide-react'
 import { crmApi, type Customer, type NotifyChannel } from '@/api/endpoints/crm'
 import { formatMoney } from '@/api/endpoints/sales'
+import { formatCurrencyTotals } from '@/lib/money-groups'
+import { CurrencyTotals } from '@/components/ui/currency-totals'
+import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/page-header'
 import { SectionCard } from '@/components/ui/section-card'
 import { MetricCard } from '@/components/ui/metric-card'
@@ -40,6 +43,7 @@ const STATUS_VARIANT = { active: 'success', dormant: 'neutral', blocked: 'danger
 
 export default function CustomersPage() {
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
   // Addressable so the Leads page can link straight to a lead's customer.
   const [searchParams, setSearchParams] = useSearchParams()
   const openId = searchParams.get('customer') ? Number(searchParams.get('customer')) : null
@@ -56,8 +60,8 @@ export default function CustomersPage() {
   }
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['customers', search],
-    queryFn: () => crmApi.listCustomers({ search: search || undefined }),
+    queryKey: ['customers', search, page],
+    queryFn: () => crmApi.listCustomers({ search: search || undefined, page }),
   })
   const { data: stats } = useQuery({
     queryKey: ['customer-stats'],
@@ -78,8 +82,14 @@ export default function CustomersPage() {
         <MetricCard
           icon={Wallet}
           label="Lifetime value"
-          value={stats ? formatMoney(stats.lifetimeValue) : '—'}
-          hint="Across all customers"
+          value={
+            stats
+              ? stats.lifetimeValueByCurrency.length > 1
+                ? `${stats.lifetimeValueByCurrency.length} currencies`
+                : formatCurrencyTotals(stats.lifetimeValueByCurrency)
+              : '—'
+          }
+          hint="Non-draft order values; no currency conversion"
         />
         <MetricCard
           icon={Repeat}
@@ -89,16 +99,30 @@ export default function CustomersPage() {
         />
       </div>
 
+      {(stats?.lifetimeValueByCurrency.length ?? 0) > 1 && (
+        <SectionCard
+          title="Customer order values by currency"
+          description="Lifetime non-draft order values, without conversion."
+        >
+          <CurrencyTotals totals={stats?.lifetimeValueByCurrency} />
+        </SectionCard>
+      )}
+
       <SectionCard title="All customers" description="Most recent order first.">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <SearchInput
             label="Search customers"
             placeholder="Name, company or email…"
             value={search}
-            onChange={setSearch}
+            onChange={(value) => {
+              setSearch(value)
+              setPage(1)
+            }}
           />
           {!isLoading && !isError && (
-            <span className="text-xs text-text-muted">{customers.length} shown</span>
+            <span className="text-xs text-text-muted">
+              {customers.length} of {data?.total ?? 0} shown
+            </span>
           )}
         </div>
 
@@ -171,7 +195,7 @@ export default function CustomersPage() {
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">{c.totalOrders}</td>
                     <td className="px-3 py-2 text-right tabular-nums">
-                      {formatMoney(c.lifetimeValue, c.currency)}
+                      {formatCurrencyTotals(c.lifetimeValueByCurrency)}
                     </td>
                     <td className="px-3 py-2 text-[12px] text-text-muted">
                       {c.lastOrderAt ? formatDate(c.lastOrderAt) : '—'}
@@ -187,6 +211,32 @@ export default function CustomersPage() {
               </tbody>
             </table>
           </div>
+        )}
+        {(data?.pages ?? 1) > 1 && (
+          <nav
+            aria-label="Customer pages"
+            className="mt-4 flex items-center justify-between gap-3 text-xs"
+          >
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((value) => value - 1)}
+            >
+              Previous
+            </Button>
+            <span>
+              Page {page} of {data?.pages}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page >= (data?.pages ?? 1)}
+              onClick={() => setPage((value) => value + 1)}
+            >
+              Next
+            </Button>
+          </nav>
         )}
       </SectionCard>
 
@@ -243,7 +293,7 @@ function CustomerDrawer({ id, onClose }: { id: number; onClose: () => void }) {
               <div className="rounded-lg border border-border bg-surface-raised p-3">
                 <div className="text-[11px] uppercase tracking-wide text-text-muted">Lifetime</div>
                 <div className="mt-1 text-lg tabular-nums">
-                  {formatMoney(customer.lifetimeValue, customer.currency)}
+                  <CurrencyTotals totals={customer.lifetimeValueByCurrency} />
                 </div>
               </div>
               <div className="rounded-lg border border-border bg-surface-raised p-3">

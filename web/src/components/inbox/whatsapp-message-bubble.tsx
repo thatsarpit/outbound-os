@@ -29,6 +29,8 @@ export function MessageBubble({
   const failed = ['failed', 'permanently_failed'].includes(message.status)
   const reason = message.providerStatusReason
   const isInbound = message.direction === 'inbound'
+  const unsupported = isInbound && message.channel === 'whatsapp'
+    && /^\[(unsupported|Unsupported WhatsApp message)\]$/i.test(message.content.trim())
   const meta = getChannel(message.channel)
   const showPricing =
     !isInbound &&
@@ -62,7 +64,13 @@ export function MessageBubble({
             /^\[(Photo|Video|Audio|Voice message|Sticker|Image|Document|Pdf)\]/.test(
               message.content || '',
             )
-          ) && <p className="whitespace-pre-wrap break-words">{message.content}</p>}
+          ) && (
+            <p className="whitespace-pre-wrap break-words">
+              {unsupported
+                ? 'WhatsApp could not provide this message’s content. Ask the customer to resend it as a standard text, photo or file.'
+                : message.content}
+            </p>
+          )}
 
           {message.mediaUrl && (
             <MessageMedia

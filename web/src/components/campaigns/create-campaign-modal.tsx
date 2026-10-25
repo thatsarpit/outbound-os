@@ -4,6 +4,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, Check, Send } from 'lucide-react'
 import { campaignsApi } from '@/api/endpoints/campaigns'
 import { emailSendersApi } from '@/api/endpoints/email'
+import { whatsappApi } from '@/api/endpoints/whatsapp'
+import type { WhatsAppAccount } from '@/api/types'
 import {
   EMAIL_TEMPLATE_LIST_QUERY_KEY,
   templatesApi,
@@ -47,6 +49,8 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
     emailSubject: '',
     targetFilter: '',
     senderAccountId: null as number | null,
+    whatsappSenderAccountId: null as number | null,
+    waCampaignName: '',
     variantBTemplate: '',
     variantBSubject: '',
     selectedTemplateId: null as number | null,
@@ -58,6 +62,12 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
   )
   const filterLooksInvalid = Boolean(form.targetFilter.trim()) && !parsedTargetFilter
   const requiresEmail = form.channel === 'email' || form.channel === 'both'
+  const requiresWhatsApp = form.channel === 'whatsapp' || form.channel === 'both'
+  const { data: whatsappAccounts = [] } = useQuery<WhatsAppAccount[]>({
+    queryKey: ['campaign-whatsapp-senders'],
+    queryFn: async () => (await whatsappApi.list()) || [],
+    enabled: requiresWhatsApp,
+  })
 
   const { data: templates = [] } = useQuery<EmailTemplate[]>({
     queryKey: EMAIL_TEMPLATE_LIST_QUERY_KEY,
@@ -85,14 +95,18 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
     !requiresEmail || !form.variantBTemplate.trim() || Boolean(form.variantBSubject.trim())
 
   const previewMutation = useMutation({
-    mutationFn: () => campaignsApi.previewLeads(parsedTargetFilter || {}),
+    mutationFn: ({ filter, channel }: { filter: string; channel: Campaign['channel'] }) =>
+      campaignsApi.previewLeads(parseTargetFilter(filter) || {}, channel),
     onError: (error: Error) => toast.error(`Audience preview failed: ${error.message}`),
   })
-  const previewCount = previewMutation.data ? num(previewMutation.data.count) : null
-  const previewSample: Lead[] = Array.isArray(previewMutation.data?.sample)
-    ? previewMutation.data.sample
-    : []
-  const audienceReady = previewCount === null ? !form.targetFilter.trim() : previewCount > 0
+  const previewCurrent =
+    previewMutation.variables?.filter === form.targetFilter &&
+    previewMutation.variables?.channel === form.channel
+  const previewCount =
+    previewCurrent && previewMutation.data ? num(previewMutation.data.count) : null
+  const previewSample: Lead[] =
+    previewCurrent && Array.isArray(previewMutation.data?.sample) ? previewMutation.data.sample : []
+  const audienceReady = previewCount !== null && previewCount > 0
   const selectedTemplate =
     templates.find((template) => template.id === form.selectedTemplateId) ?? null
 
@@ -106,7 +120,9 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
         messageTemplate: form.messageTemplate,
         emailSubject: form.emailSubject || null,
         targetFilter: parsedTargetFilter || null,
-        senderAccountId: requiresEmail ? form.senderAccountId : null,
+        emailSenderAccountId: requiresEmail ? form.senderAccountId : null,
+        whatsappSenderAccountId: requiresWhatsApp ? form.whatsappSenderAccountId : null,
+        waCampaignName: requiresWhatsApp ? form.waCampaignName || null : null,
         variantBTemplate: form.variantBTemplate || null,
         variantBSubject: form.variantBSubject || null,
       })
@@ -133,7 +149,7 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
       ? `${formatCount(previewCount)} matching lead${previewCount === 1 ? '' : 's'}`
       : form.targetFilter.trim()
         ? 'Run audience preview before creating'
-        : 'Broad send without a saved preview'
+        : 'Preview the audience before creating'
 
   const applyTemplate = (templateId: number | null) => {
     setForm((current) => {
@@ -199,6 +215,45 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
               </select>
             </Field>
 
+            {requiresWhatsApp && (
+              <div className="space-y-3 rounded-md border border-border p-3">
+                <Field label="WhatsApp sender">
+                  <select
+                    className={inputClass}
+                    value={form.whatsappSenderAccountId ?? ''}
+                    onChange={(event) =>
+                      setForm({
+                        ...form,
+                        whatsappSenderAccountId: event.target.value
+                          ? Number(event.target.value)
+                          : null,
+                      })
+                    }
+                  >
+                    <option value="">Use lead assignment or an available sender</option>
+                    {whatsappAccounts
+                      .filter((account) => account.enabled && account.sessionReady)
+                      .map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.name} · {account.phone}
+                        </option>
+                      ))}
+                  </select>
+                </Field>
+                <Field
+                  label="Approved Meta template name"
+                  hint="Use the exact approved name for this sender. Leave empty only for replies within the customer's open 24-hour window; closed windows will be skipped."
+                >
+                  <input
+                    className={inputClass}
+                    value={form.waCampaignName}
+                    onChange={(event) => setForm({ ...form, waCampaignName: event.target.value })}
+                    placeholder="new_enquiry"
+                  />
+                </Field>
+              </div>
+            )}
+
             {requiresEmail && (
               <>
                 <Field label="Sender mailbox" required>
@@ -246,7 +301,7 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
                   <p className="text-[11px] text-warning">
                     {senderOptions.length
                       ? 'Select an enabled, verified mailbox before creating this campaign.'
-                      : 'No sender mailboxes are available. Add and verify one in Settings before launching email outreach.'}
+                      : 'No sender mailboxes are available. Add and verify one in Integrations before launching email outreach.'}
                   </p>
                 )}
 
@@ -373,7 +428,9 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => previewMutation.mutate()}
+                  onClick={() =>
+                    previewMutation.mutate({ filter: form.targetFilter, channel: form.channel })
+                  }
                   disabled={filterLooksInvalid}
                   pending={previewMutation.isPending}
                   pendingLabel="Previewing…"
@@ -384,7 +441,7 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
             >
               {previewMutation.isPending ? (
                 <LoadingState label="Matching leads…" />
-              ) : previewMutation.data ? (
+              ) : previewCurrent && previewMutation.data ? (
                 <div className="space-y-2">
                   <p className="text-[13px] tabular-nums text-text-primary">
                     {formatCount(num(previewMutation.data.count))} leads match this filter.

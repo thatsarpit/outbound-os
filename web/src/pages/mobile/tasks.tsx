@@ -20,12 +20,13 @@ export default function MobileTasksPage() {
   const online = useOnlineStatus()
   const { timezone } = useWorkspaceTimezone()
   const client = useQueryClient()
+  const [ownership, setOwnership] = useState<'mine' | 'workspace'>('workspace')
   const [showAll, setShowAll] = useState(false)
   const [page, setPage] = useState(1)
   const result = useQuery({
     refetchOnWindowFocus: true,
-    queryKey: ['mobile-tasks', dashboardScope, page, showAll],
-    queryFn: () => tasksApi.listTeamTasks({ page, limit: 25, done: showAll }),
+    queryKey: ['mobile-tasks', dashboardScope, page, showAll, ownership],
+    queryFn: () => tasksApi.listTeamTasks({ page, limit: 25, done: showAll, scope: ownership }),
     refetchInterval: 30_000,
   })
   useEffect(() => {
@@ -62,6 +63,21 @@ export default function MobileTasksPage() {
             {all ? 'All follow-ups' : 'Pending'}
           </button>
         ))}
+      </div>
+      <div className="flex items-center gap-2 text-xs text-text-secondary">
+        <label htmlFor="task-ownership">Follow-ups for</label>
+        <select
+          id="task-ownership"
+          value={ownership}
+          onChange={(event) => {
+            setOwnership(event.target.value as 'mine' | 'workspace')
+            setPage(1)
+          }}
+          className="min-h-11 rounded-md border border-border bg-surface px-3 text-sm text-text-primary"
+        >
+          <option value="workspace">Workspace leads</option>
+          {user?.role !== 'viewer' && <option value="mine">My assigned leads</option>}
+        </select>
       </div>
       <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching} />
       {result.isPending ? (

@@ -1,3 +1,4 @@
+import { resolveMcpDelegation } from './mcpPersonal.js';
 /** Clerk authentication for this single-workspace installation.
  * Built-in org:admin maps to admin and org:member maps to sales agent.
  * Existing custom roles remain readable while old memberships are migrated.
@@ -49,7 +50,8 @@ export function requireRole(minRole) {
   // and it reads the sign-in page's HTML as if it were the API response.
   // Clerk's own migration note for this exact deprecation is getAuth() plus
   // a manual 401, which is what this does.
-  return (req, res, next) => {
+  return async (req, res, next) => {
+    if (await resolveMcpDelegation(req, res, next, minRole)) return;
     const authHeader = req.headers.authorization || '';
     const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
     if (matchesServiceToken(bearer)) {

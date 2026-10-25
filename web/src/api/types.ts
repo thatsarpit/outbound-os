@@ -13,7 +13,24 @@ export interface User {
   updatedAt: string
 }
 
+export interface AssignedWorkspaceMember {
+  key: string
+  name: string
+  provider: 'clerk' | 'local'
+  externalId: string
+  orgId: string
+  role: string | null
+  lastVerifiedAt: string | null
+}
+
 export interface Lead {
+  customer?: {
+    id: number
+    name: string
+    totalOrders: number
+    lifetimeValue: number | null
+    currency: string
+  } | null
   id: number
   externalId: string | null
   name: string
@@ -40,6 +57,8 @@ export interface Lead {
   telegramStatus: string
   assignedTelegramAccountId: number | null
   assignedToId: number | null
+  assignedMemberKey?: string | null
+  assignedMember?: AssignedWorkspaceMember | null
   assignedTo: User | null
   followupCount: number
   emailFollowupCount: number
@@ -150,6 +169,9 @@ export interface Campaign {
   emailSubject: string | null
   emailTemplateId: number | null
   senderAccountId: number | null
+  emailSenderAccountId?: number | null
+  whatsappSenderAccountId?: number | null
+  waCampaignName?: string | null
   status: 'draft' | 'scheduled' | 'running' | 'paused' | 'completed'
   targetFilter: string | null
   variantBTemplate: string | null
@@ -173,7 +195,8 @@ export interface CampaignLead {
   id: number
   campaignId: number
   leadId: number
-  status: 'pending' | 'sent' | 'failed' | 'replied'
+  status: 'pending' | 'sent' | 'failed' | 'replied' | 'skipped'
+  skipReason?: string | null
   sentAt: string | null
   variant: 'A' | 'B'
 }
@@ -295,6 +318,7 @@ export interface LeadPoolAccounts {
 }
 
 export interface ActivityLog {
+  read?: boolean
   id: number | string
   type: string
   message: string
@@ -510,6 +534,8 @@ export interface InboxThreadSummary {
   senderAccountId: number | null
   assignedEmailAccountId: number | null
   assignedToId: number | null
+  assignedMemberKey?: string | null
+  assignedMember?: AssignedWorkspaceMember | null
   unread: boolean
   replyNeeded: boolean
   lastMessage: string

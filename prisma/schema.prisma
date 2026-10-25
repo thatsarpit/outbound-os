@@ -29,6 +29,21 @@ model User {
   sentInvitations Invitation[]
 }
 
+// Provider-scoped directory snapshots label assignments without creating sign-in users.
+model WorkspaceMember {
+  key            String   @id
+  provider       String
+  externalId     String
+  orgId          String
+  name           String
+  email          String?
+  role           String
+  lastVerifiedAt DateTime
+  leads          Lead[]
+
+  @@unique([provider, orgId, externalId])
+}
+
 model Lead {
   /// Reserved for a future multi-workspace mode; always null today.
   tenantId   Int?
@@ -60,6 +75,9 @@ model Lead {
   // Agent assignment (which team member owns this lead)
   assignedToId Int? // FK to User.id — null = unassigned
   assignedTo   User? @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  assignedMemberKey String?
+  assignedMember WorkspaceMember? @relation(fields: [assignedMemberKey], references: [key], onDelete: SetNull)
 
   // Resolving a conversation does not close the sales lead or change opt-outs.
   inboxResolvedAt DateTime?
@@ -161,6 +179,7 @@ model Lead {
   @@index([originSupplierId])
   @@index([assignedAccount])
   @@index([assignedToId])
+  @@index([assignedMemberKey])
   @@index([poolId])
   @@index([assignedTelegramAccountId])
 }
@@ -321,7 +340,9 @@ model Campaign {
   messageTemplate String // template with {{placeholders}} (WA body or email body)
   emailSubject    String? // email subject template (email/both campaigns only)
   emailTemplateId Int? // FK to EmailTemplate for HTML rendering (email campaigns)
-  senderAccountId Int? // specific WA or email account ID to send from
+  senderAccountId Int? // Legacy: email for email/both, WhatsApp for whatsapp campaigns
+  emailSenderAccountId Int?
+  whatsappSenderAccountId Int?
   /// Approved Meta template sent by this campaign.
   /// Set it and WhatsApp sends go out as that template rather than as free
   /// text — the only transport WhatsApp accepts outside the 24h service
@@ -361,7 +382,8 @@ model CampaignLead {
   leadId     Int
   lead       Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
   status     String    @default("pending")
-  // pending | sent | failed | replied
+  // pending | sent | failed | replied | skipped
+  skipReason String?
   sentAt     DateTime?
   variant    String    @default("A") // A | B (for A/B testing)
 
@@ -1296,6 +1318,51 @@ model DashboardPreference {
   @@unique([ownerKey, page])
 }
 
+// Personal notification reads survive browser changes without changing inbox resolution.
+model NotificationCursor {
+  viewerKey String @id
+  readThroughId Int @default(0)
+  updatedAt DateTime @updatedAt
+}
+
+// Durable MIME receipt ledger also retains mail that has not matched a CRM lead.
+model InboundEmailReceipt {
+  id Int @id @default(autoincrement())
+  provider String
+  dedupeKey String @unique
+  payloadHash String
+  envelopeFrom String
+  envelopeTo String
+  emailAccountId Int?
+  messageId Int?
+  rfcMessageId String?
+  state String @default("pending")
+  reason String?
+  rawPath String?
+  attachmentMetadata String?
+  receivedAt DateTime @default(now())
+  processedAt DateTime?
+
+  @@index([state, receivedAt])
+  @@index([emailAccountId])
+}
+
+model NotificationRead {
+  viewerKey String
+  activityId Int
+  createdAt DateTime @default(now())
+
+  @@id([viewerKey, activityId])
+}
+
+// Opt-in personal MCP authorization ledger; writes use revision compare-and-swap.
+model McpAuthorizationStore {
+  id String @id
+  revision Int @default(0)
+  value String
+  updatedAt DateTime @updatedAt
+}
+
 // Endpoints and encryption keys are stored as one encrypted subscription.
 model WebPushSubscription {
   id              Int      @id @default(autoincrement())
@@ -1329,23 +1396,3 @@ model WhatsAppReceipt {
 }
 
 // Durable, private inbound MIME receipt ledger.
-model InboundEmailReceipt {
-  id Int @id @default(autoincrement())
-  provider String
-  dedupeKey String @unique
-  payloadHash String
-  envelopeFrom String
-  envelopeTo String
-  emailAccountId Int?
-  messageId Int?
-  rfcMessageId String?
-  state String @default("pending")
-  reason String?
-  rawPath String?
-  attachmentMetadata String?
-  receivedAt DateTime @default(now())
-  processedAt DateTime?
-
-  @@index([state, receivedAt])
-  @@index([emailAccountId])
-}

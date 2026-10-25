@@ -2,6 +2,8 @@ import express from 'express';
 import prisma from '../utils/prismaClient.js';
 import { requireRole } from '../auth/index.js';
 import orderNotifier from '../services/orderNotifier.js';
+import { currencyTotals, customerOrderValues, revenueCurrencySummaries, singleCurrencyTotal } from '../utils/moneyGroups.js';
+import { workspaceTimezone, zonedParts, zonedTimeToUtc } from '../utils/workspaceTime.js';
 
 /**
  * Customers and revenue.
@@ -17,6 +19,16 @@ const toInt = (v, d = 0) => {
   const n = Number(v);
   return Number.isFinite(n) ? Math.round(n) : d;
 };
+
+/** Read full monetary history in its stored currencies, not a mutable preference. */
+async function withCustomerValues(customers) {
+  if (!customers.length) return [];
+  const orders = await prisma.salesOrder.findMany({
+    where: { customerId: { in: customers.map(row => row.id) }, status: { notIn: ['draft', 'cancelled'] } },
+    select: { customerId: true, total: true, currency: true, createdAt: true },
+  });
+  return customers.map(customer => ({ ...customer, ...customerOrderValues(orders.filter(order => order.customerId === customer.id)) }));
+}
 
 // ── Customers ────────────────────────────────────────────────────────────────
 
@@ -36,8 +48,9 @@ router.get('/customers', requireRole('agent'), async (req, res) => {
       });
     }
     const where = and.length ? { AND: and } : {};
-    const allowed = ['lastOrderAt', 'lifetimeValue', 'totalOrders', 'name', 'createdAt'];
-    const take = Math.min(100, toInt(limit, 25));
+    if (sortBy === 'lifetimeValue') return res.status(400).json({ error: 'Customer values are reported by currency. Sort by last order, order count or name instead.' });
+    const allowed = ['lastOrderAt', 'totalOrders', 'name', 'createdAt'];
+    const take = Math.max(1, Math.min(100, toInt(limit, 25)));
     const skip = (Math.max(1, toInt(page, 1)) - 1) * take;
 
     const [customers, total] = await Promise.all([
@@ -49,7 +62,7 @@ router.get('/customers', requireRole('agent'), async (req, res) => {
       }),
       prisma.customer.count({ where }),
     ]);
-    res.json({ data: customers, total, page: toInt(page, 1), pages: Math.ceil(total / take) || 1 });
+    res.json({ data: await withCustomerValues(customers), total, page: Math.max(1, toInt(page, 1)), pages: Math.ceil(total / take) || 1 });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -57,21 +70,30 @@ router.get('/customers', requireRole('agent'), async (req, res) => {
 
 router.get('/customers/stats', requireRole('agent'), async (_req, res) => {
   try {
-    const [totals, top] = await Promise.all([
-      prisma.customer.aggregate({ _count: { id: true }, _sum: { lifetimeValue: true } }),
-      prisma.customer.findMany({
-        where: { totalOrders: { gt: 0 } },
-        orderBy: { lifetimeValue: 'desc' },
-        take: 5,
-        select: { id: true, name: true, company: true, lifetimeValue: true, totalOrders: true, currency: true },
+    const [customers, orders] = await Promise.all([
+      prisma.customer.findMany({ select: { id: true, name: true, company: true, currency: true } }),
+      prisma.salesOrder.findMany({
+        where: { customerId: { not: null }, status: { notIn: ['draft', 'cancelled'] } },
+        select: { customerId: true, total: true, currency: true, createdAt: true },
       }),
     ]);
-    const repeat = await prisma.customer.count({ where: { totalOrders: { gt: 1 } } });
+    const lifetimeValueByCurrency = currencyTotals(orders);
+    const customerValues = customers.map(customer => ({ ...customer, ...customerOrderValues(orders.filter(order => order.customerId === customer.id)) }));
+    const topCustomersByCurrency = lifetimeValueByCurrency.map(({ currency }) => ({
+      currency,
+      customers: customerValues.map(customer => ({
+        id: customer.id, name: customer.name, company: customer.company,
+        currency, totalOrders: customer.totalOrders,
+        lifetimeValue: customer.lifetimeValueByCurrency.find(row => row.currency === currency)?.total || 0,
+      })).filter(customer => customer.lifetimeValue > 0).sort((a, b) => b.lifetimeValue - a.lifetimeValue).slice(0, 5),
+    }));
     res.json({
-      customerCount: totals._count.id || 0,
-      lifetimeValue: totals._sum.lifetimeValue || 0,
-      repeatCustomers: repeat,
-      topCustomers: top,
+      customerCount: customers.length,
+      lifetimeValue: singleCurrencyTotal(lifetimeValueByCurrency),
+      lifetimeValueByCurrency,
+      repeatCustomers: customerValues.filter(customer => customer.totalOrders > 1).length,
+      topCustomers: topCustomersByCurrency.length === 1 ? topCustomersByCurrency[0].customers : [],
+      topCustomersByCurrency,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -96,7 +118,7 @@ router.get('/customers/:id', requireRole('agent'), async (req, res) => {
       },
     });
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
-    res.json(customer);
+    res.json((await withCustomerValues([customer]))[0]);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -145,7 +167,7 @@ router.patch('/customers/:id', requireRole('agent'), async (req, res) => {
     }
     // Rollups are derived; refuse to let a request body set them.
     const customer = await prisma.customer.update({ where: { id: toInt(req.params.id) }, data });
-    res.json(customer);
+    res.json((await withCustomerValues([customer]))[0]);
   } catch (e) {
     if (e.code === 'P2025') return res.status(404).json({ error: 'Customer not found' });
     res.status(500).json({ error: e.message });
@@ -170,7 +192,7 @@ router.post('/leads/:id/convert', requireRole('agent'), async (req, res) => {
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
     const existing = await prisma.customer.findUnique({ where: { leadId } });
-    if (existing) return res.json(existing);
+    if (existing) return res.json((await withCustomerValues([existing]))[0]);
 
     const customer = await prisma.customer.create({
       data: {
@@ -197,53 +219,46 @@ router.post('/leads/:id/convert', requireRole('agent'), async (req, res) => {
 router.get('/revenue/summary', requireRole('agent'), async (req, res) => {
   try {
     const months = Math.min(24, Math.max(1, toInt(req.query.months, 12)));
-    const since = new Date();
-    since.setMonth(since.getMonth() - months);
-    since.setHours(0, 0, 0, 0);
-
-    const orders = await prisma.salesOrder.findMany({
-      where: { status: { notIn: ['draft', 'cancelled'] }, createdAt: { gte: since } },
-      select: { createdAt: true, total: true, currency: true, country: true, customerId: true },
-    });
-
-    // Grouped in JS rather than SQL so this stays portable to Postgres — the
-    // volume here is orders, not messages, so it is not a scale concern.
-    const byMonth = new Map();
-    const byCountry = new Map();
-    for (const o of orders) {
-      const key = `${o.createdAt.getFullYear()}-${String(o.createdAt.getMonth() + 1).padStart(2, '0')}`;
-      byMonth.set(key, (byMonth.get(key) || 0) + (o.total || 0));
-      const c = o.country || 'Unknown';
-      byCountry.set(c, (byCountry.get(c) || 0) + (o.total || 0));
-    }
-
-    const [invoiceAgg, unpaid] = await Promise.all([
-      prisma.salesInvoice.aggregate({
-        where: { status: { in: ['issued', 'partially_paid', 'paid'] } },
-        _sum: { total: true, amountPaid: true },
+    const timezone = workspaceTimezone();
+    const today = zonedParts(new Date(), timezone);
+    const since = zonedTimeToUtc(today.year, today.month - months, today.day, 0, 0, timezone);
+    const invoicePage = Math.max(1, toInt(req.query.invoicePage, 1));
+    const currencyFilter = String(req.query.currency || '').trim().toUpperCase();
+    if (currencyFilter && !/^[A-Z]{3,10}$/.test(currencyFilter)) return res.status(400).json({ error: 'Choose a valid currency.' });
+    const unpaidWhere = { status: { in: ['issued', 'partially_paid'] }, ...(currencyFilter ? { currency: currencyFilter } : {}) };
+    const [orders, invoices, unpaid, unpaidInvoiceCount] = await Promise.all([
+      prisma.salesOrder.findMany({
+        where: { status: { notIn: ['draft', 'cancelled'] }, createdAt: { gte: since } },
+        select: { createdAt: true, total: true, currency: true, country: true },
       }),
       prisma.salesInvoice.findMany({
-        where: { status: { in: ['issued', 'partially_paid'] } },
+        where: { status: { in: ['issued', 'partially_paid', 'paid'] } },
+        select: { total: true, amountPaid: true, currency: true },
+      }),
+      prisma.salesInvoice.findMany({
+        where: unpaidWhere,
         select: { id: true, number: true, total: true, amountPaid: true, dueAt: true, currency: true,
           order: { select: { id: true, orderNumber: true, customerName: true } } },
-        orderBy: { dueAt: 'asc' },
-        take: 25,
+        orderBy: [{ dueAt: 'asc' }, { id: 'asc' }], take: 25, skip: (invoicePage - 1) * 25,
       }),
+      prisma.salesInvoice.count({ where: unpaidWhere }),
     ]);
-
-    const invoiced = invoiceAgg._sum.total || 0;
-    const collected = invoiceAgg._sum.amountPaid || 0;
-
+    const byCurrency = revenueCurrencySummaries(orders, invoices, date => {
+      const part = zonedParts(new Date(date), timezone);
+      return `${part.year}-${String(part.month + 1).padStart(2, '0')}`;
+    });
+    const single = byCurrency.length === 1 ? byCurrency[0] : null;
     res.json({
-      months: [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, total]) => ({ month, total })),
-      byCountry: [...byCountry.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10)
-        .map(([country, total]) => ({ country, total })),
-      bookedTotal: orders.reduce((s, o) => s + (o.total || 0), 0),
+      byCurrency,
+      currency: single?.currency || null,
+      months: single?.months || [], byCountry: single?.byCountry || [],
+      bookedTotal: byCurrency.length > 1 ? null : single?.bookedTotal || 0,
       orderCount: orders.length,
-      invoiced,
-      collected,
-      outstanding: Math.max(0, invoiced - collected),
-      unpaidInvoices: unpaid,
+      invoiced: byCurrency.length > 1 ? null : single?.invoiced || 0,
+      collected: byCurrency.length > 1 ? null : single?.collected || 0,
+      outstanding: byCurrency.length > 1 ? null : single?.outstanding || 0,
+      period: { since: since.toISOString(), timezone, orderDateBasis: 'createdAt', invoiceScope: 'lifetime' },
+      unpaidInvoices: unpaid, unpaidInvoiceCount, invoicePage, invoicePages: Math.ceil(unpaidInvoiceCount / 25) || 1,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

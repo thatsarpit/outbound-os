@@ -15,9 +15,21 @@ import {
 } from '@/components/ui'
 import type { EmailAccount } from '@/api/types'
 import { cn, formatRelativeTime } from '@/lib/utils'
-import { Loader2, Mail, Plus, TestTube, Trash2, X } from 'lucide-react'
+import { Loader2, Mail, Plus, TestTube, Trash2 } from 'lucide-react'
 import { InfoTile } from '@/components/integrations/integration-helpers'
+import { emailAccountHealth, emailHealthSummary } from '@/lib/email-health'
+import { toast } from '@/stores/toast-store'
 import { EmailReceipts } from '@/components/integrations/email-receipts'
+
+const RECEIVING_LABELS = {
+  not_configured: 'Not connected',
+  paused: 'Paused',
+  error: 'Check connection',
+  never_synced: 'Waiting for first sync',
+  invalid_timestamp: 'Sync time unavailable',
+  stale: 'Sync stale',
+  current: 'Sync current',
+}
 
 export default function EmailSection() {
   const queryClient = useQueryClient()
@@ -36,26 +48,33 @@ export default function EmailSection() {
     queryKey: ['email-accounts', dashboardScope],
     queryFn: async () => {
       const res = await api.get<EmailAccount[]>('/email/accounts')
-      if (!res) throw new Error('Empty response')
+      if (!Array.isArray(res)) throw new Error('The email account response was incomplete.')
       return res
     },
     refetchInterval: 30_000,
   })
 
   const accounts = Array.isArray(rawAccounts) ? rawAccounts : []
-  const syncTimes = accounts
-    .map((account) => account.lastSyncAt)
-    .filter((value): value is string => Boolean(value))
-    .sort()
-  const lastSync = syncTimes[syncTimes.length - 1]
+  const summary = emailHealthSummary(accounts)
 
   const testMutation = useMutation({
-    mutationFn: (id: number) => api.post(`/email/accounts/${id}/test`),
+    mutationFn: async (id: number) => {
+      const result = await api.post<{ success: boolean; error?: string }>(
+        `/email/accounts/${id}/test`,
+      )
+      if (!result?.success)
+        throw new Error(result?.error || 'The sending provider could not be verified.')
+      return result
+    },
+    onSuccess: () => toast.success('Sending provider verified. No email was sent.'),
+    onError: (error: Error) => toast.error(error.message),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ['email-accounts'] }),
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => api.delete(`/email/accounts/${id}`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['email-accounts'] }),
+    onError: (error: Error) => toast.error(error.message),
   })
 
   if (isLoading) {
@@ -80,19 +99,23 @@ export default function EmailSection() {
   return (
     <div className="space-y-4">
       {accountsError && (
-        <p role="alert" className="rounded-md border border-danger/30 p-4 text-sm text-danger">
-          Email accounts could not be loaded.{' '}
-          <button className="min-h-11 underline" onClick={() => void refetch()}>
+        <div role="alert" className="rounded-lg border border-danger/30 bg-surface p-4">
+          <p className="text-sm text-text-secondary">
+            Email connections could not be updated.
+            {rawAccounts ? ' Showing previously loaded accounts.' : ''}
+          </p>
+          <Button className="mt-3" size="sm" variant="secondary" onClick={() => void refetch()}>
             Try again
-          </button>
-        </p>
+          </Button>
+        </div>
       )}
       <div className="rounded-lg border border-border bg-surface px-5 py-5 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-sm font-semibold">Email accounts</p>
+            <p className="text-sm font-semibold">Email connections</p>
             <p className="mt-1 text-sm text-text-secondary">
-              {accounts.length} email accounts configured for sending and testing.
+              Manage sending providers and reply inboxes separately. Sending verification does not
+              verify receiving.
             </p>
           </div>
           <Button
@@ -106,108 +129,171 @@ export default function EmailSection() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <InfoTile label="Accounts" value={`${accounts.length}`} detail="Total configured inboxes" />
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <InfoTile
-          label="Enabled"
-          value={`${accounts.filter((acc) => acc.enabled).length}`}
-          detail="Active sending inboxes"
+          label="Accounts"
+          value={accountsError && !rawAccounts ? '—' : `${summary.total}`}
+          detail={
+            accountsError && !rawAccounts
+              ? 'Connection data unavailable'
+              : `${summary.enabled} enabled · ${summary.total - summary.enabled} disabled`
+          }
         />
         <InfoTile
-          label="Last Sync"
-          value={lastSync ? formatRelativeTime(lastSync) : 'Never'}
-          detail="Most recent mailbox check; not a delivery guarantee"
+          label="Sending verified"
+          value={
+            accountsError && !rawAccounts ? '—' : `${summary.sendingVerified} / ${summary.enabled}`
+          }
+          detail="Enabled accounts with a verified provider"
+        />
+        <InfoTile
+          label="Reply inbox checks"
+          value={
+            accountsError && !rawAccounts
+              ? '—'
+              : `${summary.receivingCurrent} / ${summary.receivingEnabled}`
+          }
+          detail={`${summary.receivingStale} stale · ${summary.receivingUnconfirmed} unconfirmed`}
+        />
+        <InfoTile
+          label="Latest successful sync"
+          value={
+            accountsError && !rawAccounts
+              ? 'Unavailable'
+              : summary.lastSyncAt
+                ? formatRelativeTime(summary.lastSyncAt)
+                : 'No sync'
+          }
+          detail="Enabled reply inboxes; each inbox must sync within 15 minutes"
         />
       </div>
+
+      {canConfigure && <EmailReceipts key={dashboardScope} accounts={accounts} />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {accounts.map((acc) => (
-          <div key={acc.id} className="card-hover glass overflow-hidden rounded-lg">
-            <div className="border-b border-border bg-surface/70 p-5">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-accent-muted">
-                    <Mail className="w-4 h-4 text-accent" />
+        {accounts.map((acc) => {
+          const health = emailAccountHealth(acc)
+          return (
+            <div key={acc.id} className="card-hover glass overflow-hidden rounded-lg">
+              <div className="border-b border-border bg-surface/70 p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-accent-muted">
+                      <Mail className="w-4 h-4 text-accent" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold truncate">{acc.name || acc.email}</p>
+                      <p className="text-text-muted text-xs truncate">{acc.email}</p>
+                    </div>
                   </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold truncate">{acc.name || acc.email}</p>
-                    <p className="text-text-muted text-xs truncate">{acc.email}</p>
-                  </div>
+                  <span
+                    className={cn(
+                      'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase',
+                      'bg-surface-raised text-text-secondary',
+                    )}
+                  >
+                    {acc.enabled ? 'Enabled' : 'Disabled'}
+                  </span>
                 </div>
-                <span
-                  className={cn(
-                    'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase',
-                    acc.enabled
-                      ? 'bg-success-muted text-success'
-                      : 'bg-surface-raised text-text-muted',
-                  )}
-                >
-                  {acc.enabled ? (
-                    <div className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
-                  ) : (
-                    <div className="h-1.5 w-1.5 rounded-full bg-text-muted" />
-                  )}
-                  {acc.enabled ? 'Active' : 'Disabled'}
-                </span>
-              </div>
 
-              <div className="flex flex-wrap gap-2 text-[11px]">
-                <span className="rounded-full bg-surface-raised px-2.5 py-1 text-text-muted">
-                  {acc.provider}
-                </span>
-                <span className="rounded-full bg-surface-raised px-2.5 py-1 text-text-muted">
-                  {acc.sentToday} sent today
-                </span>
-                <span className="rounded-full bg-surface-raised px-2.5 py-1 text-text-muted">
-                  Last sync {acc.lastSyncAt ? formatRelativeTime(acc.lastSyncAt) : 'Never'}
-                </span>
+                <div className="flex flex-wrap gap-2 text-[11px]">
+                  <span className="rounded-full bg-surface-raised px-2.5 py-1 text-text-muted">
+                    {acc.provider}
+                  </span>
+                  <span className="rounded-full bg-surface-raised px-2.5 py-1 text-text-muted">
+                    {acc.sentToday} sent today
+                  </span>
+                  <span className="rounded-full bg-surface-raised px-2.5 py-1 text-text-muted">
+                    {acc.provider === 'brevo' ? 'API key' : 'SMTP / IMAP credentials'}
+                  </span>
+                </div>
+              </div>
+              <div className="p-5">
+                <dl className="mb-4 space-y-2 text-xs">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <dt className="text-text-muted">Sending provider</dt>
+                    <dd
+                      className={
+                        health.sending === 'verified'
+                          ? 'text-success'
+                          : health.sending === 'error'
+                            ? 'text-danger'
+                            : 'text-text-secondary'
+                      }
+                    >
+                      {health.sending === 'verified'
+                        ? 'Verified'
+                        : health.sending === 'error'
+                          ? 'Verification failed'
+                          : health.sending === 'paused'
+                            ? 'Paused'
+                            : 'Not verified'}
+                    </dd>
+                  </div>
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <dt className="text-text-muted">Receiving replies</dt>
+                    <dd
+                      className={
+                        health.receiving === 'current'
+                          ? 'text-success'
+                          : ['stale', 'error', 'invalid_timestamp'].includes(health.receiving)
+                            ? 'text-warning'
+                            : 'text-text-secondary'
+                      }
+                    >
+                      {RECEIVING_LABELS[health.receiving]}
+                    </dd>
+                  </div>
+                </dl>
+                <p className="mb-3 text-xs text-text-secondary">
+                  {acc.imapHost
+                    ? `IMAP: ${acc.imapUser || 'Mailbox address missing'} · ${health.lastSyncAt ? `last success ${formatRelativeTime(health.lastSyncAt)}` : 'no confirmed successful sync'}`
+                    : 'Connect a reply inbox to receive customer messages.'}
+                </p>
+                {acc.lastError && (
+                  <p className="mb-3 break-words text-xs text-danger">
+                    Last reported error: {acc.lastError}
+                  </p>
+                )}
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={!canConfigure}
+                    onClick={() => setInboxAccount(acc)}
+                  >
+                    {acc.imapHost === 'imap.gmail.com'
+                      ? 'Gmail inbox settings'
+                      : 'Set up Gmail via IMAP'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    isLoading={testMutation.isPending && testMutation.variables === acc.id}
+                    disabled={!canConfigure}
+                    onClick={() => testMutation.mutate(acc.id)}
+                    leftIcon={<TestTube className="w-3.5 h-3.5" />}
+                  >
+                    Verify sending
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="hover:text-danger hover:bg-danger-muted"
+                    disabled={!canConfigure}
+                    onClick={() => setConfirmDelete(acc)}
+                    leftIcon={<Trash2 className="w-3.5 h-3.5" />}
+                  >
+                    Delete
+                  </Button>
+                </div>
               </div>
             </div>
-            <div className="p-5">
-              <p className="mb-3 text-xs text-text-secondary">
-                {acc.imapHost
-                  ? `Replies: ${acc.imapUser} · ${acc.lastSyncAt ? `checked ${formatRelativeTime(acc.lastSyncAt)}` : 'first sync pending'}`
-                  : 'Reply inbox not connected'}
-              </p>
-              {acc.imapHost && acc.lastError && (
-                <p className="mb-3 text-xs text-danger">{acc.lastError}</p>
-              )}
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={!canConfigure}
-                  onClick={() => setInboxAccount(acc)}
-                >
-                  {acc.imapHost ? 'Inbox settings' : 'Connect Gmail inbox'}
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  isLoading={testMutation.isPending}
-                  disabled={!canConfigure}
-                  onClick={() => testMutation.mutate(acc.id)}
-                  leftIcon={<TestTube className="w-3.5 h-3.5" />}
-                >
-                  Test
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="hover:text-danger hover:bg-danger-muted"
-                  disabled={!canConfigure}
-                  onClick={() => setConfirmDelete(acc)}
-                  leftIcon={<Trash2 className="w-3.5 h-3.5" />}
-                >
-                  Delete
-                </Button>
-              </div>
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
-      {!accountsError && accounts.length === 0 && (
+      {accounts.length === 0 && !accountsError && (
         <div className="rounded-md border border-dashed border-border bg-surface px-6 py-12 text-center">
           <Mail className="mx-auto mb-2 h-10 w-10 text-text-muted/40 animate-pulse" />
           <p className="text-text-secondary text-sm">No email accounts configured</p>
@@ -216,8 +302,6 @@ export default function EmailSection() {
           </p>
         </div>
       )}
-
-      {canConfigure && <EmailReceipts key={dashboardScope} accounts={accounts} />}
 
       {showAdd && <AddEmailModal onClose={() => setShowAdd(false)} />}
       {inboxAccount && (
@@ -271,9 +355,10 @@ function GmailInboxModal({ account, onClose }: { account: EmailAccount; onClose:
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Connect Gmail reply inbox</DialogTitle>
+          <DialogTitle>Gmail reply inbox · IMAP</DialogTitle>
           <DialogDescription>
-            Receive replies here while keeping your existing sending provider.
+            This connection uses a Google app password. Google OAuth mailbox authorization is not
+            available yet.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -283,6 +368,12 @@ function GmailInboxModal({ account, onClose }: { account: EmailAccount; onClose:
             mutation.mutate()
           }}
         >
+          {account.imapHost && account.imapHost !== 'imap.gmail.com' && (
+            <p className="text-xs leading-5 text-warning">
+              Saving replaces this account’s receiving connection at {account.imapHost} with Gmail
+              IMAP. The sending provider stays the same.
+            </p>
+          )}
           <Input
             label="Gmail inbox address"
             type="email"
@@ -362,8 +453,12 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
       api.post<{ success: boolean; error?: string }>('/email/accounts/test-config', {
         provider: form.provider,
         email: form.email,
-        smtpHost: form.smtpHost || (form.provider === 'gmail' ? 'smtp.gmail.com' : ''),
-        smtpPort: form.smtpPort,
+        smtpHost: form.provider === 'custom' ? form.smtpHost : providers?.[form.provider]?.smtpHost,
+        smtpPort: form.provider === 'custom' ? form.smtpPort : providers?.[form.provider]?.smtpPort,
+        smtpSecure:
+          form.provider === 'custom'
+            ? Number(form.smtpPort) === 465
+            : providers?.[form.provider]?.smtpSecure,
         smtpUser: form.smtpUser,
         smtpPass: form.smtpPass,
       }),
@@ -375,7 +470,9 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
     queryKey: ['email-providers'],
     queryFn: async () => {
       const res =
-        await api.get<Record<string, { smtpHost: string; smtpPort: number }>>('/email/providers')
+        await api.get<Record<string, { smtpHost: string; smtpPort: number; smtpSecure: boolean }>>(
+          '/email/providers',
+        )
       if (!res) throw new Error('Empty response')
       return res
     },
@@ -384,65 +481,78 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
   const providerList = providers
     ? Object.entries(providers).map(([id, config]) => ({
         id,
-        name: id.charAt(0).toUpperCase() + id.slice(1),
+        name:
+          id === 'gmail'
+            ? 'Gmail · app password'
+            : id === 'outlook'
+              ? 'Outlook · manual credentials'
+              : id.charAt(0).toUpperCase() + id.slice(1),
         smtpHost: config.smtpHost,
         smtpPort: config.smtpPort,
       }))
     : []
 
   const mutation = useMutation({
-    mutationFn: () => api.post('/email/accounts', form),
+    mutationFn: () =>
+      api.post('/email/accounts', {
+        ...form,
+        ...(form.provider === 'custom'
+          ? { smtpSecure: Number(form.smtpPort) === 465 }
+          : { smtpHost: undefined, smtpPort: undefined }),
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['email-accounts'] })
       onClose()
     },
   })
+  const pending = mutation.isPending || testConfigMutation.isPending
+  function changeForm(updates: Partial<typeof form>) {
+    setTestResult(null)
+    setForm((current) => ({ ...current, ...updates }))
+  }
 
   return (
-    <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-      onClick={onClose}
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !pending) onClose()
+      }}
     >
-      <div
-        className="bg-surface rounded-lg w-full max-w-md max-h-[85vh] overflow-y-auto border border-border shadow-2xl overflow-hidden animate-slide-up"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="border-b border-border bg-linear-to-br from-accent-muted/25 via-surface to-surface px-6 py-5">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-text-muted">
-                Email integration
-              </p>
-              <h2 className="mt-2 text-lg font-semibold tracking-tight">Add Email Account</h2>
-              <p className="mt-1 text-sm text-text-secondary">
-                Connect your sending provider and verify its credentials.
-              </p>
-            </div>
-            <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close">
-              <X className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-        <div className="p-6 space-y-3">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add email account</DialogTitle>
+          <DialogDescription>
+            Connect a sending provider with an API key or manual mail credentials.
+          </DialogDescription>
+        </DialogHeader>
+        <fieldset disabled={pending} className="p-6 space-y-3">
           <UISelectField
             label="Provider"
             value={form.provider}
-            onValueChange={(v) => setForm({ ...form, provider: v })}
+            disabled={pending}
+            onValueChange={(v) => changeForm({ provider: v })}
             options={[
               ...providerList.map((p) => ({ value: p.id, label: p.name })),
               { value: 'custom', label: 'Custom SMTP' },
             ]}
           />
+          {(form.provider === 'gmail' || form.provider === 'outlook') && (
+            <p className="text-xs leading-5 text-text-secondary">
+              This is a manual SMTP/IMAP connection. It does not open Google or Microsoft OAuth.
+              {form.provider === 'gmail' &&
+                ' Use a Google app password, not your normal account password.'}
+            </p>
+          )}
           <Input
             label="Name"
             value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            onChange={(e) => changeForm({ name: e.target.value })}
           />
           <Input
             label="Email"
             type="email"
             value={form.email}
-            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            onChange={(e) => changeForm({ email: e.target.value })}
             required
           />
           {form.provider === 'custom' && (
@@ -450,12 +560,12 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
               <Input
                 label="SMTP Host"
                 value={form.smtpHost}
-                onChange={(e) => setForm({ ...form, smtpHost: e.target.value })}
+                onChange={(e) => changeForm({ smtpHost: e.target.value })}
               />
               <Input
                 label="SMTP Port"
                 value={form.smtpPort}
-                onChange={(e) => setForm({ ...form, smtpPort: e.target.value })}
+                onChange={(e) => changeForm({ smtpPort: e.target.value })}
               />
             </>
           )}
@@ -463,7 +573,7 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
             <Input
               label="SMTP User"
               value={form.smtpUser}
-              onChange={(e) => setForm({ ...form, smtpUser: e.target.value })}
+              onChange={(e) => changeForm({ smtpUser: e.target.value })}
             />
           )}
           <Input
@@ -476,7 +586,7 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
             autoComplete="new-password"
             type="password"
             value={form.smtpPass}
-            onChange={(e) => setForm({ ...form, smtpPass: e.target.value })}
+            onChange={(e) => changeForm({ smtpPass: e.target.value })}
           />
           {mutation.error && (
             <p role="alert" className="text-sm text-danger">
@@ -493,15 +603,22 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
                   : 'border-danger/20 bg-danger-muted/40 text-danger',
               )}
             >
-              {testResult.success ? '✓ Sending provider verified' : `✗ ${testResult.error}`}
+              {testResult.success
+                ? 'Sending credentials checked. Save the account, then verify it to enable sending.'
+                : testResult.error}
             </div>
           )}
-        </div>
+        </fieldset>
         <div className="border-t border-border bg-surface/70 px-6 py-4 flex justify-between gap-2">
           <Button
             variant="secondary"
             size="sm"
-            disabled={!form.smtpPass || (form.provider === 'brevo' ? !form.email : !form.smtpUser)}
+            disabled={
+              mutation.isPending ||
+              !form.smtpPass ||
+              (form.provider === 'brevo' ? !form.email : !form.smtpUser) ||
+              (form.provider !== 'custom' && !providers)
+            }
             isLoading={testConfigMutation.isPending}
             onClick={() => {
               setTestResult(null)
@@ -512,19 +629,24 @@ function AddEmailModal({ onClose }: { onClose: () => void }) {
             Test connection
           </Button>
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={onClose}>
+            <Button variant="ghost" disabled={pending} onClick={onClose}>
               Cancel
             </Button>
             <Button
               onClick={() => mutation.mutate()}
-              disabled={!form.email || !form.smtpPass}
+              disabled={
+                testConfigMutation.isPending ||
+                !form.email ||
+                !form.smtpPass ||
+                (form.provider !== 'brevo' && !form.smtpUser)
+              }
               isLoading={mutation.isPending}
             >
               Add
             </Button>
           </div>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

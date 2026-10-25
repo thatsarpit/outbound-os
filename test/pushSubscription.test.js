@@ -26,3 +26,25 @@ test('push endpoint credentials are encrypted with authentication and hashed sep
     else process.env.LEAD_SYNC_ENCRYPTION_KEY = old;
   }
 });
+
+test('notification inventory has safe labels and never serializes subscription credentials', async () => {
+  const { publicPushDevice, pushDeviceId, pushDeviceLabel } = await import('../src/utils/pushSubscription.js');
+  const old = process.env.LEAD_SYNC_ENCRYPTION_KEY;
+  process.env.LEAD_SYNC_ENCRYPTION_KEY = 'fixture-encryption-key-with-32-characters';
+  try {
+    const encryptedData = encryptPushSubscription(valid, '  Safari on iPhone\n\u202E  ');
+    const row = { id: 3, encryptedData, enabled: true, vapidKey: 'fixture-key', createdAt: '2026-10-24T00:00:00Z', viewerKey: 'private-viewer', endpointHash: 'private-hash' };
+    assert.deepEqual(publicPushDevice(row, 'fixture-key'), { id: 3, label: 'Safari on iPhone', enabled: true, needsReconnect: false, registeredAt: row.createdAt });
+    assert.equal(publicPushDevice(row, 'rotated-key').needsReconnect, true);
+    assert.deepEqual(decryptPushSubscription(encryptedData), valid, 'web push receives no label metadata');
+    assert.doesNotMatch(JSON.stringify(publicPushDevice(row, 'fixture-key')), /endpoint|keys|encryptedData|vapidKey|viewerKey|private/);
+    assert.equal(publicPushDevice({ ...row, encryptedData: 'corrupt' }, 'fixture-key').label, 'Notification device');
+    assert.equal(pushDeviceLabel('a'.repeat(100)).length, 64);
+    assert.equal(pushDeviceLabel(null), 'Notification device');
+    assert.equal(pushDeviceId('12'), 12);
+    for (const id of ['0', '01', '1junk', '-1', '1.1', '9007199254740992', undefined, 2]) assert.equal(pushDeviceId(id), null);
+  } finally {
+    if (old === undefined) delete process.env.LEAD_SYNC_ENCRYPTION_KEY;
+    else process.env.LEAD_SYNC_ENCRYPTION_KEY = old;
+  }
+});

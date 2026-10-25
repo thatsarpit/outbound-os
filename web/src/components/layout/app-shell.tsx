@@ -105,6 +105,7 @@ export function AppShell() {
     '/overview': '/m/inbox',
     '/inbox': '/m/inbox',
     '/leads': '/m/leads',
+    '/tasks': '/m/tasks',
     '/account': '/m/account',
   }[location.pathname]
   let desktopChosen = wantsDesktop

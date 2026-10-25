@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query'
 import { getCoreRowModel, useReactTable, type ColumnDef } from '@tanstack/react-table'
 import { Megaphone, MessageSquare, Pause, Play, Plus, Send, TrendingUp, Users } from 'lucide-react'
-import { campaignsApi } from '@/api/endpoints/campaigns'
+import { campaignsApi, type CampaignListResponse } from '@/api/endpoints/campaigns'
 import type { Campaign } from '@/api/types'
 import { Button, EmptyState, ErrorState, LoadingState, MetricCard } from '@/components/ui'
 import { DataTable } from '@/components/ui/data-table'
@@ -28,7 +29,6 @@ const COLUMN_SORT_FIELD: Record<string, string> = {
   totalLeads: 'totalLeads',
   sentCount: 'sentCount',
   replyCount: 'replyCount',
-  replyRate: 'replyRate',
   createdAt: 'createdAt',
 }
 
@@ -55,36 +55,76 @@ function sortValue(campaign: Campaign, field: string): string | number {
 
 export default function CampaignsPage() {
   const queryClient = useQueryClient()
-  const [showCreate, setShowCreate] = useState(false)
-  const [detailId, setDetailId] = useState<number | null>(null)
+  const [params, setParams] = useSearchParams()
+  const [createOpen, setCreateOpen] = useState(false)
+  const showCreate = createOpen || params.get('create') === '1'
+  const setShowCreate = (open: boolean) => {
+    setCreateOpen(open)
+    if (!open && params.has('create')) {
+      const next = new URLSearchParams(params)
+      next.delete('create')
+      setParams(next, { replace: true })
+    }
+  }
+  const [page, setPage] = useState(1)
+  const [localDetailId, setDetailId] = useState<number | null>(null)
+  const routedId = Number(params.get('id'))
+  const detailId =
+    localDetailId || (Number.isSafeInteger(routedId) && routedId > 0 ? routedId : null)
+  const closeDetail = () => {
+    setDetailId(null)
+    if (params.has('id')) {
+      const next = new URLSearchParams(params)
+      next.delete('id')
+      setParams(next, { replace: true })
+    }
+  }
   const [sort, setSort] = useState<{ by: string; dir: 'asc' | 'desc' }>({
     by: 'createdAt',
     dir: 'desc',
   })
 
-  /* Defensive: several pages in this app white-screened on `X.filter is not a
+  /* Validate the paginated contract: several pages in this app white-screened on `X.filter is not a
      function` because they trusted the payload shape. Anything that is not a
-     list of campaigns degrades to an empty list and the page renders its
-     zero-state instead. */
+     list of campaigns is an error rather than an authoritative empty workspace. */
   const {
-    data: campaigns = [],
+    data: response,
     isLoading,
     isError,
     error,
     refetch,
-  } = useQuery<Campaign[]>({
-    queryKey: ['campaigns'],
+  } = useQuery<CampaignListResponse>({
+    queryKey: ['campaigns', page, sort.by, sort.dir],
     queryFn: async () => {
-      const res = (await campaignsApi.list()) as unknown
-      const list = Array.isArray(res)
-        ? res
-        : ((res as { campaigns?: unknown } | null)?.campaigns ?? [])
-      return (Array.isArray(list) ? list : []) as Campaign[]
+      const result = await campaignsApi.list({
+        page,
+        limit: 25,
+        sortBy: sort.by,
+        sortOrder: sort.dir,
+      })
+      if (!result || !Array.isArray(result.campaigns))
+        throw new Error('Campaign response was incomplete. Try again.')
+      return result
     },
     refetchInterval: 15_000,
   })
+  const campaigns = useMemo(() => response?.campaigns ?? [], [response])
+  const summary = response?.summary
+  const pages = response?.pages
+  useEffect(() => {
+    if (pages !== undefined) setPage((value) => Math.min(value, Math.max(1, pages)))
+  }, [pages])
+  const detailResult = useQuery({
+    queryKey: ['campaign-detail', detailId],
+    queryFn: async () => {
+      const result = await campaignsApi.get(detailId!)
+      if (!result?.id) throw new Error('Campaign could not be loaded.')
+      return result
+    },
+    enabled: detailId !== null,
+  })
 
-  const counts = campaigns.reduce(
+  const pageCounts = campaigns.reduce(
     (acc, campaign) => {
       acc[normalizeStatus(campaign.status)] += 1
       return acc
@@ -94,10 +134,15 @@ export default function CampaignsPage() {
       number
     >,
   )
-  const totalLeads = campaigns.reduce((sum, campaign) => sum + num(campaign.totalLeads), 0)
-  const totalSent = campaigns.reduce((sum, campaign) => sum + num(campaign.sentCount), 0)
-  const totalReplies = campaigns.reduce((sum, campaign) => sum + num(campaign.replyCount), 0)
-  const totalFailed = campaigns.reduce((sum, campaign) => sum + num(campaign.failedCount), 0)
+  const counts = { ...pageCounts, ...summary?.byStatus }
+  const totalLeads =
+    summary?.totalLeads ?? campaigns.reduce((sum, campaign) => sum + num(campaign.totalLeads), 0)
+  const totalSent =
+    summary?.sentCount ?? campaigns.reduce((sum, campaign) => sum + num(campaign.sentCount), 0)
+  const totalReplies =
+    summary?.replyCount ?? campaigns.reduce((sum, campaign) => sum + num(campaign.replyCount), 0)
+  const totalFailed =
+    summary?.failedCount ?? campaigns.reduce((sum, campaign) => sum + num(campaign.failedCount), 0)
   const replyRate = percent(totalReplies, totalSent)
 
   const sortedCampaigns = useMemo(() => {
@@ -124,13 +169,26 @@ export default function CampaignsPage() {
     queryClient.setQueriesData({ queryKey: ['campaigns'] }, (old: unknown) =>
       Array.isArray(old)
         ? old.map((c: Campaign) => (c.id === id ? { ...c, status: nextStatus } : c))
-        : old,
+        : old && typeof old === 'object' && 'campaigns' in old
+          ? {
+              ...old,
+              campaigns: (old as CampaignListResponse).campaigns.map((c) =>
+                c.id === id ? { ...c, status: nextStatus } : c,
+              ),
+            }
+          : old,
     )
     return { entries }
   }
   const rollbackCampaignStatus = (snapshot: CampaignSnapshot) => {
     for (const [key, val] of snapshot.entries) queryClient.setQueryData(key, val)
   }
+
+  const invalidateCampaignQueries = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['campaigns'] }),
+      queryClient.invalidateQueries({ queryKey: ['campaign-detail'] }),
+    ])
 
   const startMutation = useMutation({
     mutationFn: (id: number) => campaignsApi.start(id),
@@ -140,7 +198,7 @@ export default function CampaignsPage() {
       if (ctx) rollbackCampaignStatus(ctx)
       toast.error(`Failed to start: ${error.message}`)
     },
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['campaigns'] }),
+    onSettled: invalidateCampaignQueries,
   })
 
   const pauseMutation = useMutation({
@@ -151,20 +209,20 @@ export default function CampaignsPage() {
       if (ctx) rollbackCampaignStatus(ctx)
       toast.error(`Failed to pause: ${error.message}`)
     },
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: ['campaigns'] }),
+    onSettled: invalidateCampaignQueries,
   })
 
   const populateMutation = useMutation({
     mutationFn: (id: number) => campaignsApi.populate(id),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['campaigns'] })
+      void invalidateCampaignQueries()
       toast.success('Leads populated')
     },
     onError: (error: Error) => toast.error(`Failed to populate: ${error.message}`),
   })
 
   const detailCampaign = detailId
-    ? (campaigns.find((campaign) => campaign.id === detailId) ?? null)
+    ? (detailResult.data ?? campaigns.find((campaign) => campaign.id === detailId) ?? null)
     : null
 
   const handleSort = (field: string) =>
@@ -371,8 +429,8 @@ export default function CampaignsPage() {
               icon={Users}
               label="Leads in play"
               value={formatCount(totalLeads)}
-              hint={`across ${formatCount(campaigns.length)} ${
-                campaigns.length === 1 ? 'campaign' : 'campaigns'
+              hint={`across ${formatCount(response?.total ?? campaigns.length)} ${
+                response?.total === 1 ? 'campaign' : 'campaigns'
               }`}
             />
             <MetricCard
@@ -393,7 +451,7 @@ export default function CampaignsPage() {
               icon={TrendingUp}
               label="Reply rate"
               value={`${replyRate.toFixed(1)}%`}
-              hint="Across every campaign"
+              hint={summary ? 'Across every campaign' : 'On this page'}
             />
           </div>
 
@@ -460,9 +518,45 @@ export default function CampaignsPage() {
         </>
       )}
 
+      {(response?.pages ?? 1) > 1 && (
+        <nav
+          aria-label="Campaign pages"
+          className="flex items-center justify-between gap-3 text-sm"
+        >
+          <Button
+            variant="secondary"
+            disabled={page <= 1}
+            onClick={() => setPage((value) => value - 1)}
+          >
+            Previous
+          </Button>
+          <span className="text-text-muted">
+            Page {page} of {response?.pages} · {formatCount(response?.total ?? 0)} campaigns
+          </span>
+          <Button
+            variant="secondary"
+            disabled={page >= (response?.pages ?? 1)}
+            onClick={() => setPage((value) => value + 1)}
+          >
+            Next
+          </Button>
+        </nav>
+      )}
+
       {showCreate && <CreateCampaignModal onClose={() => setShowCreate(false)} />}
+      {detailId && detailResult.isError && (
+        <ErrorState
+          title="Could not open this campaign"
+          description="Retry or close this campaign link."
+          onRetry={() => void detailResult.refetch()}
+        />
+      )}
       {detailCampaign && (
-        <CampaignDetailDrawer campaign={detailCampaign} onClose={() => setDetailId(null)} />
+        <CampaignDetailDrawer
+          key={detailCampaign.id}
+          campaign={detailCampaign}
+          onClose={closeDetail}
+        />
       )}
     </div>
   )

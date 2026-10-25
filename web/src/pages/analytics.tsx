@@ -1,5 +1,6 @@
 import { DashboardLayout } from '@/components/ui/dashboard-layout'
 import { useState } from 'react'
+import { useAuthStore } from '@/stores/auth-store'
 import { useHomeCurrency } from '@/hooks/use-home-currency'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
@@ -70,7 +71,7 @@ interface CampaignRow {
 }
 
 interface TeamRow {
-  id: number
+  id: number | string
   name: string
   role: string
   leadsAssigned: number
@@ -105,6 +106,8 @@ function SectionMessage({ children }: { children: React.ReactNode }) {
 }
 
 export default function AnalyticsPage() {
+  const { dashboardScope, isManagerOrAbove } = useAuthStore()
+  const canViewTeam = isManagerOrAbove()
   const home = useHomeCurrency()
   const chartTheme = useChartTheme()
   const timezoneOffset = typeof window === 'undefined' ? 0 : new Date().getTimezoneOffset()
@@ -216,12 +219,13 @@ export default function AnalyticsPage() {
     error: teamError,
     refetch: refetchTeam,
   } = useQuery<TeamRow[]>({
-    queryKey: ['analytics-team', days, timezoneOffset],
+    queryKey: ['analytics-team', dashboardScope, days, timezoneOffset],
+    enabled: canViewTeam,
     queryFn: async () =>
       asArray<Record<string, unknown>>(
         await api.get<unknown>(`/analytics/team?days=${days}&tzOffset=${timezoneOffset}`),
       ).map((m, i) => ({
-        id: num(m?.id) || i,
+        id: typeof m?.id === 'string' ? m.id : num(m?.id) || i,
         name: str(m?.name, 'Unnamed'),
         role: str(m?.role, '—'),
         leadsAssigned: num(m?.leadsAssigned),
@@ -698,9 +702,11 @@ export default function AnalyticsPage() {
         onRetry={() => refetchTeam()}
         rows={teamStats.map((row) => ({ ...row })) satisfies WidgetRow[]}
         title="Team performance"
-        description="Current outcomes by agent for leads received in the selected period."
+        description="Outcomes by recorded lead owner for leads received in the selected period."
       >
-        {teamError ? (
+        {!canViewTeam ? (
+          <SectionMessage>Team performance is available to workspace managers.</SectionMessage>
+        ) : teamError ? (
           <ErrorState
             compact
             title="Couldn't load team performance"

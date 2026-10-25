@@ -1,4 +1,5 @@
 /** The campaign detail drawer. Extracted from campaigns.tsx. */
+import { useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { BarChart3, Mail, X } from 'lucide-react'
 import { campaignsApi } from '@/api/endpoints/campaigns'
@@ -24,13 +25,22 @@ export function CampaignDetailDrawer({
   campaign: Campaign
   onClose: () => void
 }) {
-  const { data: campaignLeads = [], isLoading } = useQuery({
-    queryKey: ['campaign-leads', campaign.id],
+  const [page, setPage] = useState(1)
+  const {
+    data: response,
+    isLoading,
+    isError,
+    refetch,
+  } = useQuery({
+    queryKey: ['campaign-leads', campaign.id, page],
     queryFn: async () => {
-      const res = await campaignsApi.getLeads(campaign.id)
-      return Array.isArray(res?.leads) ? res.leads : []
+      const res = await campaignsApi.getLeads(campaign.id, { page, limit: 50 })
+      if (!res || !Array.isArray(res.leads)) throw new Error('Could not load campaign recipients.')
+      return res
     },
   })
+
+  const campaignLeads = response?.leads ?? []
 
   const testSendMutation = useMutation({
     mutationFn: () => campaignsApi.testSend(campaign.id),
@@ -59,7 +69,7 @@ export function CampaignDetailDrawer({
   const replyRate = percent(replyCount, sentCount)
   const canTestSend =
     (campaign.channel === 'email' || campaign.channel === 'both') &&
-    Boolean(campaign.senderAccountId) &&
+    Boolean(campaign.emailSenderAccountId || campaign.senderAccountId) &&
     normalizeStatus(campaign.status) === 'draft'
 
   return (
@@ -91,13 +101,13 @@ export function CampaignDetailDrawer({
               value={formatCount(failedCount)}
               tone={failedCount > 0 ? 'danger' : undefined}
             />
-            <DrawerStat label="Delivered" value={`${deliveryRate.toFixed(1)}%`} />
+            <DrawerStat label="Accepted" value={`${deliveryRate.toFixed(1)}%`} />
             <DrawerStat label="Reply rate" value={`${replyRate.toFixed(1)}%`} />
           </div>
 
           <div>
             <div className="flex items-baseline justify-between text-[11px] text-text-muted">
-              <span>Delivery progress</span>
+              <span>Sending progress</span>
               <span className="tabular-nums">
                 {formatCount(sentCount)} / {formatCount(totalLeads)}
               </span>
@@ -199,12 +209,16 @@ export function CampaignDetailDrawer({
             </Panel>
           )}
 
-          <Panel title={`Campaign leads (${formatCount(campaignLeads.length)})`}>
+          <Panel title={`Campaign leads (${formatCount(response?.total ?? campaignLeads.length)})`}>
             {isLoading ? (
               <LoadingState label="Loading populated leads…" />
+            ) : isError ? (
+              <Button variant="secondary" onClick={() => void refetch()}>
+                Retry loading recipients
+              </Button>
             ) : campaignLeads.length > 0 ? (
               <ul className="max-h-64 divide-y divide-border-subtle overflow-y-auto rounded-md border border-border bg-surface">
-                {campaignLeads.slice(0, 50).map((campaignLead) => (
+                {campaignLeads.map((campaignLead) => (
                   <li
                     key={campaignLead.id}
                     className="flex items-center justify-between gap-3 px-3 py-2"
@@ -221,7 +235,10 @@ export function CampaignDetailDrawer({
                       <p className="mt-0.5 text-[11px] text-text-muted">
                         {campaignLead.sentAt
                           ? `Sent ${formatRelativeTime(campaignLead.sentAt)}`
-                          : 'Queued for send'}
+                          : campaignLead.skipReason ||
+                            (campaignLead.status === 'pending'
+                              ? 'Queued for send'
+                              : 'No confirmed send')}
                       </p>
                     </div>
                     <span className="flex shrink-0 items-center gap-2 text-[11px] text-text-secondary">
@@ -245,6 +262,32 @@ export function CampaignDetailDrawer({
                 No leads are populated yet. Populate the campaign to see delivery state, variants
                 and send timing.
               </p>
+            )}
+            {(response?.pages ?? 1) > 1 && (
+              <nav
+                aria-label="Campaign recipient pages"
+                className="mt-3 flex items-center justify-between gap-2 text-xs"
+              >
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={page <= 1}
+                  onClick={() => setPage((value) => value - 1)}
+                >
+                  Previous
+                </Button>
+                <span>
+                  Page {page} of {response?.pages}
+                </span>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={page >= (response?.pages ?? 1)}
+                  onClick={() => setPage((value) => value + 1)}
+                >
+                  Next
+                </Button>
+              </nav>
             )}
           </Panel>
         </div>

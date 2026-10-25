@@ -13,6 +13,7 @@ interface WhatsAppAccount {
   phone: string
   enabled: boolean
   status: string
+  sessionReady?: boolean
   messagesSentToday: number
   hourlyLimit: number
   dailyLimit: number
@@ -36,9 +37,7 @@ export default function WhatsAppSection() {
   })
 
   const accounts = Array.isArray(rawAccounts) ? rawAccounts : []
-  const connectedAccounts = accounts.filter(
-    (acc) => acc.enabled && acc.status === 'connected',
-  ).length
+  const connectedAccounts = accounts.filter((acc) => acc.enabled && acc.sessionReady).length
   const totalToday = accounts.reduce((sum, acc) => sum + (acc.messagesSentToday || 0), 0)
 
   const enableMutation = useMutation({
@@ -73,14 +72,14 @@ export default function WhatsAppSection() {
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
         <InfoTile
-          label="Connected"
+          label="Configured"
           value={`${connectedAccounts}`}
-          detail="Accounts live and enabled"
+          detail="Enabled accounts with saved API credentials"
         />
         <InfoTile
-          label="Messages Today"
+          label="Daily send counter"
           value={`${totalToday}`}
-          detail="Outbound volume across all senders"
+          detail="Rate-limit counters across all senders"
         />
         <InfoTile
           label="Accounts"
@@ -133,17 +132,17 @@ export default function WhatsAppSection() {
                 <span
                   className={cn(
                     'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase',
-                    acc.enabled
+                    acc.enabled && acc.sessionReady
                       ? 'bg-success-muted text-success'
                       : 'bg-surface-raised text-text-muted',
                   )}
                 >
-                  {acc.enabled ? (
-                    <div className="h-1.5 w-1.5 rounded-full bg-success animate-pulse" />
+                  {acc.enabled && acc.sessionReady ? (
+                    <div className="h-1.5 w-1.5 rounded-full bg-success" />
                   ) : (
                     <div className="h-1.5 w-1.5 rounded-full bg-text-muted" />
                   )}
-                  {acc.enabled ? 'Active' : 'Disabled'}
+                  {!acc.enabled ? 'Disabled' : acc.sessionReady ? 'Configured' : 'Setup needed'}
                 </span>
               </div>
             </div>
