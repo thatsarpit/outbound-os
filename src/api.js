@@ -817,6 +817,24 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
 // captured above. They must not require a dashboard session.
 app.use(providerWebhookRoutes);
 
+// EventSource cannot send an Authorization header. Authenticate its signed
+// query token before the ordinary API guard, which accepts header sessions.
+app.get('/api/events', async (req, res) => {
+  if (req.method !== 'GET') return res.status(405).set('Allow', 'GET').end();
+  const auth = await verifyQueryToken(req.query.token);
+  if (!auth?.role) return res.status(401).end();
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+  res.write(`data: ${JSON.stringify({ type: 'connected', ts: Date.now() })}
+
+`);
+  sseClients.add(res);
+  req.on('close', () => sseClients.delete(res));
+});
+
 app.use('/api', requireRole('viewer'));
 app.use('/api', connectorAdmin);
 app.use('/api', mcpSetup);
@@ -952,26 +970,6 @@ app.delete('/api/users/:id', requireRole('admin'), async (req, res) => {
 // GET /api/auth/me — current user info
 app.get('/api/auth/me', requireRole('viewer'), (req, res) => {
   res.json({ user: req.user || null });
-});
-
-// ======================== REAL-TIME EVENTS (SSE) ========================
-
-app.get('/api/events', async (req, res) => {
-  // EventSource cannot send an Authorization header, so this is the one
-  // route that verifies a Clerk token from the query string instead of
-  // going through requireRole().
-  const auth = await verifyQueryToken(req.query.token);
-  if (!auth?.role) return res.status(401).end();
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-  res.write(`data: ${JSON.stringify({ type: 'connected', ts: Date.now() })}
-
-`);
-  sseClients.add(res);
-  req.on('close', () => sseClients.delete(res));
 });
 
 // ======================== SYSTEM CONTROLS & HEALTH ========================

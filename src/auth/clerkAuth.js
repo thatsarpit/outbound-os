@@ -89,7 +89,7 @@ export function requireRole(minRole) {
  * @returns {Promise<{userId: string, orgId: string|null, role: string|null}|null>}
  */
 export async function verifyQueryToken(token) {
-  if (!token) return null;
+  if (typeof token !== 'string' || !token) return null;
   try {
     const claims = await verifyToken(token, { secretKey: process.env.CLERK_SECRET_KEY });
     return clerkSessionIdentity(claims);
