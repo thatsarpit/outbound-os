@@ -3,7 +3,8 @@
 Release 0.4.0 is deployed as of 25 October 2026, including the dashboard repairs
 from #53, retained-mail reading/downloads from #57 and Clerk live-update/social
 sign-in repairs from #63. The API/MCP images and production dashboard include
-`e5db03d`. This ledger keeps unfinished audit work separate from that deployment;
+`7448ac8`, including the dependency security follow-up #65. This ledger keeps
+unfinished audit work separate from that deployment;
 detailed operational evidence remains private.
 
 Production owner login, Google linking, authenticated API reads and the signed

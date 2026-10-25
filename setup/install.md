@@ -54,11 +54,11 @@ Open <http://localhost:3001>. For live reloading of the dashboard, run
 Everything is off until you connect it; an empty credential means disabled,
 never simulated success.
 
-- **WhatsApp** — Settings → WhatsApp. Choose Meta Cloud API (recommended) or
-  Meta's Cloud API. The README has the step-by-step setup.
-- **Email** — Settings → Email. Any SMTP/IMAP mailbox, or Brevo.
+- **WhatsApp** — Integrations → WhatsApp. Uses Meta's official Cloud API.
+  The README has the step-by-step setup.
+- **Email** — Integrations → Email. SMTP/IMAP accounts, or Brevo for sending.
 - **Telegram** — Integrations → Telegram.
-- **iMessage** — Settings → iMessage; needs a Mac running BlueBubbles, see
+- **iMessage** — Integrations → iMessage; needs a Mac running BlueBubbles, see
   [docs/imessage-mac-mini-setup.md](../docs/imessage-mac-mini-setup.md).
 - **Lead sources** — Integrations → Webhooks. Pick a preset (website form,
   Facebook Lead Ads, external marketplaces, TradeIndia, JustDial, Engyne Cloud) or map
