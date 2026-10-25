@@ -60,6 +60,9 @@ changed response contracts, verified deployment and remaining acceptance work.
 
 ### Security
 
+- Update API and MCP dependencies to patched URI parsing, compressed request body,
+  multipart upload, email address parsing and schema validation releases. Preserve
+  existing campaign filter and bulk-action tool inputs with the validator upgrade.
 - Rate-limit dashboard assets and SPA routes with one shared per-client budget.
   Keep API limits separate and exclude provider webhooks and health probes.
 
