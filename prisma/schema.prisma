@@ -1395,4 +1395,41 @@ model WhatsAppReceipt {
   @@index([appliedAt])
 }
 
+// Durable shadow-mode ledger. SQL triggers capture events in the business transaction.
+model HermesInboundEvent {
+  id String @id
+  eventType String
+  conversationKey String
+  channel String
+  accountId Int?
+  leadId Int?
+  messageId Int?
+  receiptId Int?
+  createdAt BigInt @default(dbgenerated("(CAST(strftime('%s','now') AS INTEGER) * 1000)"))
+  batchId String?
+  batch HermesEventBatch? @relation(fields: [batchId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([batchId, conversationKey, createdAt])
+}
+
+model HermesEventBatch {
+  id String @id
+  conversationKey String
+  body String
+  state String @default("pending")
+  attempts Int @default(0)
+  nextAttemptAt BigInt
+  leaseToken String?
+  leaseUntil BigInt?
+  lastStatus Int?
+  createdAt BigInt
+  completedAt BigInt?
+  // Exact canonical completion-body SHA-256, added to the never-deployed bridge migration.
+  completionReceiptHash String?
+  events HermesInboundEvent[]
+
+  // The active-conversation partial unique index is managed in the SQL migration.
+  @@index([state, nextAttemptAt])
+}
+
 // Durable, private inbound MIME receipt ledger.
