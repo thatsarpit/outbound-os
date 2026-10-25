@@ -7,6 +7,22 @@ Clerk keys. HTTP and SSE reject other organizations and production keys without
 that setting. The existing trusted MCP service token remains a separate
 server-to-server administrator identity; never give it to browser clients.
 
+## Operational status — 25 October 2026
+
+The production cutover is complete for owner sign-in in release 0.4.0. #53 and
+#63 are merged and deployed in the API/MCP images and production dashboard at
+`e5db03d`. The existing owner signed in to the intended workspace, authenticated
+API reads passed, and the EventSource connection accepted the owner's signed
+session. Google account linking and dashboard access were confirmed on that
+existing owner identity. Email sign-in and Clerk branding remain available.
+
+Existing notification state was transferred deliberately before startup; core
+record counts were preserved. Legacy MCP authentication and issued credentials
+were retained. This records completed owner/login acceptance, not complete
+real-team role-change, account-recovery or physical iPhone Safari/Home Screen
+acceptance. Personal MCP activation, passkeys and Gmail/Outlook OAuth mailbox
+connections remain separate work. No paid feature was activated.
+
 ## Permissions and Team
 
 Clerk's built-in `org:admin` maps to application admin. `org:member` maps to sales
@@ -31,7 +47,7 @@ workspace/role restrictions as HTTP. Role downgrades apply when a fresh session
 token is issued; an already-open SSE connection is not forcibly revoked by this
 change. Immediate stream revocation remains a separate improvement.
 
-## Release gates
+## Upgrade checklist
 
 1. Preserve the existing instance/environment, owner memberships, and database.
    Keep both marketing gates off if rolling back to the old startup selector.
@@ -57,9 +73,9 @@ change. Immediate stream revocation remains a separate improvement.
 8. Keep old images and keys available for rollback. Retain additive database
    columns. Do not reset the database or overwrite new customer activity.
 
-This source change does not create users, change an active Clerk instance,
-configure DNS, send invitations, migrate local assignments or prove owner login.
-Track operational completion independently from merged code.
+Applying source alone does not configure a Clerk instance, DNS, memberships or
+identity mappings. The operational record above describes the verified release;
+repeat the checklist for another installation or a later identity change.
 
 ## Passkeys and sign-in appearance
 
@@ -67,6 +83,10 @@ The login uses Clerk's prebuilt `SignIn` component inside the app's dark layout.
 Clerk controls enabled sign-in strategies, email-code fallback, recovery, session
 tasks and passkey authentication. Its footer branding and development notice are
 visible; only the sign-up action is hidden on this existing-member entry page.
+Configured social providers are visible alongside email, using Clerk's actual
+buttons with the app's dark theme and at least 44px touch targets. The production
+Google connection was accepted for the existing owner; enabling sign-in does not
+grant Gmail mailbox access.
 Clerk's current Hobby plan does not include removing branding or production
 passkeys. Do not enable a paid feature or change plans as part of a UI release.
 
@@ -102,7 +122,8 @@ After production domain and plan settings are reviewed and approved:
 Automated tests cover capability parsing, credential-free settings requests,
 development/domain and browser gates, and truthful failure states. They do not
 claim a completed iCloud Keychain enrollment, successful Face ID sign-in, paid
-plan configuration or a finished production authentication migration.
+plan configuration or full physical-device acceptance. Completed production
+owner sign-in is recorded separately above.
 
 References: [production requirements](https://clerk.com/docs/guides/development/deployment/production),
 [session claims](https://clerk.com/docs/guides/sessions/session-tokens),

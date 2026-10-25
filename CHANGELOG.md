@@ -6,6 +6,12 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+## [0.4.0] — 25 October 2026
+
+Dashboard workflows, retained email and production sign-in repairs from #53,
+#57 and #63 are merged and deployed. API/MCP images and the production dashboard
+were released together; the existing legacy MCP authentication mode is retained.
+
 ### Dashboard reliability and daily sales
 
 - Fix CSV parsing, import result counts, removed-pool requirements and exact audience tags.
@@ -20,18 +26,37 @@ include breaking changes, and they are called out here.
   invoice figures independently from the selected order period.
 - Show stale/error/permission states explicitly and stop offering unauthorized lead actions.
 
-### Opt-in integrations
+### Email and AI integrations
 
 - Add dashboard-sign-in MCP consent, read-only personal grants, immediate revocation,
-  rotating credentials and operation-bound API authorization. Legacy mode stays the default.
+  rotating credentials and operation-bound API authorization. Personal authorization
+  remains opt-in and is not activated by this deployment; legacy mode stays the default.
+- Preserve existing legacy MCP credentials across upgrades, and support validated
+  provider-scoped teammate discovery and assignment without giving the service a
+  personal identity. Numeric assignment IDs remain supported for local sign-in.
 - Add a shared inbound email receipt pipeline, encrypted immutable originals, administrator
-  review/reprocessing, and an inactive Cloudflare R2/Queue relay. Existing receiving routes
-  and sending providers remain in place until an explicit, verified cutover.
+  reading/reprocessing and authenticated attachment downloads from retained originals.
+  Verify original and attachment integrity and force binary downloads; this is not
+  malware scanning. Older mail without retained originals reports unavailable files.
+- Add Cloudflare relay support with a controlled private KV/Queues pilot for an
+  owned test alias. Customer aliases still use Gmail/IMAP; broader routing, storage
+  monitoring, retention and recovery acceptance remain open.
 - Include retained encrypted MIME objects in companion database backups. Instance secrets
   still require a separate operator backup.
 
 See [upgrade and acceptance](docs/dashboard-repair-upgrade.md) for the migrations,
-changed response contracts, conservative defaults and release checks still required.
+changed response contracts, verified deployment and remaining acceptance work.
+
+### Sign-in and live updates
+
+- Restore Clerk EventSource authentication before the ordinary API header guard.
+  Signed query sessions keep signature, expiry, pinned-organization and role checks;
+  other API routes do not accept query authentication.
+- Show Clerk's enabled social sign-in providers alongside email with themed 44px
+  controls, retaining branding and existing-member signup restrictions. Production
+  owner login, Google account linking, authenticated reads and live updates were verified.
+- Keep Gmail/Outlook OAuth mailbox connections, passkeys and full physical iPhone
+  Safari/Home Screen acceptance separate from the completed login release.
 
 ### Security
 

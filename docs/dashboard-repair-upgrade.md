@@ -1,10 +1,11 @@
 # Dashboard repair upgrade and acceptance
 
-Status: broader dashboard repairs remain in draft PR #53. The branch includes
-main through `cc53e72` (#57), preserving the shared inbound-email work released
-separately in #55/#56 and the receipt reader/attachment handling from #57.
-This document does not confirm promotion of the draft, real-client OAuth,
-all-address email-routing cutover or iPhone acceptance.
+Status: release 0.4.0 is deployed on 25 October 2026. #53 and #63 are merged;
+the production API/MCP images and dashboard include `e5db03d`, retaining the
+inbound-email reader and verified downloads from #57. Production owner login,
+Google linking, authenticated API reads and the signed live-update stream were
+verified. Personal MCP activation, all-alias mail cutover and full physical
+iPhone Safari/Home Screen acceptance remain open.
 
 ## Apply safely
 
@@ -18,9 +19,9 @@ contains:
 - `20261024020000_inbound_email_receipts`: receipt identity and processing history.
 - `20261024030000_workspace_member_assignment`: provider-scoped assignment snapshots.
 
-The inbound-email receipt migration is already on main. The audit workflow and
-workspace assignment migrations are the two additional migrations in this draft
-relative to main at `cc53e72`.
+The inbound-email receipt migration shipped before the broader dashboard repairs.
+The audit workflow and workspace assignment migrations are the two additions in
+#53 relative to `cc53e72`. All 17 migrations are in the released chain.
 
 Existing local user assignments and message history are preserved. Clerk assignment
 requires the installation's existing `CLERK_ORGANIZATION_ID` to be pinned in production.
@@ -70,9 +71,11 @@ rather than treating it as a successful empty result.
   [inbound email setup](inbound-email-receiver.md) before any broader cutover.
   Storage monitoring, retention, recovery and all-address routing acceptance
   remain open. Verified forced downloads do not provide malware scanning.
-- Keep the free email sign-in path. Google sign-in and Gmail/Outlook OAuth mailbox
-  connectors still need their own implementation/configuration and acceptance.
-  Passkeys remain deferred. Production Clerk cutover is tracked separately in #19.
+- Production Clerk owner login and Google account linking were verified while
+  retaining email sign-in and visible Clerk branding. Google sign-in does not
+  connect a Gmail inbox: Gmail/Outlook OAuth mailbox connectors remain separate
+  work. Passkeys remain deferred. See the
+  [production cutover record](clerk-production-cutover.md).
 
 ## Release acceptance
 
@@ -82,23 +85,41 @@ Also run dashboard lint, typecheck, regular/demo builds, Home Screen asset check
 MCP tests and repository hygiene. A normal build is not a production identity check;
 `build:production` must still pass its live-Clerk environment gate.
 
-Before production promotion, review the actual desktop and iPhone 13 flows:
-normal sign-in, navigation/safe areas, keyboard, conversation reload, closed WhatsApp
-window, visible failures, drafts, automatic updates, device notification permission,
+The production release verified owner sign-in, authenticated reads and the signed
+live-update stream. Full physical iPhone 13 Safari/Home Screen acceptance still
+needs navigation/safe areas, keyboard, conversation reload, closed WhatsApp window,
+visible failures, drafts, automatic updates, device notification permission,
 background push and notification tap into the correct sender's conversation.
-Source tests and sample screenshots cannot substitute for this device check.
+Source tests, desktop browser checks and sample screenshots cannot substitute
+for this device check.
 
 No customer send or campaign launch is needed to validate database upgrades.
 Use owned addresses/numbers only for the separately reviewed provider acceptance.
 
 ## Local verification record
 
-- Reconciliation and legacy MCP assignment repair on 25 October 2026: 354 unit/fixture checks passed; four pre-existing TODO cases remain.
+- Release source on 25 October 2026: 355 unit/fixture checks passed; four pre-existing TODO cases remain.
 - 131 API integration checks passed against the full SQLite migration chain.
 - 20 MCP transport/OAuth/assignment checks passed.
-- Dashboard lint, typecheck, normal and demo builds passed; Home Screen PNG/manifest checks passed.
+- Dashboard lint, typecheck, normal/demo and strict production builds passed; Home Screen PNG/manifest checks passed.
 - All 17 migrations applied to an empty fixture database; comparison to the Prisma schema produced an empty migration.
 - Retained-mail tests verified exact attachment bytes, encrypted-original integrity failures, route permissions and forced-download headers. The earlier private MIME backup/extraction/decryption fixture remains recorded.
 
-These checks did not use production data or contact customer providers. Bundle-size
-warnings remain; actual browser and iPhone checks are still outstanding.
+The automated checks used isolated fixtures. Bundle-size warnings remain.
+
+## Deployment verification — 25 October 2026
+
+- API and MCP images and the production Pages dashboard were released from the
+  merged source. Existing notification state was transferred before startup;
+  core record counts were preserved.
+- Production owner sign-in, authenticated API reads and EventSource updates
+  passed. Google sign-in linked to the existing owner rather than creating an
+  unrelated workspace identity.
+- The legacy MCP catalogue retained 36 tools. A read-only health tool, existing
+  OAuth access, static bearer access and anonymous denial passed; personal mode
+  was not enabled.
+- Retained email text and exact attachment bytes passed authenticated checks.
+  Forced downloads verify integrity; they do not scan for malware.
+
+The release did not require a customer send or campaign launch. Full physical
+iPhone acceptance and the configuration boundaries above remain open.
