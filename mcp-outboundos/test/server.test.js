@@ -90,6 +90,11 @@ test('MCP transport authenticates, initializes and exposes tools without contact
     assert.ok(response.tools.length > 20, 'tool catalogue is populated');
     assert.equal(new Set(response.tools.map(tool => tool.name)).size, response.tools.length, 'tool names are unique');
     assert.ok(response.tools.every(tool => tool.inputSchema?.type === 'object'));
+    for (const [name, property] of [['create_campaign', 'targetFilter'], ['update_campaign', 'targetFilter'], ['campaign_preview_leads', 'filter'], ['bulk_lead_action', 'payload']]) {
+      const record = response.tools.find(tool => tool.name === name).inputSchema.properties[property];
+      assert.equal(record.type, 'object', `${name} retains a JSON object input after the validator upgrade`);
+      assert.notEqual(record.additionalProperties, false, `${name} retains arbitrary JSON values`);
+    }
     for (const name of ['send_whatsapp', 'send_whatsapp_file']) {
       const tool = response.tools.find(tool => tool.name === name);
       assert.equal(tool.inputSchema.properties.client_message_id.type, 'string');
