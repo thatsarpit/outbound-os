@@ -48,6 +48,8 @@ export function registerCampaignTools(server) {
       emailSubject:      z.string().optional().describe('Required for email/both campaigns'),
       targetFilter:      z.record(z.any()).optional().describe('Lead filter criteria — e.g. {status:"new", tags:"trade_show_2026"}'),
       senderAccountId:   z.number().int().optional().describe('Email sender account ID'),
+      emailSenderAccountId: z.number().int().positive().optional().describe('Explicit email sender ID from email_accounts'),
+      whatsappSenderAccountId: z.number().int().positive().optional().describe('Explicit WhatsApp sender ID from whatsapp_accounts'),
       waCampaignName:    z.string().optional().describe(
         'Exact approved Meta WhatsApp template name. Set this for any WhatsApp audience '
         + 'that is not inside an open 24h conversation — cold or re-engagement leads — '
@@ -77,6 +79,9 @@ export function registerCampaignTools(server) {
       channel:           z.enum(VALID_CHANNELS).optional(),
       targetFilter:      z.record(z.any()).optional(),
       senderAccountId:   z.number().int().optional(),
+      emailSenderAccountId: z.number().int().positive().optional(),
+      whatsappSenderAccountId: z.number().int().positive().optional(),
+      waCampaignName: z.string().optional().describe('Exact approved Meta template name'),
       variantBTemplate:  z.string().optional(),
       variantBSubject:   z.string().optional(),
     },
@@ -104,6 +109,19 @@ export function registerCampaignTools(server) {
       } catch (e) { return err(e.message); }
     },
   );
+
+  server.tool('populate_campaign',
+    'Populate a draft campaign with matching eligible leads. Does not send. Review get_campaign and campaign_leads before requesting launch approval.',
+    { campaign_id: CampaignId }, async ({ campaign_id }) => {
+      try { const { data } = await post(`/api/campaigns/${campaign_id}/populate`); return ok(data); }
+      catch (e) { return err(e.message); }
+    });
+  server.tool('campaign_leads', 'Read the actual populated campaign audience and per-recipient progress.',
+    { campaign_id: CampaignId, page: Page.optional(), limit: Limit.optional(), status: z.string().optional() },
+    async ({ campaign_id, ...query }) => {
+      try { const { data } = await get(`/api/campaigns/${campaign_id}/leads`, query); return ok(data); }
+      catch (e) { return err(e.message); }
+    });
 
   // ── start_campaign ──
   server.tool(
@@ -150,10 +168,11 @@ export function registerCampaignTools(server) {
     'Preview which leads match a campaign filter — returns count and sample of 10',
     {
       filter: z.record(z.any()).optional().describe('Lead filter criteria — e.g. {status:"new", country:"India"}'),
+      channel: z.enum(VALID_CHANNELS).optional().describe('Preview eligibility for the intended campaign channel'),
     },
-    async ({ filter }) => {
+    async ({ filter, channel }) => {
       try {
-        const { data } = await post('/api/campaigns/preview-leads', { filter });
+        const { data } = await post('/api/campaigns/preview-leads', { filter, channel });
         return ok(data);
       } catch (e) { return err(e.message); }
     },

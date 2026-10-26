@@ -2439,7 +2439,15 @@ app.get('/api/campaigns/:id/leads', requireRole('manager'), async (req, res) => 
     const [campaignLeads, total] = await Promise.all([
       prisma.campaignLead.findMany({
         where,
-        include: { lead: { select: { name: true, mobile: true, status: true, score: true } } },
+        // The private sales approval snapshot must cover actual destinations,
+        // personalization and stop/routing fields, not just a display label.
+        include: { lead: { select: {
+          id: true, name: true, mobile: true, email: true, waUserId: true,
+          company: true, product: true, country: true, quantity: true,
+          status: true, score: true, repliedAt: true, poolId: true,
+          emailOptOut: true, emailStatus: true, isOnWhatsApp: true,
+          assignedAccount: true, assignedEmailAccountId: true,
+        } } },
         orderBy: { sentAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
