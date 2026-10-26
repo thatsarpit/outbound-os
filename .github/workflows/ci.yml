@@ -34,6 +34,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npx prisma generate
+      - name: Prisma migration/schema parity (isolated database and negative control)
+        run: npm run db:parity
+      - name: SQL-only schema inventory regression tests
+        run: node --test test/schemaParity.test.js
       - name: Unit tests
         run: npm test
       - name: Integration tests (fresh database through every migration)
