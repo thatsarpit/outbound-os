@@ -4,6 +4,14 @@ import { ok, err } from '../schemas/common.js';
 
 /** @param {import("@modelcontextprotocol/sdk/server/mcp.js").McpServer} server */
 export function registerSystemTools(server) {
+  server.tool('email_accounts', 'List sending email account IDs and readiness without credentials.', {}, async () => {
+    try {
+      const { data } = await get('/api/email/accounts');
+      return ok(data.map(a => ({ id: a.id, name: a.name, email: a.email, enabled: a.enabled,
+        provider: a.provider, status: a.status, dailyLimit: a.dailyLimit, sentToday: a.sentToday,
+        whatsappAccountId: a.whatsappAccountId })));
+    } catch (e) { return err(e.message); }
+  });
 
   // ── system_status ──
   server.tool(

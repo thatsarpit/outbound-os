@@ -55,3 +55,7 @@ oauth-store.json
 
 # Local Cloudflare build state.
 .wrangler/
+
+# Python integration test bytecode.
+__pycache__/
+*.pyc
