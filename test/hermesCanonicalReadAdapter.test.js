@@ -11,7 +11,7 @@ function scope() {
 
 function snapshot(request = scope()) {
   return { available: true,
-    provenance: { source, snapshotId: 'synthetic-revision-1', observedAt: now },
+    provenance: { source, snapshotId: 'synthetic-revision-1', observedAt: now, consistent: true },
     conversationKey: request.conversationKey, channel: request.channel, accountId: request.accountId,
     events: { complete: true, records: structuredClone(request.events) },
     receipts: { complete: true, records: [] },

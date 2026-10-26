@@ -1,0 +1,44 @@
+name: hermes-outbound-sales
+services:
+  adapter:
+    image: nousresearch/hermes-agent:v0.22.5@sha256:9c5561579f3ffdf333401797094ac3a743738d6c25d40f4331c7bf77b694238d
+    container_name: hermes-outbound-sales
+    entrypoint: [/usr/bin/python3, /adapter/gateway.py]
+    user: '10000:10000'
+    restart: unless-stopped
+    cpus: 0.15
+    mem_limit: 96m
+    memswap_limit: 96m
+    pids_limit: 32
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    env_file: ./private.env
+    environment:
+      UPSTREAM_URL: http://outbound-os-mcp:3010/mcp
+      APPROVAL_DB: /state/approvals.db
+      PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUNBUFFERED: '1'
+    ports:
+      - '127.0.0.1:9120:9120'
+    volumes:
+      - ./gateway.py:/adapter/gateway.py:ro
+      - ./state:/state
+    networks:
+      hermes:
+        ipv4_address: 172.30.91.3
+      outbound: {}
+    healthcheck:
+      test: [CMD, /usr/bin/python3, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9118/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      options: {max-size: 2m, max-file: '2'}
+networks:
+  hermes:
+    external: true
+    name: hermes-isolated
+  outbound:
+    external: true
+    name: outbound-os_internal

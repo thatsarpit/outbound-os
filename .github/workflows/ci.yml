@@ -40,6 +40,10 @@ jobs:
         run: node --test test/schemaParity.test.js
       - name: Unit tests
         run: npm test
+      - name: Canonical context adapter
+        run: node --test test/hermesCanonicalReadAdapter.test.js
+      - name: Hermes sales approval gateway
+        run: python3 -m unittest discover -s integrations/hermes-sales -v
       - name: Integration tests (fresh database through every migration)
         run: npm run test:integration
 

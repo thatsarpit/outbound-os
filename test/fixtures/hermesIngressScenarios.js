@@ -1,14 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { realpathSync } from 'node:fs';
 import { emailHarness } from '../helpers/hermesIngress.js';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 
 assert.equal(process.env.NODE_ENV, 'test');
-assert.equal(process.cwd(), process.env.TMPDIR);
+assert.equal(realpathSync(process.cwd()), realpathSync(process.env.TMPDIR));
 assert.equal(new URL(process.env.DATABASE_URL).protocol, 'file:');
-assert.equal(path.dirname(new URL(process.env.DATABASE_URL).pathname), process.cwd());
+assert.equal(realpathSync(path.dirname(new URL(process.env.DATABASE_URL).pathname)), realpathSync(process.cwd()));
 // Neither synthetic ingestion nor its injected callbacks may deliver network traffic.
 globalThis.fetch = () => { throw new Error('Network delivery forbidden in synthetic ingress harness'); };
 

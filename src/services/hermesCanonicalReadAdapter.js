@@ -20,6 +20,7 @@ function validEvent(event, scope) {
 /** Inert future-source boundary. No database, HTTP client or MCP fallback is installed. */
 export function createCanonicalReadAdapter({ source, readSnapshot, clock = Date.now } = {}) {
   async function read(scope) {
+    try { scope = structuredClone(scope); } catch { scope = null; }
     const base = { source, conversationKey: scope?.conversationKey, channel: scope?.channel, accountId: scope?.accountId };
     if (typeof source !== 'string' || !source.trim() || scope?.source !== source
       || !Array.isArray(scope?.events) || !scope.events.length || scope.events.length > 50
@@ -41,7 +42,8 @@ export function createCanonicalReadAdapter({ source, readSnapshot, clock = Date.
       || !Array.isArray(value.history?.messages)) return reject('inconsistent', 'malformed-snapshot');
     const observed = value.provenance?.observedAt;
     const current = clock();
-    if (value.provenance?.source !== source || typeof value.provenance?.snapshotId !== 'string'
+    if (value.provenance?.consistent !== true || scope.events.some(event => event.createdAt > observed)
+      || value.provenance?.source !== source || typeof value.provenance?.snapshotId !== 'string'
       || !value.provenance.snapshotId.trim() || !Number.isSafeInteger(observed) || observed < 0
       || !Number.isSafeInteger(current) || current < observed || current - observed > 300000
       || value.conversationKey !== scope.conversationKey || value.channel !== scope.channel
@@ -68,7 +70,7 @@ export function createCanonicalReadAdapter({ source, readSnapshot, clock = Date.
         : receipts.some(row => row.id === event.receiptId))
       || (leadId === null && messages.length !== 0)) return reject('inconsistent', 'canonical-content-mismatch');
     const contentComplete = row => row.contentComplete === true && Array.isArray(row.attachments)
-      && row.attachments.every(item => item.available === true);
+      && row.attachments.every(item => item?.available === true);
     if (value.events.complete !== true || value.receipts.complete !== true
       || value.history.complete !== true || value.history.hasMore !== false
       || !Array.isArray(value.history.gaps) || value.history.gaps.length

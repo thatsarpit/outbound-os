@@ -53,3 +53,21 @@ belongs to its published parent, not these files. `git diff --check` passed.
 
 The VM checkout is preserved untouched. Further implementation is intended to
 continue from the local handoff checkout rather than concurrent remote writers.
+
+## Sales operations cutover
+
+The two checkpoint failures above have since been fixed: snapshots require an
+explicit consistency attestation and observation time covering every event;
+attachment validation is null-safe and request scopes are copied before awaits.
+The synthetic ingress harness resolves macOS temporary-directory aliases. Fresh
+focused validation passes 18/18 tests. The main suite passes 414 with one optional
+skip and four existing TODOs; the nine harness tests and 131 API integration tests
+pass. Prisma parity and its intentional-drift negative control pass with
+`RUST_LOG=debug` on macOS.
+
+The immediate sales path is the separate private owner-approved facade documented
+in `integrations/hermes-sales/README.md`. It uses existing production channel and
+campaign engines, and adds missing MCP population/audience/sender tools. Its ten
+approval tests and 24 MCP tests pass. The shadow-event foundation remains inactive
+and is not a prerequisite for on-demand campaign operations. Do not present it as
+an automatically operating inbound drafting service.
