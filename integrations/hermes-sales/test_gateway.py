@@ -21,7 +21,8 @@ class SalesGatewayTests(unittest.TestCase):
         self.now = 100000
         self.calls = []
         self.campaign = {'id': 1, 'name': 'Synthetic campaign', 'status': 'draft', 'messageTemplate': 'Hello {{name}}'}
-        self.audience = [{'id': 1, 'leadId': 42, 'status': 'pending', 'lead': {'name': 'Synthetic lead'}}]
+        self.audience = [{'id': 1, 'leadId': 42, 'status': 'pending',
+                          'lead': {**{key: None for key in g.RECIPIENT_FIELDS}, 'id': 42, 'name': 'Synthetic lead', 'email': 'synthetic@example.test'}}]
         self.ledger = g.Ledger(str(Path(self.tmp.name) / 'test.db'), self.call, lambda: self.now)
 
     def tearDown(self):
@@ -81,6 +82,17 @@ class SalesGatewayTests(unittest.TestCase):
         self.audience = []
         with self.assertRaisesRegex(ValueError, 'Populate'):
             self.ledger.request('start_campaign', {'campaign_id': 1})
+
+    def test_recipient_destination_and_personalization_changes_invalidate_approval(self):
+        for field, value in [('email', 'changed@example.test'), ('waUserId', 'US.synthetic'), ('company', 'Changed company'), ('product', 'Changed product')]:
+            with self.subTest(field=field):
+                request = self.ledger.request('start_campaign', {'campaign_id': 1, '_request_id': field})
+                self.audience[0]['lead'][field] = value
+                self.assertEqual(self.approve(request)['state'], 'uncertain')
+        self.assertNotIn('start_campaign', self.calls)
+        del self.audience[0]['lead']['email']
+        with self.assertRaisesRegex(ValueError, 'destinations'):
+            self.ledger.request('start_campaign', {'campaign_id': 1, '_request_id': 'old-api'})
 
     def test_timeout_and_process_death_never_replay(self):
         request = self.ledger.request('send_email', {'lead_id': 42, 'body': 'Synthetic'})

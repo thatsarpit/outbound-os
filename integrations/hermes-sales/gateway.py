@@ -25,6 +25,7 @@ ALLOWED = READ | WRITE
 SLOTS = threading.BoundedSemaphore(2)
 MAX_BODY = 65536
 TTL = 1800
+RECIPIENT_FIELDS = frozenset('id name mobile email waUserId company product country quantity status score repliedAt poolId emailOptOut emailStatus isOnWhatsApp assignedAccount assignedEmailAccountId'.split())
 
 
 def canonical(value):
@@ -96,6 +97,10 @@ class Ledger:
         rows, page = [], 1
         while True:
             batch = unpack(self.caller('campaign_leads', {'campaign_id': args['campaign_id'], 'page': page, 'limit': 50}))
+            if not all(isinstance(row.get('lead'), dict)
+                       and RECIPIENT_FIELDS <= row['lead'].keys()
+                       and row['lead']['id'] == row['leadId'] for row in batch['leads']):
+                raise ValueError('Recipient destinations or personalization are missing. Upgrade the API before launch approval.')
             rows.extend(batch['leads'])
             if page >= batch['pages']:
                 break

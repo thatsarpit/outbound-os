@@ -659,6 +659,31 @@ describe("Campaign CRUD", () => {
     assert.equal(res.body.id, campaignId);
     assert.ok(res.body.stats !== undefined, 'should include stats');
   });
+
+  test('campaign audience reads include current destinations and personalized-content fields for owner approval', async () => {
+    const lead = await prisma.lead.create({ data: { name: 'Synthetic approval recipient', mobile: '15557778899',
+      email: 'approval@example.test', company: 'Synthetic company', product: 'Synthetic product', country: 'US', quantity: '2' } });
+    const membership = await prisma.campaignLead.create({ data: { campaignId, leadId: lead.id, status: 'pending' } });
+    try {
+      const read = () => request('GET', `/api/campaigns/${campaignId}/leads`, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.71' } });
+      let response = await read();
+      assert.equal(response.status, 200);
+      let row = response.body.leads.find(item => item.id === membership.id).lead;
+      for (const key of ['id', 'name', 'mobile', 'email', 'waUserId', 'company', 'product', 'country', 'quantity',
+        'status', 'score', 'repliedAt', 'poolId', 'emailOptOut', 'emailStatus', 'isOnWhatsApp', 'assignedAccount', 'assignedEmailAccountId']) {
+        assert.ok(Object.hasOwn(row, key), key);
+      }
+      assert.equal(row.email, 'approval@example.test');
+      await prisma.lead.update({ where: { id: lead.id }, data: { email: 'changed@example.test', product: 'Changed product' } });
+      response = await read();
+      row = response.body.leads.find(item => item.id === membership.id).lead;
+      assert.equal(row.email, 'changed@example.test');
+      assert.equal(row.product, 'Changed product');
+    } finally {
+      await prisma.campaignLead.delete({ where: { id: membership.id } });
+      await prisma.lead.delete({ where: { id: lead.id } });
+    }
+  });
 });
 
 // ── System Health ────────────────────────────────────────────────────────────
