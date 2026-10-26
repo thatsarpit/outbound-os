@@ -1405,7 +1405,7 @@ model HermesInboundEvent {
   leadId Int?
   messageId Int?
   receiptId Int?
-  createdAt BigInt @default(dbgenerated("(CAST(strftime('%s','now') AS INTEGER) * 1000)"))
+  createdAt BigInt @default(dbgenerated("CAST(strftime('%s','now') AS INTEGER) * 1000"))
   batchId String?
   batch HermesEventBatch? @relation(fields: [batchId], references: [id], onDelete: Restrict, onUpdate: Cascade)
 

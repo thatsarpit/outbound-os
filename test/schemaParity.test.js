@@ -26,6 +26,17 @@ function migrated() {
   return db;
 }
 
+test('event timestamp dbgenerated expression matches the SQLite introspected default', () => {
+  const db = migrated();
+  try {
+    const actual = db.prepare('PRAGMA table_info("HermesInboundEvent")').all().find(row => row.name === 'createdAt').dflt_value;
+    const schema = readFileSync(new URL('../prisma/schema.prisma', import.meta.url), 'utf8');
+    const model = schema.match(/model HermesInboundEvent \{([\s\S]*?)\n\}/)[1];
+    const declared = model.match(/createdAt BigInt @default\(dbgenerated\("([^"]+)"\)\)/)[1];
+    assert.equal(declared, actual, 'Use the introspected default expression, without SQLite DDL wrapper parentheses');
+  } finally { db.close(); }
+});
+
 test('parity gate separately verifies all four triggers and the active-conversation partial index', async () => {
   const { verifySqlOnlyObjects } = await import('../scripts/check-schema-parity.mjs');
   const db = migrated();
@@ -37,3 +48,20 @@ test('parity gate separately verifies all four triggers and the active-conversat
     assert.throws(() => verifySqlOnlyObjects(db), /SQL-only schema drift/);
   } finally { db.close(); }
 });
+
+for (const [name, mutation] of [
+  ['changed trigger body', 'DROP TRIGGER hermes_inbound_email_upgrade; CREATE TRIGGER hermes_inbound_email_upgrade AFTER UPDATE ON Message BEGIN SELECT 1; END'],
+  ['changed partial-index predicate', 'DROP INDEX HermesEventBatch_active_conversation; CREATE UNIQUE INDEX HermesEventBatch_active_conversation ON HermesEventBatch(conversationKey) WHERE state = \'pending\''],
+  ['missing partial index', 'DROP INDEX HermesEventBatch_active_conversation'],
+  ['extra trigger', 'CREATE TRIGGER synthetic_extra_trigger AFTER INSERT ON Message BEGIN SELECT 1; END'],
+  ['extra view', 'CREATE VIEW synthetic_extra_view AS SELECT id FROM HermesEventBatch'],
+]) {
+  test(`SQL-only inventory rejects ${name}`, async () => {
+    const { verifySqlOnlyObjects } = await import('../scripts/check-schema-parity.mjs');
+    const db = migrated();
+    try {
+      db.exec(mutation);
+      assert.throws(() => verifySqlOnlyObjects(db), /SQL-only schema drift/);
+    } finally { db.close(); }
+  });
+}

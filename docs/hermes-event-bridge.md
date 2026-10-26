@@ -146,6 +146,32 @@ HTTP route or credential registration is installed.
 `complete(id)` remains a **trusted local/test-only primitive**. Never expose it
 to remote callers or use it in place of authenticated completion.
 
+## Isolated migration/schema parity gate
+
+`npm run db:parity` requires the repository's installed Prisma CLI and runs in
+Node 24 CI after `npm ci`. It never downloads a CLI or uses the caller's database:
+`DATABASE_URL` is overridden with a freshly allocated scratch SQLite file, removed
+in a `finally` block. Migration deployment, integrity and foreign-key checks are
+prerequisites, not parity evidence.
+
+The gate separately compares exact SQLite DDL for all four migration-only capture
+triggers and the active-conversation partial unique index against the reviewed
+migration. Missing, changed or extra triggers, views or partial indexes fail closed.
+Only that verified inventory is removed from the disposable comparison database;
+Prisma then compares the remaining migrated schema with `schema.prisma` using
+`migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script
+--exit-code`. Exit 0 is mandatory. Adding a synthetic column must subsequently
+produce exit 2, proving the comparison detects drift. SQL-only objects are not
+covered by Prisma; their exact-DDL check is not semantic SQL equivalence or a
+substitute for the behavioral trigger/index tests.
+
+Keep the event timestamp's `dbgenerated` expression equal to SQLite's introspected
+default, without the outer SQL DDL parentheses. The migration still requires those
+parentheses. This changes no stored default or migration SQL; the regression in
+`test/schemaParity.test.js` checks the representation, and only the hosted Prisma
+comparison establishes parity. This gate does not compare production data/schema,
+prove safe upgrades of populated databases, or authorize applying migrations.
+
 ## Validation performed
 
 ```sh
