@@ -176,6 +176,27 @@ class SalesGatewayTests(unittest.TestCase):
         self.assertEqual(repeated['approval_id'], request['approval_id'])
         self.assertEqual(json.loads(self.ledger.get(repeated['approval_id'])['args'])['client_message_id'], message_id)
 
+    def test_mcp_listener_requires_bearer_and_cannot_handle_owner_routes(self):
+        server = g.ThreadingHTTPServer(('127.0.0.1', 0), g.Handler)
+        port = server.server_port
+        server.server_port = 9118
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        base = f'http://127.0.0.1:{port}'
+        message = json.dumps({'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': 'send_email', 'arguments': {'lead_id': 42, 'body': 'Synthetic'}}}).encode()
+        try:
+            with patch.dict(os.environ, {'BRIDGE_TOKEN': 'synthetic-bridge-bearer'}), patch.object(g, 'LEDGER', self.ledger):
+                for path, bearer in [('/mcp', ''), ('/sales/approval/test', 'Bearer synthetic-bridge-bearer')]:
+                    with self.assertRaises(urllib.error.HTTPError) as denied:
+                        urllib.request.urlopen(urllib.request.Request(base + path, data=message, headers={'Authorization': bearer}))
+                    self.assertEqual(denied.exception.code, 401)
+                    denied.exception.close()
+                response = urllib.request.urlopen(urllib.request.Request(base + '/mcp', data=message, headers={'Authorization': 'Bearer synthetic-bridge-bearer'}))
+                self.assertEqual(g.unpack(json.load(response)['result'])['state'], 'pending')
+                self.assertEqual(self.calls, [])
+        finally:
+            server.shutdown()
+            server.server_close()
+
 
 if __name__ == '__main__':
     unittest.main()

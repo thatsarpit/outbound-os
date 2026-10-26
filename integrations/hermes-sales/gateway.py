@@ -334,5 +334,6 @@ if __name__ == '__main__':
         assert os.environ.get(name), name + ' required'
     os.umask(0o077)
     LEDGER = Ledger(os.environ.get('APPROVAL_DB', '/state/approvals.db'))
-    threading.Thread(target=ThreadingHTTPServer(('0.0.0.0', 9120), Handler).serve_forever, daemon=True).start()
-    ThreadingHTTPServer(('0.0.0.0', 9118), Handler).serve_forever()
+    role = os.environ.get('GATEWAY_ROLE', 'mcp')
+    assert role in ['mcp', 'approval'], 'Unknown gateway role'
+    ThreadingHTTPServer(('0.0.0.0', 9120 if role == 'approval' else 9118), Handler).serve_forever()

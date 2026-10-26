@@ -16,8 +16,9 @@ The owner uses the existing Hermes dashboard admin password. The facade stores a
 salted PBKDF2 hash, never that password. Login lasts eight hours.
 
 Approval URLs are served at `/sales/approval/<opaque-id>` through private Tailscale
-HTTPS. Only port 9120 is published, to host loopback. Port 9118 is MCP-only on the
-isolated bridge. Approval HTTP routes are unavailable there; the owner session
+HTTPS. Only port 9120 is published, to host loopback, by a separate approvals
+container that is absent from the Hermes bridge. Port 9118 is MCP-only on the
+isolated bridge; that container has no approval listener. Approval HTTP routes are unavailable there; the owner session
 cookie is unavailable to MCP. Preserve the existing firewall rules, including only
 the Hermes-to-adapter port 9118 exception. Never use Funnel/public exposure.
 
