@@ -56,8 +56,15 @@ function validateBatch(value) {
   }
 }
 
-function transaction(db, fn) {
-  db.exec('BEGIN IMMEDIATE');
+function transaction(db, fn, { readOnly = false, borrow = false } = {}) {
+  if (db.isTransaction) {
+    if (!borrow) throw new Error('This operation requires its own transaction');
+    // A deferred caller snapshot must upgrade before validation, not at the real write.
+    // This changes no rows; stale WAL snapshots fail busy without ending the caller transaction.
+    if (!readOnly) db.prepare('UPDATE main.HermesShadowSchema SET version=version WHERE 0').run();
+    return fn();
+  }
+  db.exec(readOnly ? 'BEGIN' : 'BEGIN IMMEDIATE');
   try {
     const value = fn();
     db.exec('COMMIT');
@@ -68,42 +75,103 @@ function transaction(db, fn) {
   }
 }
 
-function assertIsolated(db, { initialized = true } = {}) {
-  if (db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND lower(name) IN ('lead','message')`).get()) {
-    throw new Error('An isolated receiver database is required');
-  }
-  db.exec('PRAGMA foreign_keys=ON');
-  if (db.prepare('PRAGMA foreign_keys').get().foreign_keys !== 1) throw new Error('Foreign keys are required');
-  if (initialized && !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='HermesShadowBatch'").get()) {
-    throw new Error('Explicit inbox initialization is required');
-  }
-}
-
-/** Explicit receiver-owned schema. Never called on import or by application startup. */
-export function initializeShadowInbox(db) {
-  assertIsolated(db, { initialized: false });
-  db.exec(`CREATE TABLE IF NOT EXISTS HermesShadowBatch (
+const receiverVersion = 1;
+const recovery = 'preserve a private backup, export queue rowids, drafts and locks, and review an explicit migration; do not drop or rebuild it';
+const receiverDefinitions = [
+  `CREATE TABLE HermesShadowSchema (
+    id INTEGER NOT NULL PRIMARY KEY CHECK (id=1), version INTEGER NOT NULL
+  )`,
+  `CREATE TABLE HermesShadowBatch (
     source TEXT NOT NULL, route TEXT NOT NULL, id TEXT NOT NULL,
     bodyHash TEXT NOT NULL, body BLOB NOT NULL, conversationKey TEXT NOT NULL,
     state TEXT NOT NULL DEFAULT 'queued', result TEXT, reason TEXT,
     token TEXT, leaseUntil INTEGER, createdAt INTEGER NOT NULL, completedAt INTEGER,
     PRIMARY KEY(source,route,id)
-  );
-  CREATE TABLE IF NOT EXISTS HermesShadowEvent (
+  )`,
+  `CREATE TABLE HermesShadowEvent (
     source TEXT NOT NULL, eventId TEXT NOT NULL, route TEXT NOT NULL, batchId TEXT NOT NULL,
     PRIMARY KEY(source,eventId),
     FOREIGN KEY(source,route,batchId) REFERENCES HermesShadowBatch(source,route,id)
-  );
-  CREATE TABLE IF NOT EXISTS HermesShadowDraft (
+  )`,
+  `CREATE TABLE HermesShadowDraft (
     source TEXT NOT NULL, route TEXT NOT NULL, batchId TEXT NOT NULL,
     draft TEXT NOT NULL, draftHash TEXT NOT NULL, createdAt INTEGER NOT NULL,
     PRIMARY KEY(source,route,batchId),
     FOREIGN KEY(source,route,batchId) REFERENCES HermesShadowBatch(source,route,id)
-  );
-  CREATE UNIQUE INDEX IF NOT EXISTS HermesShadowConversationOwner
-    ON HermesShadowBatch(source,conversationKey) WHERE state IN ('processing','blocked','uncertain');
-  CREATE INDEX IF NOT EXISTS HermesShadowQueue ON HermesShadowBatch(source,route,state,createdAt);
-  CREATE INDEX IF NOT EXISTS HermesShadowLeases ON HermesShadowBatch(source,state,leaseUntil);`);
+  )`,
+  `CREATE UNIQUE INDEX HermesShadowConversationOwner
+    ON HermesShadowBatch(source,conversationKey) WHERE state IN ('processing','blocked','uncertain')`,
+  'CREATE INDEX HermesShadowQueue ON HermesShadowBatch(source,route,state,createdAt)',
+  'CREATE INDEX HermesShadowLeases ON HermesShadowBatch(source,state,leaseUntil)',
+];
+const receiverObjects = receiverDefinitions.map(sql => {
+  const [, kind, name] = /^CREATE (?:UNIQUE )?(TABLE|INDEX) (\w+)/.exec(sql);
+  return { name, type: kind.toLowerCase(), table: kind === 'TABLE' ? name : 'HermesShadowBatch', sql };
+});
+
+function assertReceiverSchema(db, { allowEmpty = false } = {}) {
+  // Unqualified operational SQL must never resolve to caller-created TEMP objects.
+  if (db.prepare(`SELECT 1 FROM temp.sqlite_schema
+    WHERE lower(name) GLOB 'hermesshadow*' OR lower(tbl_name) GLOB 'hermesshadow*'`).get()) {
+    throw new Error(`Invalid receiver schema (temporary receiver object): ${recovery}`);
+  }
+  const objects = db.prepare(`SELECT type,name,tbl_name,sql FROM main.sqlite_schema WHERE sql IS NOT NULL
+    AND (lower(name) GLOB 'hermesshadow*' OR lower(tbl_name) GLOB 'hermesshadow*')`).all();
+  if (!objects.length) {
+    if (allowEmpty) return false;
+    throw new Error('Explicit inbox initialization is required');
+  }
+  const metadata = objects.find(object => object.name === 'HermesShadowSchema');
+  if (!metadata) throw new Error(`Unversioned receiver schema: ${recovery}`);
+  const drift = detail => { throw new Error(`Invalid receiver schema (${detail}): ${recovery}`); };
+  // Exact owned DDL is deliberately conservative: it checks columns, defaults, PK/FK,
+  // rowid availability, collations and the unique partial lock predicate, not just names.
+  // Equivalent hand-written replacements need explicit operator review, not adoption.
+  const matches = (object, expected) => object?.type === expected.type && object.tbl_name === expected.table
+    && object.sql === expected.sql;
+  if (!matches(metadata, receiverObjects[0])) drift('metadata definition');
+  const versions = db.prepare('SELECT id,version FROM main.HermesShadowSchema').all();
+  if (versions.length !== 1 || versions[0].id !== 1) drift('metadata singleton');
+  if (versions[0].version !== receiverVersion) {
+    throw new Error(`Unsupported receiver schema version: ${versions[0].version}; ${recovery}`);
+  }
+  for (const expected of receiverObjects) {
+    if (!matches(objects.find(object => object.name === expected.name), expected)) drift(expected.name);
+  }
+  if (objects.length !== receiverObjects.length) drift('unexpected receiver object');
+  return true;
+}
+
+function assertIsolated(db, { initialized = true } = {}) {
+  if (db.prepare(`SELECT 1 FROM main.sqlite_schema WHERE type='table' AND lower(name) IN ('lead','message')`).get()) {
+    throw new Error('An isolated receiver database is required');
+  }
+  const exists = assertReceiverSchema(db, { allowEmpty: !initialized });
+  if (db.prepare('PRAGMA foreign_keys').get().foreign_keys !== 1) {
+    db.exec('PRAGMA foreign_keys=ON');
+    if (db.prepare('PRAGMA foreign_keys').get().foreign_keys !== 1) throw new Error('Foreign keys are required');
+  }
+  return exists;
+}
+
+function receiverTransaction(db, fn, { readOnly = false } = {}) {
+  // Foreign keys can only be enabled outside a transaction, after schema checks.
+  if (!db.isTransaction && db.prepare('PRAGMA foreign_keys').get().foreign_keys !== 1) assertIsolated(db);
+  const use = () => { assertIsolated(db); return fn(); };
+  return transaction(db, use, { readOnly, borrow: true });
+}
+
+/** Explicit receiver-owned schema. Never called on import or by application startup. */
+export function initializeShadowInbox(db) {
+  if (db.isTransaction) throw new Error('Initialize the inbox outside the caller transaction');
+  if (assertIsolated(db, { initialized: false })) return;
+  transaction(db, () => {
+    // Recheck after acquiring the write lock; never repair/adopt a competing schema.
+    if (assertIsolated(db, { initialized: false })) return;
+    db.exec(receiverDefinitions.join(';') + ';');
+    db.prepare('INSERT INTO main.HermesShadowSchema (id,version) VALUES (1,?)').run(receiverVersion);
+    assertReceiverSchema(db);
+  });
 }
 
 /** The caller owns an isolated SQLite connection and fixed source/route secret scope. */
@@ -119,20 +187,22 @@ export class HermesShadowInbox {
   }
 
   get(id) {
-    return this.db.prepare('SELECT * FROM HermesShadowBatch WHERE source=? AND route=? AND id=?')
-      .get(this.source, this.route, id);
+    return receiverTransaction(this.db, () => this.db.prepare('SELECT * FROM HermesShadowBatch WHERE source=? AND route=? AND id=?')
+      .get(this.source, this.route, id), { readOnly: true });
   }
 
   getDraft(id) {
-    return this.db.prepare('SELECT * FROM HermesShadowDraft WHERE source=? AND route=? AND batchId=?')
-      .get(this.source, this.route, id);
+    return receiverTransaction(this.db, () => this.db.prepare('SELECT * FROM HermesShadowDraft WHERE source=? AND route=? AND batchId=?')
+      .get(this.source, this.route, id), { readOnly: true });
   }
 
   expire(now) {
-    if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + this.leaseMs)) throw new Error('Invalid clock');
-    this.db.prepare(`UPDATE HermesShadowBatch SET state='uncertain',reason='lease-expired',
-      result='{"state":"uncertain","reason":"lease-expired"}',token=NULL,leaseUntil=NULL,completedAt=?
-      WHERE source=? AND state='processing' AND leaseUntil<=?`).run(now, this.source, now);
+    return receiverTransaction(this.db, () => {
+      if (!Number.isSafeInteger(now) || now < 0 || !Number.isSafeInteger(now + this.leaseMs)) throw new Error('Invalid clock');
+      this.db.prepare(`UPDATE HermesShadowBatch SET state='uncertain',reason='lease-expired',
+        result='{"state":"uncertain","reason":"lease-expired"}',token=NULL,leaseUntil=NULL,completedAt=?
+        WHERE source=? AND state='processing' AND leaseUntil<=?`).run(now, this.source, now);
+    });
   }
 
   /** Explicit local execution only. Callbacks are trusted adapters, not customer-provided tools. */

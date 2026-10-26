@@ -85,6 +85,27 @@ construct `HermesShadowInbox` with fixed source, route and ingress secret. CRM
 `Lead`/`Message` tables are rejected and foreign keys are enforced. This is not
 permission to read production database files or duplicate the CRM.
 
+The receiver owns singleton `HermesShadowSchema` metadata at version 1; it does
+not change SQLite `user_version`. Fresh schema creation and its version marker
+commit together. Initialization rejects a caller-owned transaction without
+altering it; compatible repeat initialization preserves queue rowids, drafts and
+conversation locks. Constructor and public operations revalidate the contract.
+
+Standalone reads keep validation and data access in one SQLite snapshot; expiry
+takes write ownership before validation. These synchronous helpers can borrow an
+existing transaction without committing or rolling it back; stale WAL upgrades
+fail instead of restarting the caller's work. Ingress, draft processing and signed
+completion receipts require their own transaction, so they cannot report durable
+success while the caller could still roll it back. A WAL read may return its
+validated older snapshot after another writer commits; the next operation checks
+the new schema. This is not separate-process crash/power-loss validation.
+
+Unknown versions, unversioned legacy receivers, missing/changed owned DDL and
+TEMP shadow objects fail closed before schema/data repair. Matching is deliberately
+exact, not a semantic SQL-equivalence checker. Preserve a private backup and export
+queue rowids, drafts and locks for an explicitly reviewed migration; do not drop,
+rebuild or silently adopt an incompatible receiver. No legacy migration is supplied.
+
 The receiver limits bodies to 64 KiB, reference arrays to 50 and timestamp skew
 to 300 seconds; signatures use timing-safe comparison. Changed content under an
 existing batch ID and overlapping canonical event IDs are rejected atomically.
@@ -132,14 +153,21 @@ HERMES_WEBHOOK_SOURCE=/path/to/installed/hermes/gateway/platforms/webhook.py \
   NODE_ENV=test node --test --test-concurrency=1 test/hermes*.test.js
 ```
 
-Parent verification: **42 passed, 0 failed, 0 skipped** on Node 26.12.1. Tests
+Latest parent verification: **60 total, 59 passed, 0 failed, 1 skipped** on Node
+26.12.1, with the optional installed-Hermes source probe unset. Tests
 apply the complete migration chain to disposable SQLite fixtures and use injected
 synthetic transports/context/drafts. They cover transaction and event-storage
 failure rollback; historical no-backfill and genuine email/receipt recovery;
 deduplication; shared limits; bursts and account scope; retry arithmetic and
 responses; timeout/abort; lease fencing; FIFO through clock changes and route
 aliases; context failures; draft bounds; receiver authentication/replay/conflicts;
-and signed completion acceptance, tampering, wrong scope and idempotency.
+and signed completion acceptance, tampering, wrong scope and idempotency. Receiver
+regressions additionally cover atomic initialization/version writes, caller
+transaction ownership, future/legacy/schema-drift rejection, runtime revalidation,
+TEMP shadowing, and populated repeat initialization preserving FIFO/drafts/locks.
+Two-connection DELETE/WAL regressions cover validation/use serialization and
+consistent reads. Borrowed-transaction failures preserve caller work; durable
+entrypoints reject caller-owned transactions before callbacks or receipt signing.
 
 The optional installed-Hermes contract probe extracts trusted signature methods
 offline. It verifies sender bytes and stale/tampered rejection, **not** a listening
@@ -163,8 +191,9 @@ foundation; it is not security certification or production approval.
   explicitly account for SQL-only triggers/partial indexes.
 - Validate real MIME/WhatsApp ingestion, provider overlaps, separate-process
   contention/death, migration/rollback and durable receiver storage permissions.
-- Harden receiver initialization as a transactional/versioned schema contract;
-  current initialization checks are not a complete schema-version validator.
+- Provide a reviewed version-migration/recovery policy before supporting existing
+  legacy receiver databases; the current exact versioned contract rejects them
+  without modifying their schema or data.
 - Prefer canonical-ID-targeted conflict handling over broad `INSERT OR IGNORE`
   before extending the event schema with new constraints.
 - Provide approved read-only context/model adapters, endpoint admission and

@@ -66,6 +66,375 @@ test('receiver configuration fails closed and initialization rejects CRM databas
   } finally { db.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('initialization rolls back all new receiver schema after an injected DDL failure', async () => {
+  const { initializeShadowInbox } = await import('../src/services/hermesShadowInbox.js');
+  const db = new DatabaseSync(':memory:');
+  const exec = db.exec.bind(db);
+  db.exec = sql => {
+    exec(sql);
+    if (sql.includes('CREATE TABLE')) throw new Error('Synthetic DDL failure');
+  };
+  try {
+    assert.throws(() => initializeShadowInbox(db), /Synthetic DDL failure/);
+    assert.deepEqual(db.prepare('SELECT name FROM sqlite_master').all(), []);
+    assert.equal(db.isTransaction, false);
+  } finally { db.close(); }
+});
+
+test('initialization rejects an existing caller transaction without ending or mutating it', async () => {
+  const { initializeShadowInbox } = await import('../src/services/hermesShadowInbox.js');
+  for (const foreignKeys of [0, 1]) {
+    const db = new DatabaseSync(':memory:');
+    try {
+      db.exec(`PRAGMA foreign_keys=${foreignKeys}; CREATE TABLE SyntheticCaller (id INTEGER); BEGIN;
+        INSERT INTO SyntheticCaller VALUES (1)`);
+      assert.throws(() => initializeShadowInbox(db), /outside.*transaction/i);
+      assert.equal(db.isTransaction, true);
+      assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, foreignKeys);
+      assert.equal(db.prepare('SELECT count(*) AS n FROM SyntheticCaller').get().n, 1);
+      assert.equal(db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'HermesShadow%'").get().n, 0);
+      db.exec('ROLLBACK');
+      assert.equal(db.prepare('SELECT count(*) AS n FROM SyntheticCaller').get().n, 0);
+    } finally { db.close(); }
+  }
+});
+
+test('receiver initialization writes its own schema version without changing database user_version', async () => {
+  const { initializeShadowInbox } = await import('../src/services/hermesShadowInbox.js');
+  const db = new DatabaseSync(':memory:');
+  try {
+    db.exec('PRAGMA user_version=73');
+    initializeShadowInbox(db);
+    assert.deepEqual(db.prepare('SELECT id,version FROM HermesShadowSchema').all().map(row => ({ ...row })),
+      [{ id: 1, version: 1 }]);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 73);
+  } finally { db.close(); }
+});
+
+function databaseSnapshot(db) {
+  const schema = db.prepare('SELECT type,name,tbl_name,sql FROM main.sqlite_schema ORDER BY type,name').all();
+  return { schema, rows: schema.filter(row => row.type === 'table').map(({ name }) => [name,
+    db.prepare(`SELECT * FROM main."${name.replaceAll('"', '""')}"`).all()]),
+  temporary: db.prepare('SELECT type,name,tbl_name,sql FROM temp.sqlite_schema ORDER BY type,name').all(),
+  changes: db.prepare('SELECT total_changes() AS n').get().n,
+  foreignKeys: db.prepare('PRAGMA foreign_keys').get().foreign_keys,
+  userVersion: db.prepare('PRAGMA user_version').get().user_version,
+  schemaVersion: db.prepare('PRAGMA schema_version').get().schema_version };
+}
+
+test('future receiver versions reject initialization before any schema or data write', async () => {
+  const { initializeShadowInbox } = await import('../src/services/hermesShadowInbox.js');
+  const db = new DatabaseSync(':memory:');
+  try {
+    initializeShadowInbox(db);
+    db.exec('UPDATE HermesShadowSchema SET version=2; DROP TABLE HermesShadowDraft; PRAGMA foreign_keys=OFF');
+    const before = databaseSnapshot(db);
+    const statements = [];
+    const exec = db.exec.bind(db);
+    db.exec = sql => { statements.push(sql); return exec(sql); };
+    assert.throws(() => initializeShadowInbox(db), /unsupported.*version.*2/i);
+    assert.deepEqual(statements, [], 'future contracts must reject before even connection PRAGMA writes');
+    assert.deepEqual(databaseSnapshot(db), before);
+  } finally { db.close(); }
+});
+
+test('unversioned legacy receivers require preservation and review instead of automatic adoption', async () => {
+  const { initializeShadowInbox, HermesShadowInbox } = await import('../src/services/hermesShadowInbox.js');
+  for (const complete of [false, true]) {
+    const db = new DatabaseSync(':memory:');
+    try {
+      if (complete) {
+        initializeShadowInbox(db);
+        new HermesShadowInbox(db, { secret, source, route }).receive(signed(payload()));
+        db.exec('DROP TABLE HermesShadowSchema');
+      } else db.exec("CREATE TABLE HermesShadowBatch (kept TEXT); INSERT INTO HermesShadowBatch VALUES ('Synthetic legacy data')");
+      db.exec('PRAGMA foreign_keys=OFF');
+      const before = databaseSnapshot(db);
+      const statements = [];
+      const exec = db.exec.bind(db);
+      db.exec = sql => { statements.push(sql); return exec(sql); };
+      for (const attempt of [() => initializeShadowInbox(db), () => new HermesShadowInbox(db, { secret, source, route })]) {
+        assert.throws(attempt, /unversioned.*preserve.*export.*review/i);
+        assert.deepEqual(databaseSnapshot(db), before);
+      }
+      assert.deepEqual(statements, []);
+    } finally { db.close(); }
+  }
+});
+
+function replaceReceiverTable(db, name, transform) {
+  const table = db.prepare('SELECT sql FROM main.sqlite_schema WHERE name=?').get(name).sql;
+  const indexes = db.prepare("SELECT sql FROM main.sqlite_schema WHERE type='index' AND tbl_name=? AND sql IS NOT NULL").all(name);
+  db.exec(`DROP TABLE ${name}; ${transform(table)}; ${indexes.map(row => row.sql).join(';')}`);
+}
+
+test('versioned receiver schema drift is rejected without repairing or changing existing objects', async () => {
+  const { initializeShadowInbox, HermesShadowInbox } = await import('../src/services/hermesShadowInbox.js');
+  const mutations = [
+    ['missing batch table', db => db.exec('DROP TABLE HermesShadowBatch')],
+    ['missing event table', db => db.exec('DROP TABLE HermesShadowEvent')],
+    ['missing draft table', db => db.exec('DROP TABLE HermesShadowDraft')],
+    ['missing column', db => db.exec('ALTER TABLE HermesShadowBatch DROP COLUMN result')],
+    ['nullable hash', db => replaceReceiverTable(db, 'HermesShadowBatch', sql => sql.replace('bodyHash TEXT NOT NULL', 'bodyHash TEXT'))],
+    ['wrong type', db => replaceReceiverTable(db, 'HermesShadowBatch', sql => sql.replace('body BLOB', 'body TEXT'))],
+    ['wrong default', db => replaceReceiverTable(db, 'HermesShadowBatch', sql => sql.replace("DEFAULT 'queued'", "DEFAULT 'blocked'"))],
+    ['no FIFO rowid', db => replaceReceiverTable(db, 'HermesShadowBatch', sql => sql + ' WITHOUT ROWID')],
+    ['wrong primary key', db => replaceReceiverTable(db, 'HermesShadowEvent', sql => sql.replace('PRIMARY KEY(source,eventId)', 'PRIMARY KEY(source,eventId,route)'))],
+    ['missing foreign key', db => replaceReceiverTable(db, 'HermesShadowDraft', sql => sql.replace(/,\s*FOREIGN KEY\(source,route,batchId\) REFERENCES HermesShadowBatch\(source,route,id\)/, ''))],
+    ['changed foreign key', db => replaceReceiverTable(db, 'HermesShadowEvent', sql => sql.replace('REFERENCES HermesShadowBatch(source,route,id)', 'REFERENCES HermesShadowBatch(source,route,id) ON DELETE CASCADE'))],
+    ['missing owner index', db => db.exec('DROP INDEX HermesShadowConversationOwner')],
+    ['missing queue index', db => db.exec('DROP INDEX HermesShadowQueue')],
+    ['missing lease index', db => db.exec('DROP INDEX HermesShadowLeases')],
+    ['nonunique owner', db => db.exec(`DROP INDEX HermesShadowConversationOwner;
+      CREATE INDEX HermesShadowConversationOwner ON HermesShadowBatch(source,conversationKey) WHERE state IN ('processing','blocked','uncertain')`)],
+    ['wrong lock predicate', db => db.exec(`DROP INDEX HermesShadowConversationOwner;
+      CREATE UNIQUE INDEX HermesShadowConversationOwner ON HermesShadowBatch(source,conversationKey) WHERE state IN ('processing','blocked')`)],
+    ['route-scoped lock', db => db.exec(`DROP INDEX HermesShadowConversationOwner;
+      CREATE UNIQUE INDEX HermesShadowConversationOwner ON HermesShadowBatch(source,route,conversationKey) WHERE state IN ('processing','blocked','uncertain')`)],
+    ['index owned elsewhere', db => db.exec(`DROP INDEX HermesShadowQueue; CREATE TABLE SyntheticOther (source,route,state,createdAt);
+      CREATE INDEX HermesShadowQueue ON SyntheticOther(source,route,state,createdAt)`)],
+    ['unexpected trigger', db => db.exec('CREATE TRIGGER SyntheticMutation AFTER INSERT ON HermesShadowBatch BEGIN SELECT 1; END')],
+    ['unexpected receiver index', db => db.exec('CREATE INDEX SyntheticExtra ON HermesShadowBatch(id)')],
+    ['metadata column drift', db => db.exec('ALTER TABLE HermesShadowSchema RENAME COLUMN version TO revision')],
+    ['metadata row missing', db => db.exec('DELETE FROM HermesShadowSchema')],
+  ];
+  for (const [label, mutate] of mutations) {
+    const db = new DatabaseSync(':memory:');
+    try {
+      initializeShadowInbox(db);
+      db.exec('PRAGMA foreign_keys=OFF');
+      mutate(db);
+      const before = databaseSnapshot(db);
+      const statements = [];
+      const exec = db.exec.bind(db);
+      db.exec = sql => { statements.push(sql); return exec(sql); };
+      for (const attempt of [() => initializeShadowInbox(db), () => new HermesShadowInbox(db, { secret, source, route })]) {
+        assert.throws(attempt, /receiver schema|unsupported.*version/i, label);
+        assert.deepEqual(databaseSnapshot(db), before, label);
+      }
+      assert.deepEqual(statements, [], label);
+    } finally { db.close(); }
+  }
+});
+
+test('every inbox operation revalidates the receiver contract after construction', async () => {
+  for (const mutation of ['UPDATE HermesShadowSchema SET version=2', 'DROP INDEX HermesShadowConversationOwner']) {
+    const f = await fixture();
+    try {
+      const value = payload();
+      f.inbox.receive(signed(value));
+      f.db.exec(mutation + '; PRAGMA foreign_keys=OFF');
+      const before = databaseSnapshot(f.db);
+      for (const attempt of [
+        () => f.inbox.get(value.event_id), () => f.inbox.getDraft(value.event_id),
+        () => f.inbox.expire(now + 1000), () => f.inbox.receive(signed(payload({ messageId: 2 }))),
+        () => f.inbox.completionReceipt(value.event_id, { completionSecret: receiptSecret, now }),
+      ]) {
+        assert.throws(attempt, /receiver schema|unsupported.*version/i);
+        assert.deepEqual(databaseSnapshot(f.db), before);
+      }
+      await assert.rejects(f.inbox.runNext({ clock: () => now }), /receiver schema|unsupported.*version/i);
+      assert.deepEqual(databaseSnapshot(f.db), before);
+    } finally { f.close(); }
+  }
+});
+
+function afterReceiverSchemaRead(db, callback) {
+  const prepare = db.prepare.bind(db);
+  let called = false;
+  db.prepare = sql => {
+    const statement = prepare(sql);
+    if (sql.startsWith('SELECT type,name,tbl_name,sql FROM main.sqlite_schema WHERE sql IS NOT NULL')) {
+      const all = statement.all.bind(statement);
+      statement.all = (...args) => {
+        const rows = all(...args);
+        if (!called) { called = true; callback(); }
+        return rows;
+      };
+    }
+    return statement;
+  };
+  return () => { db.prepare = prepare; assert.equal(called, true, 'schema-read race hook must execute'); };
+}
+
+test('standalone expiry locks out schema changes before validating in rollback and WAL modes', async () => {
+  for (const journal of ['DELETE', 'WAL']) {
+    const f = await fixture();
+    const other = new DatabaseSync(f.filename);
+    let restore;
+    try {
+      f.db.exec(`PRAGMA journal_mode=${journal}`);
+      other.exec('PRAGMA busy_timeout=0');
+      const value = payload();
+      f.inbox.receive(signed(value));
+      f.db.prepare("UPDATE HermesShadowBatch SET state='processing',token='synthetic-token',leaseUntil=1 WHERE id=?").run(value.event_id);
+      let committed = false, blocked;
+      restore = afterReceiverSchemaRead(f.db, () => {
+        try { other.exec('DROP INDEX HermesShadowConversationOwner'); committed = true; }
+        catch (error) { blocked = error; }
+      });
+      f.inbox.expire(2);
+      restore(); restore = null;
+      assert.equal(committed, false, `${journal}: schema writer must not commit during expiry validation/use`);
+      assert.match(blocked?.message ?? '', /locked|busy/i);
+      assert.equal(f.inbox.get(value.event_id).state, 'uncertain');
+      assert.equal(f.db.isTransaction, false);
+      other.exec('DROP INDEX HermesShadowConversationOwner');
+      const before = databaseSnapshot(f.db);
+      assert.throws(() => f.inbox.expire(3), /receiver schema/i);
+      assert.deepEqual(databaseSnapshot(f.db), before);
+    } finally { restore?.(); other.close(); f.close(); }
+  }
+});
+
+async function assertStandaloneReadSnapshot(method) {
+  for (const journal of ['WAL', 'DELETE']) {
+    const f = await fixture();
+    const other = new DatabaseSync(f.filename);
+    let restore;
+    try {
+      f.db.exec(`PRAGMA journal_mode=${journal}`);
+      other.exec('PRAGMA busy_timeout=0');
+      const value = payload();
+      f.inbox.receive(signed(value));
+      await f.inbox.runNext({ clock: () => now + 1, readContext: async scope => attested(scope),
+        draftReply: async () => 'Synthetic snapshot draft' });
+      const before = f.inbox[method](value.event_id);
+      let committed = false, blocked;
+      const change = `UPDATE HermesShadowSchema SET version=2; DROP INDEX HermesShadowConversationOwner;
+        UPDATE HermesShadowBatch SET reason='synthetic-new'; UPDATE HermesShadowDraft SET draft='Synthetic new draft'`;
+      restore = afterReceiverSchemaRead(f.db, () => {
+        other.exec('BEGIN IMMEDIATE');
+        try { other.exec(change + '; COMMIT'); committed = true; }
+        catch (error) { blocked = error; other.exec('ROLLBACK'); }
+      });
+      assert.deepEqual(f.inbox[method](value.event_id), before, `${method} must use the validated snapshot`);
+      restore(); restore = null;
+      assert.equal(f.db.isTransaction, false);
+      assert.equal(committed, journal === 'WAL', 'WAL writers may commit after the read snapshot begins');
+      if (!committed) {
+        assert.match(blocked?.message ?? '', /locked|busy/i);
+        other.exec(change);
+      }
+      assert.throws(() => f.inbox[method](value.event_id), /unsupported.*version.*2/i,
+        'the next standalone read must see the newly committed schema');
+      assert.equal(f.db.isTransaction, false);
+    } finally { restore?.(); other.close(); f.close(); }
+  }
+}
+
+test('standalone get keeps validation and data in one coherent snapshot', async () => {
+  await assertStandaloneReadSnapshot('get');
+});
+
+test('standalone getDraft keeps validation and data in one coherent snapshot', async () => {
+  await assertStandaloneReadSnapshot('getDraft');
+});
+
+test('borrowed deferred expiry acquires the write lock before validation without ending the caller transaction', async () => {
+  for (const journal of ['DELETE', 'WAL']) {
+    const f = await fixture();
+    const other = new DatabaseSync(f.filename);
+    let restore;
+    try {
+      f.db.exec(`PRAGMA journal_mode=${journal}`);
+      other.exec('PRAGMA busy_timeout=0');
+      const value = payload();
+      f.inbox.receive(signed(value));
+      f.db.prepare("UPDATE HermesShadowBatch SET state='processing',leaseUntil=1 WHERE id=?").run(value.event_id);
+      f.db.exec('BEGIN');
+      let acquired = false, blocked;
+      restore = afterReceiverSchemaRead(f.db, () => {
+        try { other.exec('BEGIN IMMEDIATE'); acquired = true; other.exec('ROLLBACK'); }
+        catch (error) { blocked = error; }
+      });
+      f.inbox.expire(2);
+      restore(); restore = null;
+      assert.equal(acquired, false, `${journal}: deferred caller must own the write lock before schema validation`);
+      assert.match(blocked?.message ?? '', /locked|busy/i);
+      assert.equal(f.db.isTransaction, true);
+      assert.equal(f.inbox.get(value.event_id).state, 'uncertain');
+      assert.equal(other.prepare('SELECT state FROM HermesShadowBatch WHERE id=?').get(value.event_id).state, 'processing');
+      f.db.exec('ROLLBACK');
+      assert.equal(f.inbox.get(value.event_id).state, 'processing', 'only the caller rolls back the mutation');
+    } finally { restore?.(); if (f.db.isTransaction) f.db.exec('ROLLBACK'); other.close(); f.close(); }
+  }
+});
+
+test('compatible reinitialization is read-only and preserves durable FIFO, drafts and conversation locks', async () => {
+  const f = await fixture();
+  try {
+    const values = [payload(), payload({ messageId: 2, leadId: 2 }), payload({ messageId: 3, leadId: 3 }),
+      payload({ messageId: 4, leadId: 3 }), payload({ messageId: 5, leadId: 2 })];
+    for (const [index, value] of values.entries()) f.inbox.receive(signed(value, { time: now - index }));
+    const callbacks = { clock: () => now + 1, readContext: async scope => attested(scope), draftReply: async () => 'Synthetic preserved draft' };
+    assert.equal((await f.inbox.runNext(callbacks)).state, 'drafted');
+    assert.equal((await f.inbox.runNext({ clock: callbacks.clock })).state, 'blocked');
+    f.db.exec('UPDATE HermesShadowBatch SET rowid=rowid+100');
+    const before = databaseSnapshot(f.db);
+    const rowids = f.db.prepare('SELECT rowid,id FROM HermesShadowBatch ORDER BY rowid').all();
+    const exec = f.db.exec.bind(f.db);
+    f.db.exec = () => { throw new Error('Compatible initialization must not execute writes'); };
+    f.api.initializeShadowInbox(f.db);
+    f.api.initializeShadowInbox(f.db);
+    assert.deepEqual(databaseSnapshot(f.db), before);
+    f.db.exec = exec;
+    f.reopen();
+    f.api.initializeShadowInbox(f.db);
+    assert.deepEqual(f.db.prepare('SELECT rowid,id FROM HermesShadowBatch ORDER BY rowid').all(), rowids);
+    assert.equal(f.inbox.getDraft(values[0].event_id).draft, 'Synthetic preserved draft');
+    assert.equal(f.inbox.get(values[1].event_id).state, 'blocked');
+    assert.equal((await f.inbox.runNext(callbacks)).id, values[2].event_id);
+    assert.equal((await f.inbox.runNext(callbacks)).id, values[3].event_id);
+    assert.deepEqual(await f.inbox.runNext(callbacks), { state: 'idle' });
+    assert.equal(f.inbox.get(values[4].event_id).state, 'queued');
+  } finally { f.close(); }
+});
+
+test('temporary receiver objects cannot shadow a valid or empty main receiver schema', async () => {
+  const { initializeShadowInbox, HermesShadowInbox } = await import('../src/services/hermesShadowInbox.js');
+  for (const initialized of [false, true]) {
+    const db = new DatabaseSync(':memory:');
+    try {
+      if (initialized) initializeShadowInbox(db);
+      db.exec('CREATE TEMP TABLE HermesShadowBatch (id TEXT); PRAGMA foreign_keys=OFF');
+      const before = databaseSnapshot(db);
+      assert.throws(() => initializeShadowInbox(db), /receiver schema.*temp/i);
+      assert.throws(() => new HermesShadowInbox(db, { secret, source, route }), /receiver schema.*temp/i);
+      assert.deepEqual(databaseSnapshot(db), before);
+    } finally { db.close(); }
+  }
+});
+
+test('initialization rolls back schema and the executed version write together on a late failure', async () => {
+  const { initializeShadowInbox } = await import('../src/services/hermesShadowInbox.js');
+  const db = new DatabaseSync(':memory:');
+  const prepare = db.prepare.bind(db);
+  let versionWritten = false;
+  db.prepare = sql => {
+    const statement = prepare(sql);
+    if (sql.startsWith('INSERT INTO main.HermesShadowSchema')) {
+      const run = statement.run.bind(statement);
+      statement.run = (...args) => {
+        run(...args);
+        assert.equal(db.isTransaction, true);
+        assert.equal(prepare('SELECT version FROM main.HermesShadowSchema').get().version, 1);
+        versionWritten = true;
+        throw new Error('Synthetic failure after version write');
+      };
+    }
+    return statement;
+  };
+  try {
+    db.exec('PRAGMA user_version=73');
+    assert.throws(() => initializeShadowInbox(db), /Synthetic failure after version write/);
+    assert.equal(versionWritten, true);
+    assert.deepEqual(db.prepare('SELECT name FROM main.sqlite_schema').all(), []);
+    assert.equal(db.isTransaction, false);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 73);
+  } finally { db.close(); }
+});
+
 test('authentication rejects malformed, stale, substituted and incorrectly scoped requests before persistence', async () => {
   const f = await fixture();
   try {
@@ -220,6 +589,94 @@ test('backward receiver clocks cannot bypass oldest blocked or uncertain convers
       assert.equal(f.inbox.get(older.event_id).state, state);
     } finally { other.close(); f.close(); }
   }
+});
+
+test('durable ingress, processing and receipts reject caller-owned transactions', async () => {
+  const f = await fixture();
+  try {
+    const value = payload();
+    f.inbox.receive(signed(value));
+    const callbacks = { clock: () => now + 1, readContext: async scope => attested(scope),
+      draftReply: async () => 'Synthetic committed draft' };
+    assert.equal((await f.inbox.runNext(callbacks)).state, 'drafted');
+    f.inbox.receive(signed(payload({ messageId: 2, leadId: 2 })));
+    f.db.exec('CREATE TABLE SyntheticCaller (id INTEGER); BEGIN; INSERT INTO SyntheticCaller VALUES (1)');
+    const before = databaseSnapshot(f.db);
+    assert.throws(() => f.inbox.receive(signed(payload({ messageId: 3, leadId: 3 }))), /own transaction/i);
+    let contextCalls = 0;
+    await assert.rejects(f.inbox.runNext({ ...callbacks,
+      readContext: async scope => { contextCalls++; return attested(scope); } }), /own transaction/i);
+    assert.equal(contextCalls, 0, 'uncommitted claims must not invoke callbacks');
+    assert.throws(() => f.inbox.completionReceipt(value.event_id,
+      { completionSecret: receiptSecret, now: now + 2 }), /own transaction/i);
+    assert.equal(f.db.isTransaction, true);
+    assert.deepEqual(databaseSnapshot(f.db), before, 'durable entrypoints must not change the caller transaction');
+    f.db.exec('ROLLBACK');
+    assert.equal(f.db.prepare('SELECT count(*) AS n FROM SyntheticCaller').get().n, 0);
+    assert.equal(f.inbox.getDraft(value.event_id).draft, 'Synthetic committed draft');
+  } finally { if (f.db.isTransaction) f.db.exec('ROLLBACK'); f.close(); }
+});
+
+test('borrowed operations preserve caller work when foreign keys are disabled', async () => {
+  const f = await fixture();
+  try {
+    const value = payload();
+    f.inbox.receive(signed(value));
+    f.db.exec('CREATE TABLE SyntheticCaller (id INTEGER); PRAGMA foreign_keys=OFF; BEGIN; INSERT INTO SyntheticCaller VALUES (1)');
+    const before = databaseSnapshot(f.db);
+    for (const attempt of [() => f.inbox.get(value.event_id), () => f.inbox.getDraft(value.event_id),
+      () => f.inbox.expire(now + 1000)]) {
+      assert.throws(attempt, /Foreign keys are required/);
+      assert.equal(f.db.isTransaction, true);
+      assert.deepEqual(databaseSnapshot(f.db), before);
+    }
+    f.db.exec('ROLLBACK');
+    assert.equal(f.db.prepare('SELECT count(*) AS n FROM SyntheticCaller').get().n, 0);
+  } finally { if (f.db.isTransaction) f.db.exec('ROLLBACK'); f.close(); }
+});
+
+test('borrowed operations reject invalid schema without rolling back caller work', async () => {
+  for (const mutation of ['UPDATE HermesShadowSchema SET version=2', 'DROP INDEX HermesShadowConversationOwner',
+    'DROP TABLE HermesShadowSchema', 'ALTER TABLE HermesShadowSchema RENAME COLUMN version TO revision']) {
+    const f = await fixture();
+    try {
+      const value = payload();
+      f.inbox.receive(signed(value));
+      f.db.exec(mutation + '; CREATE TABLE SyntheticCaller (id INTEGER); BEGIN; INSERT INTO SyntheticCaller VALUES (1)');
+      const before = databaseSnapshot(f.db);
+      for (const attempt of [() => f.inbox.get(value.event_id), () => f.inbox.getDraft(value.event_id),
+        () => f.inbox.expire(now + 1000)]) {
+        assert.throws(attempt);
+        assert.equal(f.db.isTransaction, true);
+        assert.deepEqual(databaseSnapshot(f.db), before);
+      }
+      f.db.exec('ROLLBACK');
+      assert.equal(f.db.prepare('SELECT count(*) AS n FROM SyntheticCaller').get().n, 0);
+    } finally { if (f.db.isTransaction) f.db.exec('ROLLBACK'); f.close(); }
+  }
+});
+
+test('borrowed stale WAL write upgrades fail without ending the caller snapshot', async () => {
+  const f = await fixture();
+  let other;
+  try {
+    f.db.exec('PRAGMA journal_mode=WAL');
+    const value = payload();
+    f.inbox.receive(signed(value));
+    f.db.prepare("UPDATE HermesShadowBatch SET state='processing',token='Synthetic stale owner',leaseUntil=? WHERE id=?")
+      .run(now, value.event_id);
+    other = new DatabaseSync(f.filename);
+    other.exec('PRAGMA busy_timeout=0');
+    f.db.exec('BEGIN');
+    const before = databaseSnapshot(f.db);
+    other.prepare('UPDATE HermesShadowBatch SET reason=? WHERE id=?').run('Synthetic concurrent marker', value.event_id);
+    assert.throws(() => f.inbox.expire(now + 1000), error => /busy|locked/i.test(error.message));
+    assert.equal(f.db.isTransaction, true);
+    assert.deepEqual(databaseSnapshot(f.db), before, 'failed upgrade must preserve the borrowed snapshot');
+    f.db.exec('ROLLBACK');
+    assert.equal(f.inbox.get(value.event_id).state, 'processing');
+    assert.equal(f.inbox.get(value.event_id).reason, 'Synthetic concurrent marker');
+  } finally { if (f.db.isTransaction) f.db.exec('ROLLBACK'); other?.close(); f.close(); }
 });
 
 function attested(scope, data = { history: 'Synthetic private history marker' }) {
