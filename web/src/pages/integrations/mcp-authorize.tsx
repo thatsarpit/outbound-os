@@ -46,6 +46,7 @@ export default function McpAuthorizePage() {
     : request.isError
       ? request.error.message
       : ''
+  const writeAccess = request.data?.scope.split(' ').includes('mcp:write') === true
   return (
     <div className="mx-auto max-w-xl space-y-5 py-6 sm:py-10">
       <Link
@@ -94,12 +95,14 @@ export default function McpAuthorizePage() {
               </div>
               <div>
                 <h2 className="flex items-center gap-2 text-sm font-semibold text-text-primary">
-                  <ShieldCheck className="h-4 w-4" aria-hidden="true" /> Read-only CRM access
+                  <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+                  {writeAccess ? 'Read and write CRM access' : 'Read-only CRM access'}
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-text-secondary">
-                  Read leads, conversations, campaigns, team details and reports. This connection
-                  cannot send messages, edit records or start campaigns. Access stops if you revoke
-                  it or lose administrator access.
+                  {writeAccess
+                    ? 'Read CRM data, create and edit leads and campaigns, import or delete records, send messages, and start, pause or resume outreach. Your AI client can execute these operations without a separate dashboard approval for each action. Existing channel charges and sending rules apply.'
+                    : 'Read leads, conversations, campaigns, team details and reports. This connection cannot send messages, edit records or start campaigns.'}
+                  {' '}Access stops if you revoke it or lose administrator access.
                 </p>
               </div>
               <p className="flex gap-2 text-xs leading-5 text-text-secondary">
@@ -133,7 +136,7 @@ export default function McpAuthorizePage() {
                   pendingLabel="Saving…"
                   onClick={() => void decide('allow')}
                 >
-                  Allow read-only access
+                  {writeAccess ? 'Allow read and write access' : 'Allow read-only access'}
                 </Button>
               </div>
             </>

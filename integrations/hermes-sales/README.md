@@ -74,3 +74,20 @@ can incur the channel's existing charges.
 python3 -m unittest discover -s integrations/hermes-sales -v
 npm test --prefix mcp-outboundos
 ```
+
+## Direct automation mode
+
+An operator may explicitly set `DIRECT_SALES=true` in the private service env
+file after owner authorization. This exposes all 39 upstream CRM tools (plus the
+local action-status tool) and executes requested sales mutations directly,
+including sends, campaign launches, imports and deletes. The durable request
+ledger, one-time execution claim, campaign audience checks and uncertain-result
+handling remain in force. No separate browser approval is needed in this mode.
+Keep coding and infrastructure tools disabled in Hermes. The owner must still
+specify the campaign/offer/audience and operating rules before real outreach;
+permission to configure the integration is not a campaign brief.
+
+Personal OAuth is independently scope-based: new clients can request
+`mcp:read mcp:write` and consent in the dashboard. Old read-only grants remain
+restricted until the owner reconnects them. The public MCP and this private
+facade both preserve the existing CRM channel eligibility and stop rules.

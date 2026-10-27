@@ -17,32 +17,8 @@ export function mcpError(message, status = 400, code = 'invalid_request') {
   return Object.assign(new Error(message), { status, code });
 }
 
-/** Only the documented, side-effect-free tools are enabled in personal mode. */
-export const MCP_READ_OPERATIONS = Object.freeze({
-  stats_overview: /^\/api\/stats\/overview$/,
-  whatsapp_costs: /^\/api\/analytics\/whatsapp-pricing$/,
-  analytics_funnel: /^\/api\/analytics\/funnel$/,
-  analytics_campaign_roi: /^\/api\/analytics\/campaign-roi$/,
-  analytics_email_performance: /^\/api\/analytics\/email-performance$/,
-  list_campaigns: /^\/api\/campaigns$/,
-  get_campaign: /^\/api\/campaigns\/[1-9]\d*$/,
-  campaign_ab_results: /^\/api\/campaigns\/[1-9]\d*\/ab-results$/,
-  list_tags: /^\/api\/leads\/tags$/,
-  list_leads: /^\/api\/leads$/,
-  get_lead: /^\/api\/leads\/[1-9]\d*$/,
-  lead_timeline: /^\/api\/leads\/[1-9]\d*\/timeline$/,
-  list_messages: /^\/api\/leads\/[1-9]\d*\/messages$/,
-  list_media_files: /^\/api\/media$/,
-  system_status: /^\/api\/system\/status$/,
-  whatsapp_accounts: /^\/api\/whatsapp\/accounts$/,
-  whatsapp_templates: /^\/api\/whatsapp\/accounts\/[1-9]\d*\/templates$/,
-  list_users: /^\/api\/users$/,
-});
-
-export function mcpReadOperationAllowed(tool, method, pathname) {
-  return method === 'GET' && typeof pathname === 'string'
-    && Object.hasOwn(MCP_READ_OPERATIONS, tool) && MCP_READ_OPERATIONS[tool].test(pathname);
-}
+import { MCP_READ_OPERATIONS, MCP_FULL_SCOPE, validMcpScope, mcpOperationAllowed } from '../../shared/mcpOperations.js';
+export { MCP_READ_OPERATIONS, mcpReadOperationAllowed } from '../../shared/mcpOperations.js';
 
 export function personalMcpConfig(env = process.env) {
   if (env.MCP_AUTH_MODE !== 'personal') return null;
@@ -90,9 +66,10 @@ export function parseMcpAuthorization(input, resource) {
     throw mcpError('A registered callback, code response and S256 PKCE challenge are required.');
   }
   if (input.resource !== resource) throw mcpError('The requested MCP resource is not supported.', 400, 'invalid_target');
-  if (input.scope && input.scope !== 'mcp:read') throw mcpError('Personal connections currently support mcp:read only.', 400, 'invalid_scope');
+  const scope = input.scope || MCP_FULL_SCOPE;
+  if (!validMcpScope(scope)) throw mcpError('Unsupported MCP permissions.', 400, 'invalid_scope');
   return { clientId: input.client_id, redirectUri: input.redirect_uri, challenge: input.code_challenge,
-    state: input.state ?? null, resource, scope: 'mcp:read' };
+    state: input.state ?? null, resource, scope };
 }
 
 export function emptyMcpLedger() {
@@ -264,13 +241,13 @@ export class McpAuthorization {
     state.refresh[mcpHash(refresh)] = { grantId: grant.id, used: false,
       expires: Math.min(now + REFRESH_IDLE_TTL, grant.expires) };
     return { access_token: access, refresh_token: refresh, token_type: 'Bearer',
-      expires_in: Math.floor((accessExpires - now) / 1000), scope: 'mcp:read' };
+      expires_in: Math.floor((accessExpires - now) / 1000), scope: grant.scope };
   }
 
   async exchange(input) {
     fields(input, ['grant_type', 'code', 'code_verifier', 'redirect_uri', 'client_id', 'resource', 'refresh_token', 'scope']);
     if (input.resource !== this.config.resource) throw mcpError('Incorrect resource.', 400, 'invalid_target');
-    if (input.scope && input.scope !== 'mcp:read') throw mcpError('Unsupported scope.', 400, 'invalid_scope');
+    if (input.scope && !validMcpScope(input.scope)) throw mcpError('Unsupported scope.', 400, 'invalid_scope');
     const isCode = input.grant_type === 'authorization_code';
     if (!isCode && input.grant_type !== 'refresh_token') throw mcpError('Unsupported grant type.', 400, 'unsupported_grant_type');
     const hash = mcpHash(isCode ? input.code || '' : input.refresh_token || '');
@@ -279,6 +256,7 @@ export class McpAuthorization {
       return entry ? structuredClone(isCode ? entry : state.grants[entry.grantId]) : null;
     });
     if (!snapshot) throw mcpError('The credential is expired or invalid.', 400, 'invalid_grant');
+    if (input.scope && input.scope !== snapshot.scope) throw mcpError('Reconnect to change permissions.', 400, 'invalid_scope');
     await this.person(snapshot.owner);
     const result = await this.update((state, now) => {
       if (isCode) {
@@ -323,13 +301,13 @@ export class McpAuthorization {
       const grant = access && state.grants[access.grantId];
       return grant && grant.revokedAt === null ? structuredClone(grant) : null;
     });
-    if (!grant || grant.resource !== this.config.resource || grant.scope !== 'mcp:read') throw mcpError('Connection expired or revoked.', 401, 'invalid_token');
+    if (!grant || grant.resource !== this.config.resource || !validMcpScope(grant.scope)) throw mcpError('Connection expired or revoked.', 401, 'invalid_token');
     return { grant, person: await this.person(grant.owner) };
   }
 
   async inventory(owner) {
     const person = await this.person(owner);
-    return this.update(state => ({ mode: 'personal', readOnly: true,
+    return this.update(state => ({ mode: 'personal', readOnly: false,
       grants: Object.values(state.grants).filter(grant => grant.owner.id === String(person.id)
         && grant.owner.provider === person.provider && grant.owner.orgId === person.orgId)
         .map(({ id, clientName, callbackHost, scope, createdAt, expires, revokedAt, lastToolAt }) =>
@@ -352,8 +330,8 @@ export class McpAuthorization {
   }
 
   async delegate({ token, tool, method, path }) {
-    if (!mcpReadOperationAllowed(tool, method, path)) throw mcpError('This personal connection permits read-only tools only.', 403, 'insufficient_scope');
     const { grant } = await this.access(token);
+    if (!mcpOperationAllowed(tool, method, path, grant.scope)) throw mcpError('The operation is outside this connection’s granted permissions (read-only without mcp:write).', 403, 'insufficient_scope');
     const payload = Buffer.from(JSON.stringify({ accessHash: mcpHash(token), grantId: grant.id, tool, method, path,
       aud: 'outbound-os-api:mcp-delegation', workspace: this.config.workspace, expires: this.now() + 30_000 })).toString('base64url');
     const signature = createHmac('sha256', this.config.secret).update(payload).digest('base64url');
@@ -368,15 +346,16 @@ export class McpAuthorization {
     try { parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')); } catch { throw mcpError('Invalid delegated credential.', 401); }
     if (parsed.aud !== 'outbound-os-api:mcp-delegation' || parsed.workspace !== this.config.workspace
       || parsed.expires <= this.now() || parsed.expires > this.now() + 30_000
-      || parsed.method !== method || parsed.path !== path || !mcpReadOperationAllowed(parsed.tool, method, path)) throw mcpError('Delegated operation is not permitted.', 403);
+      || parsed.method !== method || parsed.path !== path) throw mcpError('Delegated operation is not permitted.', 403);
     const grant = await this.update(state => {
       const access = state.access[parsed.accessHash];
       const grant = access && state.grants[access.grantId];
       if (!grant || grant.id !== parsed.grantId || grant.revokedAt !== null || grant.resource !== this.config.resource
-        || grant.scope !== 'mcp:read') return null;
+        || !validMcpScope(grant.scope)) return null;
       return structuredClone(grant);
     });
     if (!grant) throw mcpError('Connection expired or revoked.', 401);
+    if (!mcpOperationAllowed(parsed.tool, method, path, grant.scope)) throw mcpError('Delegated operation is outside granted permissions.', 403);
     const person = await this.person(grant.owner);
     return { ...person, mcpGrantId: grant.id, mcpClientId: grant.clientId, delegated: true, mcpTool: parsed.tool };
   }

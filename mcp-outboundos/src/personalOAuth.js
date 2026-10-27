@@ -1,11 +1,8 @@
 import { randomBytes } from 'node:crypto';
 
-const READ_TOOLS = new Set([
-  'stats_overview', 'whatsapp_costs', 'analytics_funnel', 'analytics_campaign_roi', 'analytics_email_performance',
-  'list_campaigns', 'get_campaign', 'campaign_ab_results', 'list_tags', 'list_leads', 'get_lead', 'lead_timeline',
-  'list_messages', 'list_media_files', 'system_status', 'whatsapp_accounts', 'whatsapp_templates', 'list_users',
-]);
-export const personalReadToolAllowed = name => READ_TOOLS.has(name);
+import { MCP_SCOPES, mcpToolAllowed } from '../../shared/mcpOperations.js';
+export const personalReadToolAllowed = name => mcpToolAllowed(name, 'mcp:read');
+export const personalToolAllowed = mcpToolAllowed;
 
 export function personalOAuthConfig(env = process.env) {
   if (env.MCP_AUTH_MODE !== 'personal') return null;
@@ -64,10 +61,10 @@ export function mountPersonalOAuth(app, config, control = (operation, body) => p
     token_endpoint: `${config.issuer}/oauth/token`, registration_endpoint: `${config.issuer}/oauth/register`,
     response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'],
     code_challenge_methods_supported: ['S256'], token_endpoint_auth_methods_supported: ['none'],
-    scopes_supported: ['mcp:read'], authorization_response_iss_parameter_supported: true,
+    scopes_supported: MCP_SCOPES, authorization_response_iss_parameter_supported: true,
   };
   app.get('/.well-known/oauth-protected-resource', headers, handle(async (_req, res) => {
-    res.json({ resource: config.resource, authorization_servers: [config.issuer], scopes_supported: ['mcp:read'] });
+    res.json({ resource: config.resource, authorization_servers: [config.issuer], scopes_supported: MCP_SCOPES });
   }));
   for (const path of ['/.well-known/oauth-authorization-server', '/.well-known/oauth-authorization-server/mcp']) {
     app.get(path, headers, handle(async (_req, res) => res.json(metadata)));

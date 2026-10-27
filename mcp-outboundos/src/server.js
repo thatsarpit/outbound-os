@@ -7,7 +7,7 @@ import log from './logger.js';
 import { registerAllTools } from './registerTools.js';
 import { mountOAuth, verifyOAuthToken } from './oauth.js';
 import { requestOrigin } from './requestOrigin.js';
-import { mountPersonalOAuth, personalControl, personalOAuthConfig, personalReadToolAllowed } from './personalOAuth.js';
+import { mountPersonalOAuth, personalControl, personalOAuthConfig, personalToolAllowed } from './personalOAuth.js';
 import { mcpRequestContext } from './client.js';
 
 // ── Config ──
@@ -70,7 +70,7 @@ if (PERSONAL) {
 function unauthorized(req, res, message) {
   res.set(
     'WWW-Authenticate',
-    `Bearer resource_metadata="${PERSONAL?.issuer || requestOrigin(req)}/.well-known/oauth-protected-resource"${PERSONAL ? ', scope="mcp:read"' : ''}`
+    `Bearer resource_metadata="${PERSONAL?.issuer || requestOrigin(req)}/.well-known/oauth-protected-resource"${PERSONAL ? ', scope="mcp:read mcp:write"' : ''}`
   );
   return res.status(401).json({ error: message });
 }
@@ -83,7 +83,8 @@ async function requireBearer(req, res, next) {
   const token = auth.slice(7);
   if (PERSONAL && token.startsWith('mcp_personal_')) {
     try {
-      await personalControl('inspect', { token }, PERSONAL);
+      const inspected = await personalControl('inspect', { token }, PERSONAL);
+      req.personalMcpScope = inspected.scope;
       req.personalMcpToken = token;
       return next();
     } catch (error) {
@@ -99,7 +100,7 @@ async function requireBearer(req, res, next) {
 
 // ── MCP transport map (stateless — one transport per request) ──
 
-function createMcpServer(personalToken) {
+function createMcpServer(personalToken, scope) {
   const server = new McpServer({
     name: 'outbound-os',
     version: '1.0.0',
@@ -107,9 +108,9 @@ function createMcpServer(personalToken) {
   if (personalToken) {
     registerAllTools({
       tool(name, ...args) {
-        if (!personalReadToolAllowed(name)) return;
+        if (!personalToolAllowed(name, scope)) return;
         const handler = args.pop();
-        server.tool(name, ...args, (...handlerArgs) => mcpRequestContext.run({ personalToken, tool: name }, () => handler(...handlerArgs)));
+        server.tool(name, ...args, (...handlerArgs) => mcpRequestContext.run({ personalToken, personalScope: scope, tool: name }, () => handler(...handlerArgs)));
       },
     });
   } else registerAllTools(server);
@@ -119,7 +120,7 @@ function createMcpServer(personalToken) {
 // POST /mcp — main MCP endpoint (Streamable HTTP)
 app.post('/mcp', requireBearer, async (req, res) => {
   try {
-    const server = createMcpServer(req.personalMcpToken);
+    const server = createMcpServer(req.personalMcpToken, req.personalMcpScope);
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,  // stateless mode
     });

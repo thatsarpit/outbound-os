@@ -188,6 +188,14 @@ class SalesGatewayTests(unittest.TestCase):
         self.assertEqual(repeated['approval_id'], request['approval_id'])
         self.assertEqual(json.loads(self.ledger.get(repeated['approval_id'])['args'])['client_message_id'], message_id)
 
+    def test_explicit_operator_direct_mode_executes_requested_writes_without_browser_approval(self):
+        with patch.dict(os.environ, {'DIRECT_SALES': 'true'}), patch.object(g, 'LEDGER', self.ledger):
+            for tool in ['send_email', 'delete_campaign', 'bulk_lead_action']:
+                message = {'jsonrpc': '2.0', 'id': 1, 'method': 'tools/call', 'params': {'name': tool, 'arguments': {'_request_id': tool}}}
+                self.assertTrue(g.unpack(g.rpc(message)['result'])['success'])
+                self.assertTrue(g.unpack(g.rpc(message)['result'])['success'])
+                self.assertEqual(self.calls.count(tool), 1)
+
     def test_mcp_listener_requires_bearer_and_cannot_handle_owner_routes(self):
         server = g.ThreadingHTTPServer(('127.0.0.1', 0), g.Handler)
         port = server.server_port

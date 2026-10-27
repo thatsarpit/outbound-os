@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { McpAuthorization, emptyMcpLedger, mcpHash, parseMcpAuthorization, mcpReadOperationAllowed, personalMcpConfig } from '../src/services/mcpAuthorization.js';
 
-function fixture() {
+function fixture(scope = 'mcp:read') {
   let now = 1_000_000;
   let role = 'admin';
   let exists = true;
@@ -27,7 +27,7 @@ function fixture() {
   async function request() {
     const client = await service.register({ redirect_uris: [redirect], client_name: '<Fixture client>' });
     const parameters = { response_type: 'code', client_id: client.client_id, redirect_uri: redirect,
-      code_challenge: challenge, code_challenge_method: 'S256', resource: config.resource, scope: 'mcp:read', state: 'opaque state+&=' };
+      code_challenge: challenge, code_challenge_method: 'S256', resource: config.resource, ...(scope ? { scope } : {}), state: 'opaque state+&=' };
     const pending = await service.createRequest(parameters, browserNonce);
     return { client, parameters, pending };
   }
@@ -240,4 +240,44 @@ test('authorization handles cannot address inherited object properties', async (
   assert.equal(Object.hasOwn(f.state().requests, mcpHash(pending.id)), true);
   assert.equal((await f.service.details(pending.id, f.owner)).id, pending.id);
   assert.equal(Object.prototype.status, undefined);
+});
+
+test('explicitly consented write grants authorize operations and remain bound to their tool, path and current owner', async () => {
+  const f = fixture('mcp:read mcp:write');
+  const code = await f.authorizedCode();
+  const token = await f.service.exchange(f.tokenInput(code));
+  assert.equal(token.scope, 'mcp:read mcp:write');
+  for (const [tool, method, path] of [
+    ['create_campaign', 'POST', '/api/campaigns'], ['populate_campaign', 'POST', '/api/campaigns/1/populate'],
+    ['start_campaign', 'POST', '/api/campaigns/1/start'], ['send_whatsapp', 'POST', '/api/leads/1/send'],
+    ['send_email', 'POST', '/api/leads/1/email/send'], ['update_lead', 'PATCH', '/api/leads/1'],
+    ['delete_lead', 'DELETE', '/api/leads/1'], ['bulk_lead_action', 'POST', '/api/leads/bulk'],
+    ['system_pause_resume', 'POST', '/api/system/resume'],
+  ]) {
+    const { assertion } = await f.service.delegate({ token: token.access_token, tool, method, path });
+    const actor = await f.service.verifyDelegation(assertion, method, path);
+    assert.equal(actor.mcpTool, tool);
+    await assert.rejects(f.service.verifyDelegation(assertion, method, path + '/other'));
+  }
+  await assert.rejects(f.service.delegate({ token: token.access_token, tool: 'start_campaign', method: 'POST', path: '/api/system/resume' }));
+  await assert.rejects(f.service.delegate({ token: token.access_token, tool: 'unknown_admin', method: 'POST', path: '/api/config/env' }));
+  const refreshed = await f.service.exchange({ grant_type: 'refresh_token', refresh_token: token.refresh_token, client_id: code.client.client_id, resource: f.config.resource });
+  assert.equal(refreshed.scope, token.scope);
+  f.setRole('agent');
+  await assert.rejects(f.service.delegate({ token: refreshed.access_token, tool: 'start_campaign', method: 'POST', path: '/api/campaigns/1/start' }), /membership/);
+});
+
+test('existing read grants cannot gain writes through code exchange, refresh or delegation', async () => {
+  const f = fixture();
+  const code = await f.authorizedCode();
+  await assert.rejects(f.service.exchange({ ...f.tokenInput(code), scope: 'mcp:read mcp:write' }), /change permissions/);
+  const token = await f.service.exchange(f.tokenInput(code));
+  await assert.rejects(f.service.exchange({ grant_type: 'refresh_token', refresh_token: token.refresh_token, client_id: code.client.client_id,
+    resource: f.config.resource, scope: 'mcp:read mcp:write' }), /change permissions/);
+  const refreshed = await f.service.exchange({ grant_type: 'refresh_token', refresh_token: token.refresh_token, client_id: code.client.client_id, resource: f.config.resource });
+  assert.equal(refreshed.scope, 'mcp:read');
+  await assert.rejects(f.service.delegate({ token: refreshed.access_token, tool: 'send_email', method: 'POST', path: '/api/leads/1/email/send' }), /read-only/);
+  const next = fixture(null);
+  const request = await next.request();
+  assert.equal((await next.service.details(request.pending.id, next.owner)).scope, 'mcp:read mcp:write', 'new unspecified-scope requests disclose full operations before consent');
 });

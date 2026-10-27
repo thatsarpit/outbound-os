@@ -160,7 +160,7 @@ export default function McpIntegrationPage() {
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
           <p className="max-w-2xl text-xs leading-5 text-text-secondary">
             {personal
-              ? 'New connections use your dashboard sign-in and an explicit read-only approval.'
+              ? 'New connections use your dashboard sign-in and an explicit permission approval. Read/write connections can run sales operations.'
               : 'This server currently uses legacy shared integration authorization.'}{' '}
             Server reachability does not prove that an AI client is authorized.
           </p>
@@ -435,7 +435,7 @@ export default function McpIntegrationPage() {
                 No personal connections yet
               </p>
               <p className="mt-1 text-xs text-text-secondary">
-                Connect an AI client and approve read-only access to see it here.
+                Connect an AI client and approve its requested permissions to see it here.
               </p>
               <Button variant="secondary" className="mt-4" onClick={() => setTab('connect')}>
                 Connect an agent
@@ -451,7 +451,7 @@ export default function McpIntegrationPage() {
                   <div className="min-w-0">
                     <p className="font-medium text-text-primary">{grant.clientName}</p>
                     <p className="mt-1 break-all text-xs text-text-muted">
-                      {grant.callbackHost} · Read-only ·{' '}
+                      {grant.callbackHost} · {grant.scope.split(' ').includes('mcp:write') ? 'Read/write' : 'Read-only'} ·{' '}
                       {grant.revokedAt
                         ? 'Revoked'
                         : grant.expiresAt <= Date.now()

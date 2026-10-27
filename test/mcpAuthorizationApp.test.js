@@ -5,6 +5,8 @@ import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { McpAuthorization, personalMcpConfig, prismaMcpRepository } from '../src/services/mcpAuthorization.js';
 
 test('real API middleware parses personal control and consent JSON before guarding delegated reads', async () => {
@@ -20,10 +22,14 @@ test('real API middleware parses personal control and consent JSON before guardi
   });
   const { default: prisma } = await import('../src/utils/prismaClient.js');
   const { signToken } = await import('../src/auth/rbac.js');
-  // This fixture intentionally needs no provider, customer data or application
-  // schedulers. The real API's middleware and its existing users route run here.
-  await prisma.$executeRawUnsafe('CREATE TABLE User (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, passwordHash TEXT NOT NULL, role TEXT NOT NULL DEFAULT \'agent\', phone TEXT, enabled BOOLEAN NOT NULL DEFAULT true, lastLoginAt DATETIME, createdAt DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt DATETIME NOT NULL)');
-  await prisma.$executeRawUnsafe('CREATE TABLE McpAuthorizationStore (id TEXT PRIMARY KEY NOT NULL, revision INTEGER NOT NULL DEFAULT 0, value TEXT NOT NULL, updatedAt DATETIME NOT NULL)');
+  // Real migrated schema, isolated data and no provider/scheduler execution.
+  const schema = new DatabaseSync(path.join(directory, 'fixture.db'));
+  const migrations = new URL('../prisma/migrations/', import.meta.url);
+  for (const name of readdirSync(migrations).sort()) {
+    const file = new URL(`${name}/migration.sql`, migrations);
+    if (existsSync(file)) schema.exec(readFileSync(file, 'utf8'));
+  }
+  schema.close();
   const user = await prisma.user.create({ data: { name: 'Fixture owner', email: 'owner@example.test', passwordHash: 'unused-fixture-hash', role: 'admin' } });
   const { default: app } = await import('../src/api.js');
   const server = app.listen(0, '127.0.0.1');
@@ -61,6 +67,13 @@ test('real API middleware parses personal control and consent JSON before guardi
     const issued = await Promise.all([control('token', tokenInput), control('token', tokenInput)]);
     assert.deepEqual(issued.map(response => response.status).sort(), [200, 400], 'SQLite compare-and-swap consumes an authorization code once');
     const token = await issued.find(response => response.status === 200).json();
+    assert.equal(token.scope, 'mcp:read mcp:write');
+    const campaignDelegation = await (await control('delegate', { token: token.access_token, tool: 'create_campaign', method: 'POST', path: '/api/campaigns' })).json();
+    const created = await request('/campaigns', { credential: campaignDelegation.assertion, method: 'POST',
+      body: { name: 'Synthetic delegated campaign', channel: 'email', emailSubject: 'Synthetic', messageTemplate: 'Never sent' } });
+    assert.equal(created.status, 200, 'an explicitly authorized write grant reaches the actual manager-only API route');
+    assert.equal((await created.json()).status, 'draft');
+    assert.equal((await request('/leads', { credential: campaignDelegation.assertion, method: 'POST', body: { name: 'Never created' } })).status, 403);
     const delegated = await (await control('delegate', { token: token.access_token, tool: 'list_users', method: 'GET', path: '/api/users' })).json();
     const users = await request('/users', { credential: delegated.assertion });
     assert.equal(users.status, 200, 'global API authentication accepts only the operation-bound assertion');

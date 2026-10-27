@@ -21,11 +21,13 @@ test('personal MCP filters writes and isolates concurrent clients through operat
   const calls = [];
   backend.post('/api/mcp-control/:operation', async (req, res) => {
     assert.equal(req.headers.authorization, `Bearer ${controlSecret}`);
-    if (req.params.operation === 'inspect') return res.json({ grantId: req.body.token.slice(-1), scope: 'mcp:read' });
+    if (req.params.operation === 'inspect') return res.json({ grantId: req.body.token.slice(-1), scope: req.body.token.endsWith('w') ? 'mcp:read mcp:write' : 'mcp:read' });
     if (req.params.operation === 'delegate') {
-      assert.equal(req.body.tool, 'system_status');
-      assert.equal(req.body.method, 'GET');
-      assert.equal(req.body.path, '/api/system/status');
+      if (req.body.token.endsWith('w')) {
+        assert.equal(req.body.tool, 'create_campaign'); assert.equal(req.body.method, 'POST'); assert.equal(req.body.path, '/api/campaigns');
+      } else {
+        assert.equal(req.body.tool, 'system_status'); assert.equal(req.body.method, 'GET'); assert.equal(req.body.path, '/api/system/status');
+      }
       await new Promise(resolve => setTimeout(resolve, req.body.token.endsWith('a') ? 25 : 2));
       return res.json({ assertion: `fixture-delegation-${req.body.token.slice(-1)}` });
     }
@@ -35,6 +37,7 @@ test('personal MCP filters writes and isolates concurrent clients through operat
     calls.push(req.headers.authorization);
     res.json({ fixtureActor: req.headers.authorization.slice(-1) });
   });
+  backend.post('/api/campaigns', (req, res) => { calls.push(req.headers.authorization); res.json({ id: 7, name: req.body.name, status: 'draft' }); });
   const apiServer = backend.listen(0, '127.0.0.1');
   await once(apiServer, 'listening');
   const probe = net.createServer();
@@ -54,7 +57,7 @@ test('personal MCP filters writes and isolates concurrent clients through operat
   let logs = '';
   child.stdout.on('data', value => { logs += value; });
   child.stderr.on('data', value => { logs += value; });
-  const clients = ['a', 'b'].map(id => new Client({ name: `fixture-${id}`, version: '1.0.0' }));
+  const clients = ['a', 'b', 'w'].map(id => new Client({ name: `fixture-${id}`, version: '1.0.0' }));
   try {
     let ready = false;
     for (let attempt = 0; attempt < 50; attempt++) {
@@ -65,17 +68,22 @@ test('personal MCP filters writes and isolates concurrent clients through operat
     }
     assert.ok(ready, logs);
     await Promise.all(clients.map((client, index) => client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
-      requestInit: { headers: { Authorization: `Bearer mcp_personal_${index === 0 ? 'a' : 'b'}` } },
+      requestInit: { headers: { Authorization: `Bearer mcp_personal_${['a','b','w'][index]}` } },
     }))));
     const catalogue = await clients[0].listTools();
-    assert.equal(catalogue.tools.length, 18);
+    assert.equal(catalogue.tools.length, 21);
     assert.ok(catalogue.tools.every(tool => !['send_whatsapp', 'send_email', 'start_campaign', 'create_lead', 'system_pause_resume'].includes(tool.name)));
-    const results = await Promise.all(clients.map(client => client.callTool({ name: 'system_status', arguments: {} })));
+    const results = await Promise.all(clients.slice(0,2).map(client => client.callTool({ name: 'system_status', arguments: {} })));
     assert.deepEqual(results.map(result => JSON.parse(result.content[0].text).fixtureActor), ['a', 'b']);
     assert.deepEqual(new Set(calls), new Set(['Bearer fixture-delegation-a', 'Bearer fixture-delegation-b']));
+    const writeTools = await clients[2].listTools();
+    assert.equal(writeTools.tools.length, 39);
+    const written = await clients[2].callTool({ name: 'create_campaign', arguments: { name: 'Synthetic write test', messageTemplate: 'Synthetic message' } });
+    assert.equal(JSON.parse(written.content[0].text).created, true);
+    assert.equal(calls.at(-1), 'Bearer fixture-delegation-w');
     const denied = await clients[0].callTool({ name: 'send_whatsapp', arguments: { lead_id: 1, message: 'Never sent' } });
     assert.equal(denied.isError, true);
-    assert.equal(calls.length, 2, 'direct calls to hidden writes cannot reach the backend');
+    assert.equal(calls.length, 3, 'direct calls to hidden writes cannot reach the backend');
   } finally {
     await Promise.all(clients.map(client => client.close().catch(() => {})));
     const exited = once(child, 'exit');
