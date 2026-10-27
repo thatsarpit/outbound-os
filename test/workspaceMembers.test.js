@@ -1,3 +1,4 @@
+import { markVerifiedMcpActor } from '../src/auth/verifiedMcpActor.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { WorkspaceMembers } from '../src/services/workspaceMembers.js';
@@ -162,4 +163,12 @@ test('legacy Clerk service assignments require the pinned workspace and recheck 
   f.service.env = { AUTH_PROVIDER: 'clerk', NODE_ENV: 'production' };
   await assert.rejects(f.service.list(serviceActor), error => error.statusCode === 503 && error.code === 'member_workspace_unconfigured');
   assert.equal(f.stored.size, 1);
+});
+
+test('personal delegated workspace identity requires an in-process verification proof', () => {
+  const actor = { id: '1', orgId: 'local', role: 'admin', delegated: true, mcpGrantId: 'synthetic-grant' };
+  assert.equal(workspaceMemberIdentity(actor, localEnv), null);
+  markVerifiedMcpActor(actor);
+  assert.equal(workspaceMemberIdentity(actor, localEnv).key, 'local:local:1');
+  assert.equal(workspaceMemberIdentity({ ...actor }, localEnv), null, 'serialized lookalikes cannot claim verification');
 });

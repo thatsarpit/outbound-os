@@ -60,3 +60,12 @@ Rolling back to legacy mode disables personal control routes and personal delega
 Automated tests cover parser/redirect/PKCE checks, same-browser completion, same-origin personal consent, service-identity rejection, disk failure, atomic code use, refresh replay, live role/removal, immediate revocation, signed API delegation, tool catalogue parity and legacy transport compatibility. The real API middleware test checks parsed control/consent JSON before the broad API guard, concurrent SQLite code use and refresh rotation, a newly constructed service reading the same ledger, live local-account changes and immediate family revocation. Fixtures use temporary databases/listeners and no customer providers.
 
 Remaining release acceptance: actual Clerk dashboard sign-in/consent with the pinned organization, a real ChatGPT web connection, a separate Codex OAuth connection, normal proxy/Host behavior, restart persistence, lost callback recovery and rollback. Use only `system_status` / `whatsapp_accounts` for live checks. No customer send is required. Browser/iPhone acceptance was not performed during the source implementation.
+
+## Dashboard deployment
+
+Build the dashboard with its existing production Clerk public key, then run
+`npm run deploy:pages --prefix web -- --project-name <project> --branch main --verify-url https://<dashboard-origin>`.
+The deployment wrapper runs Wrangler from `web/` so `web/functions/api/[[path]].ts`
+is bundled. Deploying `web/dist` from the repository root omits that proxy and
+returns SPA HTML for API paths. Post-deployment checks require actual JSON from
+`/api/auth/config` and a JSON authentication rejection from a protected endpoint.

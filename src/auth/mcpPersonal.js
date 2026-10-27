@@ -3,6 +3,7 @@ import prisma from '../utils/prismaClient.js';
 import { appRoleFromOrgRole } from '../../shared/clerkRoles.js';
 import { McpAuthorization, personalMcpConfig, prismaMcpRepository } from '../services/mcpAuthorization.js';
 import logger from '../utils/logger.js';
+import { markVerifiedMcpActor } from './verifiedMcpActor.js';
 
 let service;
 const verifiedActor = Symbol('verifiedMcpActor');
@@ -72,7 +73,7 @@ export async function resolveMcpDelegation(req, res, next, minimumRole) {
     if (!Object.hasOwn(levels, minimumRole) || levels[actor.role] < levels[minimumRole]) {
       throw Object.assign(new Error('Insufficient current workspace role.'), { status: 403 });
     }
-    req.user = actor;
+    req.user = markVerifiedMcpActor(actor);
     if (!req[verifiedActor]) {
       req[verifiedActor] = actor;
       const correlationId = randomUUID();

@@ -74,6 +74,18 @@ test('real API middleware parses personal control and consent JSON before guardi
     assert.equal(created.status, 200, 'an explicitly authorized write grant reaches the actual manager-only API route');
     assert.equal((await created.json()).status, 'draft');
     assert.equal((await request('/leads', { credential: campaignDelegation.assertion, method: 'POST', body: { name: 'Never created' } })).status, 403);
+    const directoryDelegation = await (await control('delegate', { token: token.access_token, tool: 'list_users', method: 'GET', path: '/api/workspace/members' })).json();
+    const directoryResponse = await request('/workspace/members', { credential: directoryDelegation.assertion });
+    assert.equal(directoryResponse.status, 200, 'verified personal delegations retain live workspace identity');
+    const directory = await directoryResponse.json();
+    const member = directory.members.find(item => item.externalId === String(user.id));
+    assert.ok(member);
+    const lead = await prisma.lead.create({ data: { name: 'Synthetic assignment', mobile: '15557770019' } });
+    const assignmentPath = `/api/leads/${lead.id}/assign`;
+    const assignmentDelegation = await (await control('delegate', { token: token.access_token, tool: 'lead_assign', method: 'POST', path: assignmentPath })).json();
+    const assignment = await request(`/leads/${lead.id}/assign`, { credential: assignmentDelegation.assertion, method: 'POST', body: { memberKey: member.key } });
+    assert.equal(assignment.status, 200, 'MCP lead assignment checks a verified personal actor and live target');
+    assert.equal((await assignment.json()).assignedMemberKey, member.key);
     const delegated = await (await control('delegate', { token: token.access_token, tool: 'list_users', method: 'GET', path: '/api/users' })).json();
     const users = await request('/users', { credential: delegated.assertion });
     assert.equal(users.status, 200, 'global API authentication accepts only the operation-bound assertion');
