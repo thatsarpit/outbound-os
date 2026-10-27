@@ -1878,6 +1878,8 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
         name: 'Exports Desk',
         email: 'exports@acme.example',
         provider: 'brevo',
+        receivingProvider: 'cloudflare',
+        receivingReady: true,
         sentToday: 12,
         imapHost: '',
         imapUser: '',

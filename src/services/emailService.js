@@ -14,6 +14,7 @@ import leadScorer from './leadScorer.js';
 import { isSameZonedDay } from '../utils/workspaceTime.js';
 import inboundEmailIngestion from './inboundEmailIngestion.js';
 import { EMAIL_INGRESS_MAX_BYTES } from '../utils/emailIngressSignature.js';
+import { usesCloudflareReceiving, emailReceivingStatus } from '../utils/emailReceiving.js';
 
 /**
  * Unsubscribe requests go to the mailbox that sent the email, which is the one
@@ -347,7 +348,7 @@ class EmailService {
   _sanitizeAccount(account) {
     if (!account) return null;
     const { smtpPass, imapPass, ...safe } = account;
-    return { ...safe, hasSmtpPass: !!smtpPass, hasImapPass: !!imapPass };
+    return { ...safe, ...emailReceivingStatus(account), hasSmtpPass: !!smtpPass, hasImapPass: !!imapPass };
   }
 
   // ── SMTP Transport ──
@@ -874,6 +875,7 @@ class EmailService {
   async syncInbox(id) {
     const account = await prisma.emailAccount.findUnique({ where: { id } });
     if (!account) throw new Error('Email account not found');
+    if (usesCloudflareReceiving(account)) throw new Error('This address receives directly through Cloudflare; IMAP sync is not used.');
     if (!account.enabled || !account.imapHost) throw new Error('Connect an enabled inbox first');
     try {
       const replies = await this._syncRepliesForAccount(account);
@@ -885,6 +887,7 @@ class EmailService {
   }
 
   async _syncRepliesForAccount(account) {
+    if (usesCloudflareReceiving(account)) return 0;
     const key = `${account.imapHost}:${account.imapPort}:${account.imapUser || account.smtpUser}`.toLowerCase();
     const previous = this._inboxSyncs.get(key) || Promise.resolve();
     const operation = previous.catch(() => {}).then(async () => {
@@ -907,6 +910,7 @@ class EmailService {
 
     let totalNew = 0;
     for (const account of accounts) {
+      if (usesCloudflareReceiving(account)) continue;
       try {
         const count = await this._syncRepliesForAccount(account);
         totalNew += count;

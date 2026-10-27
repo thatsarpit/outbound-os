@@ -27,6 +27,7 @@ const RECEIVING_LABELS = {
   error: 'Check connection',
   never_synced: 'Waiting for first sync',
   invalid_timestamp: 'Sync time unavailable',
+  direct: 'Cloudflare configured',
   stale: 'Sync stale',
   current: 'Sync current',
 }
@@ -147,16 +148,16 @@ export default function EmailSection() {
           detail="Enabled accounts with a verified provider"
         />
         <InfoTile
-          label="Reply inbox checks"
+          label="Reply inboxes"
           value={
             accountsError && !rawAccounts
               ? '—'
-              : `${summary.receivingCurrent} / ${summary.receivingEnabled}`
+              : `${summary.receivingCurrent + summary.receivingDirect} / ${summary.receivingEnabled}`
           }
-          detail={`${summary.receivingStale} stale · ${summary.receivingUnconfirmed} unconfirmed`}
+          detail={`${summary.receivingDirect} Cloudflare · ${summary.receivingStale} IMAP stale · ${summary.receivingUnconfirmed} unconfirmed`}
         />
         <InfoTile
-          label="Latest successful sync"
+          label="Latest IMAP sync"
           value={
             accountsError && !rawAccounts
               ? 'Unavailable'
@@ -164,7 +165,7 @@ export default function EmailSection() {
                 ? formatRelativeTime(summary.lastSyncAt)
                 : 'No sync'
           }
-          detail="Enabled reply inboxes; each inbox must sync within 15 minutes"
+          detail="Cloudflare delivers directly. IMAP inboxes are checked every five minutes."
         />
       </div>
 
@@ -234,7 +235,7 @@ export default function EmailSection() {
                     <dt className="text-text-muted">Receiving replies</dt>
                     <dd
                       className={
-                        health.receiving === 'current'
+                        ['current', 'direct'].includes(health.receiving)
                           ? 'text-success'
                           : ['stale', 'error', 'invalid_timestamp'].includes(health.receiving)
                             ? 'text-warning'
@@ -246,7 +247,9 @@ export default function EmailSection() {
                   </div>
                 </dl>
                 <p className="mb-3 text-xs text-text-secondary">
-                  {acc.imapHost
+                  {acc.receivingProvider === 'cloudflare'
+                    ? 'Direct delivery through Cloudflare. IMAP polling is off; delivery receipts are available in Email receipts.'
+                    : acc.imapHost
                     ? `IMAP: ${acc.imapUser || 'Mailbox address missing'} · ${health.lastSyncAt ? `last success ${formatRelativeTime(health.lastSyncAt)}` : 'no confirmed successful sync'}`
                     : 'Connect a reply inbox to receive customer messages.'}
                 </p>
@@ -262,7 +265,9 @@ export default function EmailSection() {
                     disabled={!canConfigure}
                     onClick={() => setInboxAccount(acc)}
                   >
-                    {acc.imapHost === 'imap.gmail.com'
+                    {acc.receivingProvider === 'cloudflare'
+                      ? 'Saved Gmail fallback'
+                      : acc.imapHost === 'imap.gmail.com'
                       ? 'Gmail inbox settings'
                       : 'Set up Gmail via IMAP'}
                   </Button>

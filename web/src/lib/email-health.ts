@@ -3,6 +3,8 @@ export const EMAIL_SYNC_STALE_AFTER_MS = 15 * 60_000
 type EmailHealthAccount = {
   enabled: boolean
   status: string
+  receivingProvider?: 'cloudflare' | 'imap' | 'none'
+  receivingReady?: boolean
   imapHost?: string | null
   imapUser?: string | null
   hasImapPass?: boolean
@@ -11,10 +13,11 @@ type EmailHealthAccount = {
 }
 
 export type EmailReceivingState =
-  'not_configured' | 'paused' | 'error' | 'never_synced' | 'invalid_timestamp' | 'stale' | 'current'
+  'direct' | 'not_configured' | 'paused' | 'error' | 'never_synced' | 'invalid_timestamp' | 'stale' | 'current'
 
 export function emailAccountHealth(account: EmailHealthAccount, now = Date.now()) {
-  const receivingConfigured = Boolean(
+  const direct = account.receivingProvider === 'cloudflare'
+  const receivingConfigured = direct || Boolean(
     account.imapHost?.trim() && account.imapUser?.trim() && account.hasImapPass !== false,
   )
   const syncTime = account.lastSyncAt ? Date.parse(account.lastSyncAt) : Number.NaN
@@ -23,6 +26,7 @@ export function emailAccountHealth(account: EmailHealthAccount, now = Date.now()
   let receiving: EmailReceivingState
   if (!receivingConfigured) receiving = 'not_configured'
   else if (!account.enabled) receiving = 'paused'
+  else if (direct) receiving = account.receivingReady ? 'direct' : 'error'
   else if (account.lastError?.trim()) receiving = 'error'
   else if (!account.lastSyncAt) receiving = 'never_synced'
   else if (!validSync) receiving = 'invalid_timestamp'
@@ -38,7 +42,7 @@ export function emailAccountHealth(account: EmailHealthAccount, now = Date.now()
           : ('unverified' as const),
     receiving,
     receivingConfigured,
-    lastSyncAt: validSync ? account.lastSyncAt || null : null,
+    lastSyncAt: !direct && validSync ? account.lastSyncAt || null : null,
   }
 }
 
@@ -58,6 +62,7 @@ export function emailHealthSummary(accounts: EmailHealthAccount[], now = Date.no
     receivingConfigured: states.filter(({ health }) => health.receivingConfigured).length,
     receivingEnabled: receiving.length,
     receivingCurrent: receiving.filter(({ health }) => health.receiving === 'current').length,
+    receivingDirect: receiving.filter(({ health }) => health.receiving === 'direct').length,
     receivingStale: receiving.filter(({ health }) => health.receiving === 'stale').length,
     receivingUnconfirmed: receiving.filter(({ health }) =>
       ['error', 'never_synced', 'invalid_timestamp'].includes(health.receiving),

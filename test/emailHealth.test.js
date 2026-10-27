@@ -33,7 +33,21 @@ test('aggregate reports all mailbox states instead of hiding stale accounts behi
     { ...account, status: 'pending', imapHost: '' },
     { ...account, enabled: false, lastSyncAt: new Date(now).toISOString() },
   ], now);
-  assert.deepEqual(summary, { total: 5, enabled: 4, sendingVerified: 3, receivingConfigured: 4, receivingEnabled: 3, receivingCurrent: 1, receivingStale: 1, receivingUnconfirmed: 1, lastSyncAt: account.lastSyncAt });
+  assert.deepEqual(summary, { total: 5, enabled: 4, sendingVerified: 3, receivingConfigured: 4, receivingEnabled: 3, receivingCurrent: 1, receivingDirect: 0, receivingStale: 1, receivingUnconfirmed: 1, lastSyncAt: account.lastSyncAt });
   assert.equal(emailHealthSummary([], now).lastSyncAt, null);
   assert.equal(emailHealthSummary([{ ...account, lastSyncAt: old }], now).receivingCurrent, 0);
+});
+
+
+test('Cloudflare configuration is independent of IMAP timestamps and does not claim live delivery health', () => {
+  const direct = { ...account, receivingProvider: 'cloudflare', receivingReady: true,
+    imapHost: '', lastError: 'Old IMAP error', lastSyncAt: 'invalid' };
+  assert.equal(emailAccountHealth(direct, now).receiving, 'direct');
+  assert.equal(emailAccountHealth(direct, now).lastSyncAt, null);
+  assert.equal(emailAccountHealth({ ...direct, receivingReady: false }, now).receiving, 'error');
+  assert.equal(emailAccountHealth({ ...direct, enabled: false }, now).receiving, 'paused');
+  const summary = emailHealthSummary([direct], now);
+  assert.equal(summary.receivingDirect, 1);
+  assert.equal(summary.receivingCurrent, 0);
+  assert.equal(summary.lastSyncAt, null);
 });

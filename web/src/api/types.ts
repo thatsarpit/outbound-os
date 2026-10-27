@@ -249,6 +249,8 @@ export interface EmailAccount {
   smtpPort: number
   smtpSecure: boolean
   smtpUser: string
+  receivingProvider?: 'cloudflare' | 'imap' | 'none'
+  receivingReady?: boolean
   imapHost: string
   imapPort: number
   imapSecure: boolean
