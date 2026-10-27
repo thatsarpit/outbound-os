@@ -1,10 +1,12 @@
 # Personal MCP authorization
 
-Status: implemented as an **opt-in, administrator-only, read-only** mode. Existing installations remain in legacy mode until an operator configures, tests and explicitly activates the new mode. This document does not record a production cutover or live-client acceptance.
+Status: implemented as an **opt-in, administrator-only, scope-based** mode. Existing installations remain in legacy mode until an operator configures, tests and explicitly activates the new mode. This document does not record a production cutover or live-client acceptance.
 
 ## What changes
 
-New personal connections use the existing dashboard sign-in provider, an explicit Allow read-only access screen and a revocable grant. No second access password is needed in personal mode. The client can read leads, messages, campaigns, team data and reports; it cannot send, import, edit, delete or start/pause campaigns. These write permissions remain a separate implementation task and are not presented as available checkboxes.
+New personal connections use the existing dashboard sign-in provider and explicit consent. `mcp:read` grants expose read operations only. `mcp:write` enables the full registered CRM tool catalogue, including edits, imports, deletes, customer messages, campaign start/pause and queue resume. Write access includes reads. New requests with omitted scope request `mcp:read mcp:write`; the consent page clearly discloses direct execution and provider charges before approval. Clients can explicitly request `mcp:read` for a restricted connection. No per-operation dashboard approval is imposed on a write grant.
+
+Existing grants and refresh families retain their original scope. They cannot be upgraded through refresh or a token request; reconnect with write scope and explicitly consent. Revocation and live administrator membership checks apply equally to reads and writes. All delegation is bounded to a registered tool, exact HTTP method/path and current grant permissions. No arbitrary admin API or infrastructure access is granted.
 
 ChatGPT and Codex are grouped under OpenAI in the setup UI, but authorize separately. The copied setup prompt contains only the public server URL and instructions. It cannot install an MCP connection on clients that provide no installation tool, and cannot approve consent for the person.
 
@@ -33,7 +35,7 @@ The dashboard must serve `/integrations/mcp/authorize` through the normal authen
 
 The default/unset `MCP_AUTH_MODE` is `legacy`; existing tokens and logins are unchanged. With personal mode active, `MCP_LEGACY_COMPAT=true` explicitly retains the static bearer, existing legacy OAuth access tokens and legacy refreshes. New registration and authorization use personal mode. The old shared-password authorize POST is disabled in personal mode.
 
-Legacy tokens have no trustworthy individual owner or granular permission history. They are not displayed as personal grants and remain shared administrator access. The UI labels this difference. Do not claim that the read-only grant limits these old credentials. After a personal owner connection works in the real clients, set `MCP_LEGACY_COMPAT=false` in the MCP container to stop accepting legacy credentials. Preserve the old OAuth store for an explicit rollback; do not silently erase it.
+Legacy tokens have no trustworthy individual owner or granular permission history. They are not displayed as personal grants and remain shared administrator access. The UI labels this difference. Do not claim that the read-only grant limits these old credentials. After all personal and private service connections have migrated, set `MCP_LEGACY_COMPAT=false` in the MCP container to stop accepting legacy credentials. Preserve the old OAuth store for an explicit rollback; do not silently erase it.
 
 Legacy `list_users` discovers provider-scoped `memberKey` values from the workspace directory. Pass one as `lead_assign.member_key`, or pass `member_key: null` to unassign. Numeric `user_id` remains supported only with local sign-in. Clerk installations require the existing organization to be pinned; each explicit target is checked against current membership and user status. Shared service administrators cannot claim a conversation as themselves, authorize personal grants or acquire a personal identity. During a staggered API upgrade, discovery falls back to the older local user list only when the workspace directory returns 404, never on a permission or provider failure.
 
@@ -43,7 +45,7 @@ Rolling back to legacy mode disables personal control routes and personal delega
 
 - The API stores a bounded, versioned ledger in one compare-and-swap row. Each issuance, code consumption, refresh rotation and revocation commits atomically before its result is returned. CAS conflicts retry at most eight times and then fail safely. SQLite remains owned by the API.
 - Client callbacks must exactly match a registered URL, including path/query/port. HTTPS and literal loopback HTTP callbacks are allowed for registration. There is no trusted-brand wildcard or unregistered loopback exception.
-- Authorization parameters are scalar/bounded, `response_type=code`, exact resource and S256 PKCE are required. Only `mcp:read` is accepted. Dynamic registration remains supported; CIMD is not advertised as implemented.
+- Authorization parameters are scalar/bounded, `response_type=code`, exact resource and S256 PKCE are required. `mcp:read` and `mcp:write` are supported; unknown, repeated or malformed scopes are rejected. Dynamic registration remains supported; CIMD is not advertised as implemented.
 - Five-minute requests bind immutable OAuth parameters to a random, Secure/HttpOnly/host-only/SameSite=Lax browser cookie. A request ID alone cannot approve, complete or issue access. Personal approval uses a one-use, account-bound decision nonce and exact Origin. Cancellation creates no grant.
 - Codes and all access/refresh credentials are stored hashed. Codes are one-use, expire in five minutes and require the exact client, redirect, resource and PKCE verifier. OAuth state is preserved and issuer identification is returned.
 - Access lasts at most 15 minutes. Refresh tokens rotate, expire after seven days idle and have a 30-day absolute grant/family limit. Consumed hashes remain until family expiry, so replay revokes the entire family, including newer access tokens.
@@ -58,3 +60,12 @@ Rolling back to legacy mode disables personal control routes and personal delega
 Automated tests cover parser/redirect/PKCE checks, same-browser completion, same-origin personal consent, service-identity rejection, disk failure, atomic code use, refresh replay, live role/removal, immediate revocation, signed API delegation, tool catalogue parity and legacy transport compatibility. The real API middleware test checks parsed control/consent JSON before the broad API guard, concurrent SQLite code use and refresh rotation, a newly constructed service reading the same ledger, live local-account changes and immediate family revocation. Fixtures use temporary databases/listeners and no customer providers.
 
 Remaining release acceptance: actual Clerk dashboard sign-in/consent with the pinned organization, a real ChatGPT web connection, a separate Codex OAuth connection, normal proxy/Host behavior, restart persistence, lost callback recovery and rollback. Use only `system_status` / `whatsapp_accounts` for live checks. No customer send is required. Browser/iPhone acceptance was not performed during the source implementation.
+
+## Dashboard deployment
+
+Build the dashboard with its existing production Clerk public key, then run
+`npm run deploy:pages --prefix web -- --project-name <project> --branch main --verify-url https://<dashboard-origin>`.
+The deployment wrapper runs Wrangler from `web/` so `web/functions/api/[[path]].ts`
+is bundled. Deploying `web/dist` from the repository root omits that proxy and
+returns SPA HTML for API paths. Post-deployment checks require actual JSON from
+`/api/auth/config` and a JSON authentication rejection from a protected endpoint.

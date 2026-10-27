@@ -20,8 +20,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
 READ = frozenset('stats_overview whatsapp_costs analytics_funnel analytics_campaign_roi analytics_email_performance list_tags list_leads get_lead lead_timeline list_messages list_campaigns get_campaign campaign_ab_results system_status whatsapp_accounts whatsapp_templates email_accounts list_users list_media_files campaign_leads campaign_preview_leads'.split())
-WRITE = frozenset('create_lead update_lead lead_set_status lead_assign import_leads create_campaign update_campaign populate_campaign start_campaign pause_campaign send_whatsapp send_whatsapp_file send_email system_pause_resume'.split())
+WRITE = frozenset('create_lead update_lead delete_lead lead_toggle_pause lead_set_status lead_assign bulk_lead_action import_leads create_campaign update_campaign delete_campaign populate_campaign start_campaign pause_campaign send_whatsapp send_whatsapp_file send_email system_pause_resume'.split())
 ALLOWED = READ | WRITE
+DIRECT_ONLY = frozenset({'delete_lead', 'delete_campaign', 'bulk_lead_action', 'lead_toggle_pause'})
 SLOTS = threading.BoundedSemaphore(2)
 MAX_BODY = 65536
 TTL = 1800
@@ -192,14 +193,14 @@ def rpc(message):
     if method == 'tools/call':
         params = message.get('params', {})
         tool, args = params.get('name'), params.get('arguments', {})
-        if not isinstance(args, dict) or tool not in ALLOWED | {'sales_action_status'}:
+        if not isinstance(args, dict) or tool not in ALLOWED | {'sales_action_status'} or (tool in DIRECT_ONLY and os.environ.get('DIRECT_SALES') != 'true'):
             raise ValueError('Unsupported sales tool')
         if tool == 'sales_action_status':
             row = LEDGER.get(args.get('approval_id', ''))
             value = result(LEDGER.public(row) if row else {'error': 'Approval not found'}, not bool(row))
         elif tool in WRITE:
             prepared = LEDGER.request(tool, args)
-            if tool in ['create_campaign', 'update_campaign', 'populate_campaign', 'pause_campaign', 'lead_assign'] or (tool == 'system_pause_resume' and args.get('action') == 'pause'):
+            if os.environ.get('DIRECT_SALES') == 'true' or tool in ['create_campaign', 'update_campaign', 'populate_campaign', 'pause_campaign', 'lead_assign'] or (tool == 'system_pause_resume' and args.get('action') == 'pause'):
                 row = LEDGER.get(prepared['approval_id'])
                 finished = LEDGER.decide(row['id'], row['csrf'], 'approve')
                 value = finished['result'] or result(finished)
@@ -217,17 +218,19 @@ def rpc(message):
     if data and method == 'initialize' and 'result' in data:
         data['result']['serverInfo'] = {'name': 'outbound-os-sales', 'version': '1.0.0'}
         data['result']['capabilities'] = {'tools': {}}
-        data['result']['instructions'] = 'Sales operations. Draft campaigns, audience population, assignment and emergency pauses execute immediately. Customer sends, campaign starts/resumes and other lead mutations require human approval through the private page. Read results truthfully. No coding or admin/destructive operations.'
+        data['result']['instructions'] = ('Direct sales execution enabled by the owner. Requested CRM, messaging and campaign operations execute immediately. Preserve request IDs and inspect uncertain results before retrying. No coding or infrastructure changes.' if os.environ.get('DIRECT_SALES') == 'true' else 'Sales operations. Draft campaigns, audience population, assignment and emergency pauses execute immediately. Other mutations require human approval through the private page. Read results truthfully.')
     if data and method == 'tools/list' and 'result' in data:
         tools = []
         for item in data['result'].get('tools', []):
             name = item.get('name')
             if name not in ALLOWED:
                 continue
+            if name in DIRECT_ONLY and os.environ.get('DIRECT_SALES') != 'true':
+                continue
             item = dict(item)
             item['annotations'] = {'readOnlyHint': name in READ, 'destructiveHint': name in WRITE, 'idempotentHint': name in READ}
             if name in WRITE:
-                item['description'] = ('Executes draft preparation, assignments and pauses immediately; other mutations only prepare an owner approval link. ' + item['description'])
+                item['description'] = (('Executes directly under owner authorization. ' if os.environ.get('DIRECT_SALES') == 'true' else 'Executes draft preparation, assignments and pauses immediately; other mutations only prepare an owner approval link. ') + item['description'])
                 item['inputSchema'] = {**item['inputSchema'], 'properties': {**item['inputSchema'].get('properties', {}), '_request_id': {'type': 'string', 'maxLength': 100, 'description': 'Stable ID for this intent; reuse after interruptions. New ID only for a separate intentional action.'}}}
             tools.append(item)
         tools.append({'name': 'sales_action_status', 'description': 'Read the result of an owner-approved sales action.', 'inputSchema': {'type': 'object', 'properties': {'approval_id': {'type': 'string'}}, 'required': ['approval_id']}, 'annotations': {'readOnlyHint': True}})

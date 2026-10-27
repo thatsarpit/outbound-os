@@ -1,10 +1,12 @@
+import { isVerifiedMcpActor } from '../auth/verifiedMcpActor.js';
+
 const token = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,200}$/.test(value);
 const localId = value => /^[1-9]\d*$/.test(String(value ?? '')) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
 export const memberAssignmentError = (message, statusCode = 400, code = 'invalid_member') => Object.assign(new Error(message), { statusCode, code });
 
 /** Identity is provider-scoped; a matching email is never evidence of ownership. */
 export function workspaceMemberIdentity(user, env = process.env) {
-  if (!user || user.delegated || user.id === 'mcp-service' || user.orgId === 'service') return null;
+  if (!user || (user.delegated && !isVerifiedMcpActor(user)) || user.id === 'mcp-service' || user.orgId === 'service') return null;
   const provider = (env.AUTH_PROVIDER || (env.CLERK_SECRET_KEY ? 'clerk' : 'local')).toLowerCase() === 'clerk' ? 'clerk' : 'local';
   const externalId = String(user.id ?? user.sub ?? '');
   if (provider === 'local') {

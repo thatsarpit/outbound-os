@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { request as httpRequest } from 'node:http';
 import express from 'express';
-import { mountPersonalOAuth, personalReadToolAllowed } from '../src/personalOAuth.js';
+import { mountPersonalOAuth, personalReadToolAllowed, personalToolAllowed } from '../src/personalOAuth.js';
 import { McpAuthorization, emptyMcpLedger, MCP_READ_OPERATIONS } from '../../src/services/mcpAuthorization.js';
 import { registerAllTools } from '../src/registerTools.js';
 
@@ -47,14 +47,14 @@ test('personal OAuth HTTP bridge requires explicit approval, bound cookie, canon
   const post = (path, body) => fixtureFetch(`${server.base}${path}`, { method: 'POST', headers, body: JSON.stringify(body), redirect: 'manual' });
   try {
     const metadata = await (await fixtureFetch(`${server.base}/.well-known/oauth-authorization-server`, { headers })).json();
-    assert.deepEqual(metadata.scopes_supported, ['mcp:read'], JSON.stringify(metadata));
+    assert.deepEqual(metadata.scopes_supported, ['mcp:read', 'mcp:write'], JSON.stringify(metadata));
     assert.equal(metadata.issuer, config.issuer);
     assert.equal((await fixtureFetch(`${server.base}/.well-known/oauth-authorization-server`)).status, 400, 'conflicting direct Host is rejected');
     const redirect = 'https://client.example.test/callback?fixed=1';
     const registered = await (await post('/oauth/register', { redirect_uris: [redirect], client_name: 'Fixture client' })).json();
     const verifier = 'v'.repeat(43);
     const parameters = new URLSearchParams({ response_type: 'code', client_id: registered.client_id, redirect_uri: redirect,
-      code_challenge_method: 'S256', code_challenge: createHash('sha256').update(verifier).digest('base64url'), resource: config.resource, state: 'opaque value+&=' });
+      code_challenge_method: 'S256', code_challenge: createHash('sha256').update(verifier).digest('base64url'), resource: config.resource, scope: 'mcp:read', state: 'opaque value+&=' });
     const duplicate = await fixtureFetch(`${server.base}/oauth/authorize?${parameters}&client_id=wrong`, { headers, redirect: 'manual' });
     assert.equal(duplicate.status, 400);
     const start = await fixtureFetch(`${server.base}/oauth/authorize?${parameters}`, { headers, redirect: 'manual' });
@@ -96,9 +96,11 @@ test('personal tool catalogue and API operation policy match every registered to
     assert.equal(personalReadToolAllowed(name), true);
   }
   for (const name of names) assert.equal(personalReadToolAllowed(name), Object.hasOwn(MCP_READ_OPERATIONS, name));
+  for (const name of names) assert.equal(personalToolAllowed(name, 'mcp:read mcp:write'), true, name);
   for (const name of ['send_whatsapp', 'send_email', 'create_lead', 'create_campaign', 'start_campaign', 'system_pause_resume', '__proto__', 'not_registered']) {
     assert.equal(personalReadToolAllowed(name), false);
   }
+  for (const name of ['__proto__', 'unknown_admin', 'terminal']) assert.equal(personalToolAllowed(name, 'mcp:read mcp:write'), false);
 });
 
 test('personal OAuth retains only explicitly enabled legacy refresh compatibility', async () => {

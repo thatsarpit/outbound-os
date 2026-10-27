@@ -29,6 +29,7 @@ RUN npm ci --omit=dev
 
 # Copy source
 COPY mcp-outboundos/src ./src
+COPY shared /shared
 
 RUN mkdir -p /app/data && chown -R appuser:appuser /app
 USER appuser

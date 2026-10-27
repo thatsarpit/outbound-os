@@ -84,7 +84,7 @@ export function registerSystemTools(server) {
     {},
     async () => {
       try {
-        if (!mcpRequestContext.getStore()?.personalToken) {
+        if (!mcpRequestContext.getStore()?.personalToken || mcpRequestContext.getStore()?.personalScope?.split(' ').includes('mcp:write')) {
           try {
             const { data } = await get('/api/workspace/members');
             if (!Array.isArray(data?.members)) throw new Error('The workspace member response was incomplete. Try again after checking the API version.');
