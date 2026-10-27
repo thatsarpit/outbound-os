@@ -9,6 +9,7 @@ import { classifyInboundEmail, HUMAN_REPLY_WHERE } from '../utils/emailInbound.j
 import { InboundEmailSpool } from '../utils/inboundEmailSpool.js';
 import { EMAIL_INGRESS_MAX_BYTES } from '../utils/emailIngressSignature.js';
 import { emailAttachmentMetadata } from '../utils/emailAttachments.js';
+import { receivedEmailText } from '../utils/receivedEmailText.js';
 
 const normalizeAddress = (value) => String(value || '').trim().toLowerCase();
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
@@ -36,7 +37,7 @@ export function sanitizeReceivedEmailHtml(value) {
 
 function contentOf(parsed, subject, complete, from) {
   if (!complete) return `[Email reply from ${from}] Subject: ${subject} — body not yet downloaded`;
-  const text = typeof parsed.text === 'string' ? parsed.text.trim() : '';
+  const text = receivedEmailText(parsed);
   if (text) return text;
   if (parsed.attachments?.length) return `[${parsed.attachments.length} attachment${parsed.attachments.length === 1 ? '' : 's'}] ${subject}`.trim();
   return `[Empty email] ${subject}`.trim();

@@ -179,3 +179,20 @@ test('HTTP attachment routes enforce roles, exact identifiers and private forced
     assert.equal((await fetch(`${base}/email/receipts/1junk`, admin)).status, 400);
   } finally { await new Promise(resolve => server.close(resolve)); }
 }));
+
+
+test('multipart HTML-only body with an attachment remains readable in the inbox and receipt review', () => fixture(async ({ db, spool, account, lead }) => {
+  const ingestion = new InboundEmailIngestion({ db, spool, publish: async () => {}, score: async () => {} });
+  const raw = Buffer.from(mime(lead.email, '<html><body><p>Please quote <b>five boxes</b> &amp; delivery.</p><script>steal()</script><img src="https://tracking.example.test/a"><a href="javascript:alert(1)">Details</a></body></html>').toString()
+    .replace('Content-Type: text/plain; charset=utf-8', 'Content-Type: text/html; charset=utf-8'));
+  const { receipt } = await ingestion.ingest({ provider: 'cloudflare', dedupeKey: 'cloudflare-inbound:html-attachment-fixture', rawMime: raw, envelopeFrom: lead.email, envelopeTo: [account.email], strictRecipient: true });
+  const message = await db.message.findUnique({ where: { id: receipt.messageId } });
+  assert.match(message.content, /Please quote five boxes & delivery/);
+  assert.doesNotMatch(message.content, /steal|javascript|tracking/);
+  const service = new InboundEmailAttachments({ db, spool });
+  const preview = await service.previewReceipt(receipt.id);
+  assert.match(preview.text, /Please quote five boxes & delivery/);
+  assert.doesNotMatch(preview.text, /steal|javascript|tracking/);
+  assert.equal(preview.items.length, 1);
+  assert.deepEqual((await service.downloadReceipt(receipt.id, 0)).bytes, bytes);
+}));

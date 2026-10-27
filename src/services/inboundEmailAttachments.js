@@ -1,4 +1,5 @@
 import { simpleParser } from 'mailparser';
+import { receivedEmailText } from '../utils/receivedEmailText.js';
 import prisma from '../utils/prismaClient.js';
 import { InboundEmailSpool } from '../utils/inboundEmailSpool.js';
 import { EMAIL_INGRESS_MAX_BYTES } from '../utils/emailIngressSignature.js';
@@ -48,7 +49,7 @@ export class InboundEmailAttachments {
       subject: String(parsed.subject || '').slice(0, 2000),
       // MIME is parsed as text; HTML, remote images and sender scripts never
       // execute in the review surface, including HTML-only messages.
-      text: typeof parsed.text === 'string' ? parsed.text.trim() : '',
+      text: receivedEmailText(parsed),
       items: metadata.map(({ filename, contentType, size }, index) => ({ index, filename, contentType, size })),
     }));
   }

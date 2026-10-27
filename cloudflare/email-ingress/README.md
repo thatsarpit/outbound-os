@@ -1,6 +1,6 @@
 # Optional Cloudflare inbound-mail relay
 
-Status: implemented source and local contract tests; **not deployed or connected to a domain**. Sending stays with the existing provider. Gmail/Outlook OAuth mailbox connectors are separate work.
+Deployment and domain routing are installation-specific. Sending stays with the existing provider. Gmail/Outlook OAuth mailbox connectors are separate work.
 
 ## Free-plan KV option
 
@@ -64,3 +64,29 @@ See the [backend contract and remaining acceptance work](../../docs/inbound-emai
 Current provider references: [Email Worker handler](https://developers.cloudflare.com/email-service/api/route-emails/email-handler/), [R2 object notifications](https://developers.cloudflare.com/r2/buckets/event-notifications/), [Queue JavaScript API](https://developers.cloudflare.com/queues/configuration/javascript-apis/), [R2 data security](https://developers.cloudflare.com/r2/reference/data-security/).
 
 Storage failures in the KV receiver explicitly reject SMTP delivery so the sender is told to resend. There is no Gmail fallback. Queues and cron only retry mail after the original was retained. CPU-limit termination is a platform failure and still needs live workload monitoring; mocks do not establish Free-plan capacity.
+
+
+## Cut over an existing IMAP inbox
+
+1. Back up the exact Email Routing rule and confirm that the envelope recipient
+   matches an enabled EmailAccount. Keep login/recovery aliases separate.
+2. Switch that exact recipient rule to the Worker. Allow propagation, send an
+   owned-address test, then inspect the routing activity log and the retained
+   receipt in Outbound OS. Verify the complete body and attachment bytes.
+3. Only after direct delivery is confirmed, add the recipient to the API's
+   `EMAIL_CLOUDFLARE_ACCOUNTS` comma-separated environment variable and restart
+   the API. This stops automatic and manual IMAP sync for just those addresses;
+   their saved Gmail credentials remain available for rollback.
+4. The dashboard labels these addresses **Cloudflare configured**. This means
+   the local ingress configuration is present, not proof of current external
+   routing, queue health or a recent delivery. Inspect Email receipts and the
+   Cloudflare activity/queue logs when diagnosing delays. Quiet mailboxes are
+   not treated as stale IMAP connections.
+5. For rollback, restore the original forwarding rule first, allow propagation,
+   then remove that address from `EMAIL_CLOUDFLARE_ACCOUNTS` and restart the API.
+   Overlap is safe: both transports use the shared receipt/message deduplication.
+
+Do not delete historical Gmail mail or credentials during migration. This
+configuration does not change the sending provider or enable automatic replies.
+Monitor retained storage against the Free-plan quota; this Worker does not
+purge originals automatically.
