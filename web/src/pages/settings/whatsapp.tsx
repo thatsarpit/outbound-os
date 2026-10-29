@@ -155,7 +155,7 @@ export default function WhatsAppSettingsPage() {
                 label="Connected Phone"
                 value={selectedAccount.phone || 'Pending'}
               />
-              <StatCard icon={CheckCircle2} label="Provider" value={'Meta Cloud API'} />
+              <StatCard icon={CheckCircle2} label="Provider" value={selectedAccount.providerLabel || (selectedAccount.provider === 'ycloud' ? 'YCloud' : 'Meta Cloud API')} />
               <StatCard icon={Clock} label="Status" value={selectedAccount.status || 'Unknown'} />
               <StatCard
                 icon={Power}

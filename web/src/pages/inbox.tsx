@@ -17,6 +17,7 @@ import { inboxApi } from '@/api/endpoints/inbox'
 import { EMAIL_TEMPLATE_LIST_QUERY_KEY, templatesApi } from '@/api/endpoints/templates'
 import type { InboxChannel, InboxThreadState, MediaFile } from '@/api/types'
 import { ChannelHealthStrip } from '@/components/inbox/channel-health-strip'
+import { OtherEmail } from '@/components/inbox/other-email'
 import { ComposeEmailDrawer } from '@/components/inbox/compose-email-drawer'
 import { ThreadListItem } from '@/components/inbox/thread-list-item'
 import { LeadContextPanel } from '@/components/inbox/lead-context-panel'
@@ -596,6 +597,7 @@ function InboxInner() {
   return (
     <div className="animate-fade-in space-y-3">
       <ChannelHealthStrip health={channelHealth} />
+      <OtherEmail />
       <div className="flex min-h-[calc(100vh-11rem)] flex-col gap-4 lg:h-[calc(100dvh-9.5rem)] lg:flex-row">
         <div className="glass flex w-full shrink-0 flex-col overflow-hidden rounded-lg border border-border lg:w-80 xl:w-[22rem] lg:min-h-0">
           <div className="border-b border-border px-3 py-3">
