@@ -64,3 +64,28 @@ again; the existing account ID, encrypted Meta credentials and history remain.
 
 References: [YCloud API](https://nndocs.ycloud.com/reference/whatsapp_message-send-directly),
 [webhooks](https://nndocs.ycloud.com/reference/webhook-integration-guide).
+
+## Free email checks
+
+Email integrations can queue a background batch for all lead emails, selected
+lead IDs or a pasted list of up to 20,000 addresses. The built-in verifier uses
+[validator.js](https://github.com/validatorjs/validator.js) for syntax,
+[Mailchecker](https://github.com/FGRibreau/mailchecker) for disposable domains,
+and DNS MX records. These MIT libraries run locally without a paid API. Domain
+checks do not establish that an individual mailbox exists or accepts delivery;
+SMTP probes, catch-all detection and deliverability guarantees are not provided.
+
+Set `EMAIL_VERIFICATION_ENABLED=true` to protect sales sends. Invalid and unknown
+results stop delivery before sender quota or provider calls, including CC/BCC.
+Email campaign previews and daily batches include only current ready results;
+run verification before selecting an audience. WhatsApp eligibility is unchanged.
+Manual sends and fresh-lead email perform checks at send time. Internal account
+and password emails are unaffected. Verification does not grant marketing
+consent, override opt-outs or send messages.
+
+DNS lookups have a shared eight-request concurrency limit. Results are retained
+in SQLite, reusable for 24 hours (15 minutes for unknown), and background jobs
+resume after restart. Each batch retains its own results for review. The admin
+API is `/api/email/verification/jobs`; the MCP tools are
+`verify_email_addresses` and `email_verification_status`. Old read-only MCP
+connections may read results but cannot create batches.

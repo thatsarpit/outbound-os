@@ -34,6 +34,7 @@ import telegramRoutes from './routes/telegram.js';
 import emailInboxRoutes from './routes/emailInbox.js';
 import emailIngressRoutes from './routes/emailIngress.js';
 import emailReceiptRoutes from './routes/emailReceipts.js';
+import emailVerificationRoutes from './routes/emailVerification.js';
 import notificationRoutes from './routes/notifications.js';
 import activityRecordRoutes from './routes/activityRecords.js';
 import workspaceMemberRoutes from './routes/workspaceMembers.js';
@@ -60,6 +61,7 @@ import csvExporter from './services/csvExporter.js';
 import campaignEngine from './services/campaignEngine.js';
 import { campaignInput } from './services/campaignInput.js';
 import { hasAllLeadTags } from './utils/campaignAudience.js';
+import { verificationEnabled } from './utils/emailVerification.js';
 import replyDetector from './services/replyDetector.js';
 import leadStateService, { LEAD_STATUS } from './domain/leadStateService.js';
 import emailService from './services/emailService.js';
@@ -856,6 +858,7 @@ app.use('/api', productRoutes);
 app.use('/api', telegramRoutes);
 app.use('/api', emailInboxRoutes);
 app.use('/api', emailReceiptRoutes);
+app.use('/api', emailVerificationRoutes);
 app.use('/api', notificationRoutes);
 app.use('/api', activityRecordRoutes);
 app.use('/api', workspaceMemberRoutes);
@@ -2477,7 +2480,7 @@ app.post('/api/campaigns/preview-leads', requireRole('manager'), async (req, res
     const channel = req.body.channel || 'whatsapp';
     if (!VALID_CHANNELS.includes(channel)) return res.status(400).json({ error: 'Invalid campaign channel.' });
     const leads = await campaignEngine.getMatchingLeads(req.body.filter || {}, previewPoolId, channel);
-    res.json({ count: leads.length, sample: leads.slice(0, 10), poolId: previewPoolId });
+    res.json({ count: leads.length, sample: leads.slice(0, 10), poolId: previewPoolId, emailVerificationRequired: verificationEnabled() && ['email', 'both'].includes(channel) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

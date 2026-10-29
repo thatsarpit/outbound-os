@@ -4,6 +4,23 @@ import { ok, err } from '../schemas/common.js';
 
 /** @param {import("@modelcontextprotocol/sdk/server/mcp.js").McpServer} server */
 export function registerSystemTools(server) {
+  server.tool('verify_email_addresses', 'Start a free background email check for selected lead IDs, pasted addresses, or all lead emails. Checks syntax, disposable domains and MX; does not send mail or prove mailbox existence. Use before populating an email campaign.', {
+    lead_ids: z.array(z.number().int().positive()).max(20000).optional(),
+    emails: z.array(z.string().max(320)).max(20000).optional(),
+    all_leads: z.boolean().optional(),
+  }, async ({ lead_ids, emails, all_leads }) => {
+    try { const { data } = await post('/api/email/verification/jobs', {
+      ...(lead_ids !== undefined ? { leadIds: lead_ids } : {}),
+      ...(emails !== undefined ? { emails } : {}),
+      ...(all_leads !== undefined ? { allLeads: all_leads } : {}),
+    }); return ok(data); } catch (error) { return err(error.message); }
+  });
+  server.tool('email_verification_status', 'Read email verification batches or paginated results. Mail domain ready is not confirmation of an individual mailbox. Unknown/invalid/unchecked addresses are excluded from protected email campaign audiences.', {
+    job_id: z.string().uuid().optional(), page: z.number().int().min(1).max(400).optional(),
+  }, async ({ job_id, page = 1 }) => {
+    try { const { data } = await get(job_id ? `/api/email/verification/jobs/${encodeURIComponent(job_id)}?page=${page}` : '/api/email/verification/jobs'); return ok(data); }
+    catch (error) { return err(error.message); }
+  });
   server.tool('email_accounts', 'List sending email account IDs and readiness without credentials.', {}, async () => {
     try {
       const { data } = await get('/api/email/accounts');

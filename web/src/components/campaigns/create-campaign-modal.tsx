@@ -446,6 +446,11 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
                   <p className="text-[13px] tabular-nums text-text-primary">
                     {formatCount(num(previewMutation.data.count))} leads match this filter.
                   </p>
+                  {previewMutation.data.emailVerificationRequired && (
+                    <p className="text-[12px] text-text-muted">
+                      Email audiences include only addresses with current checks. Verify recipients in Email integrations.
+                    </p>
+                  )}
                   <ul className="divide-y divide-border-subtle rounded-md border border-border bg-surface">
                     {previewSample.slice(0, 5).map((lead) => (
                       <li key={lead.id} className="px-3 py-2">

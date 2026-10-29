@@ -1333,6 +1333,37 @@ model NotificationCursor {
 }
 
 // Durable MIME receipt ledger also retains mail that has not matched a CRM lead.
+model EmailVerification {
+  email String @id
+  status String
+  reason String
+  result String
+  checkedAt DateTime
+  expiresAt DateTime
+  @@index([status, expiresAt])
+}
+
+model EmailVerificationJob {
+  id String @id
+  status String @default("queued")
+  emails String
+  total Int
+  checked Int @default(0)
+  counts String @default("{}")
+  error String?
+  createdAt DateTime @default(now())
+  completedAt DateTime?
+  @@index([status, createdAt])
+}
+
+model EmailVerificationJobResult {
+  jobId String
+  email String
+  result String
+  checkedAt DateTime @default(now())
+  @@id([jobId, email])
+}
+
 model InboundEmailReceipt {
   id Int @id @default(autoincrement())
   provider String

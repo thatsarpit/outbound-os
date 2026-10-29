@@ -19,6 +19,7 @@ export const MCP_READ_OPERATIONS = Object.freeze({
   whatsapp_accounts: /^\/api\/whatsapp\/accounts$/,
   whatsapp_templates: /^\/api\/whatsapp\/accounts\/[1-9]\d*\/templates$/,
   email_accounts: /^\/api\/email\/accounts$/,
+  email_verification_status: /^\/api\/email\/verification\/jobs(?:\/[0-9a-f-]{36})?$/,
   list_users: /^\/api\/(?:users|workspace\/members)$/,
   campaign_preview_leads: /^\/api\/campaigns\/preview-leads$/,
 });
@@ -41,6 +42,7 @@ export const MCP_WRITE_OPERATIONS = Object.freeze({
   send_whatsapp: ['POST', /^\/api\/leads\/[1-9]\d*\/send$/],
   send_whatsapp_file: ['POST', /^\/api\/leads\/[1-9]\d*\/send-media$/],
   send_email: ['POST', /^\/api\/leads\/[1-9]\d*\/email\/send$/],
+  verify_email_addresses: ['POST', /^\/api\/email\/verification\/jobs$/],
   system_pause_resume: ['POST', /^\/api\/system\/(?:pause|resume)$/],
 });
 

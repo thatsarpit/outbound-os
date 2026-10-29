@@ -14,6 +14,7 @@ import { toast } from '@/stores/toast-store'
 import { handleInboxRequest } from './inbox'
 import { handleDemoMcpRequest } from './mcp'
 import { handleEmailReceiptRequest } from './email-receipts'
+import { handleEmailVerificationRequest } from './email-verification'
 
 /**
  * Sample data for the dashboard without a backend: a workspace called Acme
@@ -2352,6 +2353,8 @@ export function installFixtureFetch() {
     if (mobileSales) return mobileSales
     const connector = handleConnectorRequest(url, init)
     if (connector) return connector
+    const verification = handleEmailVerificationRequest(url, init)
+    if (verification) return verification
     const receipt = handleEmailReceiptRequest(url, init)
     if (receipt) return receipt
     const inbox = await handleInboxRequest(url, init, FIXTURE_LEADS)
