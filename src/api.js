@@ -3001,7 +3001,7 @@ app.get('/api/inbox/channel-health', requireRole('agent'), async (_req, res) => 
         campaignReady,
         projectReady,
         detail: campaignReady > 0
-          ? 'Meta credentials configured for templates and session replies'
+          ? 'WhatsApp provider credentials configured for templates and session replies'
           : 'Connect a WhatsApp number in Settings → WhatsApp',
       },
       imessage: {
