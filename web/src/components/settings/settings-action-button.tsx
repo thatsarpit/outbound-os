@@ -10,17 +10,20 @@ export function ActionButton({
   pending,
   label,
   secondary = false,
+  disabled = false,
 }: {
   onClick: () => void
   pending: boolean
   label: string
   secondary?: boolean
+  disabled?: boolean
 }) {
   return (
     <Button
       variant={secondary ? 'secondary' : 'primary'}
       isLoading={pending}
       onClick={onClick}
+      disabled={disabled}
       leftIcon={pending ? undefined : <Save className="h-4 w-4" />}
     >
       {label}

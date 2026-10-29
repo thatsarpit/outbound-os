@@ -41,6 +41,8 @@ export function WhatsAppConnectionPanel({
 }) {
   const webhookUrl =
     typeof window === 'undefined' ? '/webhook/meta' : `${window.location.origin}/webhook/meta`
+  const providerSaved = form.provider === account.provider
+  const configured = providerSaved && Boolean(account.connectionConfigured)
 
   return (
     <SettingsPanel
@@ -57,7 +59,8 @@ export function WhatsAppConnectionPanel({
           <ActionButton
             onClick={() => testMutation.mutate()}
             pending={testMutation.isPending}
-            label="Test connection"
+            label={providerSaved ? 'Test connection' : 'Save connection before testing'}
+            disabled={!providerSaved}
             secondary
           />
         </div>
@@ -127,10 +130,10 @@ export function WhatsAppConnectionPanel({
             />
           </div>
           <StatusChip
-            ok={Boolean(account.connectionConfigured)}
+            ok={configured}
             label="Sending"
             detail={
-              account.connectionConfigured
+              configured
                 ? 'credentials saved — use Test connection to confirm'
                 : 'needs provider credentials'
             }
