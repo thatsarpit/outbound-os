@@ -78,7 +78,7 @@ npm test --prefix mcp-outboundos
 ## Direct automation mode
 
 An operator may explicitly set `DIRECT_SALES=true` in the private service env
-file after owner authorization. This exposes all 39 upstream CRM tools (plus the
+file after owner authorization. This exposes all 41 upstream CRM tools (plus the
 local action-status tool) and executes requested sales mutations directly,
 including sends, campaign launches, imports and deletes. The durable request
 ledger, one-time execution claim, campaign audience checks and uncertain-result

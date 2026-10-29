@@ -249,3 +249,21 @@ test('preparing a file request never contacts the backend or sends before the ca
   assert.equal(payload(prepared).reason, 'request_id_required');
   assert.match(payload(prepared).client_message_id, /^[\w-]{16,100}$/);
 });
+
+test('email verification tools create a bounded background job and read paginated results without sending', async t => {
+  const job = 'f954d7fb-b384-46b0-b767-9f944de14ec8';
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, opts) => {
+    calls.push({ url: new URL(url), method: opts.method, body: opts.body && JSON.parse(opts.body) });
+    return Response.json({ id: job, status: 'queued', total: 2, mailboxVerified: false });
+  });
+  assert.equal(payload(await invoke('verify_email_addresses', { lead_ids: [1, 2] })).id, job);
+  assert.equal(calls[0].method, 'POST');
+  assert.equal(calls[0].url.pathname, '/api/email/verification/jobs');
+  assert.deepEqual(calls[0].body, { leadIds: [1, 2] });
+  await invoke('email_verification_status', { job_id: job, page: 2 });
+  assert.equal(calls[1].method, 'GET');
+  assert.equal(calls[1].url.pathname, `/api/email/verification/jobs/${job}`);
+  assert.equal(calls[1].url.searchParams.get('page'), '2');
+  assert.throws(() => tools.get('email_verification_status').schema.parse({ job_id: '../private' }));
+});

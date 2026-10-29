@@ -3,6 +3,8 @@ import logger from '../utils/logger.js';
 import whatsappManager from './whatsapp.js';
 import { credentialState } from './whatsappProviders.js';
 import emailService from './emailService.js';
+import emailVerification from './emailVerification.js';
+import { emailIdentity } from '../utils/emailVerification.js';
 import imessageService from './imessage.js';
 import { randomDelay, isBusinessHours } from '../utils/delay.js';
 import { whatsappAddress } from '../utils/whatsappAddress.js';
@@ -24,8 +26,8 @@ const UNCERTAIN = new Set(['timeout', 'exception', 'no_message_id', 'confirmatio
 export class CampaignEngine {
   constructor({ db = prisma, whatsapp = whatsappManager, email = emailService,
     imessage = imessageService, delay = randomDelay, businessHours = isBusinessHours,
-    reconcileReceipts = reconcileMetaReceipts } = {}) {
-    Object.assign(this, { db, whatsapp, email, imessage, delay, businessHours, reconcileReceipts });
+    reconcileReceipts = reconcileMetaReceipts, verification = emailVerification } = {}) {
+    Object.assign(this, { db, whatsapp, email, imessage, delay, businessHours, reconcileReceipts, verification });
   }
 
   async createCampaign({ name, description, messageTemplate, targetFilter, channel = 'whatsapp',
@@ -62,9 +64,10 @@ export class CampaignEngine {
     if (filter.product) where.product = { contains: filter.product };
     if (filter.country) where.country = { contains: filter.country };
     const leads = await this.db.lead.findMany({ where, orderBy: [{ score: 'desc' }, { id: 'asc' }] });
+    const ready = channels.includes('email') ? await this.verification.readyEmails(leads.map(lead => lead.email)) : null;
     // A DB substring predicate is not a tag match: "uk" must not select "bulk".
     return leads.filter((lead) => hasAllLeadTags(lead.tags, filter.tags)
-      && channels.some((item) => campaignChannelEligibility(lead, item).eligible));
+      && channels.some((item) => campaignChannelEligibility(lead, item).eligible && (item !== 'email' || !ready || ready.has(emailIdentity(lead.email)))));
   }
 
   async populateCampaign(campaignId) {
@@ -114,6 +117,10 @@ export class CampaignEngine {
     const lead = await this.db.lead.findUnique({ where: { id: leadId } });
     if (campaign.poolId && lead?.poolId !== campaign.poolId) return { reason: 'lead_left_campaign_pool' };
     const eligibility = campaignChannelEligibility(lead, channel);
+    if (eligibility.eligible && channel === 'email') {
+      const ready = await this.verification.readyEmails([lead.email]);
+      if (ready && !ready.has(emailIdentity(lead.email))) return { reason: 'email_verification_required' };
+    }
     return eligibility.eligible ? { lead } : { reason: eligibility.reason };
   }
 

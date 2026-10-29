@@ -3,6 +3,7 @@ import logger from '../utils/logger.js';
 import { createHash } from 'node:crypto';
 import emailService from './emailService.js';
 import brevoMarketingCampaigns from './brevoMarketingCampaigns.js';
+import emailVerification from './emailVerification.js';
 import { zonedDateKey, isSameZonedDay } from '../utils/workspaceTime.js';
 import { batchRecipientIdentity, countryAllowed, normalizeRecipientEmail, prepareBatchTemplate, renderBatchTemplate, validateCountries } from '../utils/emailBatchPolicy.js';
 
@@ -92,9 +93,10 @@ class DailyEmailScheduler {
         orderBy: [{ score: 'desc' }, { consumedAt: 'desc' }, { createdAt: 'desc' }, { id: 'asc' }],
         take: 500, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       });
+      const verified = await emailVerification.readyEmails(page.map(lead => lead.email));
       for (const lead of page) {
         const email = normalizeRecipientEmail(lead.email);
-        if (!email || seen.has(email) || !countryAllowed(lead.country, countries)) continue;
+        if (!email || seen.has(email) || (verified && !verified.has(email)) || !countryAllowed(lead.country, countries)) continue;
         seen.add(email);
         count += 1;
         if (leads.length < limit) leads.push(lead);

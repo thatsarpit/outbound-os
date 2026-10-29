@@ -2,6 +2,7 @@ import businessProfile from '../businessProfile.js';
 import crypto from 'crypto';
 
 import prisma from '../utils/prismaClient.js';
+import emailVerification from './emailVerification.js';
 import emailService from './emailService.js';
 import brevoDeliveryEvents from './brevoDeliveryEvents.js';
 import { batchContactAttributes, batchRecipientIdentity, countryAllowed, prepareBatchTemplate, renderBatchTemplate } from '../utils/emailBatchPolicy.js';
@@ -337,6 +338,7 @@ class BrevoMarketingCampaigns {
       || !capacity || capacity.remaining < leads.length || !await this.isEnabled()
       || !await validateRecipients(leads)) return { state, blocked: true, reason: 'audience_or_settings_changed' };
     if (!allowWhileGloballyPaused && await isGloballyPaused()) return { state, paused: true };
+    await emailVerification.assertRecipients(leads.map(lead => lead.email));
     state.sendRequestedAt = new Date().toISOString();
     await this._writeBatchState(date, account.id, state);
     await emailService.brevoRequestForAccount(account.id, `/emailCampaigns/${encodeURIComponent(state.campaignId)}/sendNow`, { method: 'POST' });
@@ -416,7 +418,10 @@ class BrevoMarketingCampaigns {
     if (allocations.some(({ lead }) => !countryAllowed(lead?.country, countries))) {
       return { handled: true, skipped: true, reason: 'audience_country_not_allowed' };
     }
-    if (!dryRun) await this.ensureDefaults();
+    if (!dryRun) {
+      await emailVerification.assertRecipients(allocations.map(item => item.lead?.email));
+      await this.ensureDefaults();
+    }
     const groups = new Map();
     for (const allocation of allocations) {
       if (!allocation?.lead || !allocation?.account) continue;

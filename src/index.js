@@ -6,6 +6,7 @@ import whatsappManager from './services/whatsapp.js';
 import followupEngine from './services/followup.js';
 import leadScorer from './services/leadScorer.js';
 import emailService from './services/emailService.js';
+import emailVerification from './services/emailVerification.js';
 import orderNotifier from './services/orderNotifier.js';
 import imessageService from './services/imessage.js';
 import telegramService from './services/telegram.js';
@@ -40,6 +41,7 @@ async function main() {
   try {
     // ── Step 0: Ensure default admin user exists ──
     await ensureDefaultAdmin();
+    await emailVerification.resume();
 
     // Settings saved in the dashboard override .env; apply them before any
     // service reads the business profile, time zone or country code.

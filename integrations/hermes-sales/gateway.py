@@ -19,8 +19,8 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-READ = frozenset('stats_overview whatsapp_costs analytics_funnel analytics_campaign_roi analytics_email_performance list_tags list_leads get_lead lead_timeline list_messages list_campaigns get_campaign campaign_ab_results system_status whatsapp_accounts whatsapp_templates email_accounts list_users list_media_files campaign_leads campaign_preview_leads'.split())
-WRITE = frozenset('create_lead update_lead delete_lead lead_toggle_pause lead_set_status lead_assign bulk_lead_action import_leads create_campaign update_campaign delete_campaign populate_campaign start_campaign pause_campaign send_whatsapp send_whatsapp_file send_email system_pause_resume'.split())
+READ = frozenset('stats_overview whatsapp_costs analytics_funnel analytics_campaign_roi analytics_email_performance list_tags list_leads get_lead lead_timeline list_messages list_campaigns get_campaign campaign_ab_results system_status whatsapp_accounts whatsapp_templates email_accounts email_verification_status list_users list_media_files campaign_leads campaign_preview_leads'.split())
+WRITE = frozenset('create_lead update_lead delete_lead lead_toggle_pause lead_set_status lead_assign bulk_lead_action import_leads create_campaign update_campaign delete_campaign populate_campaign start_campaign pause_campaign send_whatsapp send_whatsapp_file send_email verify_email_addresses system_pause_resume'.split())
 ALLOWED = READ | WRITE
 DIRECT_ONLY = frozenset({'delete_lead', 'delete_campaign', 'bulk_lead_action', 'lead_toggle_pause'})
 SLOTS = threading.BoundedSemaphore(2)
@@ -200,7 +200,7 @@ def rpc(message):
             value = result(LEDGER.public(row) if row else {'error': 'Approval not found'}, not bool(row))
         elif tool in WRITE:
             prepared = LEDGER.request(tool, args)
-            if os.environ.get('DIRECT_SALES') == 'true' or tool in ['create_campaign', 'update_campaign', 'populate_campaign', 'pause_campaign', 'lead_assign'] or (tool == 'system_pause_resume' and args.get('action') == 'pause'):
+            if os.environ.get('DIRECT_SALES') == 'true' or tool in ['create_campaign', 'update_campaign', 'populate_campaign', 'pause_campaign', 'lead_assign', 'verify_email_addresses'] or (tool == 'system_pause_resume' and args.get('action') == 'pause'):
                 row = LEDGER.get(prepared['approval_id'])
                 finished = LEDGER.decide(row['id'], row['csrf'], 'approve')
                 value = finished['result'] or result(finished)

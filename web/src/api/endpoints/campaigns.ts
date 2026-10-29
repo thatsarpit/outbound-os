@@ -36,6 +36,7 @@ export interface CampaignPreviewLeadsPayload {
 }
 
 export interface CampaignPreviewLeadsResponse {
+  emailVerificationRequired?: boolean
   count: number
   sample: Lead[]
 }

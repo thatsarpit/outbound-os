@@ -20,6 +20,7 @@ import { InfoTile } from '@/components/integrations/integration-helpers'
 import { emailAccountHealth, emailHealthSummary } from '@/lib/email-health'
 import { toast } from '@/stores/toast-store'
 import { EmailReceipts } from '@/components/integrations/email-receipts'
+import { EmailVerificationPanel } from '@/components/integrations/email-verification'
 
 const RECEIVING_LABELS = {
   not_configured: 'Not connected',
@@ -169,6 +170,7 @@ export default function EmailSection() {
         />
       </div>
 
+      {canConfigure && <EmailVerificationPanel />}
       {canConfigure && <EmailReceipts key={dashboardScope} accounts={accounts} />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

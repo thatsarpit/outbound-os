@@ -3620,3 +3620,112 @@ describe('YCloud WhatsApp provider', () => {
     await assert.rejects(downloadYCloudInboundMedia(media), /untrusted/);
   });
 });
+
+describe('Free bulk email verification and send protection', () => {
+  let prisma, verifier, previousLookup, previousEnabled;
+  const headers = () => ({ ...authHeader(), 'X-Forwarded-For': '192.0.2.217' });
+  before(async () => {
+    ({ default: prisma } = await import('../src/utils/prismaClient.js'));
+    ({ default: verifier } = await import('../src/services/emailVerification.js'));
+    previousLookup = verifier.lookupMx;
+    previousEnabled = process.env.EMAIL_VERIFICATION_ENABLED;
+    verifier.lookupMx = async domain => {
+      if (domain.startsWith('blocked.')) return [{ exchange: '.', priority: 0 }];
+      if (domain.startsWith('unknown.')) throw Object.assign(new Error('fixture'), { code: 'ETIMEOUT' });
+      return [{ exchange: `mx.${domain}`, priority: 10 }];
+    };
+    verifier.domains.clear();
+    process.env.EMAIL_VERIFICATION_ENABLED = 'true';
+  });
+  after(() => {
+    verifier.lookupMx = previousLookup; verifier.domains.clear();
+    if (previousEnabled === undefined) delete process.env.EMAIL_VERIFICATION_ENABLED;
+    else process.env.EMAIL_VERIFICATION_ENABLED = previousEnabled;
+  });
+  test('requires authentication and rejects ambiguous or oversized requests', async () => {
+    assert.equal((await request('GET', '/api/email/verification/jobs', { headers: { 'X-Forwarded-For': '192.0.2.218' } })).status, 401);
+    for (const body of [{}, { allLeads: true, emails: ['a@example.test'] }, { leadIds: ['bad'] }, { emails: [null] }]) {
+      assert.equal((await request('POST', '/api/email/verification/jobs', { headers: headers(), body })).status, 400);
+    }
+  });
+  test('runs durable deduplicated batches, keeps unknown separate and retains historical batch results', async () => {
+    const beforeMessages = await prisma.message.count();
+    const created = await request('POST', '/api/email/verification/jobs', { headers: headers(), body: {
+      emails: ['ready@verification.example.test', 'READY@verification.example.test', 'bad@blocked.example.test', 'no@unknown.example.test', 'not-an-address'],
+    } });
+    assert.equal(created.status, 202);
+    assert.equal(created.body.total, 4);
+    assert.equal(created.body.emails, undefined, 'job summaries never return the complete private input list');
+    let job;
+    for (let n = 0; n < 100; n++) {
+      job = await prisma.emailVerificationJob.findUnique({ where: { id: created.body.id } });
+      if (job.status === 'completed' || job.status === 'failed') break;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    assert.equal(job.status, 'completed');
+    assert.deepEqual(JSON.parse(job.counts), { ready: 1, invalid: 2, unknown: 1 });
+    const detail = await request('GET', `/api/email/verification/jobs/${job.id}`, { headers: headers() });
+    assert.equal(detail.body.results.length, 4);
+    assert.equal(detail.body.results.every(result => result.mailboxVerified === false), true);
+    await prisma.emailVerification.update({ where: { email: 'ready@verification.example.test' }, data: { result: JSON.stringify({ status: 'invalid', reason: 'fixture-new-check' }) } });
+    const historical = await request('GET', `/api/email/verification/jobs/${job.id}`, { headers: headers() });
+    assert.equal(historical.body.results.find(result => result.email === 'ready@verification.example.test').status, 'ready');
+    assert.equal(await prisma.message.count(), beforeMessages, 'verification does not queue or send mail');
+  });
+  test('cache and DNS concurrency stay bounded across unique addresses', async () => {
+    let active = 0, peak = 0, calls = 0;
+    verifier.domains.clear();
+    const lookup = verifier.lookupMx;
+    verifier.lookupMx = async domain => {
+      calls++; active++; peak = Math.max(peak, active);
+      await new Promise(resolve => setTimeout(resolve, 3));
+      active--; return [{ exchange: `mx.${domain}` }];
+    };
+    try {
+      await Promise.all(Array.from({ length: 24 }, (_, n) => verifier.verify(`owner@concurrency${n}.example.test`)));
+      assert.ok(peak <= 8);
+      await verifier.verify('owner@concurrency0.example.test');
+      assert.equal(calls, 24, 'fresh durable address results are reused');
+      await verifier.verify('another@concurrency0.example.test');
+      assert.equal(calls, 24, 'addresses on one domain share DNS work');
+    } finally { verifier.lookupMx = lookup; verifier.domains.clear(); }
+  });
+  test('invalid To, CC and BCC stop sales delivery before sender quota or provider calls', async () => {
+    const { default: email } = await import('../src/services/emailService.js');
+    const lead = await prisma.lead.create({ data: { name: 'Verification fixture', mobile: 'no-phone:verify-fixture', email: 'to@blocked.send.example.test' } });
+    const account = await prisma.emailAccount.create({ data: { name: 'Verifier sender fixture', email: 'sender@example.test', provider: 'brevo', enabled: true, smtpHost: 'api.brevo.test', smtpUser: 'fixture', smtpPass: 'fixture' } });
+    const oldRequest = email._brevoRequest;
+    let sends = 0;
+    email._brevoRequest = async () => { sends++; return { messageId: 'fixture-message' }; };
+    try {
+      const send = extra => email.sendEmail({ leadId: lead.id, accountId: account.id, subject: 'Fixture', body: 'Fixture only', ...extra });
+      await assert.rejects(send({}), error => error.code === 'email_verification_required');
+      await prisma.lead.update({ where: { id: lead.id }, data: { email: 'to@allowed.send.example.test' } });
+      await assert.rejects(send({ cc: 'CC <cc@blocked.send.example.test>' }), error => error.code === 'email_verification_required');
+      await assert.rejects(send({ bcc: 'hidden@unknown.send.example.test' }), error => error.code === 'email_verification_required');
+      assert.equal(sends, 0);
+      assert.equal((await prisma.emailAccount.findUnique({ where: { id: account.id } })).sentToday, 0);
+    } finally { email._brevoRequest = oldRequest; }
+  });
+  test('protected email previews and dispatch exclude unchecked, expired and invalid addresses without affecting WhatsApp', async () => {
+    const { default: campaigns } = await import('../src/services/campaignEngine.js');
+    const tag = 'verification-audience-fixture';
+    const leads = [];
+    for (const [n, email] of ['ready@audience.example.test', 'bad@blocked.audience.example.test', 'unchecked@audience.example.test', 'expired@audience.example.test'].entries()) {
+      leads.push(await prisma.lead.create({ data: { name: `Audience fixture ${n}`, mobile: `1555020000${n}`, email, tags: tag, emailMarketingConsent: true } }));
+    }
+    await verifier.verify(leads[0].email); await verifier.verify(leads[1].email); await verifier.verify(leads[3].email);
+    await prisma.emailVerification.update({ where: { email: leads[3].email }, data: { expiresAt: new Date(0) } });
+    const emailAudience = await campaigns.getMatchingLeads({ tags: [tag] }, null, 'email');
+    assert.deepEqual(emailAudience.map(lead => lead.id), [leads[0].id]);
+    assert.equal((await campaigns.getMatchingLeads({ tags: [tag] }, null, 'whatsapp')).length, 4);
+  });
+
+  test('bulk provider campaigns fail before creating provider contacts or sending invalid audiences', async () => {
+    const { default: marketing } = await import('../src/services/brevoMarketingCampaigns.js');
+    const template = { id: 9, name: 'Verification fixture', subject: 'Hi {{name}}', htmlBody: '<p>{{product}}</p><a href="{{ unsubscribe }}">Unsubscribe</a>', textBody: 'Hi {{name}}' };
+    await assert.rejects(marketing.dispatchDailyBatch({ date: '2026-10-29', template, countries: ['US'],
+      allocations: [{ lead: { email: 'buyer@blocked.bulk.example.test', country: 'US' }, account: { id: 999 } }], validateRecipients: async () => true }),
+    error => error.code === 'email_verification_required');
+  });
+});

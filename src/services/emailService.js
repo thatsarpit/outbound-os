@@ -15,6 +15,8 @@ import { isSameZonedDay } from '../utils/workspaceTime.js';
 import inboundEmailIngestion from './inboundEmailIngestion.js';
 import { EMAIL_INGRESS_MAX_BYTES } from '../utils/emailIngressSignature.js';
 import { usesCloudflareReceiving, emailReceivingStatus } from '../utils/emailReceiving.js';
+import emailVerification from './emailVerification.js';
+import { recipientAddresses } from '../utils/emailVerification.js';
 
 /**
  * Unsubscribe requests go to the mailbox that sent the email, which is the one
@@ -551,6 +553,8 @@ class EmailService {
     let account = await prisma.emailAccount.findUnique({ where: { id: accountId } });
     if (!account) throw new Error('Email account not found');
     if (!account.enabled) throw new Error('Email account is disabled');
+
+    await emailVerification.assertRecipients(recipientAddresses([lead.email, cc, bcc]));
 
     const capacity = await this._reserveSendCapacity(account.id, { excludeMessageId: existingMessageId });
     if (!capacity.ok) return { success: false, error: capacity.error };
