@@ -3,6 +3,8 @@ let sellerId;
 async function call(type,extra={}){const result=await chrome.runtime.sendMessage({type,...extra});if(!result?.ok)throw new Error(result?.error||'Relay unavailable.');return result;}
 async function refresh(){try{
  const result=await call('STATUS'),s=result.status||{};
+ $('run').disabled=!result.config?.enabled;
+ $('pause').disabled=!result.config?.enabled;
  $('status').textContent=[`Relay: ${result.config?.enabled?'enabled':'paused / not started'}`,`State: ${s.state||'not started'}`,
  `Last successful check: ${s.lastCheck?new Date(s.lastCheck).toLocaleString():'none'}`,
  `Pending imports: ${result.ledger?.outbox?.length||0}`,s.error||''].filter(Boolean).join('\n');

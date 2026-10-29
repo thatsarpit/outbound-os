@@ -20,8 +20,9 @@ The selected email must be linked to the selected WhatsApp persona. Do not use
 another business's sending account. The source key authenticates
 `/api/webhooks/indiamart/indiamart_live` and its `/health` endpoint.
 
-Only genuinely new contacts with purchases after the baseline and within one
-hour receive an outreach intent. Existing contacts, conflicts and historical
+Only genuinely new contacts with purchases after the baseline receive an
+outreach intent. The default freshness window is one hour; the owner-approved
+Mac relay policy uses up to seven days to catch purchases made during sleep. Existing contacts, conflicts and historical
 purchases stay suppressed. Replays do not convert baseline records into live
 outreach. An operator edit/pause between import and hand-off blocks automatic
 unpausing. The durable first-touch queue uses only the selected WhatsApp and
