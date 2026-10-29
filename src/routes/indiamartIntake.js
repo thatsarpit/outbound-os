@@ -32,7 +32,7 @@ router.post('/:source', async (req, res) => {
     try { records = validateConnectorRecords(req.body?.records); }
     catch (error) { return res.status(422).json({ error: error.message }); }
     if (!source.importSupplierId) return res.status(409).json({ error: 'Source supplier is not configured.' });
-    return res.json(await intake.ingest(source, records, req.body?.mode, req.body?.sellerId));
+    return res.json(await intake.ingest(source, records, req.body?.mode, req.body?.sellerId, { confirmSeller: req.body?.confirmSeller === true }));
   } catch { return res.status(503).json({ error: 'Intake not completed. Check the account configuration and retry the same purchase IDs.' }); }
 });
 export default router;

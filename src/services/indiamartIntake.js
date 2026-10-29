@@ -13,15 +13,20 @@ export class IndiamartIntake {
     const row = await this.db.systemConfig.findUnique({ where: { key: INDIAMART_POLICY } });
     return row ? JSON.parse(row.value) : null;
   }
-  async ingest(source, records, mode, sellerId) {
+  async ingest(source, records, mode, sellerId, { confirmSeller = false } = {}) {
     const policy = await this.policy();
-    if (!policy || policy.sourceId !== source.id || source.source !== INDIAMART_SOURCE
-      || String(sellerId) !== policy.sellerId || !policy.sellerId) throw new Error('Seller account is not configured for this source.');
+    if (!policy || policy.sourceId !== source.id || source.source !== INDIAMART_SOURCE) throw new Error('Seller account is not configured for this source.');
     if (!['baseline', 'live'].includes(mode)) throw new Error('Choose baseline or live mode.');
+    const initialPair = !policy.sellerId && !policy.armedAt && policy.allowInitialPairing === true
+      && mode === 'baseline' && confirmSeller === true && /^\d{1,20}$/.test(String(sellerId));
+    if (initialPair) policy.sellerId = String(sellerId);
+    if (!policy.sellerId || String(sellerId) !== policy.sellerId) throw new Error('Seller account is not configured for this source.');
     if (mode === 'live' && !policy.armedAt) throw new Error('Complete the initial baseline first.');
-    const results = await importConnectorRecords(this.db, source, records, { intakeMode: mode, liveAfter: policy.armedAt });
+    const results = await importConnectorRecords(this.db, source, records, { intakeMode: mode, liveAfter: policy.armedAt, maxAgeHours: policy.maxPurchaseAgeHours });
     if (mode === 'baseline' && !policy.armedAt) {
       policy.armedAt = new Date().toISOString();
+      policy.allowInitialPairing = false;
+      if (initialPair && policy.enableAfterBaseline === true) policy.enabled = true;
       await this.db.systemConfig.update({ where: { key: INDIAMART_POLICY }, data: { value: JSON.stringify(policy) } });
     }
     this.kick();

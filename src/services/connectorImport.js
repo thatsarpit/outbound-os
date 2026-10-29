@@ -94,7 +94,7 @@ export function validateConnectorRecords(records) {
 }
 
 /** One transaction per bounded batch. No outreach service is imported here. */
-export async function importConnectorRecords(db, source, records, { intakeMode, liveAfter } = {}) {
+export async function importConnectorRecords(db, source, records, { intakeMode, liveAfter, maxAgeHours = 1 } = {}) {
   const rows = validateConnectorRecords(records);
   return db.$transaction(async (tx) => {
     // Early single-workspace installs used both null and 1 for the same
@@ -150,7 +150,7 @@ export async function importConnectorRecords(db, source, records, { intakeMode, 
       }
       const acquired = Date.parse(row.acquiredAt);
       const recent = Number.isFinite(acquired) && acquired >= Date.parse(liveAfter)
-        && acquired <= Date.now() + 60_000 && acquired >= Date.now() - 3600_000;
+        && acquired <= Date.now() + 60_000 && acquired >= Date.now() - Math.max(1, Math.min(Number(maxAgeHours) || 1, 168)) * 3600_000;
       const liveState = !intakeMode ? 'none' : intakeMode === 'baseline' ? 'baseline'
         : state !== 'created' ? 'existing_or_conflict' : recent ? 'pending' : 'historical';
       const receipt = await tx.connectorReceipt.create({ data: { liveState,

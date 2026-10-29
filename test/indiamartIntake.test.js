@@ -71,3 +71,25 @@ test('an interruption after the atomic hand-off retains the intent for restart w
   assert.equal(await db.lead.count(),1);
   assert.equal((await db.connectorReceipt.findFirst()).liveState,'queued');
 }));
+
+
+test('an unpaired relay needs explicit initial account confirmation and cannot change a pinned seller',async()=>fixture(async({db,source,service,policy,save,calls})=>{
+  policy.sellerId=null;policy.armedAt=null;policy.enabled=false;policy.allowInitialPairing=true;policy.enableAfterBaseline=true;await save();
+  await assert.rejects(service.ingest(source,[record(40)],'baseline','10001'),/Seller/);
+  await assert.rejects(service.ingest(source,[record(40)],'live','10001',{confirmSeller:true}),/Seller/);
+  assert.equal(await db.lead.count(),0);
+  await service.ingest(source,[record(40)],'baseline','10001',{confirmSeller:true});
+  const paired=await service.policy();
+  assert.equal(paired.sellerId,'10001');assert.equal(paired.enabled,true);assert.equal(paired.allowInitialPairing,false);
+  await assert.rejects(service.ingest(source,[record(41)],'baseline','10002',{confirmSeller:true}),/Seller/);
+  await service.drain();assert.equal(calls.length,0,'initial baseline never launches historical outreach');
+}));
+
+
+test('wake catch-up can import missed post-baseline purchases while old history remains suppressed',async()=>fixture(async({db,source,service,policy,save,calls})=>{
+  policy.armedAt=new Date(Date.now()-10*86400_000).toISOString();policy.maxPurchaseAgeHours=168;await save();
+  await service.ingest(source,[record(50,{acquiredAt:new Date(Date.now()-2*86400_000).toISOString()}),record(51,{acquiredAt:new Date(Date.now()-8*86400_000).toISOString()})],'live','10001');
+  await service.drain();
+  assert.equal(calls.length,1);
+  assert.deepEqual((await db.connectorReceipt.findMany({orderBy:{id:'asc'}})).map(r=>r.liveState),['queued','historical']);
+}));
