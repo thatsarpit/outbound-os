@@ -3561,13 +3561,18 @@ describe('YCloud WhatsApp provider', () => {
 
   test('downloads signed provider media without credentials and rejects arbitrary URLs', async () => {
     const { downloadYCloudInboundMedia } = await import('../src/services/whatsappMedia.js');
-    const media = { type: 'image', image: { id: 'fixture-media', mime_type: 'image/png', link: `${process.env.YCLOUD_API_BASE}/whatsapp/media/download/fixture?sig=fixture` } };
+    const media = { type: 'image', image: { id: 'fixture-media', mime_type: 'image/png', sha256: crypto.createHash('sha256').update('fixture-image').digest('base64'), link: `${process.env.YCLOUD_API_BASE}/whatsapp/media/download/fixture-media?sig=fixture&payload=fixture` } };
     const stored = await downloadYCloudInboundMedia(media);
     assert.equal(calls.at(-1).key, undefined);
     const target = path.join(__dirname, '..', stored.mediaUrl);
     assert.equal(fs.readFileSync(target).toString(), 'fixture-image');
     fs.unlinkSync(target);
+    assert.equal(new URL(calls.at(-1).url, 'http://fixture.test').pathname, '/v2/whatsapp/media/download/fixture-media');
+    media.image.sha256 = 'incorrect-checksum';
+    await assert.rejects(downloadYCloudInboundMedia(media), /checksum/);
     media.image.link = 'http://127.0.0.1/private';
+    await assert.rejects(downloadYCloudInboundMedia(media), /untrusted/);
+    media.image.link = `${process.env.YCLOUD_API_BASE}/whatsapp/media/download/other-id?sig=fixture`;
     await assert.rejects(downloadYCloudInboundMedia(media), /untrusted/);
   });
 });

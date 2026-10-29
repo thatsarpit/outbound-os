@@ -48,7 +48,7 @@ router.post('/webhook/ycloud/:accountId', async (req, res) => {
       }
       const text = metaInboundText(message);
       if (!text) return res.sendStatus(400);
-      const media = await downloadYCloudInboundMedia(message);
+      const media = await downloadYCloudInboundMedia(message, id);
       await replyDetector.handleReply(String(message.from || ''), text, id, {
         source: 'ycloud', messageId, timestamp: message.sendTime, messageType: message.type,
         waUserId: senderId || undefined, waUsername: message.customerProfile?.username,
