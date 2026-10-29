@@ -5,7 +5,7 @@ import path from 'node:path';
 export function forbiddenArtifact(file) {
   const normalized = file.replaceAll('\\', '/');
   const basename = path.posix.basename(normalized);
-  if (/^\.env(?:\..*)?$/.test(basename) && basename !== '.env.example') return 'environment credentials';
+  if (basename === 'private.env' || (/^\.env(?:\..*)?$/.test(basename) && basename !== '.env.example')) return 'environment credentials';
   if (/(?:^|\/)(?:node_modules|\.wrangler|data|logs|backups|exports|\.wwebjs_auth|\.wwebjs_cache|\.next|dist|dist-demo)(?:\/|$)/.test(normalized)) return 'generated or runtime data';
   if (/\.(?:db|sqlite|sqlite3)(?:-(?:wal|shm|journal))?$/.test(basename)) return 'database';
   if (/^(?:instance-secrets|oauth-store|.*-private)\.json$/.test(basename) || /\.(?:pem|key|p12|pfx)$/.test(basename)) return 'private credentials';
