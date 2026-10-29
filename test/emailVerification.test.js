@@ -34,3 +34,16 @@ test('MCP read scope cannot start a verification job or use the status tool for 
   assert.equal(mcpOperationAllowed('email_verification_status', 'POST', '/api/email/verification/jobs', 'mcp:read'), false);
   assert.equal(mcpOperationAllowed('email_verification_status', 'GET', '/api/email/verification/jobs', 'mcp:read'), true);
 });
+
+
+test('email verification demo has complete fictional results and cannot launch real checks', async () => {
+  const { handleEmailVerificationRequest: handle } = await import('../web/src/demo/email-verification.ts');
+  const list = await handle('/api/email/verification/jobs').json();
+  assert.equal(list.jobs[0].total, 3);
+  const detail = await handle(`/api/email/verification/jobs/${list.jobs[0].id}`).json();
+  assert.deepEqual(detail.results.map(row => row.status), ['ready', 'invalid', 'unknown']);
+  assert.ok(detail.results.every(row => row.mailboxVerified === false));
+  assert.equal(handle('/api/email/verification/jobs', { method: 'POST' }).status, 403);
+  assert.equal(handle('/api/email/verification/jobs/not-a-batch').status, 404);
+  assert.equal(handle('/api/other'), null);
+});
