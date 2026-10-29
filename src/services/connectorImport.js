@@ -8,7 +8,7 @@ const phoneKey = (value) => {
 const emailKey = (value) => String(value || '').trim().toLowerCase();
 const leadFields = {
   id: true, mobile: true, email: true, tags: true, originSupplierId: true,
-  poolId: true, company: true, country: true, product: true, quantity: true, notes: true,
+  poolId: true, updatedAt: true, company: true, country: true, product: true, quantity: true, notes: true,
 };
 
 async function findCandidates(tx, source, rows) {
@@ -94,7 +94,7 @@ export function validateConnectorRecords(records) {
 }
 
 /** One transaction per bounded batch. No outreach service is imported here. */
-export async function importConnectorRecords(db, source, records) {
+export async function importConnectorRecords(db, source, records, { intakeMode, liveAfter } = {}) {
   const rows = validateConnectorRecords(records);
   return db.$transaction(async (tx) => {
     // Early single-workspace installs used both null and 1 for the same
@@ -148,7 +148,13 @@ export async function importConnectorRecords(db, source, records) {
           leads.set(lead.id, lead); state = 'created';
         }
       }
-      const receipt = await tx.connectorReceipt.create({ data: { sourceId: source.id, externalId: row.externalId, leadId: reason ? null : lead.id, state, reason, recordJson: JSON.stringify(row) }, select: { externalId: true, state: true, leadId: true } });
+      const acquired = Date.parse(row.acquiredAt);
+      const recent = Number.isFinite(acquired) && acquired >= Date.parse(liveAfter)
+        && acquired <= Date.now() + 60_000 && acquired >= Date.now() - 3600_000;
+      const liveState = !intakeMode ? 'none' : intakeMode === 'baseline' ? 'baseline'
+        : state !== 'created' ? 'existing_or_conflict' : recent ? 'pending' : 'historical';
+      const receipt = await tx.connectorReceipt.create({ data: { liveState,
+        ...(liveState === 'pending' ? { liveLeadVersion: lead.updatedAt } : {}), sourceId: source.id, externalId: row.externalId, leadId: reason ? null : lead.id, state, reason, recordJson: JSON.stringify(row) }, select: { externalId: true, state: true, leadId: true } });
       receipts.set(row.externalId, receipt);
       results.push({ externalId: row.externalId, state, leadId: reason ? null : lead.id, ...(reason ? { reason } : {}) });
     }

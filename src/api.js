@@ -1,5 +1,7 @@
 import websiteEnquiries from './routes/websiteEnquiries.js';
 import connectorIntake from './routes/connectorIntake.js';
+import indiamartIntake from './routes/indiamartIntake.js';
+import indiamartIntakeService from './services/indiamartIntake.js';
 import connectorAdmin from './routes/connectorAdmin.js';
 import mcpSetup from './routes/mcpSetup.js';
 import mcpAuthorizationRouter from './routes/mcpAuthorization.js';
@@ -478,6 +480,7 @@ app.use('/api/config/env', bulkLimiter);
 // Public website intake has its own opt-in origin and rate-limit boundary.
 app.use('/api/public/request-access', websiteEnquiries);
 app.use('/api/webhooks/connector', connectorIntake);
+app.use('/api/webhooks/indiamart', indiamartIntake);
 
 // Browsers only need CORS when the dashboard is served from a different origin
 // than this API (for example a CDN in front of a separate API host). The
@@ -987,6 +990,7 @@ app.get('/api/system/status', requireRole('manager'), async (req, res) => {
       connectedAccounts,
       enabledAccounts,
       dashboardConnections: sseClients.size,
+      indiamart: await indiamartIntakeService.health(),
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
