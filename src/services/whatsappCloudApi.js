@@ -11,11 +11,13 @@ import { cloudApiAddressee } from '../utils/whatsappAddress.js';
 import { summarizeWhatsAppTemplate } from '../utils/whatsappTemplates.js';
 import { createDecipheriv, createCipheriv, randomBytes, createHash } from 'crypto';
 
-import { credentialState, metaCredentialPair } from './whatsappProviders.js';
+import { credentialState, metaCredentialPair, providerOf } from './whatsappProviders.js';
+import { ycloudSendPayload } from '../utils/ycloudWebhook.js';
 
 // Read per call so tests (and self-hosters pinning an API version) can set it
 // after this module has loaded.
 const graphBase = () => process.env.META_GRAPH_API_BASE || 'https://graph.facebook.com/v21.0';
+export const ycloudBase = () => process.env.YCLOUD_API_BASE || 'https://api.ycloud.com/v2';
 const REQUEST_TIMEOUT_MS = parseInt(process.env.META_TIMEOUT_MS, 10) || 20000;
 
 // ── Credential encryption ───────────────────────────────────────────────────
@@ -76,6 +78,8 @@ function classifyError(httpStatus, errCode, message = '') {
     case 131047:            // re-engagement: outside the 24h window
       return errCode === 131047 ? 're_engagement_required' : 'not_on_whatsapp';
     case 131030: return 'invalid_phone';
+    case 131042: return 'payment_issue';
+    case 131049: return 'marketing_limit';
     case 131008: return 'quota_exceeded';
     case 131056: return 'blocked_by_user';
     case 132000:            // template param count mismatch
@@ -100,6 +104,7 @@ class WhatsAppCloudApiService {
     const account = await prisma.whatsAppAccount.findUnique({ where: { id: accountId } });
     const fail = (status, reason, message) => ({ ok: false, status, reason, message });
     if (!account) return fail(404, 'account_not_found', 'WhatsApp account not found.');
+    if (providerOf(account) === 'ycloud') return this.listYCloudTemplates(account);
     if (!account.metaWabaId) {
       return fail(422, 'missing_waba_id', 'Add the WhatsApp Business Account ID in Settings → WhatsApp for this number.');
     }
@@ -159,6 +164,14 @@ class WhatsAppCloudApiService {
   async getTransport(accountId) {
     const account = await this._loadAccount(accountId);
     if (accountId && !account) throw new Error('WhatsApp account not found.');
+    if (providerOf(account) === 'ycloud') {
+      const token = decrypt(account.ycloudApiKey);
+      if (!credentialState(account, {}).ready || !token) {
+        throw new Error('Add the YCloud API key, sender number and YCloud WABA ID in Settings → WhatsApp.');
+      }
+      return { provider: 'ycloud', account, token, phoneNumber: account.ycloudPhoneNumber,
+        url: `${ycloudBase()}/whatsapp/messages/sendDirectly`, headers: { 'X-API-Key': token } };
+    }
     const pair = metaCredentialPair(account);
     const token = pair ? decrypt(pair.token) : '';
     if (!pair || !token) {
@@ -214,7 +227,8 @@ class WhatsAppCloudApiService {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(provider === 'ycloud' ? ycloudSendPayload(payload, transport.phoneNumber) : payload),
+        redirect: 'error',
         signal: controller.signal,
       });
 
@@ -222,21 +236,21 @@ class WhatsAppCloudApiService {
       let data = {};
       try { data = text ? JSON.parse(text) : {}; } catch { /* non-JSON error body */ }
 
-      if (!res.ok) {
-        const errMsg = data?.error?.message || data?.message || text?.slice(0, 300) || `HTTP ${res.status}`;
-        const errCode = data?.error?.code;
+      if (!res.ok || (provider === 'ycloud' && data.status === 'failed')) {
+        const errMsg = data?.error?.whatsappApiError?.error_data?.details || data?.error?.message || data?.errorMessage || data?.message || `HTTP ${res.status}`;
+        const errCode = Number(data?.error?.whatsappApiError?.code || data?.whatsappApiError?.code || data?.errorCode || data?.error?.code);
         const reason = classifyError(res.status, errCode, errMsg);
         logger.error(`${tag} ${label} failed [HTTP ${res.status}${errCode ? `/${errCode}` : ''}] ${reason}: ${errMsg}`);
         return { success: false, reason, rawError: errMsg };
       }
 
-      const messageId = data?.messages?.[0]?.id;
+      const messageId = provider === 'ycloud' ? data?.id : data?.messages?.[0]?.id;
       const waId = data?.contacts?.[0]?.wa_id;
       if (!messageId) {
         // 2xx without a message id means we cannot correlate delivery webhooks
         // to the Message row later. Treat as a failure rather than pretend.
-        logger.error(`${tag} ${label} returned 2xx with no message id: ${text?.slice(0, 300)}`);
-        return { success: false, reason: 'no_message_id', rawError: text?.slice(0, 300) };
+        logger.error(`${tag} ${label} returned 2xx with no message id.`);
+        return { success: false, reason: 'no_message_id', rawError: 'Provider response did not include a message ID.' };
       }
 
       return { success: true, messageId, waId, accountId: accountId ?? null, provider };
@@ -396,7 +410,22 @@ class WhatsAppCloudApiService {
     try {
       transport = await this.getTransport(accountId);
     } catch (error) {
-      return { ok: false, provider: 'meta', reason: 'no_credentials', message: error.message };
+      const account = await this._loadAccount(accountId);
+      return { ok: false, provider: providerOf(account), reason: 'no_credentials', message: error.message };
+    }
+    if (transport.provider === 'ycloud') {
+      try {
+        const data = await this.ycloudRead(`/whatsapp/phoneNumbers/${encodeURIComponent(transport.account.ycloudWabaId)}/${encodeURIComponent(transport.phoneNumber)}`, transport);
+        const phone = String(data.phoneNumber || '').replace(/\D/g, '');
+        if (phone !== transport.phoneNumber.replace(/\D/g, '') || String(data.wabaId) !== transport.account.ycloudWabaId) {
+          return { ok: false, provider: 'ycloud', reason: 'account_mismatch', message: 'YCloud returned a different number or WABA. Check both account fields.' };
+        }
+        return { ok: true, provider: 'ycloud', phoneNumber: data.phoneNumber,
+          verifiedName: data.verifiedName || null, qualityRating: data.qualityRating || null,
+          message: `YCloud can access ${data.phoneNumber}. No message was sent.` };
+      } catch (error) {
+        return { ok: false, provider: 'ycloud', reason: 'connection_failed', message: error.message };
+      }
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -444,6 +473,34 @@ class WhatsAppCloudApiService {
    */
   encryptToken(plainToken) {
     return encrypt(plainToken);
+  }
+
+  decryptToken(stored) { return decrypt(stored); }
+
+  async ycloudRead(path, transport) {
+    const response = await fetch(`${ycloudBase()}${path}`, {
+      headers: transport.headers, redirect: 'error', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(`YCloud request failed (HTTP ${response.status}). Check the API key and number access.`);
+    return data;
+  }
+
+  async listYCloudTemplates(account) {
+    try {
+      const transport = await this.getTransport(account.id);
+      const templates = [];
+      for (let page = 1; page <= 100; page++) {
+        const params = new URLSearchParams({ page: String(page), limit: '100', 'filter.wabaId': account.ycloudWabaId, 'filter.status': 'APPROVED' });
+        const data = await this.ycloudRead(`/whatsapp/templates?${params}`, transport);
+        if (!Array.isArray(data.items)) throw new Error('YCloud returned an invalid template list.');
+        templates.push(...data.items.filter(t => t.status === 'APPROVED' && String(t.wabaId) === account.ycloudWabaId).map(summarizeWhatsAppTemplate));
+        if (data.items.length < 100) return { ok: true, templates };
+      }
+      throw new Error('YCloud template pagination did not complete.');
+    } catch (error) {
+      return { ok: false, status: 502, reason: 'upstream_error', message: error.message };
+    }
   }
 }
 

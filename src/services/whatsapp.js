@@ -485,6 +485,8 @@ class WhatsAppManager {
     return accounts.map(a => {
       const {
         cloudApiToken,
+        ycloudApiKey,
+        ycloudWebhookSecret,
         ...safe
       } = a;
       return {

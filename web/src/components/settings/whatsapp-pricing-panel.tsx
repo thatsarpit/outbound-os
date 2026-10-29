@@ -45,7 +45,7 @@ export function WhatsAppPricingPanel() {
     <SettingsPanel
       icon={Receipt}
       title="WhatsApp messaging costs"
-      description="Meta bills WhatsApp messages to your own WhatsApp Business account, per message, by category and the recipient's country. These counts come from Meta's delivery updates; multiply by Meta's rate card for your markets."
+      description="Message counts come from your provider's delivery updates. Check Meta or YCloud billing for actual charges, rates and any provider fees."
       action={
         <a
           href="https://developers.facebook.com/docs/whatsapp/pricing"
@@ -60,9 +60,9 @@ export function WhatsAppPricingPanel() {
       <div className="mb-4 rounded-md border border-warning/30 bg-warning-muted px-4 py-3 text-sm text-text-primary">
         <p className="font-medium">WhatsApp charges depend on the message and its destination.</p>
         <p className="mt-1 text-text-secondary">
-          Meta currently provides free service replies inside the 24-hour customer-service window.
-          Marketing and other billable messages follow Meta&rsquo;s current rate card. Check the
-          pricing category and billable status below when reviewing usage.
+          A customer-service window permits session replies; it does not guarantee that your
+          provider charges nothing. These counts use confirmed pricing information when available.
+          Check your provider&rsquo;s billing portal before launching a campaign.
         </p>
       </div>
 
@@ -106,14 +106,13 @@ export function WhatsAppPricingPanel() {
             </table>
           ) : (
             <p className="mt-4 text-sm text-text-muted">
-              No priced messages yet this month. Meta reports pricing once a message is sent through
-              the Cloud API.
+              No priced messages yet this month. Pricing appears when the provider reports it.
             </p>
           )}
           {data.unpriced > 0 && (
             <p className="mt-3 text-xs text-text-muted">
-              &ldquo;No pricing reported&rdquo; covers messages sent through a provider that does
-              not pass Meta&rsquo;s pricing metadata for, and messages Meta has not confirmed yet.
+              &ldquo;No pricing reported&rdquo; covers messages without final pricing information.
+              It does not mean those messages were free.
             </p>
           )}
         </>

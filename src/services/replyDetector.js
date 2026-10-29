@@ -440,6 +440,9 @@ class ReplyDetector {
           content: body,
           waAccount: channel === 'whatsapp' ? (accountId || 0) : 0,
           waMessageId: channel === 'whatsapp' ? (meta.messageId || null) : null,
+          // The unique key also protects concurrent YCloud redeliveries.
+          ...(channel === 'whatsapp' && meta.source === 'ycloud' && meta.messageId
+            ? { idempotencyKey: `ycloud-inbound:${meta.messageId}` } : {}),
           imessageAccountId: channel === 'imessage' ? (accountId || null) : null,
           imessageMessageId: channel === 'imessage' ? (meta.messageId || null) : null,
           // A photo, document, voice note or video the lead sent, already

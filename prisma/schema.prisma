@@ -424,7 +424,7 @@ model WhatsAppAccount {
   waAccountType String @default("cloud_api") // cloud_api
 
   // WhatsApp is delivered directly through Meta's official Cloud API.
-  provider         String @default("meta") // meta
+  provider         String @default("meta") // meta | ycloud
   templateLanguage String @default("en")
   // WhatsApp Business Account ID, used to list approved templates.
   metaWabaId       String @default("")
@@ -436,6 +436,13 @@ model WhatsAppAccount {
   //                     (AES-256-GCM encrypted at rest)
   cloudApiToken   String @default("")
   cloudApiPhoneId String @default("")
+
+  // YCloud credentials are independent of the direct Meta token. Secrets use
+  // the same AES-GCM encryption as the other integration credentials.
+  ycloudApiKey        String @default("")
+  ycloudWebhookSecret String @default("")
+  ycloudPhoneNumber   String @default("")
+  ycloudWabaId        String @default("")
 
   // ── Lifecycle ──
   enabled   Boolean @default(false) // Allow sending when configured

@@ -81,7 +81,7 @@ import sheetsSync from './services/sheetsSync.js';
 import { sheetsWebhookUrl } from './utils/sheetsWebhook.js';
 import { browserMutationGuard } from './utils/browserMutation.js';
 import whatsappCloudApi from './services/whatsappCloudApi.js';
-import { WHATSAPP_PROVIDERS, credentialState, publicCredentialSummary } from './services/whatsappProviders.js';
+import { WHATSAPP_PROVIDERS, credentialState, publicCredentialSummary, publicWhatsAppAccount } from './services/whatsappProviders.js';
 import {
   getWorkspaceProfile, saveWorkspaceProfile, isOnboardingDismissed, setOnboardingDismissed,
 } from './services/workspaceProfile.js';
@@ -2544,6 +2544,8 @@ app.get('/api/whatsapp/status', async (req, res) => {
         }
         const {
           cloudApiToken,
+          ycloudApiKey,
+          ycloudWebhookSecret,
           ...safeAccount
         } = account;
         return {
@@ -2562,7 +2564,7 @@ app.get('/api/whatsapp/status', async (req, res) => {
   app.post('/api/whatsapp/accounts', requireRole('admin'), async (req, res) => {
     try {
       const account = await whatsappManager.addAccount(req.body);
-      res.json({ success: true, account });
+      res.json({ success: true, account: publicWhatsAppAccount(account) });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -2596,7 +2598,7 @@ app.get('/api/whatsapp/status', async (req, res) => {
       if (isNaN(id) || id < 1) return res.status(400).json({ error: 'Invalid account id' });
       const account = await whatsappManager.updateAccount(id, req.body);
       if (!account) return res.status(400).json({ error: 'No valid fields to update' });
-      res.json({ success: true, account });
+      res.json({ success: true, account: publicWhatsAppAccount(account) });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }
@@ -2856,7 +2858,7 @@ app.get('/api/onboarding/status', requireRole('manager'), async (_req, res) => {
     const [whatsappAccounts, emailAccounts, telegramAccounts, imessageAccounts, leadSources, leads, users, dismissed, sheetsRow, subscriptions] = await Promise.all([
       prisma.whatsAppAccount.findMany({
         where: { enabled: true },
-        select: { provider: true, cloudApiPhoneId: true, cloudApiToken: true },
+        select: { provider: true, cloudApiPhoneId: true, cloudApiToken: true, ycloudApiKey: true, ycloudPhoneNumber: true, ycloudWabaId: true },
       }),
       prisma.emailAccount.count({ where: { enabled: true } }),
       prisma.telegramAccount.count({ where: { enabled: true, status: 'connected' } }),
@@ -2964,6 +2966,9 @@ app.get('/api/inbox/channel-health', requireRole('agent'), async (_req, res) => 
           provider: true,
           cloudApiPhoneId: true,
           cloudApiToken: true,
+          ycloudApiKey: true,
+          ycloudPhoneNumber: true,
+          ycloudWabaId: true,
         },
       }),
       prisma.iMessageAccount.findMany({
@@ -2996,7 +3001,7 @@ app.get('/api/inbox/channel-health', requireRole('agent'), async (_req, res) => 
         campaignReady,
         projectReady,
         detail: campaignReady > 0
-          ? 'Meta credentials configured for templates and session replies'
+          ? 'WhatsApp provider credentials configured for templates and session replies'
           : 'Connect a WhatsApp number in Settings → WhatsApp',
       },
       imessage: {
@@ -4940,6 +4945,7 @@ app.patch('/api/whatsapp/accounts/:id/cloud-credentials', requireRole('admin'), 
     const {
       provider,
       metaPhoneNumberId, metaAccessToken, metaWabaId, templateLanguage,
+      ycloudApiKey, ycloudWebhookSecret, ycloudPhoneNumber, ycloudWabaId,
       defaultCampaignName,
     } = req.body || {};
 
@@ -4952,6 +4958,22 @@ app.patch('/api/whatsapp/accounts/:id/cloud-credentials', requireRole('admin'), 
     if (metaPhoneNumberId !== undefined) data.cloudApiPhoneId = String(metaPhoneNumberId).replace(/\s+/g, '');
     if (metaAccessToken) data.cloudApiToken = whatsappCloudApi.encryptToken(String(metaAccessToken).trim());
     if (metaWabaId !== undefined) data.metaWabaId = String(metaWabaId).trim();
+    for (const [field, value] of Object.entries({ ycloudApiKey, ycloudWebhookSecret })) {
+      if (value !== undefined && (typeof value !== 'string' || value.length > 2048)) {
+        return res.status(400).json({ error: 'Invalid YCloud credential.' });
+      }
+      if (value?.trim()) data[field] = whatsappCloudApi.encryptToken(value.trim());
+    }
+    if (ycloudPhoneNumber !== undefined) {
+      const phone = String(ycloudPhoneNumber).replace(/[\s()-]/g, '');
+      if (!/^\+[1-9]\d{7,14}$/.test(phone)) return res.status(400).json({ error: 'Enter the YCloud sender in international format, starting with +.' });
+      data.ycloudPhoneNumber = phone;
+      if (provider === 'ycloud') data.phone = phone.slice(1);
+    }
+    if (ycloudWabaId !== undefined) {
+      if (!/^\d{5,30}$/.test(String(ycloudWabaId))) return res.status(400).json({ error: 'Enter the numeric WABA ID from YCloud.' });
+      data.ycloudWabaId = String(ycloudWabaId);
+    }
     if (templateLanguage !== undefined) data.templateLanguage = String(templateLanguage).trim() || 'en';
     if (defaultCampaignName !== undefined) {
       data.defaultCampaignName = String(defaultCampaignName).trim();

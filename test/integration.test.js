@@ -3412,3 +3412,211 @@ test('legacy service Clerk assignment uses pinned provider keys and never matche
     await db.user.delete({ where: { id: local.id } });
   }
 });
+
+// Real routes and a local provider fixture: never send to a live recipient.
+describe('YCloud WhatsApp provider', () => {
+  let upstream, previousBase, account, prisma, cloud;
+  let calls = [], sendFailure = false, wrongNumber = false;
+  const key = 'ycloud-test-key-not-live';
+  const secret = 'ycloud-test-signing-secret';
+  const waba = '123456789012345';
+  const phone = '+15550109999';
+  const headers = () => ({ ...authHeader(), 'X-Forwarded-For': '192.0.2.211' });
+  const sign = (body, signingSecret = secret) => {
+    const timestamp = Math.floor(Date.now() / 1000);
+    return `t=${timestamp},s=${crypto.createHmac('sha256', signingSecret).update(`${timestamp}.${JSON.stringify(body)}`).digest('hex')}`;
+  };
+  const postEvent = (body, signingSecret = secret) => request('POST', `/webhook/ycloud/${account.id}`, {
+    body, headers: { 'YCloud-Signature': sign(body, signingSecret) },
+  });
+  before(async () => {
+    ({ default: prisma } = await import('../src/utils/prismaClient.js'));
+    ({ default: cloud } = await import('../src/services/whatsappCloudApi.js'));
+    upstream = http.createServer(async (req, res) => {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      const raw = Buffer.concat(chunks).toString();
+      const body = req.headers['content-type']?.includes('application/json') && raw ? JSON.parse(raw) : raw;
+      calls.push({ method: req.method, url: req.url, key: req.headers['x-api-key'], body });
+      res.setHeader('Content-Type', 'application/json');
+      if (req.url.includes('/phoneNumbers/')) {
+        res.end(JSON.stringify({ wabaId: waba, phoneNumber: wrongNumber ? '+15550108888' : phone, verifiedName: 'Fixture Business', qualityRating: 'GREEN' }));
+      } else if (req.url.startsWith('/v2/whatsapp/templates?')) {
+        const page = new URL(req.url, 'http://fixture.test').searchParams.get('page');
+        res.end(JSON.stringify({ items: page === '1' ? Array.from({ length: 100 }, (_, n) => ({
+          wabaId: n === 0 ? '999999999999999' : waba, name: `fixture_${n}`, language: 'en', status: 'APPROVED', category: 'MARKETING', components: [{ type: 'BODY', text: 'Hello {{1}}' }],
+        })) : [{ wabaId: waba, name: 'last_page', language: 'en_US', status: 'APPROVED', components: [] }] }));
+      } else if (req.url.includes('/upload')) res.end(JSON.stringify({ id: 'media-fixture' }));
+      else if (req.url.includes('/download/')) { res.setHeader('Content-Type', 'image/png'); res.end(Buffer.from('fixture-image')); }
+      else if (req.url === '/v2/whatsapp/messages/sendDirectly') {
+        res.end(JSON.stringify(sendFailure ? { id: 'failed-fixture', status: 'failed', errorCode: '131042', errorMessage: 'Payment fixture' } : { id: 'ycloud-message-fixture', wamid: 'wamid.fixture', status: 'sent' }));
+      } else { res.statusCode = 404; res.end('{}'); }
+    });
+    await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
+    previousBase = process.env.YCLOUD_API_BASE;
+    process.env.YCLOUD_API_BASE = `http://127.0.0.1:${upstream.address().port}/v2`;
+    account = await prisma.whatsAppAccount.create({ data: { name: 'YCloud fixture', provider: 'ycloud', enabled: true } });
+  });
+  after(async () => {
+    if (previousBase === undefined) delete process.env.YCLOUD_API_BASE; else process.env.YCLOUD_API_BASE = previousBase;
+    if (upstream) await new Promise(resolve => upstream.close(resolve));
+  });
+
+  test('stores independent encrypted secrets, retains blanks and hides every secret in public routes', async () => {
+    const saved = await request('PATCH', `/api/whatsapp/accounts/${account.id}/cloud-credentials`, { headers: headers(), body: {
+      provider: 'ycloud', ycloudApiKey: key, ycloudWebhookSecret: secret, ycloudWabaId: waba, ycloudPhoneNumber: phone,
+    } });
+    assert.equal(saved.status, 200);
+    assert.equal(saved.body.ycloudConfigured, true);
+    const stored = await prisma.whatsAppAccount.findUnique({ where: { id: account.id } });
+    assert.notEqual(stored.ycloudApiKey, key);
+    assert.notEqual(stored.ycloudWebhookSecret, secret);
+    assert.equal(cloud.decryptToken(stored.ycloudApiKey), key);
+    await request('PATCH', `/api/whatsapp/accounts/${account.id}/cloud-credentials`, { headers: headers(), body: { ycloudApiKey: '', ycloudWebhookSecret: '' } });
+    const retained = await prisma.whatsAppAccount.findUnique({ where: { id: account.id } });
+    assert.equal(retained.ycloudApiKey, stored.ycloudApiKey);
+    for (const response of [saved, await request('GET', '/api/whatsapp/accounts', { headers: headers() }), await request('PUT', `/api/whatsapp/accounts/${account.id}`, { headers: headers(), body: { name: 'YCloud fixture edited' } })]) {
+      const json = JSON.stringify(response.body);
+      for (const sensitive of [key, secret, stored.ycloudApiKey, stored.ycloudWebhookSecret]) assert.equal(json.includes(sensitive), false);
+    }
+  });
+
+  test('connection check reads the exact sender and WABA without sending; templates paginate within that WABA', async () => {
+    calls = [];
+    const result = await cloud.testCredentials(account.id);
+    assert.equal(result.ok, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, 'GET');
+    assert.equal(calls[0].key, key);
+    wrongNumber = true;
+    assert.equal((await cloud.testCredentials(account.id)).reason, 'account_mismatch');
+    wrongNumber = false;
+    const list = await cloud.listApprovedTemplates(account.id);
+    assert.equal(list.ok, true);
+    assert.equal(list.templates.length, 100);
+    assert.equal(list.templates.some(t => t.name === 'fixture_0'), false);
+    assert.equal(list.templates.at(-1).name, 'last_page');
+  });
+
+  test('dispatches text, templates and uploaded media using YCloud IDs and reports provider failures', async () => {
+    calls = [];
+    const text = await cloud.sendTextMessage('15550100001', 'Fixture only', account.id);
+    assert.equal(text.messageId, 'ycloud-message-fixture');
+    assert.equal(calls[0].key, key);
+    assert.equal(calls[0].body.from, phone);
+    assert.equal(calls[0].body.to, '+15550100001');
+    assert.equal(calls[0].body.messaging_product, undefined);
+    const template = await cloud.sendCampaignTemplate({ phone: '15550100001', campaignName: 'fixture_template', templateParams: ['Taylor'], accountId: account.id });
+    assert.equal(template.success, true);
+    assert.equal(calls[1].body.template.components[0].parameters[0].text, 'Taylor');
+    const { sendMediaFile } = await import('../src/services/whatsappMedia.js');
+    const file = path.join(__dirname, '..', 'data', 'ycloud-fixture.txt');
+    fs.writeFileSync(file, 'Fixture only');
+    try {
+      assert.equal((await sendMediaFile({ address: '15550100001', filePath: file, mimeType: 'text/plain', filename: 'fixture.txt', accountId: account.id })).success, true);
+      assert.match(calls[2].url, /media\/\%2B15550109999\/upload/);
+      assert.equal(calls[3].body.document.id, 'media-fixture');
+    } finally { fs.unlinkSync(file); }
+    sendFailure = true;
+    assert.equal((await cloud.sendTextMessage('15550100001', 'Fixture only', account.id)).reason, 'payment_issue');
+    sendFailure = false;
+  });
+
+  test('rejects unsigned and cross-account events; stores one reply with original time and stops automation', async () => {
+    const lead = await prisma.lead.create({ data: { name: 'YCloud fixture recipient', mobile: '15550100002', status: 'contacted', assignedAccount: account.id } });
+    const queued = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Fixture followup', status: 'queued', waAccount: account.id } });
+    const time = new Date(Date.now() - 60_000).toISOString();
+    const body = { type: 'whatsapp.inbound_message.received', whatsappInboundMessage: { id: 'in-yc-1', wamid: 'wamid.in-yc-1', from: '+15550100002', to: phone, wabaId: waba, sendTime: time, type: 'text', text: { body: 'Please stop messaging me' } } };
+    assert.equal((await request('POST', `/webhook/ycloud/${account.id}`, { body })).status, 401);
+    assert.equal((await postEvent(body, 'wrong-secret')).status, 401);
+    const crossAccount = structuredClone(body); crossAccount.whatsappInboundMessage.to = '+15550108888';
+    assert.equal((await postEvent(crossAccount)).status, 422);
+    assert.equal((await postEvent(body)).status, 200);
+    assert.equal((await postEvent(body)).status, 200);
+    const rows = await prisma.message.findMany({ where: { waMessageId: 'wamid.in-yc-1' } });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].sentAt.toISOString(), time);
+    assert.equal(rows[0].providerCreatedAt.toISOString(), time);
+    assert.equal((await prisma.message.findUnique({ where: { id: queued.id } })).status, 'cancelled');
+    const { whatsappSession } = await import('../src/utils/whatsappSession.js');
+    assert.equal(whatsappSession(rows, account.id).isOpen, true);
+  });
+
+  test('reply persistence and stop rules survive oversized media, and replays preserve later scheduled work', async () => {
+    const lead = await prisma.lead.create({ data: { name: 'Attachment fixture', mobile: '15550100004', status: 'contacted', assignedAccount: account.id } });
+    const old = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Old followup', status: 'queued' } });
+    const body = { type: 'whatsapp.inbound_message.received', whatsappInboundMessage: { id: 'yc-large', wamid: 'wamid.yc-large', from: '+15550100004', to: phone, wabaId: waba, sendTime: new Date().toISOString(), type: 'image', image: { id: 'too-large', mime_type: 'image/png', link: `${process.env.YCLOUD_API_BASE}/whatsapp/media/download/too-large?sig=fixture` } } };
+    const previousFetch = global.fetch;
+    let downloads = 0;
+    global.fetch = async () => { downloads++; return new Response('x', { headers: { 'Content-Length': String(33 * 1024 * 1024) } }); };
+    try {
+      assert.equal((await postEvent(body)).status, 200);
+      const inbound = await prisma.message.findFirst({ where: { waMessageId: 'wamid.yc-large' } });
+      assert.ok(inbound);
+      assert.equal(inbound.providerStatusReason, 'media_unavailable');
+      assert.match(inbound.content, /Attachment unavailable/);
+      assert.equal((await prisma.message.findUnique({ where: { id: old.id } })).status, 'cancelled');
+      const later = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'New requested reminder', status: 'queued' } });
+      assert.equal((await postEvent(body)).status, 200);
+      assert.equal((await prisma.message.findUnique({ where: { id: later.id } })).status, 'queued');
+      assert.equal(downloads, 1, 'a permanently oversized attachment is not retried forever');
+      assert.equal(await prisma.message.count({ where: { waMessageId: 'wamid.yc-large' } }), 1);
+    } finally { global.fetch = previousFetch; }
+  });
+
+  test('temporary attachment failures retry media after the reply is durable without cancelling newer work', async () => {
+    const lead = await prisma.lead.create({ data: { name: 'Retry attachment fixture', mobile: '15550100005', status: 'contacted', assignedAccount: account.id } });
+    const old = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Old followup', status: 'queued' } });
+    const body = { type: 'whatsapp.inbound_message.received', whatsappInboundMessage: { id: 'yc-retry-media', wamid: 'wamid.yc-retry-media', from: '+15550100005', to: phone, wabaId: waba, sendTime: new Date().toISOString(), type: 'image', image: { id: 'retry', mime_type: 'image/png', link: `${process.env.YCLOUD_API_BASE}/whatsapp/media/download/retry?sig=fixture` } } };
+    const previousFetch = global.fetch;
+    let downloads = 0;
+    global.fetch = async () => ++downloads === 1 ? new Response('', { status: 503 }) : new Response('fixture-image', { headers: { 'Content-Type': 'image/png' } });
+    try {
+      assert.equal((await postEvent(body)).status, 503);
+      assert.equal((await prisma.message.findUnique({ where: { id: old.id } })).status, 'cancelled');
+      const inbound = await prisma.message.findFirst({ where: { waMessageId: 'wamid.yc-retry-media' } });
+      assert.equal(inbound.providerStatusReason, 'media_pending_retry');
+      const later = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'New reminder', status: 'queued' } });
+      assert.equal((await postEvent(body)).status, 200);
+      const completed = await prisma.message.findUnique({ where: { id: inbound.id } });
+      assert.ok(completed.mediaUrl);
+      assert.equal(completed.providerStatusReason, null);
+      assert.equal((await prisma.message.findUnique({ where: { id: later.id } })).status, 'queued');
+      fs.unlinkSync(path.join(__dirname, '..', completed.mediaUrl));
+    } finally { global.fetch = previousFetch; }
+  });
+
+  test('retains early receipts, deduplicates replays and never downgrades read delivery', async () => {
+    const body = { type: 'whatsapp.message.updated', createTime: new Date().toISOString(), whatsappMessage: { id: 'yc-early', from: phone, wabaId: waba, status: 'read', pricingCategory: 'marketing', totalPrice: 0.01 } };
+    assert.equal((await postEvent(body)).status, 200);
+    assert.equal((await postEvent(body)).status, 200);
+    assert.equal(await prisma.whatsAppReceipt.count({ where: { waMessageId: 'yc-early', accountId: account.id } }), 1);
+    const lead = await prisma.lead.create({ data: { name: 'Receipt fixture', mobile: '15550100003' } });
+    const row = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Fixture', status: 'sending', waAccount: account.id, waMessageId: 'yc-early' } });
+    const { reconcileMetaReceipts } = await import('../src/services/whatsappDelivery.js');
+    await reconcileMetaReceipts('yc-early', account.id);
+    const late = structuredClone(body); late.whatsappMessage.status = 'failed'; late.whatsappMessage.errorCode = '131042';
+    assert.equal((await postEvent(late)).status, 200);
+    const final = await prisma.message.findUnique({ where: { id: row.id } });
+    assert.equal(final.status, 'read');
+    assert.equal(final.ackStatus, 3);
+    assert.equal(final.billable, true);
+  });
+
+  test('downloads signed provider media without credentials and rejects arbitrary URLs', async () => {
+    const { downloadYCloudInboundMedia } = await import('../src/services/whatsappMedia.js');
+    const media = { type: 'image', image: { id: 'fixture-media', mime_type: 'image/png', sha256: crypto.createHash('sha256').update('fixture-image').digest('base64'), link: `${process.env.YCLOUD_API_BASE}/whatsapp/media/download/fixture-media?sig=fixture&payload=fixture` } };
+    const stored = await downloadYCloudInboundMedia(media);
+    assert.equal(calls.at(-1).key, undefined);
+    const target = path.join(__dirname, '..', stored.mediaUrl);
+    assert.equal(fs.readFileSync(target).toString(), 'fixture-image');
+    fs.unlinkSync(target);
+    assert.equal(new URL(calls.at(-1).url, 'http://fixture.test').pathname, '/v2/whatsapp/media/download/fixture-media');
+    media.image.sha256 = 'incorrect-checksum';
+    await assert.rejects(downloadYCloudInboundMedia(media), /checksum/);
+    media.image.link = 'http://127.0.0.1/private';
+    await assert.rejects(downloadYCloudInboundMedia(media), /untrusted/);
+    media.image.link = `${process.env.YCLOUD_API_BASE}/whatsapp/media/download/other-id?sig=fixture`;
+    await assert.rejects(downloadYCloudInboundMedia(media), /untrusted/);
+  });
+});

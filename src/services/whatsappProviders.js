@@ -1,5 +1,5 @@
-/** Meta's official Cloud API is the WhatsApp transport. */
-export const WHATSAPP_PROVIDERS = Object.freeze({ META: 'meta' });
+/** Official WhatsApp APIs, either directly through Meta or through YCloud. */
+export const WHATSAPP_PROVIDERS = Object.freeze({ META: 'meta', YCLOUD: 'ycloud' });
 
 export function providerOf(account) {
   return account?.provider || WHATSAPP_PROVIDERS.META;
@@ -18,7 +18,9 @@ export function metaCredentialPair(account, env = process.env) {
 }
 
 export function credentialState(account, env = process.env) {
-  const ready = Boolean(metaCredentialPair(account, env));
+  const ready = providerOf(account) === WHATSAPP_PROVIDERS.YCLOUD
+    ? Boolean(account?.ycloudApiKey && /^\+[1-9]\d{7,14}$/.test(account?.ycloudPhoneNumber || '') && account?.ycloudWabaId)
+    : Boolean(metaCredentialPair(account, env));
   return { provider: providerOf(account), session: ready, templates: ready, ready };
 }
 
@@ -27,10 +29,20 @@ export function publicCredentialSummary(account) {
   const state = credentialState(account);
   return {
     provider: state.provider,
-    providerLabel: 'Meta WhatsApp Cloud API',
+    providerLabel: state.provider === 'ycloud' ? 'YCloud WhatsApp API' : 'Meta WhatsApp Cloud API',
     sessionReady: state.session,
     templatesReady: state.templates,
-    metaConfigured: state.ready,
+    connectionConfigured: state.ready,
+    metaConfigured: state.provider === 'meta' && state.ready,
+    ycloudConfigured: state.provider === 'ycloud' && state.ready,
+    ycloudWebhookConfigured: Boolean(account?.ycloudWebhookSecret),
+    ycloudPhoneNumber: account?.ycloudPhoneNumber || '',
+    ycloudWabaId: account?.ycloudWabaId || '',
     metaPhoneNumberId: account?.cloudApiPhoneId || '',
   };
+}
+
+export function publicWhatsAppAccount(account) {
+  const { cloudApiToken, ycloudApiKey, ycloudWebhookSecret, ...safe } = account;
+  return { ...safe, ...publicCredentialSummary(account) };
 }

@@ -45,7 +45,11 @@ export const whatsappApi = {
   updateCloudCredentials: (
     id: number,
     data: {
-      provider?: 'meta'
+      provider?: 'meta' | 'ycloud'
+      ycloudApiKey?: string
+      ycloudWebhookSecret?: string
+      ycloudPhoneNumber?: string
+      ycloudWabaId?: string
       metaPhoneNumberId?: string
       metaAccessToken?: string
       metaWabaId?: string
