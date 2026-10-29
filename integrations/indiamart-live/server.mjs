@@ -74,7 +74,8 @@ async function poll() {
   status.running=true;status.error=null;status.lastImported=0;
   try {
     const p=await browserPage();
-    await p.goto(pageUrl,{waitUntil:'domcontentloaded',timeout:45000});
+    const navigation=await p.goto(pageUrl,{waitUntil:'domcontentloaded',timeout:45000});
+    if(navigation?.status()===403)throw new Error('IndiaMART refused access from this host (HTTP 403). Use official access or an authorized browser.');
     if(new URL(p.url()).hostname!=='seller.indiamart.com')throw new Error('Sign in to IndiaMART in the private browser.');
     const sellerId=await p.evaluate(()=>{
       const html=document.documentElement.innerHTML;

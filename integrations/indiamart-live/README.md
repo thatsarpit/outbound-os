@@ -53,3 +53,9 @@ Run `npm test --prefix integrations/indiamart-live` and the root unit and
 integration suites. Test on an owned account before enabling real automation.
 Rollback: disable the intake policy and stop this poller; retain both ledgers.
 Queued customer messages must be paused/reviewed separately in the CRM.
+
+Deployment note: IndiaMART returned HTTP 403 to both the purchase page and the
+ordinary seller/public homepages from the AWS VM on 2026-10-29. The cloud browser
+was stopped and intake remains unconfigured. Do not work around this with copied
+cookies or stealth settings. Use an authorized browser relay or official provider
+access, and verify a baseline before enabling automation.
