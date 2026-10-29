@@ -233,12 +233,17 @@ export interface WhatsAppAccount {
   metaWabaId: string
   metaPhoneNumberId?: string
   metaConfigured?: boolean
+  connectionConfigured?: boolean
+  ycloudConfigured?: boolean
+  ycloudWebhookConfigured?: boolean
+  ycloudPhoneNumber?: string
+  ycloudWabaId?: string
   defaultCampaignName: string
   lastResetAt: string
   createdAt: string
 }
 
-export type WhatsAppProvider = 'meta'
+export type WhatsAppProvider = 'meta' | 'ycloud'
 
 export interface EmailAccount {
   id: number

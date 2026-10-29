@@ -4,7 +4,7 @@ import type { WhatsAppAccount } from '@/api/types'
 import type { CloudFormState } from '@/hooks/use-whatsapp-accounts'
 import { SettingsPanel } from '@/components/settings/settings-panel'
 import { ActionButton } from '@/components/settings/settings-action-button'
-import { SettingsField } from '@/components/settings/settings-fields'
+import { SettingsField, SelectField } from '@/components/settings/settings-fields'
 import { cn } from '@/lib/utils'
 
 function StatusChip({ ok, label, detail }: { ok: boolean; label: string; detail: string }) {
@@ -46,7 +46,7 @@ export function WhatsAppConnectionPanel({
     <SettingsPanel
       icon={Cloud}
       title="WhatsApp connection"
-      description="Connect your number directly to Meta with its phone number ID and access token."
+      description="Choose the API provider that manages this WhatsApp number."
       footer={
         <div className="flex flex-wrap gap-2">
           <ActionButton
@@ -65,6 +65,27 @@ export function WhatsAppConnectionPanel({
     >
       <div className="grid gap-5">
         <div className="grid gap-4">
+          <SelectField label="Provider" value={form.provider}
+            onChange={(value) => setForm({ ...form, provider: value as 'meta' | 'ycloud' })}
+            options={[{ value: 'meta', label: 'Meta Cloud API' }, { value: 'ycloud', label: 'YCloud' }]} />
+          {form.provider === 'ycloud' ? <>
+            <SettingsField label="YCloud sender number" value={form.ycloudPhoneNumber}
+              onChange={(value) => setForm({ ...form, ycloudPhoneNumber: value })} placeholder="+15550000001" />
+            <SettingsField label="YCloud WABA ID" value={form.ycloudWabaId}
+              onChange={(value) => setForm({ ...form, ycloudWabaId: value })} placeholder="From YCloud → WhatsApp accounts" />
+            <SettingsField label="YCloud API key" type="password" value={form.ycloudApiKey}
+              onChange={(value) => setForm({ ...form, ycloudApiKey: value })}
+              placeholder={account.ycloudConfigured ? 'Key saved; leave blank to keep it' : 'From YCloud → Developers → API Key'} />
+            <SettingsField label="YCloud webhook signing secret" type="password" value={form.ycloudWebhookSecret}
+              onChange={(value) => setForm({ ...form, ycloudWebhookSecret: value })}
+              placeholder={account.ycloudWebhookConfigured ? 'Secret saved; leave blank to keep it' : 'From the YCloud webhook endpoint'} />
+            <div className="rounded-md border border-border p-3 text-xs leading-5 text-text-secondary">
+              In YCloud → Developers → Webhooks, add your public API address followed by{' '}
+              <code>/webhook/ycloud/{account.id}</code>. Subscribe to{' '}
+              <code>whatsapp.inbound_message.received</code> and <code>whatsapp.message.updated</code>.
+              Save its signing secret here to receive replies and delivery updates.
+            </div>
+          </> : <>
           <SettingsField
             label="Phone number ID"
             value={form.metaPhoneNumberId}
@@ -82,6 +103,7 @@ export function WhatsAppConnectionPanel({
                 : 'A permanent System User token with whatsapp_business_messaging'
             }
           />
+          </>}
           <SettingsField
             label="First-contact template"
             value={form.defaultCampaignName}
@@ -89,12 +111,14 @@ export function WhatsAppConnectionPanel({
             placeholder="Name of an approved template, e.g. new_enquiry"
           />
           <div className="grid gap-4 sm:grid-cols-2">
+            {form.provider === 'meta' &&
             <SettingsField
               label="WhatsApp Business Account ID (optional)"
               value={form.metaWabaId}
               onChange={(v) => setForm({ ...form, metaWabaId: v })}
               placeholder="Used to list approved templates"
             />
+            }
             <SettingsField
               label="Template language"
               value={form.templateLanguage}
@@ -103,15 +127,15 @@ export function WhatsAppConnectionPanel({
             />
           </div>
           <StatusChip
-            ok={Boolean(account.metaConfigured)}
+            ok={Boolean(account.connectionConfigured)}
             label="Sending"
             detail={
-              account.metaConfigured
+              account.connectionConfigured
                 ? 'credentials saved — use Test connection to confirm'
-                : 'needs phone number ID and token'
+                : 'needs provider credentials'
             }
           />
-          <div className="rounded-md border border-border bg-surface-raised/50 p-3 text-xs leading-5 text-text-secondary">
+          {form.provider === 'meta' && <div className="rounded-md border border-border bg-surface-raised/50 p-3 text-xs leading-5 text-text-secondary">
             <p className="font-medium text-text-primary">To receive replies</p>
             <p className="mt-1">
               In your Meta app open WhatsApp → Configuration → Webhook. Use callback URL{' '}
@@ -133,7 +157,7 @@ export function WhatsAppConnectionPanel({
             >
               Meta&rsquo;s setup guide <ExternalLink className="h-3 w-3" />
             </a>
-          </div>
+          </div>}
         </div>
       </div>
     </SettingsPanel>

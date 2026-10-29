@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import { toast } from '@/stores/toast-store'
@@ -10,6 +10,11 @@ import {
 } from '@/components/settings/settings-format'
 
 export type CloudFormState = {
+  provider: 'meta' | 'ycloud'
+  ycloudApiKey: string
+  ycloudWebhookSecret: string
+  ycloudPhoneNumber: string
+  ycloudWabaId: string
   metaPhoneNumberId: string
   metaAccessToken: string
   metaWabaId: string
@@ -18,6 +23,11 @@ export type CloudFormState = {
 }
 
 const EMPTY_CLOUD_FORM: CloudFormState = {
+  provider: 'meta',
+  ycloudApiKey: '',
+  ycloudWebhookSecret: '',
+  ycloudPhoneNumber: '',
+  ycloudWabaId: '',
   metaPhoneNumberId: '',
   metaAccessToken: '',
   metaWabaId: '',
@@ -49,6 +59,7 @@ export function useWhatsAppAccounts(timezoneOffset: number) {
 
   const [accountForm, setAccountForm] = useState<AccountFormState | null>(null)
   const [cloudForm, setCloudForm] = useState<CloudFormState>(EMPTY_CLOUD_FORM)
+  const initializedAccount = useRef<number | null>(null)
 
   useEffect(() => {
     if (!selectedAccountId && accounts.length > 0) {
@@ -57,10 +68,14 @@ export function useWhatsAppAccounts(timezoneOffset: number) {
   }, [accounts, selectedAccountId])
 
   useEffect(() => {
-    if (selectedAccount) {
+    if (selectedAccount && initializedAccount.current !== selectedAccount.id) {
+      initializedAccount.current = selectedAccount.id
       setAccountForm(toAccountForm(selectedAccount))
       setCloudForm({
         ...EMPTY_CLOUD_FORM,
+        provider: selectedAccount.provider || 'meta',
+        ycloudPhoneNumber: selectedAccount.ycloudPhoneNumber || '',
+        ycloudWabaId: selectedAccount.ycloudWabaId || '',
         metaPhoneNumberId: selectedAccount.metaPhoneNumberId || '',
         metaWabaId: selectedAccount.metaWabaId || '',
         templateLanguage: selectedAccount.templateLanguage || 'en',
@@ -90,14 +105,20 @@ export function useWhatsAppAccounts(timezoneOffset: number) {
       // Secrets are only sent when typed, so saving other fields never
       // requires pasting a token again.
       const payload: Record<string, string> = {
-        provider: 'meta',
-        metaPhoneNumberId: cloudForm.metaPhoneNumberId.trim(),
-        metaWabaId: cloudForm.metaWabaId.trim(),
+        provider: cloudForm.provider,
         templateLanguage: cloudForm.templateLanguage.trim() || 'en',
         defaultCampaignName: cloudForm.defaultCampaignName.trim(),
       }
-      if (cloudForm.metaAccessToken.trim())
-        payload.metaAccessToken = cloudForm.metaAccessToken.trim()
+      if (cloudForm.provider === 'ycloud') {
+        payload.ycloudPhoneNumber = cloudForm.ycloudPhoneNumber.trim()
+        payload.ycloudWabaId = cloudForm.ycloudWabaId.trim()
+        if (cloudForm.ycloudApiKey.trim()) payload.ycloudApiKey = cloudForm.ycloudApiKey.trim()
+        if (cloudForm.ycloudWebhookSecret.trim()) payload.ycloudWebhookSecret = cloudForm.ycloudWebhookSecret.trim()
+      } else {
+        payload.metaPhoneNumberId = cloudForm.metaPhoneNumberId.trim()
+        payload.metaWabaId = cloudForm.metaWabaId.trim()
+        if (cloudForm.metaAccessToken.trim()) payload.metaAccessToken = cloudForm.metaAccessToken.trim()
+      }
       return api.patch(`/whatsapp/accounts/${selectedAccount.id}/cloud-credentials`, payload)
     },
     onSuccess: () => {
@@ -105,6 +126,8 @@ export function useWhatsAppAccounts(timezoneOffset: number) {
       setCloudForm((prev) => ({
         ...prev,
         metaAccessToken: '',
+        ycloudApiKey: '',
+        ycloudWebhookSecret: '',
       }))
       toast.success('WhatsApp connection saved')
     },

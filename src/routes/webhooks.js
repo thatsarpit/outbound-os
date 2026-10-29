@@ -8,8 +8,10 @@ import brevoMarketingCampaigns from '../services/brevoMarketingCampaigns.js';
 import imessageService from '../services/imessage.js';
 import { downloadInboundMedia, metaInboundMedia } from '../services/whatsappMedia.js';
 import { metaInboundText } from '../utils/metaWebhook.js';
+import ycloudRoutes from './ycloud.js';
 
 const router = Router();
+router.use(ycloudRoutes);
 
 function parsePositiveInt(value) {
   const parsed = Number.parseInt(String(value), 10);

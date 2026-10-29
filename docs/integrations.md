@@ -24,3 +24,35 @@ For every outbound channel:
 Add owned-recipient tests and webhook replay tests before enabling a channel in
 production. Secrets belong in the environment or encrypted integration rows,
 never source control.
+
+## YCloud WhatsApp
+
+YCloud is an alternative official WhatsApp API provider. In WhatsApp settings,
+select YCloud on the existing sending account to retain its conversation history.
+Use the sender's international number (including `+`), its YCloud WABA ID and a
+YCloud API key. Direct Meta credentials are retained for rollback but are never
+used by the YCloud transport. The connection check only reads the selected phone
+number; it does not send a test message or prove that a message was delivered.
+
+Register `https://<public-api-host>/webhook/ycloud/<account-id>` in YCloud with
+`whatsapp.inbound_message.received` and `whatsapp.message.updated`, then save
+that endpoint's signing secret in the account settings. The API verifies the
+`YCloud-Signature` HMAC over the original request bytes and rejects missing,
+invalid or stale signatures. Keep the endpoint and API key secrets out of Git.
+
+Outbound rows retain YCloud's synchronous message ID for receipt reconciliation.
+Inbound rows retain the WhatsApp message ID where available, so migration from
+Meta does not duplicate the same inbound event. Original inbound timestamps set
+the customer service window; replays do not reopen it. Replies cancel pending
+outreach. Media downloads accept only YCloud's signed media download endpoint,
+without forwarding the API key. Estimated prices on sent messages do not count
+as confirmed free delivery.
+
+Before cutover, check for pending messages and running campaigns. After saving,
+check the connection, list approved templates and exchange an owned-recipient
+test with a reviewed spending limit. Confirm the incoming reply and delivery
+receipt in Outbound OS before starting a campaign. For rollback, select Meta
+again; the existing account ID, encrypted Meta credentials and history remain.
+
+References: [YCloud API](https://nndocs.ycloud.com/reference/whatsapp_message-send-directly),
+[webhooks](https://nndocs.ycloud.com/reference/webhook-integration-guide).

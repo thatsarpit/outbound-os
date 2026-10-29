@@ -51,7 +51,7 @@ export default function WhatsAppSettingsPage() {
 
   const totalAccounts = accounts.length
   const enabledAccounts = accounts.filter((a) => a.enabled).length
-  const cloudAccounts = accounts.filter((a) => a.metaConfigured).length
+  const cloudAccounts = accounts.filter((a) => a.connectionConfigured).length
 
   return (
     <div className="space-y-6">

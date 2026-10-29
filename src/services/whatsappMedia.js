@@ -19,7 +19,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import { fileURLToPath } from 'url';
 import logger from '../utils/logger.js';
-import whatsappCloudApi from './whatsappCloudApi.js';
+import whatsappCloudApi, { ycloudBase } from './whatsappCloudApi.js';
 import { WHATSAPP_PROVIDERS } from './whatsappProviders.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -176,18 +176,24 @@ export async function downloadInboundMedia(media, accountId) {
  * @param {number|null} args.accountId
  */
 export async function sendMediaFile({ address, filePath, mimeType, filename, caption, accountId }) {
-  const transport = await metaTransport(accountId);
+  const transport = await whatsappCloudApi.getTransport(accountId);
   const mime = baseMime(mimeType);
   const buffer = await fs.promises.readFile(filePath);
 
   const form = new FormData();
-  form.append('messaging_product', 'whatsapp');
-  form.append('type', mime);
+  if (transport.provider === 'meta') {
+    form.append('messaging_product', 'whatsapp');
+    form.append('type', mime);
+  }
   form.append('file', new Blob([buffer], { type: mime }), filename);
 
-  const uploadRes = await fetchWithTimeout(`${graphBase()}/${transport.phoneNumberId}/media`, {
+  const uploadUrl = transport.provider === 'ycloud'
+    ? `${ycloudBase()}/whatsapp/media/${encodeURIComponent(transport.phoneNumber)}/upload`
+    : `${graphBase()}/${transport.phoneNumberId}/media`;
+  const uploadRes = await fetchWithTimeout(uploadUrl, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${transport.token}` },
+    headers: transport.headers,
+    redirect: 'error',
     body: form,
   });
   const uploaded = await uploadRes.json().catch(() => ({}));
@@ -206,6 +212,37 @@ export async function sendMediaFile({ address, filePath, mimeType, filename, cap
     logger.warn(`WhatsApp media send failed: ${result.reason} ${result.rawError || ''}`);
   }
   return { ...result, kind };
+}
+
+/** YCloud supplies a signed media URL; never follow arbitrary webhook URLs. */
+export async function downloadYCloudInboundMedia(message) {
+  const media = metaInboundMedia(message);
+  if (!media) return null;
+  const link = message[message.type]?.link;
+  const base = new URL(ycloudBase());
+  const url = new URL(link);
+  if (url.origin !== base.origin || url.username || url.password
+    || !url.pathname.startsWith(`${base.pathname}/whatsapp/media/download/`)) {
+    throw new Error('YCloud supplied an untrusted media URL.');
+  }
+  const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+  if (!response.ok) throw new Error(`YCloud media download failed (HTTP ${response.status}).`);
+  if (Number(response.headers.get('content-length')) > MAX_MEDIA_BYTES) throw new Error('YCloud media exceeds the file limit.');
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of response.body) {
+    size += chunk.length;
+    if (size > MAX_MEDIA_BYTES) throw new Error('YCloud media exceeds the file limit.');
+    chunks.push(Buffer.from(chunk));
+  }
+  const mime = baseMime(media.mimeType || response.headers.get('content-type'));
+  const ext = EXTENSIONS[mime] || '';
+  const name = `${randomUUID()}${ext}`;
+  fs.mkdirSync(MEDIA_DIR, { recursive: true });
+  await fs.promises.writeFile(path.join(MEDIA_DIR, name), Buffer.concat(chunks));
+  const kind = media.type === 'sticker' ? 'image' : mediaKind(mime);
+  return { mediaUrl: `data/media/${name}`, mediaType: kind,
+    mediaFilename: safeName(media.filename || `${kind}${ext}`, ext), size };
 }
 
 export default { metaInboundMedia, downloadInboundMedia, sendMediaFile, mediaKind, baseMime };
