@@ -66,3 +66,20 @@ test('the Chrome relay remains off until its own UI confirms the inspected selle
   assert.equal((await call({type:'START',sellerId:'99999',confirm:true})).ok,false,'pinned account cannot be replaced through start');
  }finally{globalThis.chrome=previousChrome;globalThis.fetch=previousFetch;}
 });
+
+
+test('the page bridge reads only the pinned purchased-list account and returns explicit mapping failures',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const {runInNewContext}=await import('node:vm');
+ const records=readFileSync(new URL('../indiamart-live/records.mjs',import.meta.url),'utf8').replace(/^export /gm,'');
+ const entry=readFileSync(new URL('./content-entry.js',import.meta.url),'utf8');
+ let listener, requests=0;
+ const context={chrome:{runtime:{id:'fixture',onMessage:{addListener:fn=>{listener=fn;}}}},document:{cookie:'other=1; glid=12345',documentElement:{innerHTML:''}},location:{origin:'https://seller.indiamart.com',pathname:'/blproduct/mypurchasedbl'},AbortSignal,
+  fetch:async(_url,args)=>{requests++;assert.equal(JSON.parse(args.body).glusrid,'12345');return Response.json({RESPONSE:{DATA:{Listing:[{RN:'1',ETO_LEAD_PUR_ID:'99',PURCHASED_DATE:'20261029090000',BUYER_NAME:'Fixture buyer',GLUSR_USR_EMAIL:'buyer@example.test'}]}}});}};
+ runInNewContext(`(()=>{${records}\n${entry}})();`,context);
+ const call=message=>new Promise(resolve=>listener(message,{id:'fixture'},resolve));
+ assert.equal((await call({type:'IM_RELAY_INSPECT'})).sellerId,'12345');assert.equal(requests,0);
+ assert.equal((await call({type:'IM_RELAY_COLLECT',sellerId:'wrong',baseline:true})).ok,false);assert.equal(requests,0);
+ const result=await call({type:'IM_RELAY_COLLECT',sellerId:'12345',baseline:true,knownIds:[]});
+ assert.equal(result.ok,true);assert.equal(result.records[0].externalId,'99');assert.equal(requests,1);
+});

@@ -20,7 +20,8 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
       const data=await response.json();return data?.RESPONSE?.DATA?.Listing;
     },id=>known.has(id),message.baseline===true);
     return {sellerId,records};
-  })().then(value=>reply({ok:true,...value}),()=>reply({ok:false,error:'IndiaMART could not be read. Open the purchased page, check login/account and retry. The cursor is unchanged.'}));
+  })().then(value=>reply({ok:true,...value}),error=>reply({ok:false,error:/^(Purchase |Stable purchase|More than 420|Seller account|IndiaMART|Open the)/.test(error.message)
+    ? error.message.slice(0,180) : 'IndiaMART could not be read. Open the purchased page, check login/account and retry. The cursor is unchanged.'}));
   return true;
 });
 
