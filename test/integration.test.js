@@ -3542,6 +3542,50 @@ describe('YCloud WhatsApp provider', () => {
     assert.equal(whatsappSession(rows, account.id).isOpen, true);
   });
 
+  test('reply persistence and stop rules survive oversized media, and replays preserve later scheduled work', async () => {
+    const lead = await prisma.lead.create({ data: { name: 'Attachment fixture', mobile: '15550100004', status: 'contacted', assignedAccount: account.id } });
+    const old = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Old followup', status: 'queued' } });
+    const body = { type: 'whatsapp.inbound_message.received', whatsappInboundMessage: { id: 'yc-large', wamid: 'wamid.yc-large', from: '+15550100004', to: phone, wabaId: waba, sendTime: new Date().toISOString(), type: 'image', image: { id: 'too-large', mime_type: 'image/png', link: `${process.env.YCLOUD_API_BASE}/whatsapp/media/download/too-large?sig=fixture` } } };
+    const previousFetch = global.fetch;
+    let downloads = 0;
+    global.fetch = async () => { downloads++; return new Response('x', { headers: { 'Content-Length': String(33 * 1024 * 1024) } }); };
+    try {
+      assert.equal((await postEvent(body)).status, 200);
+      const inbound = await prisma.message.findFirst({ where: { waMessageId: 'wamid.yc-large' } });
+      assert.ok(inbound);
+      assert.equal(inbound.providerStatusReason, 'media_unavailable');
+      assert.match(inbound.content, /Attachment unavailable/);
+      assert.equal((await prisma.message.findUnique({ where: { id: old.id } })).status, 'cancelled');
+      const later = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'New requested reminder', status: 'queued' } });
+      assert.equal((await postEvent(body)).status, 200);
+      assert.equal((await prisma.message.findUnique({ where: { id: later.id } })).status, 'queued');
+      assert.equal(downloads, 1, 'a permanently oversized attachment is not retried forever');
+      assert.equal(await prisma.message.count({ where: { waMessageId: 'wamid.yc-large' } }), 1);
+    } finally { global.fetch = previousFetch; }
+  });
+
+  test('temporary attachment failures retry media after the reply is durable without cancelling newer work', async () => {
+    const lead = await prisma.lead.create({ data: { name: 'Retry attachment fixture', mobile: '15550100005', status: 'contacted', assignedAccount: account.id } });
+    const old = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Old followup', status: 'queued' } });
+    const body = { type: 'whatsapp.inbound_message.received', whatsappInboundMessage: { id: 'yc-retry-media', wamid: 'wamid.yc-retry-media', from: '+15550100005', to: phone, wabaId: waba, sendTime: new Date().toISOString(), type: 'image', image: { id: 'retry', mime_type: 'image/png', link: `${process.env.YCLOUD_API_BASE}/whatsapp/media/download/retry?sig=fixture` } } };
+    const previousFetch = global.fetch;
+    let downloads = 0;
+    global.fetch = async () => ++downloads === 1 ? new Response('', { status: 503 }) : new Response('fixture-image', { headers: { 'Content-Type': 'image/png' } });
+    try {
+      assert.equal((await postEvent(body)).status, 503);
+      assert.equal((await prisma.message.findUnique({ where: { id: old.id } })).status, 'cancelled');
+      const inbound = await prisma.message.findFirst({ where: { waMessageId: 'wamid.yc-retry-media' } });
+      assert.equal(inbound.providerStatusReason, 'media_pending_retry');
+      const later = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'New reminder', status: 'queued' } });
+      assert.equal((await postEvent(body)).status, 200);
+      const completed = await prisma.message.findUnique({ where: { id: inbound.id } });
+      assert.ok(completed.mediaUrl);
+      assert.equal(completed.providerStatusReason, null);
+      assert.equal((await prisma.message.findUnique({ where: { id: later.id } })).status, 'queued');
+      fs.unlinkSync(path.join(__dirname, '..', completed.mediaUrl));
+    } finally { global.fetch = previousFetch; }
+  });
+
   test('retains early receipts, deduplicates replays and never downgrades read delivery', async () => {
     const body = { type: 'whatsapp.message.updated', createTime: new Date().toISOString(), whatsappMessage: { id: 'yc-early', from: phone, wabaId: waba, status: 'read', pricingCategory: 'marketing', totalPrice: 0.01 } };
     assert.equal((await postEvent(body)).status, 200);

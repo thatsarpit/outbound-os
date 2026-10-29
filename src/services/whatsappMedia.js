@@ -215,6 +215,7 @@ export async function sendMediaFile({ address, filePath, mimeType, filename, cap
 }
 
 /** YCloud supplies a signed media URL; never follow arbitrary webhook URLs. */
+const ycloudMediaError = (code, message) => Object.assign(new Error(message), { code });
 export async function downloadYCloudInboundMedia(message, accountId = null) {
   const media = metaInboundMedia(message);
   if (!media) return null;
@@ -222,11 +223,12 @@ export async function downloadYCloudInboundMedia(message, accountId = null) {
   // Construct the request from server configuration and one encoded media ID.
   // No part of the webhook's URL can choose a host, port or request path.
   const download = new URL(`${ycloudBase()}/whatsapp/media/download/${encodeURIComponent(media.id)}`);
-  const url = new URL(link);
+  let url;
+  try { url = new URL(link); } catch { throw ycloudMediaError('untrusted_media_url', 'YCloud supplied an untrusted media URL.'); }
   if (!/^[A-Za-z0-9_-]{1,200}$/.test(media.id)
     || url.origin !== download.origin || url.username || url.password || url.hash
     || url.pathname !== download.pathname || !url.searchParams.get('sig')) {
-    throw new Error('YCloud supplied an untrusted media URL.');
+    throw ycloudMediaError('untrusted_media_url', 'YCloud supplied an untrusted media URL.');
   }
   for (const field of ['sig', 'payload']) {
     if (url.searchParams.has(field)) download.searchParams.set(field, url.searchParams.get(field));
@@ -234,21 +236,24 @@ export async function downloadYCloudInboundMedia(message, accountId = null) {
   const headers = accountId ? (await whatsappCloudApi.getTransport(accountId)).headers : {};
   const response = await fetch(download, { headers, redirect: 'error', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`YCloud media download failed (HTTP ${response.status}).`);
-  if (Number(response.headers.get('content-length')) > MAX_MEDIA_BYTES) throw new Error('YCloud media exceeds the file limit.');
+  if (Number(response.headers.get('content-length')) > MAX_MEDIA_BYTES) {
+    if (response.body) await response.body.cancel().catch(() => {});
+    throw ycloudMediaError('media_too_large', 'YCloud media exceeds the file limit.');
+  }
   const chunks = [];
   let size = 0;
   for await (const chunk of response.body) {
     size += chunk.length;
-    if (size > MAX_MEDIA_BYTES) throw new Error('YCloud media exceeds the file limit.');
+    if (size > MAX_MEDIA_BYTES) throw ycloudMediaError('media_too_large', 'YCloud media exceeds the file limit.');
     chunks.push(Buffer.from(chunk));
   }
   const buffer = Buffer.concat(chunks);
   const digest = message[message.type]?.sha256;
   if (digest && createHash('sha256').update(buffer).digest('base64') !== digest) {
-    throw new Error('YCloud media checksum did not match the signed webhook.');
+    throw ycloudMediaError('media_checksum_mismatch', 'YCloud media checksum did not match the signed webhook.');
   }
   const mime = baseMime(media.mimeType === 'application/octet-stream' ? response.headers.get('content-type') : media.mimeType);
-  if (!Object.hasOwn(EXTENSIONS, mime)) throw new Error('Unsupported YCloud media content type.');
+  if (!Object.hasOwn(EXTENSIONS, mime)) throw ycloudMediaError('unsupported_media_type', 'Unsupported YCloud media content type.');
   const ext = EXTENSIONS[mime];
   const name = `${randomUUID()}${ext}`;
   fs.mkdirSync(MEDIA_DIR, { recursive: true });

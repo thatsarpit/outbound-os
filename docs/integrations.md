@@ -44,8 +44,16 @@ Outbound rows retain YCloud's synchronous message ID for receipt reconciliation.
 Inbound rows retain the WhatsApp message ID where available, so migration from
 Meta does not duplicate the same inbound event. Original inbound timestamps set
 the customer service window; replays do not reopen it. Replies cancel pending
-outreach. Media downloads accept only YCloud's signed media download endpoint,
-without forwarding the API key. Estimated prices on sent messages do not count
+outreach before any attachment download. Permanently unavailable attachments
+retain a visible placeholder; transient failures retry the file independently
+of the already stored reply. Replay recovery only cancels work that preceded
+the original inbound row, preserving later manual or out-of-office follow-ups.
+Media requests use the configured YCloud API origin, one encoded media ID and
+only the signed query fields. Redirects are rejected. Downloads are intentionally
+untrusted attachments: size/checksum checks, generated filenames, allowlisted
+extensions and mode-0600 files keep them private and separate from application
+code. An API key is sent only to that configured provider origin, permitting
+recovery after the short signed-link lifetime. Estimated sent prices do not count
 as confirmed free delivery.
 
 Before cutover, check for pending messages and running campaigns. After saving,
