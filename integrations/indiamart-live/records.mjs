@@ -40,8 +40,7 @@ export async function collectNew(fetchPage, known, baseline, maxPages = 20) {
     const start = page * 21 + 1;
     const rows = await fetchPage(start);
     if (!Array.isArray(rows) || !rows.length || String(rows[0].RN) !== String(start)) {
-      if (page === 0) throw new Error('Purchase page unavailable; sign-in or page format may have changed.');
-      return [...unique.values()];
+      throw new Error('Purchase page unavailable or misaligned; keep the ledger unchanged and retry.');
     }
     let anchor = false;
     for (const row of rows) {

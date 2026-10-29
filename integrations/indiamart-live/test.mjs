@@ -16,5 +16,8 @@ test('baseline reads one page without a historical crawl; known IDs survive chan
 });
 test('page failures and bounded gaps do not return a partial batch to advance the ledger',async()=>{
  await assert.rejects(collectNew(async()=>undefined,()=>false,false),/unavailable/);
+ for(const later of [undefined,[],[row(1,1)]]) {
+  await assert.rejects(collectNew(async start=>start===1?Array.from({length:21},(_,i)=>row(i+1,i+1)):later,()=>false,false),/ledger unchanged/);
+ }
  await assert.rejects(collectNew(async start=>Array.from({length:21},(_,i)=>row(start+i,start+i)),()=>false,false),/420/);
 });
