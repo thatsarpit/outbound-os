@@ -3076,6 +3076,18 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
     const detail = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
     assert.ok(detail.body.messages.some(row => row.id === sent.body.message.id && row.status === 'failed'));
     assert.equal(detail.body.replyNeeded, true, 'failed attempts never clear the unanswered human reply');
+    manager.sendMessage = async () => ({ success: false, reason: 'send_failed', error: 'Provider rejected the fixture request', errorCode: 'PARAM_INVALID', requestId: 'req_fixture_manual', waMessageId: 'ycloud.failed-fixture' });
+    const rejected = await send({ text: 'A provider-rejected reply', clientMessageId: 'fixture-rejected-0001' });
+    assert.equal(rejected.status, 409);
+    assert.match(rejected.body.error, /Provider rejected the fixture request/);
+    const rejectedRow = await prisma.message.findFirst({ where: { idempotencyKey: `manual-wa:${lead.id}:fixture-rejected-0001` } });
+    assert.equal(rejectedRow.status, 'failed');
+    assert.equal(rejectedRow.providerErrorMessage, 'Provider rejected the fixture request');
+    assert.equal(rejectedRow.providerErrorCode, 'PARAM_INVALID');
+    assert.equal(rejectedRow.providerRequestId, 'req_fixture_manual');
+    assert.equal(rejectedRow.waMessageId, 'ycloud.failed-fixture');
+    const rejectedDetail = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+    assert.equal(rejectedDetail.body.messages.find(row => row.id === rejectedRow.id).providerErrorCode, 'PARAM_INVALID');
     manager.sendMessage = async () => ({ success: false, reason: 'timeout' });
     const unknown = await send({ text: 'Uncertain send', clientMessageId: 'fixture-uncertain-0001' });
     assert.equal(unknown.status, 409);
@@ -3088,6 +3100,7 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
     const parallel = await Promise.all([sendManualWhatsApp(parallelBody, dependencies), sendManualWhatsApp(parallelBody, dependencies)]);
     assert.equal(concurrentSends, 1);
     assert.equal(parallel[0].message.id, parallel[1].message.id);
+    const retainedFollowup = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Fixture pending followup', status: 'queued', waAccount: account.id } });
     const finalFailure = await sendManualWhatsApp({ leadId: lead.id, text: 'Receipt arrived first', clientMessageId: 'fixture-receipt-first1' }, { manager: { sendMessage: async () => {
       await recordMetaReceipt({ accountId: account.id, waMessageId: 'wamid.MANUAL-EARLY-FAILURE', status: 'failed', failureCode: 131047 });
       return { success: true, waMessageId: 'wamid.MANUAL-EARLY-FAILURE' };
@@ -3095,6 +3108,7 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
     assert.equal(finalFailure.success, false, 'an early failure must not produce a success response');
     assert.equal(finalFailure.message.status, 'failed');
     assert.equal(finalFailure.reason, 're_engagement_required');
+    assert.equal((await prisma.message.findUnique({ where: { id: retainedFollowup.id } })).status, 'queued', 'a rejected manual attempt must not cancel unrelated pending work');
     for (const route of [`/api/leads/${lead.id}/send-cloud-text`, `/api/leads/${lead.id}/send`]) {
       const response = await request('POST', route, { headers, body: { text: 'Legacy route', message: 'Legacy route', accountId: 999999 } });
       assert.equal(response.status, 503, 'an unavailable explicit sender cannot silently switch numbers');
@@ -3518,7 +3532,11 @@ describe('YCloud WhatsApp provider', () => {
       assert.equal(calls[3].body.document.id, 'media-fixture');
     } finally { fs.unlinkSync(file); }
     sendFailure = true;
-    assert.equal((await cloud.sendTextMessage('15550100001', 'Fixture only', account.id)).reason, 'payment_issue');
+    const failure = await cloud.sendTextMessage('15550100001', 'Fixture only', account.id);
+    assert.equal(failure.reason, 'payment_issue');
+    assert.equal(failure.messageId, 'failed-fixture');
+    assert.equal(failure.errorCode, '131042');
+    assert.equal(failure.rawError, 'Payment fixture');
     sendFailure = false;
   });
 

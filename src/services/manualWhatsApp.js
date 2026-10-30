@@ -231,6 +231,9 @@ export async function sendManualWhatsApp(
     where: { id: message.id },
     data: {
       waMessageId: result.waMessageId || result.messageId || null,
+      providerErrorCode: result.success ? null : result.errorCode || null,
+      providerErrorMessage: result.success ? null : String(result.rawError || result.error || '').slice(0, 500) || null,
+      providerRequestId: result.success ? null : result.requestId || null,
       status: result.success ? 'sent' : uncertain ? 'unconfirmed' : 'failed',
       sentAt: result.success ? new Date() : null,
       providerStatusReason: result.success
@@ -238,8 +241,9 @@ export async function sendManualWhatsApp(
         : result.reason || 'send_failed',
     },
   });
-  if (result.success) {
-    await reconcileMetaReceipts(saved.waMessageId, accountId);
+  if (saved.waMessageId) await reconcileMetaReceipts(saved.waMessageId, accountId);
+  const confirmed = await prisma.message.findUnique({ where: { id: saved.id } });
+  if (['sent', 'delivered', 'read'].includes(confirmed.status)) {
     await prisma.message.updateMany({
       where: { leadId, direction: 'outbound', status: 'queued' },
       data: { status: 'cancelled' },

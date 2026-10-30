@@ -568,6 +568,9 @@ export interface InboxMessage {
   status: InboxMessageStatus
   providerDeliveryStatus?: string | null
   providerDeliveryAt?: string | null
+  providerErrorCode?: string | null
+  providerErrorMessage?: string | null
+  providerRequestId?: string | null
   providerStatusReason?: string | null
   emailInboundKind?: 'human' | 'delivery_report' | 'automatic_reply' | 'pending' | null
   pricingCategory?: string | null

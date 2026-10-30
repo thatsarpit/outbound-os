@@ -102,6 +102,11 @@ export function MessageBubble({
               : message.status === 'unconfirmed' || message.status === 'sending'
                 ? 'Delivery is unconfirmed. Check this attempt before sending again; it may already have reached Meta.'
                 : `Not delivered${reason ? `: ${reason.replace(/_/g, ' ')}` : '. The provider did not supply a stored reason.'}`}
+            {failed && message.providerErrorMessage && (
+              <span className="mt-1 block">
+                {message.providerErrorMessage}{message.providerErrorCode ? ` (code ${message.providerErrorCode})` : ''}
+              </span>
+            )}
           </p>
         )}
         {showPricing && (
