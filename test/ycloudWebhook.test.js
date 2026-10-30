@@ -44,3 +44,14 @@ test('YCloud estimated zero prices are not reported as final free delivery', () 
   assert.equal(ycloudPricing({ status: 'read', totalPrice: 0.02 }).billable, true);
   assert.equal(ycloudPricing({ status: 'read', totalPrice: '0' }).billable, undefined);
 });
+
+
+test('provider error facts preserve Meta/YCloud diagnostics and redact the API key', async () => {
+  const { whatsappProviderError } = await import('../src/utils/whatsappProviderError.js');
+  const result = whatsappProviderError({ error: { code: 'BAD_REQUEST', message: 'Wrapper', requestId: 'req_fixture', whatsappApiError: { code: '131047', error_data: { details: 'Session expired secret-fixture-key' } } } }, 400, 'secret-fixture-key');
+  assert.deepEqual(result, { rawError: 'Session expired [redacted]', errorCode: '131047', requestId: 'req_fixture' });
+  assert.equal(whatsappProviderError({ status: 'failed', errorCode: 'PARAM_INVALID', errorMessage: 'Invalid destination' }, 200).errorCode, 'PARAM_INVALID');
+  assert.equal(whatsappProviderError({ whatsappApiError: { code: 100, message: 'Bad input' } }, 400).rawError, 'Bad input');
+  assert.equal(whatsappProviderError({}, 503).rawError, 'HTTP 503');
+  assert.equal(whatsappProviderError({ error: { code: 100, message: 'Invalid parameter', fbtrace_id: 'trace_fixture' } }, 400).requestId, 'trace_fixture');
+});

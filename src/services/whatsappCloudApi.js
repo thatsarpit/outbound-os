@@ -13,6 +13,7 @@ import { createDecipheriv, createCipheriv, randomBytes, createHash } from 'crypt
 
 import { credentialState, metaCredentialPair, providerOf } from './whatsappProviders.js';
 import { ycloudSendPayload } from '../utils/ycloudWebhook.js';
+import { whatsappProviderError } from '../utils/whatsappProviderError.js';
 
 // Read per call so tests (and self-hosters pinning an API version) can set it
 // after this module has loaded.
@@ -237,11 +238,11 @@ class WhatsAppCloudApiService {
       try { data = text ? JSON.parse(text) : {}; } catch { /* non-JSON error body */ }
 
       if (!res.ok || (provider === 'ycloud' && data.status === 'failed')) {
-        const errMsg = data?.error?.whatsappApiError?.error_data?.details || data?.error?.message || data?.errorMessage || data?.message || `HTTP ${res.status}`;
-        const errCode = Number(data?.error?.whatsappApiError?.code || data?.whatsappApiError?.code || data?.errorCode || data?.error?.code);
-        const reason = classifyError(res.status, errCode, errMsg);
-        logger.error(`${tag} ${label} failed [HTTP ${res.status}${errCode ? `/${errCode}` : ''}] ${reason}: ${errMsg}`);
-        return { success: false, reason, rawError: errMsg };
+        const failure = whatsappProviderError(data, res.status, transport.token);
+        const reason = classifyError(res.status, Number(failure.errorCode), failure.rawError);
+        logger.error(`${tag} ${label} failed [HTTP ${res.status}${failure.errorCode ? `/${failure.errorCode}` : ''}] ${reason}: ${failure.rawError}`);
+        return { success: false, reason, ...failure, provider,
+          ...(provider === 'ycloud' && typeof data.id === 'string' ? { messageId: data.id } : {}) };
       }
 
       const messageId = provider === 'ycloud' ? data?.id : data?.messages?.[0]?.id;
