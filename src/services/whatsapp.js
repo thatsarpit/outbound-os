@@ -315,6 +315,9 @@ class WhatsAppManager {
       accountId: selectedAccountId,
       reason: result.reason || 'send_failed',
       error: errorMessage,
+      errorCode: result.errorCode || null,
+      requestId: result.requestId || null,
+      waMessageId: result.messageId || null,
     };
   }
 

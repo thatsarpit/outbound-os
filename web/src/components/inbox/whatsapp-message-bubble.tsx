@@ -99,9 +99,16 @@ export function MessageBubble({
           >
             {reason === 're_engagement_required'
               ? 'Not delivered: the 24-hour reply window closed. Use an approved template and wait for a customer reply.'
+              : reason === 'thread_not_owned'
+                ? 'Not delivered: another app controls this conversation. Set your connected provider as the primary responder in Meta conversation routing before retrying.'
               : message.status === 'unconfirmed' || message.status === 'sending'
                 ? 'Delivery is unconfirmed. Check this attempt before sending again; it may already have reached Meta.'
                 : `Not delivered${reason ? `: ${reason.replace(/_/g, ' ')}` : '. The provider did not supply a stored reason.'}`}
+            {failed && message.providerErrorMessage && (
+              <span className="mt-1 block">
+                {message.providerErrorMessage}{message.providerErrorCode ? ` (code ${message.providerErrorCode})` : ''}
+              </span>
+            )}
           </p>
         )}
         {showPricing && (

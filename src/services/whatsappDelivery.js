@@ -46,6 +46,8 @@ export async function applyMetaReceipt(receipt) {
       data.ackStatus =
         receipt.status === 'failed' ? message.ackStatus : incomingRank;
       data.ackUpdatedAt = receipt.receivedAt;
+      data.providerErrorCode = receipt.status === 'failed' && receipt.failureCode != null ? String(receipt.failureCode) : null;
+      data.providerErrorMessage = receipt.status === 'failed' ? receipt.failureReason || null : null;
       data.providerStatusReason =
         receipt.status === 'failed'
           ? whatsappFailureReason(receipt.failureCode, receipt.failureReason)

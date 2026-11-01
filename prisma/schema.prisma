@@ -250,6 +250,9 @@ model Message {
   providerMessageId    String? // Remote message ID assigned by the sending provider
   providerCampaignId   String? // Historical provider campaign identity retained for reconciliation
   providerCreatedAt    DateTime? // Original provider timestamp when it differs from ingestion time
+  providerErrorCode String?
+  providerErrorMessage String?
+  providerRequestId String?
   providerStatusReason String? // Stable failure/status reason retained for diagnostics
   providerDeliveryStatus String? // Accepted, temporary failure, delivery or tracked engagement; separate from send acceptance
   providerDeliveryAt   DateTime? // UTC occurrence time of the last applied delivery event
