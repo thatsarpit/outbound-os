@@ -3463,6 +3463,11 @@ describe('YCloud WhatsApp provider', () => {
       } else if (req.url.includes('/upload')) res.end(JSON.stringify({ id: 'media-fixture' }));
       else if (req.url.includes('/download/')) { res.setHeader('Content-Type', 'image/png'); res.end(Buffer.from('fixture-image')); }
       else if (req.url === '/v2/whatsapp/messages/sendDirectly') {
+        if (sendFailure === 'thread') {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: { code: 'BAD_REQUEST', requestId: 'req_thread_fixture', whatsappApiError: { code: '131070', message: 'Caller is not thread owner', error_data: { details: 'Another app is controlling this thread now' } } } }));
+          return;
+        }
         res.end(JSON.stringify(sendFailure ? { id: 'failed-fixture', status: 'failed', errorCode: '131042', errorMessage: 'Payment fixture' } : { id: 'ycloud-message-fixture', wamid: 'wamid.fixture', status: 'sent' }));
       } else { res.statusCode = 404; res.end('{}'); }
     });
@@ -3538,6 +3543,20 @@ describe('YCloud WhatsApp provider', () => {
     assert.equal(failure.errorCode, '131042');
     assert.equal(failure.rawError, 'Payment fixture');
     sendFailure = false;
+  });
+
+  test('thread ownership rejection is actionable and never retried by the transport', async () => {
+    calls = [];
+    sendFailure = 'thread';
+    try {
+      const failure = await cloud.sendTextMessage('15550100001', 'Fixture only', account.id);
+      assert.equal(failure.success, false);
+      assert.equal(failure.reason, 'thread_not_owned');
+      assert.equal(failure.errorCode, '131070');
+      assert.equal(failure.requestId, 'req_thread_fixture');
+      assert.equal(failure.rawError, 'Another app is controlling this thread now');
+      assert.equal(calls.length, 1);
+    } finally { sendFailure = false; }
   });
 
   test('rejects unsigned and cross-account events; stores one reply with original time and stops automation', async () => {

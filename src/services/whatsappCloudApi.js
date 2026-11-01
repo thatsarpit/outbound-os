@@ -80,6 +80,7 @@ function classifyError(httpStatus, errCode, message = '') {
       return errCode === 131047 ? 're_engagement_required' : 'not_on_whatsapp';
     case 131030: return 'invalid_phone';
     case 131042: return 'payment_issue';
+    case 131070: return 'thread_not_owned';
     case 131049: return 'marketing_limit';
     case 131008: return 'quota_exceeded';
     case 131056: return 'blocked_by_user';

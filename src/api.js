@@ -375,6 +375,7 @@ async function sendManualWhatsAppMessage(payload) {
   if (!result.success) {
     const rejected = ['failed', 'permanently_failed'].includes(result.message?.status);
     const error = new Error(result.reason === 're_engagement_required' ? 'The WhatsApp reply window is closed. Use an approved template.'
+      : result.reason === 'thread_not_owned' ? 'Another app controls this WhatsApp conversation. Set the connected provider as the primary responder in Meta conversation routing before retrying.'
       : rejected && result.message?.providerErrorMessage ? `WhatsApp rejected this message: ${result.message.providerErrorMessage}`
       : 'This message was not confirmed sent. Review its status in the conversation before retrying.');
     Object.assign(error, { statusCode: 409, reason: result.reason, code: ['failed', 'permanently_failed'].includes(result.message?.status) ? 'manual_send_failed' : 'manual_send_unconfirmed' });

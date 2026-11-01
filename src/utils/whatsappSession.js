@@ -33,6 +33,7 @@ export function whatsappFailureReason(code, detail) {
     131049: 'marketing_limit',
     131048: 'spam_limit',
     131042: 'payment_issue',
+    131070: 'thread_not_owned',
     190: 'authentication_failed',
   };
   return (
