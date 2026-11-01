@@ -47,6 +47,7 @@ export function registerCampaignTools(server) {
       channel:           z.enum(VALID_CHANNELS).optional().describe('Channel: whatsapp (default), email, or both'),
       emailSubject:      z.string().optional().describe('Required for email/both campaigns'),
       targetFilter:      z.record(z.any()).optional().describe('Lead filter criteria — e.g. {status:"new", tags:"trade_show_2026"}'),
+      poolId: z.number().int().positive().optional().describe('Explicit accessible lead pool; use the same top-level poolId as the preview'),
       senderAccountId:   z.number().int().optional().describe('Email sender account ID'),
       emailSenderAccountId: z.number().int().positive().optional().describe('Explicit email sender ID from email_accounts'),
       whatsappSenderAccountId: z.number().int().positive().optional().describe('Explicit WhatsApp sender ID from whatsapp_accounts'),
@@ -165,14 +166,15 @@ export function registerCampaignTools(server) {
   // ── campaign_preview_leads ──
   server.tool(
     'campaign_preview_leads',
-    'Preview which leads match a campaign filter — returns count and sample of 10',
+    'Preview campaign eligibility with count, sample and exclusion reasons. Replies and pauses remain protected. poolId belongs at the top level, never inside filter.',
     {
       filter: z.record(z.any()).optional().describe('Lead filter criteria — e.g. {status:"new", country:"India"}'),
       channel: z.enum(VALID_CHANNELS).optional().describe('Preview eligibility for the intended campaign channel'),
+      poolId: z.number().int().positive().optional().describe('Explicit accessible lead pool, outside filter'),
     },
-    async ({ filter, channel }) => {
+    async ({ filter, channel, poolId }) => {
       try {
-        const { data } = await post('/api/campaigns/preview-leads', { filter, channel });
+        const { data } = await post('/api/campaigns/preview-leads', { filter, channel, ...(poolId !== undefined ? { poolId } : {}) });
         return ok(data);
       } catch (e) { return err(e.message); }
     },

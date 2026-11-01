@@ -49,8 +49,9 @@ export class CampaignEngine {
     return campaign;
   }
 
-  async getMatchingLeads(filterJson, poolId = null, channel = 'whatsapp') {
+  async getAudience(filterJson, poolId = null, channel = 'whatsapp') {
     const filter = typeof filterJson === 'string' ? JSON.parse(filterJson) : (filterJson || {});
+    if (filter.poolId !== undefined) throw Object.assign(new Error('Pass poolId at the top level, outside the lead filter.'), { statusCode: 400 });
     const channels = campaignChannels(channel);
     const where = {};
     if (poolId) where.poolId = poolId;
@@ -64,17 +65,42 @@ export class CampaignEngine {
     if (filter.product) where.product = { contains: filter.product };
     if (filter.country) where.country = { contains: filter.country };
     const leads = await this.db.lead.findMany({ where, orderBy: [{ score: 'desc' }, { id: 'asc' }] });
-    const ready = channels.includes('email') ? await this.verification.readyEmails(leads.map(lead => lead.email)) : null;
     // A DB substring predicate is not a tag match: "uk" must not select "bulk".
-    return leads.filter((lead) => hasAllLeadTags(lead.tags, filter.tags)
-      && channels.some((item) => campaignChannelEligibility(lead, item).eligible && (item !== 'email' || !ready || ready.has(emailIdentity(lead.email)))));
+    const matching = leads.filter(lead => hasAllLeadTags(lead.tags, filter.tags));
+    const ready = channels.includes('email') ? await this.verification.readyEmails(matching.map(lead => lead.email)) : null;
+    const eligible = [], excludedSample = [], exclusionCounts = {};
+    let excludedCount = 0;
+    for (const lead of matching) {
+      const decisions = channels.map(item => {
+        const decision = campaignChannelEligibility(lead, item);
+        if (decision.eligible && item === 'email' && ready && !ready.has(emailIdentity(lead.email))) {
+          return { channel: item, eligible: false, reason: 'email_verification_required' };
+        }
+        return { channel: item, ...decision };
+      });
+      if (decisions.some(decision => decision.eligible)) eligible.push(lead);
+      else {
+        excludedCount++;
+        const reasons = decisions.map(({ channel: item, reason }) => ({ channel: item, reason }));
+        for (const reason of reasons) {
+          const key = `${reason.channel}:${reason.reason}`;
+          exclusionCounts[key] = (exclusionCounts[key] || 0) + 1;
+        }
+        if (excludedSample.length < 10) excludedSample.push({ id: lead.id, reasons });
+      }
+    }
+    return { leads: eligible, matchedCount: matching.length, excludedCount, exclusionCounts, excludedSample };
+  }
+
+  async getMatchingLeads(filterJson, poolId = null, channel = 'whatsapp') {
+    return (await this.getAudience(filterJson, poolId, channel)).leads;
   }
 
   async populateCampaign(campaignId) {
     const campaign = await this.db.campaign.findUnique({ where: { id: campaignId } });
     if (!campaign) throw new Error('Campaign not found');
     if (campaign.status !== 'draft') throw new Error('Only draft campaigns can change their audience');
-    const leads = await this.getMatchingLeads(campaign.targetFilter, campaign.poolId, campaign.channel);
+    const { leads, excludedCount, exclusionCounts } = await this.getAudience(campaign.targetFilter, campaign.poolId, campaign.channel);
     let added = 0;
     for (const lead of leads) {
       try {
@@ -84,7 +110,7 @@ export class CampaignEngine {
     }
     const total = await this.db.campaignLead.count({ where: { campaignId } });
     await this.db.campaign.update({ where: { id: campaignId }, data: { totalLeads: total } });
-    return { added, total };
+    return { added, total, excludedCount, exclusionCounts };
   }
 
   personalizeMessage(template, lead) {

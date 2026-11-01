@@ -91,18 +91,27 @@ export function registerMessageTools(server) {
   // ── send_whatsapp ──
   server.tool(
     'send_whatsapp',
-    'Send a normal WhatsApp reply using the assigned sending number. Requires a customer message to that number within 24 hours. Success means provider acceptance; check list_messages for delivery. A caller-known client_message_id is required to send. Omit it to prepare an ID without sending; reuse it if interrupted.',
+    'Send one explicit manual WhatsApp reply or approved text-body template. Normal replies require an open 24h window; whatsapp_template uses the existing manual template composer and does not enroll a campaign or clear reply history. Paused contacts stay paused. Success means provider acceptance; check list_messages for delivery. A caller-known client_message_id is required to send. Omit it to prepare an ID without sending; reuse it if interrupted.',
     {
       lead_id: LeadId,
-      message: z.string().min(1).max(4096).describe('Message text to send'),
+      message: z.string().min(1).max(4096).optional().describe('Normal reply text; omit for an approved template'),
+      account_id: z.number().int().positive().optional().describe('Explicit sender from whatsapp_accounts'),
+      whatsapp_template: z.object({
+        name: z.string().min(1).max(512),
+        language: z.string().min(1).max(32),
+        parameters: z.array(z.string().min(1).max(1000)).max(50),
+      }).optional().describe('Exact approved template name, language and ordered body variable values; verified live before sending'),
       client_message_id: ClientMessageId,
     },
-    async ({ lead_id, message, client_message_id }) => {
+    async ({ lead_id, message, account_id, whatsapp_template, client_message_id }) => {
+      if (!message && !whatsapp_template) return err('Provide message text or an approved whatsapp_template.');
       if (!client_message_id) return prepareRequestId();
       const clientMessageId = client_message_id;
       try {
         const { data } = await post(`/api/leads/${lead_id}/send`, {
-          message,
+          ...(message !== undefined ? { message } : {}),
+          ...(account_id !== undefined ? { accountId: account_id } : {}),
+          ...(whatsapp_template ? { whatsappTemplate: whatsapp_template } : {}),
           clientMessageId,
         });
         const result = {
