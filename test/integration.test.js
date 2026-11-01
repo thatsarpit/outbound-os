@@ -3066,11 +3066,21 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
     assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
     assert.equal(accepted.body.message.content, 'Hello Buyer, still interested?');
     assert.equal((await send({ text: 'Template did not reopen the window' })).status, 409);
+    const mcpTemplate = await request('POST', `/api/leads/${lead.id}/send`, { headers, body: { accountId: account.id, whatsappTemplate: template, clientMessageId: 'fixture-mcp-template-001' } });
+    assert.equal(mcpTemplate.status, 200);
+    assert.equal(mcpTemplate.body.message.waCampaignName, 'reconnect_fixture');
+    assert.equal(mcpTemplate.body.message.content, 'Hello Buyer, still interested?');
+    const repeatTemplate = await request('POST', `/api/leads/${lead.id}/send`, { headers, body: { accountId: account.id, whatsappTemplate: template, clientMessageId: 'fixture-mcp-template-001' } });
+    assert.equal(repeatTemplate.body.message.id, mcpTemplate.body.message.id);
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'paused');
+    const explained = await request('POST', '/api/campaigns/preview-leads', { headers, body: { channel: 'whatsapp', filter: { product: 'unmatched-fixture-product', poolId: 1 } } });
+    assert.equal(explained.status, 400);
+
     await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'inbound', waAccount: account.id, content: 'Yes, please', status: 'delivered', sentAt: new Date() } });
     const body = { text: 'Here are the details', clientMessageId: 'fixture-message-00001' };
     const sent = await send(body); assert.equal(sent.status, 200);
     assert.equal(sent.body.message.waMessageId, 'wamid.MANUAL-FIXTURE');
-    const duplicate = await send(body); assert.equal(duplicate.body.message.id, sent.body.message.id); assert.equal(sends, 2);
+    const duplicate = await send(body); assert.equal(duplicate.body.message.id, sent.body.message.id); assert.equal(sends, 3);
     assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'paused');
     await prisma.message.update({ where: { id: sent.body.message.id }, data: { status: 'failed', providerStatusReason: 're_engagement_required' } });
     const detail = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });

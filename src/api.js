@@ -1966,12 +1966,12 @@ app.post('/api/leads/:id/send', requireRole('agent'), async (req, res) => {
     const lead = await prisma.lead.findUnique({ where: { id: parseInt(req.params.id) } });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-    const { message, accountId } = req.body;
-    if (!message) return res.status(400).json({ error: 'Message is required' });
+    const { message, accountId, whatsappTemplate } = req.body;
+    if (!message && !whatsappTemplate) return res.status(400).json({ error: 'A message or approved WhatsApp template is required' });
 
     // accountId (optional): forces a specific sender — used by AI outreach so the
     // message is sent from the same round-robin account whose persona drafted it.
-    const result = await sendManualWhatsApp({ leadId: lead.id, text: message, accountId: parsePositiveInt(accountId), clientMessageId: req.body.clientMessageId });
+    const result = await sendManualWhatsApp({ leadId: lead.id, text: message, template: whatsappTemplate, accountId: parsePositiveInt(accountId), clientMessageId: req.body.clientMessageId });
     const sendResult = { ...result, accountId: result.accountId };
     const sent = result.success;
     const msg = result.message;
@@ -2380,7 +2380,7 @@ app.post('/api/campaigns/:id/populate', requireRole('manager'), async (req, res)
     const result = await campaignEngine.populateCampaign(parseInt(req.params.id));
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -2477,7 +2477,9 @@ app.post('/api/campaigns/preview-leads', requireRole('manager'), async (req, res
     // poolId when supplied (membership already checked by requirePoolAccess
     // when the caller passes one in the body), else any single pool the user
     // has access to.
-    let previewPoolId = req.body.poolId ? parseInt(req.body.poolId) : null;
+    const previewPoolInput = req.body.poolId;
+    let previewPoolId = previewPoolInput == null ? null : Number(previewPoolInput);
+    if (previewPoolInput != null && (!Number.isSafeInteger(previewPoolId) || previewPoolId < 1)) return res.status(400).json({ error: 'Invalid lead pool.' });
     if (previewPoolId && !(await userCanAccessPool(req, previewPoolId))) {
       return res.status(403).json({ error: 'You do not have access to this lead pool.' });
     }
@@ -2487,10 +2489,10 @@ app.post('/api/campaigns/preview-leads', requireRole('manager'), async (req, res
     }
     const channel = req.body.channel || 'whatsapp';
     if (!VALID_CHANNELS.includes(channel)) return res.status(400).json({ error: 'Invalid campaign channel.' });
-    const leads = await campaignEngine.getMatchingLeads(req.body.filter || {}, previewPoolId, channel);
-    res.json({ count: leads.length, sample: leads.slice(0, 10), poolId: previewPoolId, emailVerificationRequired: verificationEnabled() && ['email', 'both'].includes(channel) });
+    const { leads, ...diagnostics } = await campaignEngine.getAudience(req.body.filter || {}, previewPoolId, channel);
+    res.json({ count: leads.length, sample: leads.slice(0, 10), ...diagnostics, poolId: previewPoolId, emailVerificationRequired: verificationEnabled() && ['email', 'both'].includes(channel) });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 

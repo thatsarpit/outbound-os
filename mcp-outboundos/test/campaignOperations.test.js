@@ -42,3 +42,15 @@ test('email sender discovery exposes readiness and persona ID without returning 
   assert.equal(JSON.stringify(accounts).includes('synthetic-secret'), false);
   assert.equal(JSON.stringify(accounts).includes('synthetic-private'), false);
 });
+
+
+test('campaign preview forwards pool scope outside the filter and preserves exclusion diagnostics', async t => {
+  let body;
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    body = JSON.parse(options.body);
+    return Response.json({ count: 0, poolId: 3, exclusionCounts: { 'whatsapp:customer_replied': 1 } });
+  });
+  const result = await invoke('campaign_preview_leads', { channel: 'whatsapp', poolId: 3, filter: { tags: 'owner_fixture' } });
+  assert.deepEqual(body, { channel: 'whatsapp', poolId: 3, filter: { tags: 'owner_fixture' } });
+  assert.equal(JSON.parse(result.content[0].text).exclusionCounts['whatsapp:customer_replied'], 1);
+});

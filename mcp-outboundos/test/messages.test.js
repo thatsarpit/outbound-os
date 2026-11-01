@@ -267,3 +267,18 @@ test('email verification tools create a bounded background job and read paginate
   assert.equal(calls[1].url.searchParams.get('page'), '2');
   assert.throws(() => tools.get('email_verification_status').schema.parse({ job_id: '../private' }));
 });
+
+
+test('manual WhatsApp template uses the existing send route with explicit sender and stable identity', async t => {
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ url: String(url), body: JSON.parse(options.body) });
+    return Response.json({ success: true, message: { id: 42, status: 'sent', providerStatusReason: 'provider_accepted' } });
+  });
+  const template = { name: 'fixture_reconnect', language: 'en', parameters: ['Taylor', 'Fixture country'] };
+  await invoke('send_whatsapp', { lead_id: 12, account_id: 7, whatsapp_template: template, client_message_id: 'fixture-template-mcp-001' });
+  assert.match(calls[0].url, /api\/leads\/12\/send$/);
+  assert.deepEqual(calls[0].body, { accountId: 7, whatsappTemplate: template, clientMessageId: 'fixture-template-mcp-001' });
+  await invoke('send_whatsapp', { lead_id: 12 });
+  assert.equal(calls.length, 1, 'missing text/template must never reach the API');
+});

@@ -19,7 +19,7 @@ test('changing channel cannot reinterpret a legacy WhatsApp ID as an email ID', 
   assert.equal(value.emailSenderAccountId, null);
 });
 test('invalid input and unavailable sender fail before a campaign can be saved', async () => {
-  for (const patch of [{ name: ' ' }, { targetFilter: '[]' }, { emailSenderAccountId: '2' }, { channel: 'other' }]) {
+  for (const patch of [{ name: ' ' }, { targetFilter: '[]' }, { targetFilter: { poolId: 1 } }, { emailSenderAccountId: '2' }, { channel: 'other' }]) {
     await assert.rejects(campaignInput({ ...base, ...patch }, { db }), error => error.statusCode === 400);
   }
   await assert.rejects(campaignInput({ ...base, emailSenderAccountId: 1 }, { db: { emailAccount: { findUnique: async () => ({ enabled: false }) } } }), /verified email sender/);

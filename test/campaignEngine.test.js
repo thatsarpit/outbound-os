@@ -102,8 +102,8 @@ test('audience preview and population include email-only contacts and remain ide
   assert.deepEqual((await engine.getMatchingLeads(filter, null, 'email')).map((lead) => lead.id), [emailOnly.id]);
   assert.equal((await engine.getMatchingLeads(filter, null, 'whatsapp')).length, 1, 'email opt-out alone does not suppress WhatsApp');
   const campaign = await createCampaign({ targetFilter: filter });
-  assert.deepEqual(await engine.populateCampaign(campaign.id), { added: 1, total: 1 });
-  assert.deepEqual(await engine.populateCampaign(campaign.id), { added: 0, total: 1 });
+  assert.deepEqual(await engine.populateCampaign(campaign.id), { added: 1, total: 1, excludedCount: 2, exclusionCounts: { 'email:email_opted_out': 1, 'email:lead_paused': 1 } });
+  assert.deepEqual(await engine.populateCampaign(campaign.id), { added: 0, total: 1, excludedCount: 2, exclusionCounts: { 'email:email_opted_out': 1, 'email:lead_paused': 1 } });
   assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).totalLeads, 1);
   assert.equal(await db.campaignLead.count({ where: { campaignId: campaign.id } }), 1);
 }));
@@ -228,3 +228,50 @@ test('closed business hours release the pending recipient without a provider req
   assert.equal((await db.campaignLead.findFirst({ where: { campaignId: campaign.id } })).status, 'pending');
   assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'paused');
 }, { businessHours: false }));
+
+
+test('preview explains replied-owner exclusion without altering campaign protections', async () => fixture(async ({ engine, createLead, createCampaign }) => {
+  const lead = await createLead(1, { status: 'new', repliedAt: new Date(), tags: 'owner_qa', maxFollowups: 0, emailMarketingConsent: false });
+  const result = await engine.getAudience({ tags: 'owner_qa' }, null, 'whatsapp');
+  assert.equal(result.matchedCount, 1);
+  assert.equal(result.leads.length, 0);
+  assert.deepEqual(result.exclusionCounts, { 'whatsapp:customer_replied': 1 });
+  assert.equal(result.excludedSample[0].id, lead.id);
+  const campaign = await createCampaign({ channel: 'whatsapp', targetFilter: { tags: 'owner_qa' } });
+  assert.equal((await engine.populateCampaign(campaign.id)).total, 0);
+  await assert.rejects(engine.getAudience({ poolId: 1 }, null, 'whatsapp'), error => error.statusCode === 400);
+}));
+
+test('stale receipt cleanup preserves pauses, disabled followups, replies and newer delivery evidence', async () => fixture(async ({ db, createLead }) => {
+  const { reapStaleWhatsAppMessages } = await import('../src/services/undeliveredReaper.js');
+  const old = new Date(Date.now() - 5 * 3600000);
+  const cases = [{ status: 'paused' }, { maxFollowups: 0 }, {}, {}, {}, {}, { repliedAt: new Date() }];
+  for (let i = 0; i < cases.length; i++) {
+    await createLead(i + 1, { status: 'contacted', isOnWhatsApp: true, maxFollowups: 3, ...cases[i] });
+    await db.message.create({ data: { leadId: i + 1, direction: 'outbound', channel: 'whatsapp', content: 'Fixture initial', status: i === 2 ? 'failed' : 'sent', sentAt: old, createdAt: old } });
+  }
+  await db.message.create({ data: { leadId: 4, direction: 'outbound', content: 'Fixture delivered', status: 'read', ackStatus: 3 } });
+  await db.message.create({ data: { leadId: 5, direction: 'inbound', content: 'Fixture reply', status: 'delivered' } });
+  const queued = await db.message.create({ data: { leadId: 6, direction: 'outbound', channel: 'whatsapp', content: 'Fixture followup', status: 'queued', createdAt: old } });
+  const changed = await reapStaleWhatsAppMessages(db);
+  assert.deepEqual(changed.map(lead => lead.id), [6]);
+  assert.equal((await db.message.findUnique({ where: { id: queued.id } })).status, 'cancelled');
+  assert.equal(changed[0].isOnWhatsApp, true, 'missing receipt must not mark a number unavailable');
+  assert.equal((await db.lead.findUnique({ where: { id: 1 } })).status, 'paused');
+  assert.equal((await db.lead.findUnique({ where: { id: 2 } })).maxFollowups, 0);
+  await db.lead.update({ where: { id: 6 }, data: { status: 'paused' } });
+  assert.deepEqual(await reapStaleWhatsAppMessages(db), []);
+}));
+
+test('stale receipt cleanup cannot overwrite a pause made after selection', async () => fixture(async ({ db, createLead }) => {
+  const { reapStaleWhatsAppMessages } = await import('../src/services/undeliveredReaper.js');
+  await createLead(1, { status: 'contacted', maxFollowups: 3 });
+  await db.message.create({ data: { leadId: 1, direction: 'outbound', content: 'Fixture initial', status: 'sent', sentAt: new Date(Date.now() - 5 * 3600000) } });
+  const raced = { $transaction: (...args) => db.$transaction(...args), message: { findMany: async args => {
+    const candidates = await db.message.findMany(args);
+    await db.lead.update({ where: { id: 1 }, data: { status: 'paused' } });
+    return candidates;
+  } } };
+  assert.deepEqual(await reapStaleWhatsAppMessages(raced), []);
+  assert.equal((await db.lead.findUnique({ where: { id: 1 } })).status, 'paused');
+}));
