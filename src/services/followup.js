@@ -340,6 +340,11 @@ class FollowupEngine {
     let processedAny = false;
 
     try {
+      // Old retry/recovery paths may have queued campaign rows without the
+      // approved send envelope. They cannot enter the free-form queue.
+      await prisma.message.updateMany({ where: { status: 'queued', direction: 'outbound', campaignId: { not: null },
+        ...(Array.isArray(messageIds) ? { id: { in: messageIds } } : {}) },
+        data: { status: 'unconfirmed', providerStatusReason: 'campaign_retry_review_required' } });
       // Fetch pending messages that are due, JOIN with lead to get tier
       const pendingMessages = await prisma.message.findMany({
         where: {

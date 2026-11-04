@@ -112,6 +112,9 @@ export class CampaignEngine {
       // population may not grow a capped campaign when eligibility changes.
       const current = await tx.campaign.findUnique({ where: { id: campaignId } });
       if (current?.status !== 'draft') throw new Error('Only draft campaigns can change their audience');
+      if (['targetFilter', 'poolId', 'channel', 'whatsappSenderAccountId', 'senderAccountId'].some(key => current[key] !== campaign[key])) {
+        throw Object.assign(new Error('Campaign audience settings changed. Preview and populate again.'), { statusCode: 409 });
+      }
       const filter = campaignFilter(current.targetFilter);
       let added = 0;
       const existing = await tx.campaignLead.findMany({ where: { campaignId }, select: { leadId: true } });
@@ -142,6 +145,10 @@ export class CampaignEngine {
     if (!campaign) throw new Error('Campaign not found');
     if (!['draft', 'paused', 'scheduled'].includes(campaign.status)) throw new Error('Campaign is not startable');
     if (!this.businessHours()) throw Object.assign(new Error('Outside configured sending hours. Resume during the sending window.'), { statusCode: 409, reason: 'outside_business_hours' });
+    const filter = campaignFilter(campaign.targetFilter);
+    if (filter.limit && await this.db.campaignLead.count({ where: { campaignId } }) > filter.limit) {
+      throw Object.assign(new Error('Populated audience exceeds the campaign limit. Create a correctly capped draft before sending.'), { statusCode: 409, reason: 'audience_limit_exceeded' });
+    }
     const pending = await this.db.campaignLead.count({ where: { campaignId, status: 'pending' } });
     const updated = await this.db.campaign.updateMany({
       where: { id: campaignId, status: campaign.status }, data: { status: 'running', startedAt: new Date(), completedAt: null },
@@ -197,7 +204,11 @@ export class CampaignEngine {
               orderBy: { id: 'desc' },
             });
             if (existing) {
-              if (ACCEPTED.has(existing.status)) accepted++;
+              if (ACCEPTED.has(existing.status)) {
+                accepted++;
+                await this.db.campaignLead.updateMany({ where: { id: recipient.id, status: 'sending' },
+                  data: { status: 'sent', sentAt: existing.sentAt || existing.createdAt } });
+              }
               else { failed++; reasons.push(`${channel}:${existing.providerStatusReason || existing.status}`); }
               continue;
             }
@@ -206,26 +217,33 @@ export class CampaignEngine {
             if (!context.lead) { reasons.push(`${channel}:${context.reason}`); continue; }
             const result = await this._sendChannel(campaign, context.lead, channel, body, subject);
             if (result.halt) { halted = true; break; }
-            if (result.success) accepted++;
+            if (result.success) {
+              accepted++;
+              // Publish acceptance before the delay so an immediate reply can
+              // claim attribution while the executor is still working.
+              await this.db.campaignLead.updateMany({ where: { id: recipient.id, status: 'sending' },
+                data: { status: 'sent', sentAt: new Date() } });
+            }
             else if (!result.skipped) failed++;
             if (result.reason) reasons.push(`${channel}:${result.reason}`);
+            await refreshCampaignMetrics(this.db, campaign.id);
             if (result.attempted) await this.delay(channel === 'imessage' ? 8000 : 1000, channel === 'imessage' ? 20000 : 3000);
           }
           if (halted) {
-            await this.db.campaignLead.update({ where: { id: recipient.id }, data: { status: 'pending' } });
+            await this.db.campaignLead.updateMany({ where: { id: recipient.id, status: { not: 'replied' } }, data: { status: 'pending' } });
             break;
           }
-          await this.db.campaignLead.update({
-            where: { id: recipient.id },
+          await this.db.campaignLead.updateMany({
+            where: { id: recipient.id, status: { not: 'replied' } },
             data: {
               status: failed ? 'failed' : accepted ? 'sent' : 'skipped',
-              sentAt: accepted ? new Date() : null,
+              ...(!accepted ? { sentAt: null } : {}),
               skipReason: reasons.length ? reasons.join('; ').slice(0, 500) : null,
             },
           });
         } catch (error) {
           // A failed local write after an accepted request cannot release a recipient for an automatic retry.
-          await this.db.campaignLead.update({ where: { id: recipient.id }, data: { status: 'failed', skipReason: 'dispatch_error_review_required' } });
+          await this.db.campaignLead.updateMany({ where: { id: recipient.id, status: { not: 'replied' } }, data: { status: 'failed', skipReason: 'dispatch_error_review_required' } });
           logger.error(`Campaign ${campaign.id} recipient ${recipient.id} requires review: ${error.message}`);
         }
       }
@@ -234,7 +252,7 @@ export class CampaignEngine {
       const unfinished = count('pending') + count('sending');
       await this.db.campaign.update({
         where: { id: campaign.id },
-        data: { sentCount: count('sent'), failedCount: count('failed'), status: unfinished ? 'paused' : 'completed',
+        data: { status: unfinished ? 'paused' : 'completed',
           completedAt: unfinished ? null : new Date() },
       });
       await refreshCampaignMetrics(this.db, campaign.id);

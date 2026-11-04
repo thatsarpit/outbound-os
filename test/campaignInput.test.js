@@ -35,7 +35,7 @@ test('clearing a typed sender does not restore the legacy sender', async () => {
 
 
 test('campaign caps reject unsupported filters and invalid limits before saving', async () => {
-  for (const filter of [{ limit: 0 }, { limit: -1 }, { limit: 1.5 }, { limit: '500' }, { limit: 10001 }, { limti: 500 }, { minScore: 20, maxScore: 10 }]) {
+  for (const filter of [{ limit: 0 }, { limit: -1 }, { limit: 1.5 }, { limit: '500' }, { limit: 10001 }, { limti: 500 }, { country: {} }, { status: [] }, { status: ['new', 'bogus'] }, { tags: [1] }, { minScore: 20, maxScore: 10 }]) {
     await assert.rejects(campaignInput({ ...base, targetFilter: filter }, { db }), error => error.statusCode === 400);
   }
   assert.equal(JSON.parse((await campaignInput({ ...base, targetFilter: { limit: 500 } }, { db })).targetFilter).limit, 500);

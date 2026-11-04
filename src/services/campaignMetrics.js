@@ -45,7 +45,7 @@ export async function reconcileCampaignCounters(db) {
 /** A restart must require an explicit resume; it must not redispatch uncertain attempts. */
 export async function recoverCampaignRuns(db) {
   return db.$transaction(async tx => {
-    const campaigns = await tx.campaign.findMany({ where: { status: 'running' }, select: { id: true } });
+    const campaigns = await tx.campaign.findMany({ where: { OR: [{ status: 'running' }, { campaignLeads: { some: { status: 'sending' } } }] }, select: { id: true } });
     const ids = campaigns.map(row => row.id);
     if (!ids.length) return { paused: 0 };
     await tx.campaignLead.updateMany({ where: { campaignId: { in: ids }, status: 'sending' }, data: { status: 'pending', skipReason: 'restart_review_required' } });

@@ -3185,6 +3185,24 @@ test('campaign receipts expose delivery failure, preserve opt-outs, and retain n
     assert.ok(!due.some(row => row.leadId === lead.id), 'explicit marketing opt-outs never enter retries');
     await recordMetaReceipt({ accountId: account.id, waMessageId: 'fixture-campaign-receipt-0', status: 'read', timestamp: '4' });
     assert.ok((await suppressedWhatsAppLeads(prisma, [lead.id], account.id)).has(lead.id), 'a late receipt cannot erase an opt-out');
+    const { sweep } = await import('../src/services/deliveryRetry.js');
+    const previousTime = new Date(Date.now() - 4 * 86400000);
+    await prisma.message.update({ where: { id: message.id }, data: { updatedAt: previousTime, ackUpdatedAt: previousTime } });
+    const swept = await sweep({ dryRun: false });
+    assert.ok(swept.reviewRequired >= 1, 'campaign retry requires reviewed campaign dispatch');
+    assert.equal((await prisma.message.findUnique({ where: { id: message.id } })).status, 'failed');
+    const { default: followup } = await import('../src/services/followup.js');
+    await prisma.message.update({ where: { id: message.id }, data: { status: 'queued', scheduledAt: previousTime } });
+    await followup.processQueue({ messageIds: [message.id] });
+    const quarantined = await prisma.message.findUnique({ where: { id: message.id } });
+    assert.equal(quarantined.status, 'unconfirmed');
+    assert.equal(quarantined.providerStatusReason, 'campaign_retry_review_required');
+    const uncertain = await prisma.message.create({ data: { leadId: temporaryLead.id, campaignId: campaign.id, channel: 'whatsapp', direction: 'outbound', status: 'unconfirmed', content: 'Synthetic timeout', waAccount: account.id, waMessageId: 'fixture-uncertain-receipt', providerStatusReason: 'confirmation_unknown' } });
+    await recordMetaReceipt({ accountId: account.id, waMessageId: uncertain.waMessageId, status: 'sent', timestamp: '5' });
+    const confirmed = await prisma.message.findUnique({ where: { id: uncertain.id } });
+    assert.equal(confirmed.status, 'sent'); assert.equal(confirmed.ackStatus, 1);
+    assert.equal(confirmed.providerErrorCode, null);
+    assert.ok(confirmed.sentAt);
   } finally {
     await prisma.whatsAppReceipt.deleteMany({ where: { accountId: account.id } });
     await prisma.lead.deleteMany({ where: { id: { in: [lead.id, temporaryLead.id] } } });

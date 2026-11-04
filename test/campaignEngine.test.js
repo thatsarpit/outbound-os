@@ -400,3 +400,61 @@ test('synchronous template rejection retains provider diagnostics and explicit o
   assert.equal(message.providerErrorCode, '131050'); assert.equal(message.providerRequestId, 'fixture-request');
   assert.equal((await engine.getAudience({}, null, 'whatsapp', 8)).leads.length, 0);
 }, { whatsapp: () => ({ success: false, reason: 'whatsapp_marketing_opted_out', errorCode: '131050', error: 'Synthetic opt-out', requestId: 'fixture-request' }) }));
+
+test('reply received during the send delay retains attribution and cannot be overwritten by completion', async () => fixture(async ({ db, engine, createLead, createCampaign, running }) => {
+  await createLead(1);
+  const campaign = await createCampaign(); await engine.populateCampaign(campaign.id); await running(campaign.id);
+  await engine._executeCampaign(campaign);
+  const recipient = await db.campaignLead.findFirst({ where: { campaignId: campaign.id } });
+  assert.equal(recipient.status, 'replied');
+  assert.ok(recipient.sentAt);
+  const result = await engine.getCampaign(campaign.id);
+  assert.equal(result.sentCount, 1); assert.equal(result.replyCount, 1);
+}, { delay: async ({ db }) => {
+  const recipient = await db.campaignLead.findFirst();
+  assert.equal(recipient.status, 'sent', 'acceptance must be visible before waiting');
+  await db.campaignLead.update({ where: { id: recipient.id }, data: { status: 'replied' } });
+  await db.campaign.update({ where: { id: recipient.campaignId }, data: { replyCount: { increment: 1 } } });
+} }));
+
+test('restart recovers a claimed recipient even when the operator paused its campaign before the crash', async () => fixture(async ({ db, createLead, createCampaign, engine }) => {
+  await createLead(1); const campaign = await createCampaign(); await engine.populateCampaign(campaign.id);
+  await db.campaign.update({ where: { id: campaign.id }, data: { status: 'paused' } });
+  await db.campaignLead.updateMany({ where: { campaignId: campaign.id }, data: { status: 'sending' } });
+  const message = await db.message.create({ data: { leadId: 1, campaignId: campaign.id, direction: 'outbound', channel: 'email', content: 'Synthetic', status: 'sending' } });
+  await recoverCampaignRuns(db);
+  assert.equal((await db.campaignLead.findFirst({ where: { campaignId: campaign.id } })).status, 'pending');
+  assert.equal((await db.message.findUnique({ where: { id: message.id } })).status, 'unconfirmed');
+  assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'paused');
+}));
+
+test('legacy overpopulated drafts cannot bypass the launch cap', async () => fixture(async ({ db, createLead, createCampaign, engine, calls }) => {
+  await createLead(1); await createLead(2);
+  const campaign = await createCampaign({ targetFilter: { limit: 1 } });
+  for (const leadId of [1, 2]) await db.campaignLead.create({ data: { campaignId: campaign.id, leadId } });
+  await assert.rejects(engine.startCampaign(campaign.id), error => error.reason === 'audience_limit_exceeded');
+  assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'draft');
+  assert.equal(calls.email.length, 0);
+}));
+
+test('audience edits made during population cannot silently select a stale country', async () => fixture(async ({ db, createLead, createCampaign, engine }) => {
+  await createLead(1, { country: 'Australia' });
+  const campaign = await createCampaign({ targetFilter: { country: 'Australia' } });
+  const original = engine.getAudience.bind(engine);
+  engine.getAudience = async (...args) => {
+    const result = await original(...args);
+    await db.campaign.update({ where: { id: campaign.id }, data: { targetFilter: JSON.stringify({ country: 'United Kingdom' }) } });
+    return result;
+  };
+  await assert.rejects(engine.populateCampaign(campaign.id), error => error.statusCode === 409);
+  assert.equal(await db.campaignLead.count({ where: { campaignId: campaign.id } }), 0);
+}));
+
+
+test('completion preserves the original acceptance time rather than the end of the send delay', async () => fixture(async ({ db, engine, createLead, createCampaign, running }) => {
+  await createLead(1); const campaign = await createCampaign(); await engine.populateCampaign(campaign.id); await running(campaign.id);
+  let acceptedAt;
+  engine.delay = async () => { acceptedAt = (await db.campaignLead.findFirst()).sentAt; await new Promise(resolve => setTimeout(resolve, 15)); };
+  await engine._executeCampaign(campaign);
+  assert.equal((await db.campaignLead.findFirst()).sentAt.getTime(), acceptedAt.getTime());
+}));

@@ -15,7 +15,7 @@ export async function applyMetaReceipt(receipt) {
         waMessageId: receipt.waMessageId,
         waAccount: receipt.accountId,
       },
-      select: { id: true, leadId: true, status: true, ackStatus: true, campaignId: true },
+      select: { id: true, leadId: true, status: true, ackStatus: true, campaignId: true, sentAt: true },
     });
     if (messages.length !== 1) return false; // Never guess from a recipient's number.
     const message = messages[0];
@@ -42,12 +42,14 @@ export async function applyMetaReceipt(receipt) {
     if (
       incomingRank > currentRank ||
       (receipt.status === 'failed' && currentRank < 2) ||
-      (receipt.status === 'sent' && !['failed', 'permanently_failed', 'unconfirmed'].includes(message.status) && currentRank < 2 && (message.ackStatus || 0) < 1)
+      (receipt.status === 'sent' && !['failed', 'permanently_failed'].includes(message.status) && currentRank < 2 && (message.ackStatus || 0) < 1)
     ) {
       data.status = receipt.status;
       data.ackStatus =
         receipt.status === 'failed' ? message.ackStatus : incomingRank;
       data.ackUpdatedAt = receipt.receivedAt;
+      // An authenticated receipt can resolve a timeout without another send.
+      if (receipt.status !== 'failed' && !message.sentAt) data.sentAt = receipt.receivedAt;
       data.providerErrorCode = receipt.status === 'failed' && receipt.failureCode != null ? String(receipt.failureCode) : null;
       data.providerErrorMessage = receipt.status === 'failed' ? receipt.failureReason || null : null;
       data.providerStatusReason =

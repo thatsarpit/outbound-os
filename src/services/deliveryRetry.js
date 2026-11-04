@@ -56,6 +56,7 @@ export async function findRetryable({ channel = 'whatsapp', limit = 200, now = n
       id: true,
       leadId: true,
       waAccount: true,
+      campaignId: true,
       retryCount: true,
       providerStatusReason: true,
       providerErrorCode: true,
@@ -87,6 +88,7 @@ export async function findRetryable({ channel = 'whatsapp', limit = 200, now = n
     due.push({
       id: msg.id,
       leadId: msg.leadId,
+      campaignId: msg.campaignId,
       attempt: attempt + 1,
       reason: msg.providerStatusReason || '',
     });
@@ -108,8 +110,11 @@ export async function sweep({ channel = 'whatsapp', limit = 200, dryRun = true }
     return { due: due.length, queued: 0, dryRun: true, sample: due.slice(0, 5) };
   }
 
-  let queued = 0;
+  let queued = 0, reviewRequired = 0;
   for (const item of due) {
+    // Campaign retries need a newly reviewed audience; do not turn a durable
+    // campaign attempt into ordinary automation or replace its template.
+    if (item.campaignId != null) { reviewRequired++; continue; }
     try {
       await prisma.message.update({
         where: { id: item.id },
@@ -126,7 +131,7 @@ export async function sweep({ channel = 'whatsapp', limit = 200, dryRun = true }
   }
 
   logger.info(`🔁 Delivery retry: ${queued} of ${due.length} due ${channel} messages re-queued`);
-  return { due: due.length, queued, dryRun: false };
+  return { due: due.length, queued, reviewRequired, dryRun: false };
 }
 
 export default { findRetryable, sweep };

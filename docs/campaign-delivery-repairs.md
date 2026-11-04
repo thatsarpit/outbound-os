@@ -41,6 +41,25 @@ deployed from that branch. It does not close the broader repair programme.
   UK/Australia country/number mismatches, while retaining BSUID-only contacts.
   This is structural validation, not a carrier or WhatsApp registration lookup.
 
+## Follow-up race and recovery checks
+
+Acceptance is published before the executor waits between sends, so replies
+received during that delay can claim campaign attribution. Completion and error
+handling cannot overwrite `replied`; a conditional database claim prevents two
+concurrent replies from incrementing the unique-recipient counters twice. The
+acceptance timestamp is retained rather than replaced by the end of the delay.
+Live cached counters refresh during execution as well as on receipts/completion.
+
+Startup also recovers recipients that were claimed before an operator paused
+the campaign. Legacy campaign rows found in the generic queue are held as
+`unconfirmed` with `campaign_retry_review_required`; retry sweeps report them
+for review instead of enqueueing them. An authenticated receipt may resolve an
+uncertain attempt without a second provider request.
+
+Population verifies the audience settings have not changed while it selected
+leads. Launch rejects pre-existing drafts whose populated audience exceeds its
+stored cap. Filters validate text, status, and tag shapes before database work.
+
 ## Validation boundaries
 
 Use synthetic contacts, provider stubs, and a database recreated through the
