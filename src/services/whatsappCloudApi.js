@@ -281,7 +281,7 @@ class WhatsAppCloudApiService {
    * @param {string} text — message body
    * @param {number|null} accountId — WhatsAppAccount.id
    */
-  async sendTextMessage(phone, text, accountId = null) {
+  async sendTextMessage(phone, text, accountId = null, replyTo = null) {
     const addressee = cloudApiAddressee(phone, (value) => this.normalizePhone(value));
     if (!addressee) return { success: false, reason: 'invalid_phone', rawError: 'Empty phone number' };
     const to = addressee.to || addressee.recipient;
@@ -291,11 +291,18 @@ class WhatsAppCloudApiService {
       recipient_type: 'individual',
       ...addressee,
       type: 'text',
+      ...(replyTo ? { context: { message_id: replyTo } } : {}),
       text: { preview_url: false, body: text },
     }, accountId, `text → *${to.slice(-4)}`);
 
     if (result.success) logger.info(`WhatsApp ✅ text sent to *${to.slice(-4)} — ${result.messageId}`);
     return result;
+  }
+
+  async sendReaction(phone, messageId, emoji, accountId) {
+    const addressee = cloudApiAddressee(phone, (value) => this.normalizePhone(value));
+    if (!addressee) return { success: false, reason: 'invalid_phone' };
+    return this._postMessage({ messaging_product: 'whatsapp', ...addressee, type: 'reaction', reaction: { message_id: messageId, emoji } }, accountId, 'reaction');
   }
 
   /** Send an approved Meta template using the campaign's ordered body variables. */

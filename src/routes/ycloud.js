@@ -1,3 +1,4 @@
+import { recordReaction } from '../services/messageReactions.js';
 import { Router } from 'express';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
@@ -27,7 +28,7 @@ router.post('/webhook/ycloud/:accountId', async (req, res) => {
         || (message.from && digits(message.from) !== digits(account.ycloudPhoneNumber))) return res.sendStatus(422);
       // The YCloud id is returned synchronously even before a wamid exists.
       // Keep it as the receipt key so early receipts can be reconciled later.
-      await recordMetaReceipt({ accountId: id, waMessageId: message.id,
+      await recordMetaReceipt({ accountId: id, waMessageId: message.id, nativeMessageId: message.wamid,
         status: message.status, timestamp: message.updateTime || event.createTime,
         failureCode: Number(message.errorCode || message.whatsappApiError?.code) || undefined,
         failureReason: message.whatsappApiError?.error_data?.details || message.errorMessage,
@@ -36,6 +37,10 @@ router.post('/webhook/ycloud/:accountId', async (req, res) => {
       const message = event.whatsappInboundMessage || {};
       if (String(message.wabaId) !== account.ycloudWabaId
         || digits(message.to) !== digits(account.ycloudPhoneNumber)) return res.sendStatus(422);
+      if (message.type === 'reaction') {
+        await recordReaction({ channel: 'whatsapp', accountId: id, targetId: message.reaction?.message_id, actorKey: 'customer', emoji: message.reaction?.emoji ?? '', eventAt: new Date(message.sendTime || event.createTime) });
+        return res.sendStatus(200);
+      }
       const messageId = message.wamid || message.id;
       const senderId = message.fromUserId || message.fromParentUserId;
       if (!messageId || (!message.from && !senderId) || !message.sendTime
@@ -59,6 +64,7 @@ router.post('/webhook/ycloud/:accountId', async (req, res) => {
         inbound = await prisma.message.findFirst({ where: { direction: 'inbound', waMessageId: messageId, waAccount: id } });
         if (!inbound) throw new Error('Inbound persistence not confirmed.');
       }
+      if (message.context?.id) await prisma.message.update({ where: { id: inbound.id }, data: { quotedRemoteId: message.context.id } });
       if (!inbound.idempotencyKey) await prisma.message.updateMany({ where: { id: inbound.id, idempotencyKey: null }, data: { idempotencyKey: `ycloud-inbound:${messageId}` } });
       logger.info(`YCloud inbound authenticated and stored for WhatsApp account ${id}.`);
       if (!inbound.mediaUrl && inbound.providerStatusReason !== 'media_unavailable') {

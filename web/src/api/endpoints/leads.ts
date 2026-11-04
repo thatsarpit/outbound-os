@@ -11,6 +11,7 @@ import type {
 export interface LeadFilters {
   page?: number
   limit?: number
+  hasQueuedMessages?: boolean
   status?: string
   tier?: string
   source?: string

@@ -3011,11 +3011,24 @@ test('Web Push enforces personal device ownership and retries durable reply curs
     const sent = [];
     await deliverDeviceReplies(subscription, async (_device, payload) => { sent.push(payload); });
     assert.equal(sent.length, 1);
-    assert.equal(sent[0].tag, `message-${human.id}`);
+    assert.equal(sent[0].tag, `conversation-${lead.id}-email`);
     assert.ok(!JSON.stringify(sent).includes('Private customer'));
     subscription = await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } });
     assert.equal(subscription.lastMessageId, human.id);
     await deliverDeviceReplies(subscription, async () => assert.fail('Already delivered messages must not send again'));
+    assert.equal((await request('PATCH', `/api/push/subscriptions/${subscription.id}/preview`, { headers: headers(0), body: { previewMode: 'message' } })).status, 200);
+    const previewMessage = await prisma.message.create({ data: { leadId: lead.id, direction: 'inbound', channel: 'telegram', content: '<b>Fixture</b> message preview', status: 'delivered' } });
+    subscription = await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } });
+    const previews = [];
+    await deliverDeviceReplies(subscription, async (_device, payload) => previews.push(payload));
+    assert.equal(previews.length, 1);
+    assert.equal(previews[0].title, 'Push Reply Fixture · Telegram');
+    assert.equal(previews[0].body, 'Fixture message preview');
+    assert.equal(previews[0].url, `/m/inbox?leadId=${lead.id}&channel=telegram`);
+    assert.ok(!previews[0].url.includes('Fixture'));
+    assert.equal(previews[0].timestamp, previewMessage.createdAt.getTime());
+    assert.equal((await request('PATCH', `/api/push/subscriptions/${subscription.id}/preview`, { headers: headers(0), body: { previewMode: 'private' } })).status, 200);
+    subscription = await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } });
     const newer = await prisma.message.create({ data: { leadId: lead.id, direction: 'inbound', channel: 'whatsapp', content: 'Another question', status: 'delivered' } });
     await prisma.inboxReadState.create({ data: { leadId: lead.id, viewerKey: subscription.viewerKey, lastReadMessageId: newer.id } });
     await deliverDeviceReplies(subscription, async () => assert.fail('Messages read in the foreground must not alert again'));
@@ -3855,5 +3868,62 @@ describe('IndiaMART signed source boundary', () => {
     assert.ok(!JSON.stringify(response.body).includes(source.apiKey));
     await db.webhookSource.update({ where: { id: source.id }, data: { enabled: false } });
     assert.equal((await post('/health', source.apiKey, { state: 'ready' })).status, 404);
+  });
+});
+
+describe('Message interaction identity and reaction boundaries', () => {
+  test('quoted WhatsApp sends preserve native targets, reject other threads and keep reactions out of reply counts', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const { default: manager } = await import('../src/services/whatsapp.js');
+    const { recordReaction } = await import('../src/services/messageReactions.js');
+    const { recordMetaReceipt, reconcileMetaReceipts } = await import('../src/services/whatsappDelivery.js');
+    const account = await db.whatsAppAccount.create({ data: { name: 'Interaction fixture', enabled: true } });
+    const lead = await db.lead.create({ data: { name: 'Interaction fixture', mobile: '15550001194', assignedAccount: account.id } });
+    const other = await db.lead.create({ data: { name: 'Other interaction fixture', mobile: '15550001195', assignedAccount: account.id } });
+    const parent = await db.message.create({ data: { leadId: lead.id, channel: 'whatsapp', waAccount: account.id, direction: 'inbound', status: 'delivered', content: 'A fixture enquiry', waMessageId: 'wamid.INTERACTION_PARENT', sentAt: new Date() } });
+    const { default: cloud } = await import('../src/services/whatsappCloudApi.js');
+    const oldReaction = cloud.sendReaction;
+    let reactionCalls = 0;
+    cloud.sendReaction = async (_address, target, emoji, id) => { reactionCalls++; assert.equal(target, parent.waMessageId); assert.equal(emoji, '👍'); assert.equal(id, account.id); return { success: true }; };
+    const oldSend = manager.sendMessage;
+    const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.204' };
+    let calls = 0;
+    manager.sendMessage = async (_address, _text, id, options) => { calls++; assert.equal(id, account.id); assert.equal(options.replyTo, parent.waMessageId); return { success: true, waMessageId: 'wamid.INTERACTION_REPLY' }; };
+    try {
+      const send = body => request('POST', '/api/inbox/send', { headers, body: { leadId: lead.id, channel: 'whatsapp', text: 'Fixture reply', replyToMessageId: parent.id, clientMessageId: 'fixture-interaction-001', ...body } });
+      assert.equal((await send({ leadId: other.id })).status, 400);
+      assert.equal(calls, 0);
+      const response = await send({});
+      assert.equal(response.status, 200, JSON.stringify(response.body));
+      assert.equal(response.body.message.quotedMessageId, parent.id);
+      assert.equal(response.body.message.quotedRemoteId, parent.waMessageId);
+      assert.equal((await send({})).status, 200);
+      assert.equal(calls, 1, 'same client key does not resend a quote');
+      const reacted = await request('POST', `/api/inbox/threads/${lead.id}/messages/${parent.id}/reaction`, { headers, body: { emoji: '👍' } });
+      assert.equal(reacted.status, 200, JSON.stringify(reacted.body));
+      assert.equal(reactionCalls, 1);
+      assert.equal((await request('POST', `/api/inbox/threads/${lead.id}/messages/${parent.id}/reaction`, { headers, body: { emoji: 'not-an-emoji' } })).status, 400);
+      await db.messageReaction.deleteMany({ where: { accountId: account.id } });
+      const before = await db.message.count({ where: { leadId: lead.id, direction: 'inbound' } });
+      await recordReaction({ channel: 'whatsapp', accountId: account.id, targetId: parent.waMessageId, actorKey: 'business', emoji: '👍', eventAt: new Date('2026-11-05T02:00:00Z') });
+      await recordReaction({ channel: 'whatsapp', accountId: account.id, targetId: parent.waMessageId, actorKey: 'business', emoji: '❤️', eventAt: new Date('2026-11-05T01:00:00Z') });
+      const thread = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+      assert.equal(thread.status, 200);
+      assert.equal(thread.body.messages.find(m => m.id === parent.id).reactions[0].emoji, '👍', 'stale events do not replace a newer reaction');
+      assert.equal(thread.body.messages.find(m => m.id === response.body.message.id).replyToMessageId, parent.id);
+      await recordReaction({ channel: 'whatsapp', accountId: account.id, targetId: parent.waMessageId, actorKey: 'business', emoji: '', eventAt: new Date('2026-11-05T03:00:00Z') });
+      assert.equal(await db.message.count({ where: { leadId: lead.id, direction: 'inbound' } }), before);
+      assert.equal((await request('POST', `/api/inbox/threads/${other.id}/messages/${parent.id}/reaction`, { headers, body: { emoji: '👍' } })).status, 409);
+      await recordMetaReceipt({ accountId: account.id, waMessageId: 'ycloud-identity-fixture', nativeMessageId: 'wamid.RECEIPT_FIRST', status: 'sent' });
+      const late = await db.message.create({ data: { leadId: lead.id, channel: 'whatsapp', waAccount: account.id, direction: 'outbound', status: 'sent', content: 'Fixture receipt timing', waMessageId: 'ycloud-identity-fixture' } });
+      await reconcileMetaReceipts('ycloud-identity-fixture', account.id);
+      assert.equal((await db.message.findUnique({ where: { id: late.id } })).providerMessageId, 'wamid.RECEIPT_FIRST');
+    } finally {
+      manager.sendMessage = oldSend;
+      cloud.sendReaction = oldReaction;
+      await db.messageReaction.deleteMany({ where: { accountId: account.id, channel: 'whatsapp' } });
+      await db.lead.deleteMany({ where: { id: { in: [lead.id, other.id] } } });
+      await db.whatsAppAccount.delete({ where: { id: account.id } });
+    }
   });
 });

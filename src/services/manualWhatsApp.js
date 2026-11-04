@@ -1,3 +1,4 @@
+import { assertReplyTarget } from '../utils/messageActions.js';
 import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
 import { sendMediaFile, mediaKind } from './whatsappMedia.js';
 import { randomUUID } from 'node:crypto';
@@ -70,6 +71,7 @@ export async function sendManualWhatsApp(
   {
     leadId,
     text,
+    replyToMessageId,
     template,
     media,
     clientMessageId,
@@ -107,6 +109,9 @@ export async function sendManualWhatsApp(
         duplicate: true,
       };
   }
+  const replyTarget = replyToMessageId ? await prisma.message.findUnique({ where: { id: Number(replyToMessageId) || -1 } }) : null;
+  const replyTo = replyToMessageId ? assertReplyTarget(replyTarget, leadId, 'whatsapp', accountId) : null;
+  if (replyTo && (media || template)) throw fail('Quoted replies currently support text. Remove the quote to send a file or template.');
   let marketingTemplate = false;
   let body = String(text || '').trim();
   let templateName = null,
@@ -170,6 +175,8 @@ export async function sendManualWhatsApp(
         content: body,
         waAccount: accountId,
         status: 'sending',
+        quotedMessageId: replyTarget?.id || null,
+        quotedRemoteId: replyTo,
         idempotencyKey,
         manualSendKey: idempotencyKey,
         ...(media
@@ -224,7 +231,7 @@ export async function sendManualWhatsApp(
             accountId,
             { marketing: marketingTemplate },
           )
-        : await manager.sendMessage(address, body, accountId);
+        : await manager.sendMessage(address, body, accountId, { replyTo });
   } catch {
     result = { success: false, reason: 'confirmation_unknown' };
   }

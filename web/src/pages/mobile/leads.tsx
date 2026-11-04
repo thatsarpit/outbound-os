@@ -17,6 +17,7 @@ import {
 export default function MobileLeadsPage() {
   const { dashboardScope } = useAuthStore()
   const [params, setParams] = useSearchParams()
+  const [status, setStatus] = useState(params.get('status') || '')
   const [search, setSearch] = useState(params.get('search') || '')
   const [page, setPage] = useState(Math.max(1, Number(params.get('page')) || 1))
   const deferred = useDeferredValue(search.trim())
@@ -24,13 +25,14 @@ export default function MobileLeadsPage() {
   const listParams = () => {
     const next = new URLSearchParams()
     if (search.trim()) next.set('search', search.trim())
+    if (status) next.set('status', status)
     if (page > 1) next.set('page', String(page))
     return next
   }
   const result = useQuery({
     refetchOnWindowFocus: true,
-    queryKey: ['mobile-leads', dashboardScope, deferred, page],
-    queryFn: () => leadsApi.getLeads({ search: deferred || undefined, page, limit: 25 }),
+    queryKey: ['mobile-leads', dashboardScope, deferred, page, status],
+    queryFn: () => leadsApi.getLeads({ search: deferred || undefined, status, page, limit: 25 }),
     enabled: !selected,
     refetchInterval: 30_000,
   })
@@ -64,6 +66,34 @@ export default function MobileLeadsPage() {
           }}
           placeholder="Search name, email or phone"
         />
+      </label>
+      <label className="block text-sm text-text-secondary">
+        Lead status
+        <select
+          aria-label="Filter lead status"
+          className={`${mobileInput} mt-2`}
+          value={status}
+          onChange={(event) => {
+            setStatus(event.target.value)
+            setPage(1)
+          }}
+        >
+          <option value="">All statuses</option>
+          {[
+            'new',
+            'contacted',
+            'replied',
+            'engaged',
+            'closed',
+            'paused',
+            'wa_unavailable',
+            'wa_undelivered',
+          ].map((value) => (
+            <option key={value} value={value}>
+              {value.replace(/^wa_/, 'WhatsApp ').replace(/_/g, ' ')}
+            </option>
+          ))}
+        </select>
       </label>
       {result.isPending ? (
         <p role="status" className="py-10 text-center text-sm text-text-muted">

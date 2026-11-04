@@ -243,7 +243,7 @@ export default function AnalyticsPage() {
   const replyRate = msgsSent > 0 ? (replies / msgsSent) * 100 : 0
   const hasDaily = daily.some((d) => d.leadsCreated + d.msgsSent + d.replies > 0)
 
-  const countryData = (charts?.countryDist ?? []).slice(0, 8)
+  const countryData = charts?.countryDist ?? []
   const countryTotal = countryData.reduce((sum, c) => sum + c.value, 0)
 
   // Tier is an ordered scale, so it gets the sequential ramp rather than eight
@@ -428,7 +428,7 @@ export default function AnalyticsPage() {
                 <Bar
                   isAnimationActive={false}
                   dataKey="replies"
-                  name="Replies"
+                  name="Reply messages"
                   fill={chartTheme.palette[5]}
                   radius={[3, 3, 0, 0]}
                 />
@@ -450,7 +450,7 @@ export default function AnalyticsPage() {
           })) satisfies WidgetRow[]
         }
         title="Leads by country"
-        description="Top eight countries among leads received in the selected period. Shares are within these countries."
+        description="Leads received during the selected period, including other countries. Shares use the full cohort."
       >
         {chartsError ? (
           <ErrorState
@@ -530,7 +530,7 @@ export default function AnalyticsPage() {
             dropoff,
           })) satisfies WidgetRow[]
         }
-        title="Conversion funnel"
+        title="Current pipeline progression"
         description={`Current status of active leads received in the last ${days} days.`}
       >
         {funnelError ? (
@@ -542,8 +542,11 @@ export default function AnalyticsPage() {
           />
         ) : funnelLoading ? (
           <div className="h-48 animate-pulse rounded-md bg-surface-raised" />
-        ) : !funnel || funnel.stages.length === 0 ? (
-          <SectionMessage>No funnel data for this window yet.</SectionMessage>
+        ) : !funnel || funnel.total === 0 || funnel.stages.length === 0 ? (
+          <SectionMessage>
+            No active leads in this acquisition cohort. Paused and unavailable leads are excluded;
+            messaging activity can belong to older leads.
+          </SectionMessage>
         ) : (
           <>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -584,8 +587,13 @@ export default function AnalyticsPage() {
                     </div>
                     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] tabular-nums text-text-muted">
                       <span>At this stage {formatCount(stage.count)}</span>
-                      <span>Step conversion {stage.conversionRate.toFixed(1)}%</span>
-                      {stage.dropoff > 0 && <span>Drop-off {stage.dropoff.toFixed(1)}%</span>}
+                      <span>
+                        Step conversion{' '}
+                        {stage.conversionRate == null ? '—' : `${stage.conversionRate.toFixed(1)}%`}
+                      </span>
+                      {stage.dropoff > 0 && (
+                        <span>Did not reach this stage: {formatCount(stage.dropoff)}</span>
+                      )}
                     </div>
                   </div>
                 )
@@ -601,7 +609,7 @@ export default function AnalyticsPage() {
         error={!!roiError}
         onRetry={() => refetchRoi()}
         rows={(campaignRoi?.campaigns ?? []).map((row) => ({ ...row })) satisfies WidgetRow[]}
-        title="Campaign ROI"
+        title="Campaign outcomes"
         description={`Closed revenue and conversion for campaigns created in the last ${days} days.`}
       >
         {roiError ? (
@@ -820,7 +828,8 @@ export default function AnalyticsPage() {
           funnel ? (
             <>
               <span className="tabular-nums">{formatCount(funnel.total)}</span>{' '}
-              {funnel.total === 1 ? 'active lead' : 'active leads'} over the last {days} days
+              {funnel.total === 1 ? 'active lead' : 'active leads'} in the last {days}-day
+              acquisition cohort
             </>
           ) : (
             `Outreach and conversion performance over the last ${days} days.`
@@ -853,7 +862,7 @@ export default function AnalyticsPage() {
           />
           <MetricCard
             icon={Send}
-            label="Messages sent"
+            label="Confirmed messages"
             value={formatCount(msgsSent)}
             hint={`Last ${days} days`}
             trend={daily.map((d) => d.msgsSent)}
@@ -867,9 +876,9 @@ export default function AnalyticsPage() {
           />
           <MetricCard
             icon={TrendingUp}
-            label="Reply rate"
-            value={`${replyRate.toFixed(1)}%`}
-            hint={`${formatCount(replies)} of ${formatCount(msgsSent)} sent`}
+            label="Reply messages / outbound"
+            value={msgsSent ? `${replyRate.toFixed(1)}%` : '—'}
+            hint="Message events in this period; not a recipient response rate"
           />
         </div>
       )}

@@ -16,7 +16,14 @@ type NotificationDevice = {
   registeredAt: string
   enabled: boolean
   needsReconnect: boolean
+  previewMode: 'private' | 'sender' | 'message'
 }
+type PreviewMode = NotificationDevice['previewMode']
+const previewChoices: Array<{ value: PreviewMode; label: string }> = [
+  { value: 'private', label: 'Hide sender and message' },
+  { value: 'sender', label: 'Show sender and channel' },
+  { value: 'message', label: 'Show sender and message' },
+]
 type CurrentDevice = { subscription: PushSubscription | null; id: number | null }
 
 function suggestedDeviceName() {
@@ -51,6 +58,7 @@ export function DeviceNotifications() {
   const [feedback, setFeedback] = useState('')
   const [removeDevice, setRemoveDevice] = useState<NotificationDevice | null>(null)
   const [deviceLabel, setDeviceLabel] = useState(suggestedDeviceName)
+  const [previewMode, setPreviewMode] = useState<PreviewMode>('private')
   const supported =
     window.isSecureContext &&
     'serviceWorker' in navigator &&
@@ -101,6 +109,8 @@ export function DeviceNotifications() {
   })
   const subscription = current.data?.subscription
   const deviceList = devices.data?.devices ?? []
+  const currentPreview =
+    deviceList.find((device) => device.id === current.data?.id)?.previewMode ?? 'private'
   const busy = pending !== null
 
   async function reloadDevices() {
@@ -136,6 +146,7 @@ export function DeviceNotifications() {
           {
             ...device.toJSON(),
             deviceLabel,
+            previewMode,
           },
         )
         if (!saved?.enabled) throw new Error('The notification device was not saved. Try again.')
@@ -146,7 +157,9 @@ export function DeviceNotifications() {
       }
       await reloadDevices()
       setFeedback(
-        'Enabled on this device. New customer alerts keep message text off your Lock Screen.',
+        previewMode === 'private'
+          ? 'Enabled on this device. Sender and message previews are hidden.'
+          : 'Enabled on this device with your selected notification preview.',
       )
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'Could not enable notifications.')
@@ -169,6 +182,21 @@ export function DeviceNotifications() {
       setFeedback('Notifications are off on this device.')
     } catch {
       setFeedback('Could not disable notifications. Check your connection and try again.')
+    } finally {
+      setPending(null)
+    }
+  }
+  async function changePreview(device: NotificationDevice, value: PreviewMode) {
+    setPending(`preview-${device.id}`)
+    setFeedback('')
+    try {
+      await api.patch(`/push/subscriptions/${device.id}/preview`, { previewMode: value })
+      await reloadDevices()
+      setFeedback(`Notification previews updated for ${device.label}.`)
+    } catch (error) {
+      setFeedback(
+        error instanceof Error ? error.message : 'Could not update notification previews.',
+      )
     } finally {
       setPending(null)
     }
@@ -215,10 +243,50 @@ export function DeviceNotifications() {
     >
       <div className="space-y-5">
         {IS_DEMO ? (
-          <p className="text-sm text-text-secondary">
-            Notifications are available in your connected workspace. This preview does not register
-            your device.
-          </p>
+          <div className="space-y-3">
+            <p className="text-sm text-text-secondary">
+              Try notification previews with sample data. This choice stays in this preview; no
+              device is registered and no notification is sent.
+            </p>
+            <div className="space-y-3 rounded-xl border border-border bg-surface-raised p-3">
+              <label className="block text-sm font-medium">
+                Notification content
+                <select
+                  aria-label="Sample notification preview"
+                  className="mt-2 min-h-11 w-full rounded-lg border border-border bg-surface px-3 text-base text-text-primary"
+                  value={previewMode}
+                  onChange={(event) => setPreviewMode(event.target.value as PreviewMode)}
+                >
+                  {previewChoices.map((choice) => (
+                    <option key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="text-xs leading-5 text-text-secondary">
+                In your connected workspace, this choice applies to each notification device. Sender
+                names and message previews can appear on your Lock Screen.
+              </p>
+              <div
+                aria-label="Sample notification banner"
+                aria-live="polite"
+                className="rounded-xl border border-border bg-surface p-3"
+              >
+                <p className="text-xs text-text-secondary">Sample · Outbound OS · now</p>
+                <p className="mt-1 text-sm font-semibold">
+                  {previewMode === 'private' ? 'New WhatsApp message' : 'Alex · WhatsApp'}
+                </p>
+                <p className="mt-1 text-sm text-text-secondary">
+                  {previewMode === 'message'
+                    ? 'Could you share an update on my enquiry?'
+                    : previewMode === 'sender'
+                      ? 'Sent you a message.'
+                      : 'Open Outbound OS to read and reply.'}
+                </p>
+              </div>
+            </div>
+          </div>
         ) : (
           <>
             <div className="space-y-3">
@@ -264,8 +332,58 @@ export function DeviceNotifications() {
                   <p className="text-[13px] text-text-secondary">
                     {subscription
                       ? 'Customer message alerts are enabled here.'
-                      : 'Receive alerts when the app is closed. Message previews stay private.'}
+                      : 'Receive alerts when the app is closed. Choose what appears in each notification.'}
                   </p>
+                  <div className="space-y-2 rounded-xl border border-border bg-surface-raised p-3">
+                    <label className="block text-sm font-medium">
+                      Notification content
+                      <select
+                        aria-label="Notification preview on this device"
+                        className="mt-2 min-h-11 w-full rounded-lg border border-border bg-surface px-3 text-base text-text-primary"
+                        value={subscription ? currentPreview : previewMode}
+                        disabled={
+                          busy ||
+                          (Boolean(subscription) &&
+                            !deviceList.some((device) => device.id === current.data?.id))
+                        }
+                        onChange={(event) => {
+                          const value = event.target.value as PreviewMode
+                          const device = deviceList.find((item) => item.id === current.data?.id)
+                          if (subscription && device) void changePreview(device, value)
+                          else setPreviewMode(value)
+                        }}
+                      >
+                        {previewChoices.map((choice) => (
+                          <option key={choice.value} value={choice.value}>
+                            {choice.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <p className="text-xs leading-5 text-text-secondary">
+                      Sender names and message previews can appear on your Lock Screen. This choice
+                      applies only to this notification device; your phone’s preview settings still
+                      apply.
+                    </p>
+                    <div
+                      aria-label="Notification example"
+                      className="rounded-lg border border-border bg-surface p-3"
+                    >
+                      <p className="text-xs text-text-secondary">Example · Outbound OS</p>
+                      <p className="mt-1 text-sm font-semibold">
+                        {(subscription ? currentPreview : previewMode) === 'private'
+                          ? 'New WhatsApp message'
+                          : 'Alex · WhatsApp'}
+                      </p>
+                      <p className="mt-1 text-sm text-text-secondary">
+                        {(subscription ? currentPreview : previewMode) === 'message'
+                          ? 'Could you share an update on my enquiry?'
+                          : (subscription ? currentPreview : previewMode) === 'sender'
+                            ? 'Sent you a message.'
+                            : 'Open Outbound OS to read and reply.'}
+                      </p>
+                    </div>
+                  </div>
                   {!subscription && (
                     <label className="block max-w-sm text-xs text-text-secondary">
                       Device name
@@ -374,6 +492,26 @@ export function DeviceNotifications() {
                             {Number.isFinite(registered.getTime()) &&
                               ` · Added ${registered.toLocaleDateString()}`}
                           </p>
+                          {!here && (
+                            <label className="mt-2 block text-xs text-text-secondary">
+                              Notification content
+                              <select
+                                aria-label={`Notification preview for ${device.label}`}
+                                className="mt-1 min-h-11 w-full rounded-lg border border-border bg-surface px-2 text-base text-text-primary"
+                                value={device.previewMode}
+                                disabled={busy || device.needsReconnect}
+                                onChange={(event) =>
+                                  void changePreview(device, event.target.value as PreviewMode)
+                                }
+                              >
+                                {previewChoices.map((choice) => (
+                                  <option key={choice.value} value={choice.value}>
+                                    {choice.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          )}
                         </div>
                         <Button
                           variant="ghost"

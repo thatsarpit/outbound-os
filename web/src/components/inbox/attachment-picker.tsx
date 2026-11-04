@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { File, Loader2, Paperclip, X } from 'lucide-react'
 import type { MediaFile } from '@/api/types'
@@ -27,6 +27,7 @@ export function AttachmentPicker({
   onUploadingChange,
 }: AttachmentPickerProps) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const [fileError, setFileError] = useState('')
 
   const uploadMutation = useMutation({
     networkMode: 'always',
@@ -46,9 +47,11 @@ export function AttachmentPicker({
     const file = e.target.files?.[0]
     if (!file) return
     if (file.size > 10 * 1024 * 1024) {
-      alert('File must be under 10 MB')
+      setFileError('This file is too large. Choose a file under 10 MB.')
+      e.target.value = ''
       return
     }
+    setFileError('')
     onUploadingChange?.(true)
     uploadMutation.mutate(file)
     e.target.value = ''
@@ -80,6 +83,11 @@ export function AttachmentPicker({
         </div>
       )}
 
+      {fileError && (
+        <p role="alert" className="text-sm text-danger">
+          {fileError}
+        </p>
+      )}
       {uploadMutation.error && (
         <p role="alert" className="text-xs text-danger">
           Upload failed: {uploadMutation.error.message}

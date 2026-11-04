@@ -28,10 +28,15 @@ export function pushDeviceLabel(value) {
   return value.replace(/[\u0000-\u001f\u007f\u202a-\u202e\u2066-\u2069]/g, '').trim().slice(0, 64) || 'Notification device';
 }
 
-export function encryptPushSubscription(value, label) {
+export const PUSH_PREVIEW_MODES = ['private', 'sender', 'message'];
+export function pushPreviewMode(value) {
+  return PUSH_PREVIEW_MODES.includes(value) ? value : 'private';
+}
+
+export function encryptPushSubscription(value, label, previewMode = 'private') {
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', encryptionKey(), iv);
-  const payload = { ...validatePushSubscription(value), deviceLabel: pushDeviceLabel(label) };
+  const payload = { ...validatePushSubscription(value), deviceLabel: pushDeviceLabel(label), previewMode: pushPreviewMode(previewMode) };
   const body = Buffer.concat([cipher.update(JSON.stringify(payload), 'utf8'), cipher.final()]);
   return [iv, cipher.getAuthTag(), body].map(part => part.toString('base64url')).join('.');
 }
@@ -45,6 +50,15 @@ export function decryptPushSubscription(value) {
   return validatePushSubscription(decryptPayload(value));
 }
 
+/** Legacy and unreadable metadata keep the original private Lock Screen behavior. */
+export function pushSubscriptionPreview(value) {
+  try { return pushPreviewMode(decryptPayload(value).previewMode); } catch { return 'private'; }
+}
+export function updatePushSubscriptionPreview(value, previewMode) {
+  const payload = decryptPayload(value);
+  return encryptPushSubscription(payload, payload.deviceLabel, previewMode);
+}
+
 /** The inventory never exposes endpoint credentials, hashes or encryption keys. */
 export function publicPushDevice(row, publicKey) {
   let label = 'Notification device';
@@ -55,6 +69,7 @@ export function publicPushDevice(row, publicKey) {
     registeredAt: row.createdAt,
     enabled: Boolean(row.enabled),
     needsReconnect: !publicKey || row.vapidKey !== publicKey,
+    previewMode: pushSubscriptionPreview(row.encryptedData),
   };
 }
 

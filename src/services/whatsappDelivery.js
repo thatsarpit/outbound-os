@@ -27,6 +27,7 @@ export async function applyMetaReceipt(receipt) {
       /* Retain delivery even without pricing. */
     }
     const data = {
+      ...(/^wamid\./.test(receipt.nativeMessageId || '') ? { providerMessageId: receipt.nativeMessageId } : {}),
       ...(pricing.category ? { pricingCategory: pricing.category } : {}),
       ...(pricing.type ? { pricingType: pricing.type } : {}),
       ...(typeof pricing.billable === 'boolean'
@@ -88,6 +89,7 @@ export async function applyMetaReceipt(receipt) {
 export async function recordMetaReceipt({
   accountId,
   waMessageId,
+  nativeMessageId,
   status,
   failureCode,
   failureReason,
@@ -114,6 +116,7 @@ export async function recordMetaReceipt({
   const data = {
     accountId,
     waMessageId,
+    ...(/^wamid\./.test(nativeMessageId || '') ? { nativeMessageId } : {}),
     status,
     failureCode: Number.isSafeInteger(failureCode) ? failureCode : null,
     failureReason:

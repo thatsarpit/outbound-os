@@ -1,7 +1,8 @@
 import type { InboxChannel, InboxMessage } from '@/api/types'
-import { cn, formatRelativeTime } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { getChannel } from '@/lib/channels'
 import { ChannelBadge } from './channel-badge'
+import { MessageInteractions } from './message-interactions'
 import { MessageMedia } from './message-media'
 
 /**
@@ -20,8 +21,14 @@ export function MessageBubble({
   message,
   showChannel = false,
   className,
+  onReply,
+  quotedMessage,
+  showDate = false,
 }: {
   message: InboxMessage
+  onReply?: (message: InboxMessage) => void
+  quotedMessage?: InboxMessage
+  showDate?: boolean
   /** Set when this message switches channel relative to the previous one. */
   showChannel?: boolean
   className?: string
@@ -29,101 +36,118 @@ export function MessageBubble({
   const failed = ['failed', 'permanently_failed'].includes(message.status)
   const reason = message.providerStatusReason
   const isInbound = message.direction === 'inbound'
-  const unsupported = isInbound && message.channel === 'whatsapp'
-    && /^\[(unsupported|Unsupported WhatsApp message)\]$/i.test(message.content.trim())
-  const meta = getChannel(message.channel)
-  const showPricing =
-    !isInbound &&
+  const unsupported =
+    isInbound &&
     message.channel === 'whatsapp' &&
-    (Boolean(message.pricingCategory) || typeof message.billable === 'boolean')
-  const pricingCategory = message.pricingCategory
-    ? message.pricingCategory.replace(/_/g, ' ').replace(/^./, (letter) => letter.toUpperCase())
-    : 'WhatsApp'
+    /^\[(unsupported|Unsupported WhatsApp message)\]$/i.test(message.content.trim())
+  const meta = getChannel(message.channel)
 
   return (
-    <div className={cn('flex w-full', isInbound ? 'justify-start' : 'justify-end')}>
-      <div className={cn('flex max-w-[85%] flex-col gap-1 sm:max-w-[76%]', className)}>
-        {showChannel && (
-          <ChannelBadge
-            channel={message.channel as InboxChannel}
-            variant="inline"
-            className={cn('px-0.5', isInbound ? 'self-start' : 'self-end')}
-          />
-        )}
-
-        <div
-          className={cn(
-            'rounded-md border px-3 py-2 text-[13px] leading-relaxed',
-            isInbound
-              ? 'rounded-tl-sm border-border bg-surface-raised text-text-primary'
-              : cn('rounded-tr-sm text-text-primary', meta.bg, meta.border),
-          )}
-        >
-          {!(
-            message.mediaUrl &&
-            /^\[(Photo|Video|Audio|Voice message|Sticker|Image|Document|Pdf)\]/.test(
-              message.content || '',
-            )
-          ) && (
-            <p className="whitespace-pre-wrap break-words">
-              {unsupported
-                ? 'WhatsApp could not provide this message’s content. Ask the customer to resend it as a standard text, photo or file.'
-                : message.content}
-            </p>
-          )}
-
-          {message.mediaUrl && (
-            <MessageMedia
-              messageId={message.id}
-              mediaType={message.mediaType}
-              filename={message.mediaFilename}
-            />
-          )}
-        </div>
-
-        <span
-          className={cn(
-            'px-0.5 text-[10px] tabular-nums text-text-muted',
-            isInbound ? 'self-start' : 'self-end',
-          )}
-        >
-          {formatRelativeTime(message.sentAt || message.createdAt)}
-          {!isInbound && message.status
-            ? ` · ${message.status === 'sent' && message.channel === 'whatsapp' ? 'Accepted · awaiting delivery' : message.status === 'unconfirmed' ? 'Confirmation unknown' : message.status}`
-            : ''}
-        </span>
-        {(failed || message.status === 'unconfirmed' || message.status === 'sending') && (
-          <p
-            role="status"
-            className="rounded-md bg-warning-muted px-3 py-2 text-xs leading-5 text-warning"
-          >
-            {reason === 're_engagement_required'
-              ? 'Not delivered: the 24-hour reply window closed. Use an approved template and wait for a customer reply.'
-              : reason === 'thread_not_owned'
-                ? 'Not delivered: another app controls this conversation. Set your connected provider as the primary responder in Meta conversation routing before retrying.'
-              : message.status === 'unconfirmed' || message.status === 'sending'
-                ? 'Delivery is unconfirmed. Check this attempt before sending again; it may already have reached Meta.'
-                : `Not delivered${reason ? `: ${reason.replace(/_/g, ' ')}` : '. The provider did not supply a stored reason.'}`}
-            {failed && message.providerErrorMessage && (
-              <span className="mt-1 block">
-                {message.providerErrorMessage}{message.providerErrorCode ? ` (code ${message.providerErrorCode})` : ''}
-              </span>
+    <>
+      {showDate && (
+        <p className="my-4 text-center text-xs font-medium text-text-secondary">
+          {new Date(message.sentAt || message.createdAt).toLocaleDateString([], {
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric',
+          })}
+        </p>
+      )}
+      <MessageInteractions message={message} onReply={onReply}>
+        <div className={cn('flex w-full', isInbound ? 'justify-start' : 'justify-end')}>
+          <div className={cn('flex max-w-[85%] flex-col gap-1 sm:max-w-[76%]', className)}>
+            {showChannel && (
+              <ChannelBadge
+                channel={message.channel as InboxChannel}
+                variant="inline"
+                className={cn('px-0.5', isInbound ? 'self-start' : 'self-end')}
+              />
             )}
-          </p>
-        )}
-        {showPricing && (
-          <span
-            className="self-end px-0.5 text-[10px] text-text-muted"
-            title={message.pricingType ? `Meta pricing model: ${message.pricingType}` : undefined}
-          >
-            {pricingCategory}
-            {typeof message.billable === 'boolean'
-              ? ` · ${message.billable ? 'billable' : 'free'}`
-              : ''}
-          </span>
-        )}
-      </div>
-    </div>
+
+            <div
+              className={cn(
+                'rounded-2xl border px-3.5 py-2.5 text-[15px] leading-relaxed sm:text-sm',
+                isInbound
+                  ? 'rounded-tl-md border-border bg-surface-raised text-text-primary'
+                  : cn('rounded-tr-md text-text-primary', meta.bg, meta.border),
+              )}
+            >
+              {message.replyToMessageId && (
+                <button
+                  type="button"
+                  className="mb-2 block w-full truncate rounded-lg border-l-2 border-accent bg-background/30 p-2 text-left text-xs text-text-secondary"
+                  onClick={() =>
+                    document.getElementById(`message-${message.replyToMessageId}`)?.scrollIntoView({
+                      block: 'center',
+                      behavior: matchMedia('(prefers-reduced-motion: reduce)').matches
+                        ? 'instant'
+                        : 'smooth',
+                    })
+                  }
+                >
+                  {quotedMessage?.content || 'Original message unavailable'}
+                </button>
+              )}
+              {!(
+                message.mediaUrl &&
+                /^\[(Photo|Video|Audio|Voice message|Sticker|Image|Document|Pdf)\]/.test(
+                  message.content || '',
+                )
+              ) && (
+                <p className="whitespace-pre-wrap break-words">
+                  {unsupported
+                    ? 'WhatsApp could not provide this message’s content. Ask the customer to resend it as a standard text, photo or file.'
+                    : message.content}
+                </p>
+              )}
+
+              {message.mediaUrl && (
+                <MessageMedia
+                  messageId={message.id}
+                  mediaType={message.mediaType}
+                  filename={message.mediaFilename}
+                />
+              )}
+            </div>
+
+            <span
+              className={cn(
+                'px-0.5 text-xs tabular-nums text-text-secondary',
+                isInbound ? 'self-start' : 'self-end',
+              )}
+            >
+              <time
+                dateTime={message.sentAt || message.createdAt}
+                title={new Date(message.sentAt || message.createdAt).toLocaleString()}
+              >
+                {new Date(message.sentAt || message.createdAt).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </time>
+              {!isInbound && message.status
+                ? ` · ${message.status === 'sent' && message.channel === 'whatsapp' ? 'Accepted · awaiting delivery' : message.status === 'unconfirmed' ? 'Confirmation unknown' : message.status}`
+                : ''}
+            </span>
+            {(failed || message.status === 'unconfirmed' || message.status === 'sending') && (
+              <p
+                role="status"
+                className="rounded-md bg-warning-muted px-3 py-2 text-xs leading-5 text-warning"
+              >
+                {reason === 're_engagement_required'
+                  ? 'Not delivered: the 24-hour reply window closed. Use an approved template and wait for a customer reply.'
+                  : reason === 'thread_not_owned'
+                    ? 'Not delivered. Your administrator needs to reconnect this conversation. See Message info.'
+                    : message.status === 'unconfirmed' || message.status === 'sending'
+                      ? 'Delivery is unconfirmed. Check this attempt before sending again; it may already have reached Meta.'
+                      : `Not delivered${reason ? `: ${reason.replace(/_/g, ' ')}` : '. The provider did not supply a stored reason.'}`}
+              </p>
+            )}
+          </div>
+        </div>
+      </MessageInteractions>
+    </>
   )
 }
 

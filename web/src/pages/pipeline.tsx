@@ -183,7 +183,9 @@ export default function PipelinePage() {
       </section>
       <div className="rounded-lg border border-border bg-surface px-4 py-3">
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-          <span className="font-medium text-text-secondary">Outside the sales path</span>
+          <span className="font-medium text-text-secondary">
+            Other lead states and channel flags · may overlap
+          </span>
           {outside.isPending ? (
             <span role="status" className="text-text-muted">
               Loading…

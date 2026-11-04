@@ -1,3 +1,5 @@
+import messageActionRoutes from './routes/messageActions.js';
+import { assertReplyTarget, nativeMessageId, messageAccount, reactionTarget } from './utils/messageActions.js';
 import websiteEnquiries from './routes/websiteEnquiries.js';
 import connectorIntake from './routes/connectorIntake.js';
 import indiamartIntake from './routes/indiamartIntake.js';
@@ -205,7 +207,7 @@ function buildInboxMessage(message, emailAccountsById = {}, telegramAccountsById
     subject: message.emailSubject || null,
     senderAccountId: message.emailAccountId || message.imessageAccountId || message.telegramAccountId || message.waAccount || null,
     senderDisplay: message.direction === 'inbound' ? null : telegramAccount?.displayName || telegramAccount?.name || senderAccount?.senderName || senderAccount?.name || senderAccount?.email || null,
-    replyToMessageId: null,
+    replyToMessageId: message.quotedMessageId || null,
   };
 }
 
@@ -874,6 +876,7 @@ app.use('/api', emailAttachmentRoutes);
 // 403'd if they reference a poolId they don't have a UserPool row for.
 app.use('/api', requirePoolAccess());
 app.use('/api', inboxReadStateRoutes);
+app.use('/api', messageActionRoutes);
 app.use('/api', webPushRoutes);
 app.use('/api', analyticsViewRoutes);
 // Per-lead authorization: every /api/leads/<numeric>/... request resolves
@@ -1545,6 +1548,7 @@ app.get('/api/leads', async (req, res) => {
       }
     }
 
+    if (req.query.hasQueuedMessages === 'true') andClauses.push({ messages: { some: { status: { in: ['queued', 'sending'] } } } });
     if (status && status !== 'all') {
       if (status === 'wa_unavailable') {
         andClauses.push({ isOnWhatsApp: false });
@@ -3237,7 +3241,15 @@ async function sendInboxThreadDetail(req, res) {
     const emailAccountsById = Object.fromEntries(emailAccounts.map((account) => [account.id, account]));
     const telegramAccountsById = Object.fromEntries(telegramSenderAccounts.map((account) => [account.id, account]));
     const orderedMessages = sortConversationMessages(lead.messages);
-    const mappedMessages = orderedMessages.map((message) => buildInboxMessage(message, emailAccountsById, telegramAccountsById));
+    const reactionTargets = orderedMessages.filter(m => ['whatsapp', 'telegram'].includes(m.channel) && nativeMessageId(m)).map(m => ({ channel: m.channel, accountId: messageAccount(m), targetId: reactionTarget(m) }));
+    const reactions = reactionTargets.length ? await prisma.messageReaction.findMany({ where: { OR: reactionTargets, emoji: { not: '' } } }) : [];
+    const mappedMessages = orderedMessages.map((message) => ({
+      ...buildInboxMessage(message, emailAccountsById, telegramAccountsById),
+      replyToMessageId: message.quotedMessageId || orderedMessages.find(m => m.channel === message.channel && messageAccount(m) === messageAccount(message) && nativeMessageId(m) === message.quotedRemoteId)?.id || null,
+      canReply: Boolean(nativeMessageId(message) && ['whatsapp', 'telegram', 'email'].includes(message.channel)),
+      canReact: Boolean(nativeMessageId(message) && ['whatsapp', 'telegram'].includes(message.channel) && (message.channel !== 'whatsapp' || Date.now() - new Date(message.sentAt || message.createdAt).getTime() < 30 * 86400000)),
+      reactions: reactions.filter(r => r.channel === message.channel && r.accountId === messageAccount(message) && r.targetId === reactionTarget(message)).map(r => ({ emoji: r.emoji, own: r.actorKey === 'business' })),
+    }));
     const lastMessage = orderedMessages.at(-1) || null;
     const viewerKey = inboxViewerKey(req.user);
     const readState = viewerKey ? await prisma.inboxReadState.findUnique({ where: { leadId_viewerKey: { leadId, viewerKey } }, select: { lastReadMessageId: true } }) : null;
@@ -3641,10 +3653,14 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
         return res.status(400).json({ error: 'Add a Telegram @username, phone number, or peer ID to this lead first' });
       }
 
+      const target = req.body?.replyToMessageId ? await prisma.message.findUnique({ where: { id: Number(req.body.replyToMessageId) || -1 } }) : null;
+      const replyTo = target ? assertReplyTarget(target, leadId, 'telegram', lead.assignedTelegramAccountId) : null;
+      if (req.body?.replyToMessageId && !target) return res.status(400).json({ error: 'Original message unavailable.' });
       const result = await telegramService.sendMessage({
-        accountId: parsePositiveInt(req.body?.accountId),
+        accountId: target?.telegramAccountId || parsePositiveInt(req.body?.accountId),
         peer: lead.telegramPeer,
         message: text,
+        replyTo,
       });
       const now = result.sentAt || new Date();
       const [savedMsg] = await prisma.$transaction([
@@ -3655,6 +3671,8 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
             channel: 'telegram',
             telegramAccountId: result.accountId,
             telegramMessageId: result.messageId || null,
+            quotedMessageId: target?.id || null,
+            quotedRemoteId: replyTo,
             content: text,
             status: 'sent',
             sentAt: now,
@@ -3684,6 +3702,7 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
 
       // Files, with the typed text as the first file's caption.
       if (attachmentIds.length > 0) {
+        if (req.body?.replyToMessageId) return res.status(400).json({ error: 'Remove the quote before sending attachments.' });
         const sent = await sendWhatsAppFiles({ leadId, mediaFileIds: attachmentIds, caption: text, accountId: parsePositiveInt(req.body?.accountId), clientMessageId: req.body?.clientMessageId });
         broadcastEvent('manual_reply', {
           leadId: sent.lead.id,
@@ -3696,7 +3715,7 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
 
       if (!text && !req.body?.whatsappTemplate) return res.status(400).json({ error: 'Write a reply or choose an approved template.' });
 
-      const result = await sendManualWhatsAppMessage({ leadId, text, accountId: parsePositiveInt(req.body?.accountId), template: req.body?.whatsappTemplate, clientMessageId: req.body?.clientMessageId });
+      const result = await sendManualWhatsAppMessage({ leadId, text, replyToMessageId: req.body?.replyToMessageId, accountId: parsePositiveInt(req.body?.accountId), template: req.body?.whatsappTemplate, clientMessageId: req.body?.clientMessageId });
       broadcastEvent('manual_reply', {
         leadId: result.lead.id,
         accountId: result.accountId,
@@ -4112,7 +4131,7 @@ app.get('/api/analytics/funnel', async (req, res) => {
     };
     const activeWhere = {
       ...baseWhere,
-      status: { notIn: ['paused', 'wa_unavailable'] },
+      status: { in: ['new', 'contacted', 'replied', 'engaged', 'closed'] },
     };
 
     const stages = ['new', 'contacted', 'replied', 'engaged', 'closed'];
@@ -4149,8 +4168,7 @@ app.get('/api/analytics/funnel', async (req, res) => {
         conversionRate: convRate,
         dropoff: i === 0 ? 0 : dropoff,
       });
-      if (i === 0) prevCount = allContactedPlus;
-      else prevCount = stageCounts.slice(i).reduce((a, b) => a + b, 0);
+      prevCount = reachedCount;
     }
 
     // Source breakdown
@@ -4297,8 +4315,8 @@ app.get('/api/analytics/campaign-roi', async (req, res) => {
       const revenue = leads
         .filter((lead) => lead.status === 'closed' && lead.dealValue != null)
         .reduce((sum, lead) => sum + (lead.dealValue || 0), 0);
-      const replyRate = sent > 0 ? Math.round((replied / sent) * 100) : 0;
-      const convRate = sent > 0 ? Math.round((converted / sent) * 100) : 0;
+      const replyRate = sent > 0 ? Math.round((replied / sent) * 1000) / 10 : 0;
+      const convRate = sent > 0 ? Math.round((converted / sent) * 1000) / 10 : 0;
 
       return {
         id: c.id,

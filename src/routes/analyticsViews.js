@@ -18,10 +18,13 @@ async function leadWindow(req, fallbackDays) {
 router.get('/analytics/distributions', async (req, res) => {
   try {
     const where = await leadWindow(req, 30);
-    const [countryDist, tierDist] = await Promise.all([
+    const [countryDist, tierDist, total] = await Promise.all([
       prisma.lead.groupBy({ by: ['country'], where, _count: { id: true }, orderBy: { _count: { id: 'desc' } }, take: 8 }),
       prisma.lead.groupBy({ by: ['leadTier'], where, _count: { id: true } }),
+      prisma.lead.count({ where }),
     ]);
+    const other = total - countryDist.reduce((sum, row) => sum + row._count.id, 0);
+    if (other > 0) countryDist.push({ country: 'Other countries', _count: { id: other } });
     res.json({ countryDist, tierDist });
   } catch { res.status(500).json({ error: 'Could not load lead distributions.' }); }
 });

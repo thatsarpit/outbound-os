@@ -224,7 +224,7 @@ class WhatsAppManager {
    * @param {number | null | undefined} accountId
    * @returns {{success: boolean, accountId: number | null, reason: string, error?: string, isNotOnWhatsApp?: boolean, identifiers?: string[], waMessageId?: string}}
    */
-  async sendMessage(phone, message, accountId, { poolId } = {}) {
+  async sendMessage(phone, message, accountId, { poolId, replyTo } = {}) {
     // PERSONA SAFETY: If a specific account is requested, ONLY use that account.
     // Never silently fall back to a different account — that would cause persona
     // mismatch (content was generated with the requested account's persona).
@@ -252,7 +252,7 @@ class WhatsAppManager {
       return { success: false, accountId: selectedAccountId, reason: 'invalid_phone' };
     }
 
-    const result = await whatsappCloudApi.sendTextMessage(formattedPhone, message, selectedAccountId);
+    const result = await whatsappCloudApi.sendTextMessage(formattedPhone, message, selectedAccountId, replyTo);
 
     if (result.success) {
       // ── Success — reset error count, increment counters ──

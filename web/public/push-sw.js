@@ -11,6 +11,7 @@ self.addEventListener('push', (event) => {
       body: typeof payload.body === 'string' ? payload.body : 'Open your sales workspace for an update.',
       icon: '/app-icon-192.png', badge: '/app-icon-192.png',
       tag: typeof payload.tag === 'string' ? payload.tag : 'outbound-update',
+      ...(typeof payload.timestamp === 'number' && Number.isFinite(payload.timestamp) ? { timestamp: payload.timestamp } : {}),
       data: { url },
     },
   ))
@@ -21,6 +22,8 @@ self.addEventListener('notificationclick', (event) => {
     const target = new URL(event.notification.data?.url || '/m/inbox', self.location.origin)
     if (target.origin !== self.location.origin || !target.pathname.startsWith('/m/')) return
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })
+    const openConversation = windows.find(client => client.url === target.href)
+    if (openConversation) return openConversation.focus()
     for (const client of windows) {
       if (new URL(client.url).origin !== target.origin) continue
       const navigated = await client.navigate(target.href)
