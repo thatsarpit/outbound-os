@@ -3132,18 +3132,63 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
     const stale = new Date(Date.now() - 10 * 60_000);
     const manual = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Interrupted manual attempt', status: 'sending', idempotencyKey: `manual-wa:${lead.id}:fixture-interrupted-0001`, updatedAt: stale } });
     const automated = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Interrupted queue attempt', status: 'sending', updatedAt: stale } });
+    const interruptedCampaign = await prisma.message.create({ data: { leadId: lead.id, campaignId: 987654, channel: 'whatsapp', direction: 'outbound', content: 'Synthetic interrupted campaign attempt', status: 'sending', updatedAt: stale } });
     imessage.recoverStuckMessages = async () => ({ count: 0, confirmed: 0, requeued: 0 });
     try {
       const recovered = await followup.recoverStuckMessages();
       assert.ok(recovered.unconfirmed >= 1);
       assert.equal((await prisma.message.findUnique({ where: { id: manual.id } })).status, 'unconfirmed');
       assert.equal((await prisma.message.findUnique({ where: { id: automated.id } })).status, 'queued');
+      assert.equal((await prisma.message.findUnique({ where: { id: interruptedCampaign.id } })).status, 'unconfirmed');
     } finally { imessage.recoverStuckMessages = previousRecovery; }
 
   } finally {
     manager.sendMessage = originalSend; manager.sendApprovedTemplate = originalTemplate; cloud.listApprovedTemplates = originalList;
     await prisma.whatsAppReceipt.deleteMany({ where: { accountId: account.id } });
     await prisma.lead.delete({ where: { id: lead.id } });
+    await prisma.whatsAppAccount.delete({ where: { id: account.id } });
+  }
+});
+
+test('campaign receipts expose delivery failure, preserve opt-outs, and retain numeric retry classification', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { recordMetaReceipt } = await import('../src/services/whatsappDelivery.js');
+  const { suppressedWhatsAppLeads } = await import('../src/services/whatsappSuppression.js');
+  const { findRetryable } = await import('../src/services/deliveryRetry.js');
+  const { sendManualWhatsApp } = await import('../src/services/manualWhatsApp.js');
+  const account = await prisma.whatsAppAccount.create({ data: { name: 'Synthetic campaign receipts', enabled: true } });
+  const lead = await prisma.lead.create({ data: { name: 'Synthetic receipt lead', mobile: '15550000181', status: 'contacted' } });
+  const temporaryLead = await prisma.lead.create({ data: { name: 'Synthetic retry lead', mobile: '15550000182', status: 'contacted' } });
+  const campaign = await prisma.campaign.create({ data: { name: 'Synthetic dispatch complete', messageTemplate: 'Fixture', channel: 'whatsapp', status: 'completed', totalLeads: 2 } });
+  try {
+    const sentAt = new Date(Date.now() - 48 * 3600000);
+    for (const [index, contact] of [lead, temporaryLead].entries()) {
+      await prisma.campaignLead.create({ data: { campaignId: campaign.id, leadId: contact.id, status: 'sent', sentAt } });
+      await prisma.message.create({ data: { leadId: contact.id, campaignId: campaign.id, channel: 'whatsapp', direction: 'outbound', content: 'Synthetic template', status: 'sent', sentAt, waAccount: account.id, waMessageId: `fixture-campaign-receipt-${index}` } });
+    }
+    await recordMetaReceipt({ accountId: account.id, waMessageId: 'fixture-campaign-receipt-0', status: 'sent', timestamp: '1' });
+    let message = await prisma.message.findFirst({ where: { campaignId: campaign.id, leadId: lead.id } });
+    assert.equal(message.ackStatus, 1, 'provider-sent acknowledgement advances after local acceptance');
+    await recordMetaReceipt({ accountId: account.id, waMessageId: message.waMessageId, status: 'failed', failureCode: 131050, failureReason: 'Stopped receiving business marketing', timestamp: '2' });
+    await recordMetaReceipt({ accountId: account.id, waMessageId: 'fixture-campaign-receipt-1', status: 'failed', failureCode: 131049, failureReason: 'Marketing quality throttle', timestamp: '3' });
+    message = await prisma.message.findFirst({ where: { campaignId: campaign.id, leadId: temporaryLead.id } });
+    assert.equal(message.providerErrorCode, '131049');
+    const { default: engine } = await import('../src/services/campaignEngine.js');
+    const detail = await engine.getCampaign(campaign.id);
+    assert.equal(detail.sentCount, 2); assert.equal(detail.failedCount, 2);
+    assert.equal(detail.delivery.failed, 2);
+    assert.ok((await suppressedWhatsAppLeads(prisma, [lead.id], account.id)).has(lead.id));
+    const cloud = { listApprovedTemplates: async () => ({ ok: true, templates: [{ name: 'fixture_marketing', language: 'en', category: 'MARKETING', body: 'Fixture', bodyVariables: [] }] }) };
+    await assert.rejects(sendManualWhatsApp({ leadId: lead.id, accountId: account.id, template: { name: 'fixture_marketing', language: 'en', parameters: [] } }, { cloud }), error => error.reason === 'whatsapp_marketing_opted_out');
+    const due = await findRetryable({ now: new Date(Date.now() + 48 * 3600000) });
+    assert.ok(due.some(row => row.id === message.id), 'numeric 131049 reaches the retryable path after backoff');
+    assert.ok(!due.some(row => row.leadId === lead.id), 'explicit marketing opt-outs never enter retries');
+    await recordMetaReceipt({ accountId: account.id, waMessageId: 'fixture-campaign-receipt-0', status: 'read', timestamp: '4' });
+    assert.ok((await suppressedWhatsAppLeads(prisma, [lead.id], account.id)).has(lead.id), 'a late receipt cannot erase an opt-out');
+  } finally {
+    await prisma.whatsAppReceipt.deleteMany({ where: { accountId: account.id } });
+    await prisma.lead.deleteMany({ where: { id: { in: [lead.id, temporaryLead.id] } } });
+    await prisma.campaign.delete({ where: { id: campaign.id } });
     await prisma.whatsAppAccount.delete({ where: { id: account.id } });
   }
 });

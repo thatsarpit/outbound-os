@@ -1,3 +1,4 @@
+import { whatsappAddressSuppressed } from './whatsappSuppression.js';
 import { credentialState, publicCredentialSummary } from './whatsappProviders.js';
 import prisma from '../utils/prismaClient.js';
 import config from '../config.js';
@@ -321,10 +322,11 @@ class WhatsAppManager {
     };
   }
 
-  async sendApprovedTemplate(address, name, language, parameters, accountId) {
+  async sendApprovedTemplate(address, name, language, parameters, accountId, { marketing = true } = {}) {
     const account = await prisma.whatsAppAccount.findUnique({ where: { id: accountId } });
     if (!account?.enabled || !this._hasCredentials(account)) return { success: false, reason: 'account_not_ready' };
     if (this._isAccountPaused(accountId)) return { success: false, reason: 'account_paused' };
+    if (marketing && await whatsappAddressSuppressed(prisma, address, accountId)) return { success: false, accountId, reason: 'whatsapp_marketing_opted_out' };
     const result = await whatsappCloudApi.sendTemplate(address, name, language, parameters.map(text => ({ type: 'text', text })), accountId);
     if (result.success) {
       this.consecutiveErrors.set(accountId, 0);
@@ -363,6 +365,10 @@ class WhatsAppManager {
       return { success: false, accountId: selectedAccountId, reason: 'invalid_phone' };
     }
 
+    if (await whatsappAddressSuppressed(prisma, phone, selectedAccountId)) {
+      return { success: false, accountId: selectedAccountId, reason: 'whatsapp_marketing_opted_out' };
+    }
+
     const result = await whatsappCloudApi.sendCampaignTemplate({
       phone: formattedPhone,
       campaignName,
@@ -378,6 +384,9 @@ class WhatsAppManager {
         accountId: selectedAccountId,
         reason: result.reason || 'send_failed',
         error: result.rawError || result.reason || 'WhatsApp template send failed',
+        errorCode: result.errorCode || null,
+        requestId: result.requestId || null,
+        waMessageId: result.messageId || null,
       };
     }
 

@@ -87,8 +87,8 @@ export const campaignsApi = {
 
   pause: (id: number) => api.post(`/campaigns/${id}/pause`),
 
-  previewLeads: (filter: Record<string, unknown> = {}, channel: Campaign['channel'] = 'whatsapp') =>
-    api.post<CampaignPreviewLeadsResponse>('/campaigns/preview-leads', { filter, channel }),
+  previewLeads: (filter: Record<string, unknown> = {}, channel: Campaign['channel'] = 'whatsapp', whatsappSenderAccountId?: number | null) =>
+    api.post<CampaignPreviewLeadsResponse>('/campaigns/preview-leads', { filter, channel, ...(whatsappSenderAccountId ? { whatsappSenderAccountId } : {}) }),
 
   testSend: (id: number, testEmail?: string) =>
     api.post<{ success: boolean; sentTo: string; subject: string; messageId?: string }>(

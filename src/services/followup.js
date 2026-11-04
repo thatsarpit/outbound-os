@@ -1,3 +1,4 @@
+import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
 import prisma from '../utils/prismaClient.js';
 import deliveryRetry from './deliveryRetry.js';
 import { reapStaleWhatsAppMessages } from './undeliveredReaper.js';
@@ -42,6 +43,10 @@ class FollowupEngine {
         where: { status: 'sending', direction: 'outbound', channel: 'whatsapp', idempotencyKey: { startsWith: 'manual-wa:' }, updatedAt: { lt: fiveMinAgo } },
         data: { status: 'unconfirmed', providerStatusReason: 'confirmation_unknown' },
       });
+      const campaign = await prisma.message.updateMany({
+        where: { status: 'sending', direction: 'outbound', campaignId: { not: null }, channel: { not: 'imessage' }, updatedAt: { lt: fiveMinAgo } },
+        data: { status: 'unconfirmed', providerStatusReason: 'confirmation_unknown' },
+      });
       const result = await prisma.message.updateMany({
         where: {
           status: 'sending',
@@ -51,11 +56,11 @@ class FollowupEngine {
         },
         data: { status: 'queued' },
       });
-      const count = result.count + imessage.count + manual.count;
+      const count = result.count + imessage.count + manual.count + campaign.count;
       if (count > 0) {
         logger.info(`🔧 Recovered ${count} stuck 'sending' message(s) (${imessage.confirmed} iMessage confirmed, ${result.count + imessage.requeued} requeued)`);
       }
-      return { count, requeued: result.count + imessage.requeued, unconfirmed: manual.count, imessage };
+      return { count, requeued: result.count + imessage.requeued, unconfirmed: manual.count + campaign.count, imessage };
     } catch (e) {
       logger.warn(`Failed to recover stuck messages: ${e.message}`);
       return { count: 0, error: e.message };
@@ -451,6 +456,11 @@ class FollowupEngine {
               });
               continue;
             }
+          }
+
+          if ((await suppressedWhatsAppLeads(prisma, [liveLead.id], sendAccountId || null)).has(liveLead.id)) {
+            await prisma.message.updateMany({ where: { id: claimedMsg.id, status: 'sending' }, data: { status: 'cancelled', providerStatusReason: 'whatsapp_marketing_opted_out' } });
+            continue;
           }
 
           const isInitialOutreach = liveLead.followupCount === 0;

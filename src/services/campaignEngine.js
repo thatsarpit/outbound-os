@@ -1,3 +1,6 @@
+import { campaignFilter } from '../utils/campaignFilter.js';
+import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
+import { refreshCampaignMetrics, readCampaignMetrics } from './campaignMetrics.js';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
 import whatsappManager from './whatsapp.js';
@@ -49,8 +52,8 @@ export class CampaignEngine {
     return campaign;
   }
 
-  async getAudience(filterJson, poolId = null, channel = 'whatsapp') {
-    const filter = typeof filterJson === 'string' ? JSON.parse(filterJson) : (filterJson || {});
+  async getAudience(filterJson, poolId = null, channel = 'whatsapp', whatsappSenderId = null) {
+    const filter = campaignFilter(filterJson);
     if (filter.poolId !== undefined) throw Object.assign(new Error('Pass poolId at the top level, outside the lead filter.'), { statusCode: 400 });
     const channels = campaignChannels(channel);
     const where = {};
@@ -68,11 +71,13 @@ export class CampaignEngine {
     // A DB substring predicate is not a tag match: "uk" must not select "bulk".
     const matching = leads.filter(lead => hasAllLeadTags(lead.tags, filter.tags));
     const ready = channels.includes('email') ? await this.verification.readyEmails(matching.map(lead => lead.email)) : null;
+    const suppressed = channels.includes('whatsapp') ? await suppressedWhatsAppLeads(this.db, matching.map(lead => lead.id), whatsappSenderId) : new Set();
     const eligible = [], excludedSample = [], exclusionCounts = {};
     let excludedCount = 0;
     for (const lead of matching) {
       const decisions = channels.map(item => {
-        const decision = campaignChannelEligibility(lead, item);
+        const decision = item === 'whatsapp' && suppressed.has(lead.id)
+          ? { eligible: false, reason: 'whatsapp_marketing_opted_out' } : campaignChannelEligibility(lead, item);
         if (decision.eligible && item === 'email' && ready && !ready.has(emailIdentity(lead.email))) {
           return { channel: item, eligible: false, reason: 'email_verification_required' };
         }
@@ -89,7 +94,8 @@ export class CampaignEngine {
         if (excludedSample.length < 10) excludedSample.push({ id: lead.id, reasons });
       }
     }
-    return { leads: eligible, matchedCount: matching.length, excludedCount, exclusionCounts, excludedSample };
+    return { leads: filter.limit ? eligible.slice(0, filter.limit) : eligible, matchedCount: matching.length, excludedCount, exclusionCounts, excludedSample,
+      ...(filter.limit ? { limitExcludedCount: Math.max(0, eligible.length - filter.limit) } : {}) };
   }
 
   async getMatchingLeads(filterJson, poolId = null, channel = 'whatsapp') {
@@ -100,17 +106,26 @@ export class CampaignEngine {
     const campaign = await this.db.campaign.findUnique({ where: { id: campaignId } });
     if (!campaign) throw new Error('Campaign not found');
     if (campaign.status !== 'draft') throw new Error('Only draft campaigns can change their audience');
-    const { leads, excludedCount, exclusionCounts } = await this.getAudience(campaign.targetFilter, campaign.poolId, campaign.channel);
-    let added = 0;
-    for (const lead of leads) {
-      try {
-        await this.db.campaignLead.create({ data: { campaignId, leadId: lead.id, status: 'pending' } });
+    const { leads, excludedCount, exclusionCounts } = await this.getAudience(campaign.targetFilter, campaign.poolId, campaign.channel, campaignSenderId(campaign, 'whatsapp'));
+    return this.db.$transaction(async tx => {
+      // Recheck status and capacity under the same lock as insertion. Repeated
+      // population may not grow a capped campaign when eligibility changes.
+      const current = await tx.campaign.findUnique({ where: { id: campaignId } });
+      if (current?.status !== 'draft') throw new Error('Only draft campaigns can change their audience');
+      const filter = campaignFilter(current.targetFilter);
+      let added = 0;
+      const existing = await tx.campaignLead.findMany({ where: { campaignId }, select: { leadId: true } });
+      const existingIds = new Set(existing.map(row => row.leadId));
+      for (const lead of leads) {
+        if (existingIds.has(lead.id)) continue;
+        if (filter.limit && existing.length + added >= filter.limit) break;
+        await tx.campaignLead.create({ data: { campaignId, leadId: lead.id, status: 'pending' } });
         added++;
-      } catch (error) { if (error.code !== 'P2002') throw error; }
-    }
-    const total = await this.db.campaignLead.count({ where: { campaignId } });
-    await this.db.campaign.update({ where: { id: campaignId }, data: { totalLeads: total } });
-    return { added, total, excludedCount, exclusionCounts };
+      }
+      const total = await tx.campaignLead.count({ where: { campaignId } });
+      await tx.campaign.update({ where: { id: campaignId }, data: { totalLeads: total } });
+      return { added, total, excludedCount, exclusionCounts };
+    });
   }
 
   personalizeMessage(template, lead) {
@@ -126,6 +141,7 @@ export class CampaignEngine {
     const campaign = await this.db.campaign.findUnique({ where: { id: campaignId } });
     if (!campaign) throw new Error('Campaign not found');
     if (!['draft', 'paused', 'scheduled'].includes(campaign.status)) throw new Error('Campaign is not startable');
+    if (!this.businessHours()) throw Object.assign(new Error('Outside configured sending hours. Resume during the sending window.'), { statusCode: 409, reason: 'outside_business_hours' });
     const pending = await this.db.campaignLead.count({ where: { campaignId, status: 'pending' } });
     const updated = await this.db.campaign.updateMany({
       where: { id: campaignId, status: campaign.status }, data: { status: 'running', startedAt: new Date(), completedAt: null },
@@ -143,6 +159,9 @@ export class CampaignEngine {
     const lead = await this.db.lead.findUnique({ where: { id: leadId } });
     if (campaign.poolId && lead?.poolId !== campaign.poolId) return { reason: 'lead_left_campaign_pool' };
     const eligibility = campaignChannelEligibility(lead, channel);
+    if (eligibility.eligible && channel === 'whatsapp' && (await suppressedWhatsAppLeads(this.db, [lead.id], campaignSenderId(campaign, channel) || lead.assignedAccount || null)).has(lead.id)) {
+      return { reason: 'whatsapp_marketing_opted_out' };
+    }
     if (eligibility.eligible && channel === 'email') {
       const ready = await this.verification.readyEmails([lead.email]);
       if (ready && !ready.has(emailIdentity(lead.email))) return { reason: 'email_verification_required' };
@@ -218,6 +237,7 @@ export class CampaignEngine {
         data: { sentCount: count('sent'), failedCount: count('failed'), status: unfinished ? 'paused' : 'completed',
           completedAt: unfinished ? null : new Date() },
       });
+      await refreshCampaignMetrics(this.db, campaign.id);
     } catch (error) {
       logger.error(`Campaign ${campaign.id} paused after execution error: ${error.message}`);
       await this.db.campaign.update({ where: { id: campaign.id }, data: { status: 'paused' } });
@@ -246,7 +266,9 @@ export class CampaignEngine {
       campaignId: campaign.id, leadId: lead.id, direction: 'outbound', channel, content: body,
       status: 'sending',
       ...(channel === 'email' ? { emailAccountId: accountId, emailSubject: subject } : {}),
-      ...(channel === 'whatsapp' ? { waAccount: accountId } : {}),
+      ...(channel === 'whatsapp' ? { waAccount: accountId,
+        ...(campaign.waCampaignName ? { waCampaignName: campaign.waCampaignName,
+          waTemplateParams: JSON.stringify([firstNameOf(lead.name), countryOf(lead.country)]) } : {}) } : {}),
     } });
     const live = await this._dispatchContext(campaign, lead.id, channel);
     if (!live.lead) {
@@ -255,6 +277,9 @@ export class CampaignEngine {
     }
     // Templates and destinations use the freshly read row, including opt-outs and changed addresses.
     const liveBody = this.personalizeMessage(bodyTemplate, live.lead);
+    const templateParams = [firstNameOf(live.lead.name), countryOf(live.lead.country)];
+    await this.db.message.update({ where: { id: message.id }, data: { content: liveBody,
+      ...(channel === 'whatsapp' && campaign.waCampaignName ? { waTemplateParams: JSON.stringify(templateParams) } : {}) } });
     let result;
     try {
       if (channel === 'email') {
@@ -264,7 +289,7 @@ export class CampaignEngine {
       } else if (channel === 'whatsapp') {
         result = campaign.waCampaignName
           ? await this.whatsapp.sendCampaignTemplate(whatsappAddress(live.lead), campaign.waCampaignName,
-            [firstNameOf(live.lead.name), countryOf(live.lead.country)], accountId, { poolId: live.lead.poolId, source: 'campaign' })
+            templateParams, accountId, { poolId: live.lead.poolId, source: 'campaign' })
           : await this.whatsapp.sendMessage(whatsappAddress(live.lead), liveBody, accountId, { poolId: live.lead.poolId });
       } else {
         result = await this.imessage.sendMessage(live.lead.mobile, liveBody, live.lead.assignedIMessageAccountId || undefined);
@@ -285,6 +310,8 @@ export class CampaignEngine {
     await this.db.message.updateMany({ where: { id: message.id, status: { in: ['sending', 'queued'] } }, data: {
       status, sentAt: result.success ? new Date() : null,
       providerStatusReason: result.success ? 'provider_accepted' : String(reason).slice(0, 300),
+      ...(!result.success ? { providerErrorCode: result.errorCode == null ? null : String(result.errorCode),
+        providerErrorMessage: result.error || null, providerRequestId: result.requestId || null } : {}),
     } });
     const saved = await this.db.message.findUnique({ where: { id: message.id } });
     if (result.success && channel === 'whatsapp' && saved.waMessageId) await this.reconcileReceipts(saved.waMessageId, saved.waAccount);
@@ -292,6 +319,8 @@ export class CampaignEngine {
       await this.db.lead.updateMany({ where: { id: lead.id }, data: { imessageStatus: 'sent', lastImessageAt: new Date(), assignedIMessageAccountId: result.accountId || null } });
     }
     if (result.success) {
+      const sentAt = saved.sentAt || new Date();
+      await this.db.lead.updateMany({ where: { id: lead.id, OR: [{ lastMessageAt: null }, { lastMessageAt: { lt: sentAt } }] }, data: { lastMessageAt: sentAt } });
       // Never restore a stale pre-send status after an inbound reply or manual pause.
       await this.db.lead.updateMany({ where: { id: lead.id, status: 'new' }, data: { status: 'contacted' } });
     }
@@ -303,8 +332,10 @@ export class CampaignEngine {
   }
   async getCampaign(campaignId) {
     const campaign = await this.db.campaign.findUnique({ where: { id: campaignId } });
+    if (!campaign) return null;
+    const metrics = await readCampaignMetrics(this.db, campaignId);
     const stats = await this.db.campaignLead.groupBy({ by: ['status'], where: { campaignId }, _count: true });
-    return { ...campaign, stats: Object.fromEntries(stats.map((item) => [item.status, item._count])) };
+    return { ...campaign, ...metrics, stats: Object.fromEntries(stats.map((item) => [item.status, item._count])) };
   }
   async listCampaigns() { return this.db.campaign.findMany({ orderBy: { createdAt: 'desc' } }); }
 }

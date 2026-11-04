@@ -2389,7 +2389,7 @@ app.post('/api/campaigns/:id/start', requireRole('manager'), async (req, res) =>
     const result = await campaignEngine.startCampaign(parseInt(req.params.id));
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message, ...(error.reason ? { reason: error.reason } : {}) });
   }
 });
 
@@ -2489,7 +2489,9 @@ app.post('/api/campaigns/preview-leads', requireRole('manager'), async (req, res
     }
     const channel = req.body.channel || 'whatsapp';
     if (!VALID_CHANNELS.includes(channel)) return res.status(400).json({ error: 'Invalid campaign channel.' });
-    const { leads, ...diagnostics } = await campaignEngine.getAudience(req.body.filter || {}, previewPoolId, channel);
+    const sender = req.body.whatsappSenderAccountId;
+    if (sender != null && (!Number.isSafeInteger(sender) || sender < 1)) return res.status(400).json({ error: 'Invalid WhatsApp sender.' });
+    const { leads, ...diagnostics } = await campaignEngine.getAudience(req.body.filter || {}, previewPoolId, channel, sender || null);
     res.json({ count: leads.length, sample: leads.slice(0, 10), ...diagnostics, poolId: previewPoolId, emailVerificationRequired: verificationEnabled() && ['email', 'both'].includes(channel) });
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });

@@ -171,10 +171,11 @@ export function registerCampaignTools(server) {
       filter: z.record(z.any()).optional().describe('Lead filter criteria — e.g. {status:"new", country:"India"}'),
       channel: z.enum(VALID_CHANNELS).optional().describe('Preview eligibility for the intended campaign channel'),
       poolId: z.number().int().positive().optional().describe('Explicit accessible lead pool, outside filter'),
+      whatsappSenderAccountId: z.number().int().positive().optional().describe('Preview suppressions for the same WhatsApp sender used at launch'),
     },
-    async ({ filter, channel, poolId }) => {
+    async ({ filter, channel, poolId, whatsappSenderAccountId }) => {
       try {
-        const { data } = await post('/api/campaigns/preview-leads', { filter, channel, ...(poolId !== undefined ? { poolId } : {}) });
+        const { data } = await post('/api/campaigns/preview-leads', { filter, channel, ...(poolId !== undefined ? { poolId } : {}), ...(whatsappSenderAccountId !== undefined ? { whatsappSenderAccountId } : {}) });
         return ok(data);
       } catch (e) { return err(e.message); }
     },

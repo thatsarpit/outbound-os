@@ -94,16 +94,21 @@ export function CampaignDetailDrawer({
         <div className="flex-1 space-y-4 overflow-y-auto p-5 sm:p-6">
           <div className="grid grid-cols-3 gap-px overflow-hidden rounded-md border border-border bg-border">
             <DrawerStat label="Audience" value={formatCount(totalLeads)} />
-            <DrawerStat label="Sent" value={formatCount(sentCount)} />
+            <DrawerStat label="Accepted" value={formatCount(sentCount)} />
             <DrawerStat label="Replies" value={formatCount(replyCount)} />
             <DrawerStat
               label="Failed"
               value={formatCount(failedCount)}
               tone={failedCount > 0 ? 'danger' : undefined}
             />
-            <DrawerStat label="Accepted" value={`${deliveryRate.toFixed(1)}%`} />
+            <DrawerStat label="Acceptance rate" value={`${deliveryRate.toFixed(1)}%`} />
             <DrawerStat label="Reply rate" value={`${replyRate.toFixed(1)}%`} />
+            <DrawerStat label="Delivered (incl. read)" value={campaign.delivery ? formatCount(campaign.delivery.delivered) : '—'} />
+            <DrawerStat label="Read" value={campaign.delivery ? formatCount(campaign.delivery.read) : '—'} />
+            <DrawerStat label="Awaiting delivery" value={campaign.delivery ? formatCount(campaign.delivery.awaitingConfirmation) : '—'} />
           </div>
+
+          <p className="text-xs text-text-muted">Accepted means the provider accepted submission. Check delivery and failure counts to see what reached recipients.</p>
 
           <div>
             <div className="flex items-baseline justify-between text-[11px] text-text-muted">

@@ -1,3 +1,4 @@
+import { refreshCampaignMetrics } from './campaignMetrics.js';
 import { createHash } from 'node:crypto';
 import activityLog, { EVENT_TYPES } from '../utils/activityLog.js';
 import prisma from '../utils/prismaClient.js';
@@ -5,7 +6,7 @@ import { whatsappFailureReason } from '../utils/whatsappSession.js';
 
 const ranks = { sent: 1, failed: 1, delivered: 2, read: 3 };
 export async function applyMetaReceipt(receipt) {
-  let failedLeadId = null;
+  let failedLeadId = null, campaignId = null;
   const applied = await prisma.$transaction(async (tx) => {
     const messages = await tx.message.findMany({
       where: {
@@ -14,10 +15,11 @@ export async function applyMetaReceipt(receipt) {
         waMessageId: receipt.waMessageId,
         waAccount: receipt.accountId,
       },
-      select: { id: true, leadId: true, status: true, ackStatus: true },
+      select: { id: true, leadId: true, status: true, ackStatus: true, campaignId: true },
     });
     if (messages.length !== 1) return false; // Never guess from a recipient's number.
     const message = messages[0];
+    campaignId = message.campaignId;
     let pricing = {};
     try {
       pricing = JSON.parse(receipt.pricing || '{}');
@@ -40,7 +42,7 @@ export async function applyMetaReceipt(receipt) {
     if (
       incomingRank > currentRank ||
       (receipt.status === 'failed' && currentRank < 2) ||
-      (receipt.status === 'sent' && message.status === 'sending')
+      (receipt.status === 'sent' && !['failed', 'permanently_failed', 'unconfirmed'].includes(message.status) && currentRank < 2 && (message.ackStatus || 0) < 1)
     ) {
       data.status = receipt.status;
       data.ackStatus =
@@ -64,6 +66,7 @@ export async function applyMetaReceipt(receipt) {
     });
     return true;
   });
+  if (applied && campaignId) await refreshCampaignMetrics(prisma, campaignId);
   if (failedLeadId !== null)
     activityLog.add(
       EVENT_TYPES.MESSAGE_FAILED,

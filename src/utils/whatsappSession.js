@@ -31,6 +31,8 @@ export function whatsappFailureReason(code, detail) {
     131047: 're_engagement_required',
     131026: 'message_undeliverable',
     131049: 'marketing_limit',
+    131050: 'whatsapp_marketing_opted_out',
+    131056: 'rate_limited',
     131048: 'spam_limit',
     131042: 'payment_issue',
     131070: 'thread_not_owned',

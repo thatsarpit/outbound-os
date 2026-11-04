@@ -182,6 +182,7 @@ export interface Campaign {
   variantBReplies: number
   totalLeads: number
   sentCount: number
+  delivery?: { accepted: number; delivered: number; read: number; failed: number; unconfirmed: number; awaitingConfirmation: number }
   failedCount: number
   replyCount: number
   scheduledAt: string | null

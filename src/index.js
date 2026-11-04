@@ -1,3 +1,4 @@
+import { recoverCampaignRuns, reconcileCampaignCounters } from './services/campaignMetrics.js';
 import { startWebPush, stopWebPush } from './services/webPush.js';
 import cron from 'node-cron';
 import config from './config.js';
@@ -56,6 +57,8 @@ async function main() {
     await whatsappManager.initialize();
 
     // Recover any messages stuck in 'sending' from a prior crash
+    await recoverCampaignRuns(prisma);
+    await reconcileCampaignCounters(prisma);
     await followupEngine.recoverStuckMessages();
 
     // ── Step 2: Reply detection ──
