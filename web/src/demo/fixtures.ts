@@ -1894,6 +1894,18 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
     ],
   ],
   [
+    /\/campaigns\/\d+\/leads/,
+    { leads: FIXTURE_LEADS.slice(0, 5).map((lead, index) => ({ id: index + 1, leadId: lead.id, status: 'pending', variant: 'A', lead })), total: 5, page: 1, pages: 1 },
+  ],
+  [
+    /\/campaigns\/\d+(?:\?|$)/,
+    (url: string) => {
+      const id = Number(new URL(url, location.origin).pathname.match(/\/campaigns\/(\d+)/)?.[1])
+      const data = FIXTURE_RESPONSES.find(([pattern]) => pattern.source === /\/campaigns/.source)?.[1] as { campaigns: Array<Record<string, unknown>> }
+      return data.campaigns.find(campaign => campaign.id === id) || {}
+    },
+  ],
+  [
     /\/campaigns/,
     // Field names must match the Campaign type: sentCount / replyCount /
     // failedCount, and status 'running' (not 'active'). Guessing these renders
@@ -1976,6 +1988,8 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
           failedCount: 0,
           replyCount: 0,
           scheduledAt: ago(-3600),
+          scheduleTimezone: 'Europe/London',
+          scheduleError: null,
           startedAt: null,
           completedAt: null,
           createdAt: ago(600),
@@ -1998,7 +2012,7 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
           variantBCount: 0,
           variantAReplies: 0,
           variantBReplies: 0,
-          totalLeads: 0,
+          totalLeads: 5,
           sentCount: 0,
           failedCount: 0,
           replyCount: 0,

@@ -238,10 +238,12 @@ class WhatsAppCloudApiService {
 
       if (!res.ok || (provider === 'ycloud' && data.status === 'failed')) {
         const errMsg = data?.error?.whatsappApiError?.error_data?.details || data?.error?.message || data?.errorMessage || data?.message || `HTTP ${res.status}`;
-        const errCode = Number(data?.error?.whatsappApiError?.code || data?.whatsappApiError?.code || data?.errorCode || data?.error?.code);
-        const reason = classifyError(res.status, errCode, errMsg);
+        const errCode = data?.error?.whatsappApiError?.code || data?.whatsappApiError?.code || data?.errorCode || data?.error?.code || data?.code;
+        const reason = provider === 'ycloud' && errCode === 'BALANCE_INSUFFICIENT'
+          ? 'payment_issue'
+          : classifyError(res.status, Number(errCode), errMsg);
         logger.error(`${tag} ${label} failed [HTTP ${res.status}${errCode ? `/${errCode}` : ''}] ${reason}: ${errMsg}`);
-        return { success: false, reason, rawError: errMsg };
+        return { success: false, reason, rawError: errMsg, errorCode: errCode ?? null };
       }
 
       const messageId = provider === 'ycloud' ? data?.id : data?.messages?.[0]?.id;

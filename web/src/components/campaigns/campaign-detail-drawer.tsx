@@ -7,6 +7,7 @@ import type { Campaign } from '@/api/types'
 import { Button, DrawerShell, LoadingState } from '@/components/ui'
 import { cn, formatCount, formatRelativeTime } from '@/lib/utils'
 import { toast } from '@/stores/toast-store'
+import { CampaignSchedulePanel } from './campaign-schedule-panel'
 import {
   num,
   percent,
@@ -92,16 +93,17 @@ export function CampaignDetailDrawer({
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto p-5 sm:p-6">
+          <CampaignSchedulePanel campaign={campaign} />
           <div className="grid grid-cols-3 gap-px overflow-hidden rounded-md border border-border bg-border">
             <DrawerStat label="Audience" value={formatCount(totalLeads)} />
-            <DrawerStat label="Sent" value={formatCount(sentCount)} />
+            <DrawerStat label="Accepted" value={formatCount(sentCount)} />
             <DrawerStat label="Replies" value={formatCount(replyCount)} />
             <DrawerStat
               label="Failed"
               value={formatCount(failedCount)}
               tone={failedCount > 0 ? 'danger' : undefined}
             />
-            <DrawerStat label="Accepted" value={`${deliveryRate.toFixed(1)}%`} />
+            <DrawerStat label="Acceptance rate" value={`${deliveryRate.toFixed(1)}%`} />
             <DrawerStat label="Reply rate" value={`${replyRate.toFixed(1)}%`} />
           </div>
 

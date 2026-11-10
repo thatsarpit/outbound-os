@@ -365,12 +365,16 @@ model Campaign {
   failedCount      Int       @default(0)
   replyCount       Int       @default(0)
   scheduledAt      DateTime?
+  scheduleTimezone String?
+  scheduleError    String?
   startedAt        DateTime?
   completedAt      DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
   campaignLeads CampaignLead[]
+
+  @@index([status, scheduledAt])
 }
 
 model CampaignLead {

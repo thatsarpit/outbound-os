@@ -87,6 +87,11 @@ export const campaignsApi = {
 
   pause: (id: number) => api.post(`/campaigns/${id}/pause`),
 
+  schedule: (id: number, scheduledAt: string, timezone: string) =>
+    api.post<Campaign>(`/campaigns/${id}/schedule`, { scheduledAt, timezone }),
+
+  cancelSchedule: (id: number) => api.delete(`/campaigns/${id}/schedule`),
+
   previewLeads: (filter: Record<string, unknown> = {}, channel: Campaign['channel'] = 'whatsapp') =>
     api.post<CampaignPreviewLeadsResponse>('/campaigns/preview-leads', { filter, channel }),
 

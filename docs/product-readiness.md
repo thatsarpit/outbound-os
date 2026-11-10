@@ -60,21 +60,25 @@ promise of complete vulnerability coverage.
 
 ## Scheduler implementation boundary
 
-The current campaign engine checks workspace business hours at launch and
-dispatch. A `scheduledAt` column exists, but no due-campaign worker or schedule
-API was found in `src/index.js` or the campaign MCP tools. A time-window check
-is not a scheduler. Do not mark a campaign scheduled by writing the column alone.
+The scheduler change adds a database-backed, one-time launch to the campaign
+drawer and MCP. Populate and review the audience before scheduling. The
+dashboard uses the browser's time zone for entry, displays the chosen time
+zone, and validates the launch against workspace sending hours. The worker
+checks every minute and pauses schedules missed by more than one hour.
+Cancel a pending schedule to return it to draft. A running campaign uses the
+existing pause control.
 
-The first scheduler release needs transactional claims, durable execution
-identity, explicit cancellation and overdue-run policy, per-recipient next-send
-times and tests for restart/concurrent workers, DST, pauses, replies, suppression
-and unknown provider outcomes. It must not widen audiences or automatically
-replay accepted/uncertain submissions.
+The worker claims the persisted schedule atomically and only recognizes
+explicitly saved schedules. A restart during a scheduled send pauses the
+campaign for review and leaves interrupted provider submissions unconfirmed.
+This release targets the single-instance deployment. Recipient-local time
+selection and pacing across multiple workers remain follow-up work.
 
 The explicit-sender campaign template path currently updates counters without
 enforcing daily/hourly limits at that dispatch boundary. Its per-recipient
-delay is approximately 1–3 seconds. Scheduler work must address that path;
-changing documented account defaults alone cannot provide reliable pacing.
+delay is approximately 1–3 seconds. Campaigns pause on a synchronous provider
+payment refusal. Spend estimates and proactive rate and budget caps remain
+separate work.
 
 Country routing also needs a provider-policy check. Twilio's
 [official WhatsApp notice](https://www.twilio.com/en-us/changelog/whatsapp-marketing-messages-to-u-s--numbers-no-longer-supported)

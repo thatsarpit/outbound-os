@@ -22,6 +22,7 @@ import { createClerkTeamRouter } from './routes/clerkTeam.js';
 import { ACTIONABLE_CONVERSATION_WHERE, HUMAN_REPLY_WHERE, isActionableConversationMessage, isHumanReply } from './utils/emailInbound.js';
 import salesRoutes from './routes/sales.js';
 import analyticsViewRoutes from './routes/analyticsViews.js';
+import campaignScheduleRoutes from './routes/campaignSchedules.js';
 import { analyticsWindow } from './utils/analyticsWindow.js';
 import leadFollowupRoutes from './routes/leadFollowups.js';
 import dashboardPreferenceRoutes from './routes/dashboardPreferences.js';
@@ -869,6 +870,7 @@ app.use('/api', requirePoolAccess());
 app.use('/api', inboxReadStateRoutes);
 app.use('/api', webPushRoutes);
 app.use('/api', analyticsViewRoutes);
+app.use('/api', campaignScheduleRoutes);
 // Per-lead authorization: every /api/leads/<numeric>/... request resolves
 // the lead's poolId once and 403s if the user can't access it. This covers
 // detail / patch / delete / send / notes / tasks / etc. without each handler
@@ -2372,7 +2374,7 @@ app.post('/api/campaigns/:id/populate', requireRole('manager'), async (req, res)
     const result = await campaignEngine.populateCampaign(parseInt(req.params.id));
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -2381,7 +2383,7 @@ app.post('/api/campaigns/:id/start', requireRole('manager'), async (req, res) =>
     const result = await campaignEngine.startCampaign(parseInt(req.params.id));
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -2404,7 +2406,9 @@ app.patch('/api/campaigns/:id', requireRole('manager'), async (req, res) => {
 
     const updates = await campaignInput(req.body, { db: prisma, existing: campaign });
 
-    const updated = await prisma.campaign.update({ where: { id }, data: updates });
+    const result = await prisma.campaign.updateMany({ where: { id, status: 'draft', updatedAt: campaign.updatedAt }, data: updates });
+    if (!result.count) return res.status(409).json({ error: 'Campaign changed. Refresh before editing.' });
+    const updated = await prisma.campaign.findUnique({ where: { id } });
     res.json(updated);
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
@@ -2417,12 +2421,12 @@ app.delete('/api/campaigns/:id', requireRole('manager'), async (req, res) => {
     const id = parseInt(req.params.id);
     const campaign = await prisma.campaign.findUnique({ where: { id } });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-    if (campaign.status === 'running') return res.status(400).json({ error: 'Cannot delete a running campaign. Pause it first.' });
+    if (['running', 'scheduled'].includes(campaign.status)) {
+      return res.status(409).json({ error: 'Pause a running campaign or cancel its schedule before deleting it.' });
+    }
 
-    await prisma.$transaction([
-      prisma.campaignLead.deleteMany({ where: { campaignId: id } }),
-      prisma.campaign.delete({ where: { id } }),
-    ]);
+    const result = await prisma.campaign.deleteMany({ where: { id, status: campaign.status, updatedAt: campaign.updatedAt } });
+    if (!result.count) return res.status(409).json({ error: 'Campaign changed. Refresh before deleting it.' });
 
     logger.info(`🗑️ Campaign ${id} (${campaign.name}) deleted by ${req.user?.email || 'unknown'}`);
     res.json({ success: true, deleted: id });
