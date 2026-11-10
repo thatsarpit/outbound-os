@@ -75,16 +75,24 @@ export class CampaignEngine {
     if (!campaign) throw new Error('Campaign not found');
     if (campaign.status !== 'draft') throw new Error('Only draft campaigns can change their audience');
     const leads = await this.getMatchingLeads(campaign.targetFilter, campaign.poolId, campaign.channel);
-    let added = 0;
-    for (const lead of leads) {
-      try {
-        await this.db.campaignLead.create({ data: { campaignId, leadId: lead.id, status: 'pending' } });
-        added++;
-      } catch (error) { if (error.code !== 'P2002') throw error; }
-    }
-    const total = await this.db.campaignLead.count({ where: { campaignId } });
-    await this.db.campaign.update({ where: { id: campaignId }, data: { totalLeads: total } });
-    return { added, total };
+    return this.db.$transaction(async tx => {
+      // Acquire the draft write before inserting recipients so scheduling
+      // cannot approve a partial audience or race a stale population request.
+      const draft = await tx.campaign.updateMany({
+        where: { id: campaignId, status: 'draft', updatedAt: campaign.updatedAt },
+        data: { updatedAt: new Date() },
+      });
+      if (!draft.count) throw Object.assign(new Error('Campaign changed. Preview the audience again.'), { statusCode: 409 });
+      const existing = await tx.campaignLead.findMany({ where: { campaignId }, select: { leadId: true } });
+      const existingIds = new Set(existing.map(row => row.leadId));
+      const additions = leads.filter(lead => !existingIds.has(lead.id));
+      if (additions.length) {
+        await tx.campaignLead.createMany({ data: additions.map(lead => ({ campaignId, leadId: lead.id, status: 'pending' })) });
+      }
+      const total = existing.length + additions.length;
+      await tx.campaign.update({ where: { id: campaignId }, data: { totalLeads: total } });
+      return { added: additions.length, total };
+    });
   }
 
   personalizeMessage(template, lead) {
@@ -96,13 +104,20 @@ export class CampaignEngine {
       .replace(/\{\{quantity\}\}/gi, () => lead.quantity || '').trim();
   }
 
-  async startCampaign(campaignId) {
+  async startCampaign(campaignId, { expectedSchedule } = {}) {
     const campaign = await this.db.campaign.findUnique({ where: { id: campaignId } });
     if (!campaign) throw new Error('Campaign not found');
     if (!['draft', 'paused', 'scheduled'].includes(campaign.status)) throw new Error('Campaign is not startable');
+    if (campaign.status === 'scheduled' && (!expectedSchedule || !campaign.scheduledAt || campaign.scheduledAt > new Date())) {
+      throw Object.assign(new Error('Cancel the schedule before starting manually.'), { statusCode: 409 });
+    }
+    if (!this.businessHours()) throw Object.assign(new Error('Outside configured sending hours. Choose a time inside the workspace window.'), { statusCode: 409 });
     const pending = await this.db.campaignLead.count({ where: { campaignId, status: 'pending' } });
+    if (!pending) throw Object.assign(new Error('There are no pending recipients to send.'), { statusCode: 409 });
     const updated = await this.db.campaign.updateMany({
-      where: { id: campaignId, status: campaign.status }, data: { status: 'running', startedAt: new Date(), completedAt: null },
+      where: { id: campaignId, status: campaign.status, updatedAt: campaign.updatedAt,
+        ...(expectedSchedule ? { status: 'scheduled', scheduledAt: expectedSchedule.scheduledAt, updatedAt: expectedSchedule.updatedAt } : {}) },
+      data: { status: 'running', startedAt: new Date(), completedAt: null, scheduleError: null },
     });
     if (!updated.count) throw new Error('Campaign already running or changed');
     this._executeCampaign(campaign).catch((error) => logger.error(`Campaign ${campaignId}: ${error.message}`));
@@ -129,6 +144,7 @@ export class CampaignEngine {
     const pending = await this.db.campaignLead.findMany({
       where: { campaignId: campaign.id, status: 'pending' }, orderBy: { id: 'asc' },
     });
+    let billingBlocked = false;
     try {
       for (const recipient of pending) {
         const claim = await this.db.campaignLead.updateMany({
@@ -164,6 +180,10 @@ export class CampaignEngine {
             if (result.success) accepted++;
             else if (!result.skipped) failed++;
             if (result.reason) reasons.push(`${channel}:${result.reason}`);
+            if (result.reason === 'payment_issue') {
+              billingBlocked = true;
+              break;
+            }
             if (result.attempted) await this.delay(channel === 'imessage' ? 8000 : 1000, channel === 'imessage' ? 20000 : 3000);
           }
           if (halted) {
@@ -183,14 +203,16 @@ export class CampaignEngine {
           await this.db.campaignLead.update({ where: { id: recipient.id }, data: { status: 'failed', skipReason: 'dispatch_error_review_required' } });
           logger.error(`Campaign ${campaign.id} recipient ${recipient.id} requires review: ${error.message}`);
         }
+        if (billingBlocked) break;
       }
       const stats = await this.db.campaignLead.groupBy({ by: ['status'], where: { campaignId: campaign.id }, _count: true });
       const count = (status) => stats.find((item) => item.status === status)?._count || 0;
       const unfinished = count('pending') + count('sending');
       await this.db.campaign.update({
         where: { id: campaign.id },
-        data: { sentCount: count('sent'), failedCount: count('failed'), status: unfinished ? 'paused' : 'completed',
-          completedAt: unfinished ? null : new Date() },
+        data: { sentCount: count('sent'), failedCount: count('failed'), status: unfinished || billingBlocked ? 'paused' : 'completed',
+          completedAt: unfinished || billingBlocked ? null : new Date(),
+          ...(billingBlocked ? { scheduleError: 'The provider rejected payment. Check the sending account balance before resuming.' } : {}) },
       });
     } catch (error) {
       logger.error(`Campaign ${campaign.id} paused after execution error: ${error.message}`);
@@ -226,6 +248,21 @@ export class CampaignEngine {
     if (!live.lead) {
       await this.db.message.update({ where: { id: message.id }, data: { status: 'cancelled', providerStatusReason: live.reason } });
       return { skipped: true, halt: live.halt, reason: live.reason };
+    }
+    if (channel === 'whatsapp') {
+      const prior = await this.db.message.findMany({
+        where: { leadId: lead.id, channel, direction: 'outbound', waAccount: accountId, waMessageId: { not: null } },
+        select: { waMessageId: true },
+      });
+      const optedOut = prior.length && await this.db.whatsAppReceipt.findFirst({
+        where: { accountId, waMessageId: { in: prior.map(row => row.waMessageId) }, failureCode: 131050 },
+        select: { id: true },
+      });
+      if (optedOut) {
+        const reason = 'whatsapp_marketing_opted_out';
+        await this.db.message.update({ where: { id: message.id }, data: { status: 'cancelled', providerStatusReason: reason } });
+        return { skipped: true, reason };
+      }
     }
     // Templates and destinations use the freshly read row, including opt-outs and changed addresses.
     const liveBody = this.personalizeMessage(bodyTemplate, live.lead);

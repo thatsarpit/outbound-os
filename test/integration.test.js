@@ -1714,6 +1714,46 @@ test('Inbox thread exposes Meta pricing without inventing an amount', async () =
   assert.equal(message.billable, true);
 });
 
+describe('Campaign schedule API', () => {
+  test('requires manager access and persists/cancels a populated future schedule without sending', async () => {
+    const scheduleRequest = (method, url, options = {}) => request(method, url, { ...options, headers: { ...options.headers, 'X-Forwarded-For': '192.0.2.182' } });
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const { signToken } = await import('../src/auth/rbac.js');
+    const user = await db.user.create({ data: { name: 'Schedule viewer', email: 'schedule-viewer@example.test', role: 'viewer', passwordHash: 'fixture' } });
+    const lead = await db.lead.create({ data: { name: 'Schedule fixture', mobile: '15550001998', email: 'schedule-fixture@example.test' } });
+    const campaign = await db.campaign.create({ data: { name: 'Schedule fixture', messageTemplate: 'Hello', channel: 'email' } });
+    await db.campaignLead.create({ data: { campaignId: campaign.id, leadId: lead.id } });
+    const url = `/api/campaigns/${campaign.id}/schedule`;
+    const scheduledAt = new Date(Date.now() + 86400000);
+    scheduledAt.setUTCHours(12, 0, 0, 0);
+    const body = { scheduledAt: scheduledAt.toISOString(), timezone: 'UTC' };
+    const { default: config } = await import('../src/config.js');
+    const old = { ...config.businessHours };
+    config.businessHours = { start: 0, end: 24, timezone: 'UTC' };
+    try {
+      assert.equal((await scheduleRequest('POST', url, { body })).status, 401);
+      const viewer = { Authorization: `Bearer ${signToken(user)}` };
+      assert.equal((await scheduleRequest('POST', url, { body, headers: viewer })).status, 403);
+      assert.equal((await scheduleRequest('DELETE', url, { headers: viewer })).status, 403);
+      const scheduled = await scheduleRequest('POST', url, { body, headers: authHeader() });
+      assert.equal(scheduled.status, 200);
+      assert.equal(scheduled.body.status, 'scheduled');
+      assert.equal(scheduled.body.scheduleTimezone, 'UTC');
+      assert.equal(await db.message.count({ where: { campaignId: campaign.id } }), 0);
+      assert.equal((await scheduleRequest('POST', `/api/campaigns/${campaign.id}/start`, { headers: authHeader() })).status, 409);
+      assert.equal((await scheduleRequest('DELETE', url, { headers: authHeader() })).status, 200);
+      assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'draft');
+      assert.equal((await scheduleRequest('POST', url, { body: { scheduledAt: 'invalid', timezone: 'UTC' }, headers: authHeader() })).status, 400);
+    } finally {
+      config.businessHours = old;
+      await db.campaignLead.deleteMany({ where: { campaignId: campaign.id } });
+      await db.campaign.delete({ where: { id: campaign.id } });
+      await db.lead.delete({ where: { id: lead.id } });
+      await db.user.delete({ where: { id: user.id } });
+    }
+  });
+});
+
 describe('Account dashboard layouts', () => {
   const layoutRequest = (method, url, options = {}) => request(method, url, { ...options, headers: { ...options.headers, 'X-Forwarded-For': '192.0.2.10' } });
   test('requires authentication and keeps pages and accounts isolated', async () => {
@@ -3449,6 +3489,10 @@ describe('YCloud WhatsApp provider', () => {
       } else if (req.url.includes('/upload')) res.end(JSON.stringify({ id: 'media-fixture' }));
       else if (req.url.includes('/download/')) { res.setHeader('Content-Type', 'image/png'); res.end(Buffer.from('fixture-image')); }
       else if (req.url === '/v2/whatsapp/messages/sendDirectly') {
+        if (sendFailure === 'balance') {
+          res.statusCode = 403;
+          return res.end(JSON.stringify({ code: 'BALANCE_INSUFFICIENT', message: 'Payment fixture' }));
+        }
         res.end(JSON.stringify(sendFailure ? { id: 'failed-fixture', status: 'failed', errorCode: '131042', errorMessage: 'Payment fixture' } : { id: 'ycloud-message-fixture', wamid: 'wamid.fixture', status: 'sent' }));
       } else { res.statusCode = 404; res.end('{}'); }
     });
@@ -3519,6 +3563,10 @@ describe('YCloud WhatsApp provider', () => {
     } finally { fs.unlinkSync(file); }
     sendFailure = true;
     assert.equal((await cloud.sendTextMessage('15550100001', 'Fixture only', account.id)).reason, 'payment_issue');
+    sendFailure = 'balance';
+    const balance = await cloud.sendCampaignTemplate({ phone: '15550100001', campaignName: 'fixture_template', templateParams: ['Taylor'], accountId: account.id });
+    assert.equal(balance.reason, 'payment_issue');
+    assert.equal(balance.errorCode, 'BALANCE_INSUFFICIENT');
     sendFailure = false;
   });
 

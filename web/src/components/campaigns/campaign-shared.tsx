@@ -40,7 +40,7 @@ export function normalizeStatus(status: string | null | undefined): CampaignStat
    small enough to scan past. Same treatment as the Leads table. */
 export const STATUS_META: Record<CampaignStatusKey, { label: string; dot: string }> = {
   running: { label: 'Live', dot: 'bg-success' },
-  scheduled: { label: 'Queued', dot: 'bg-info' },
+  scheduled: { label: 'Scheduled', dot: 'bg-info' },
   paused: { label: 'Paused', dot: 'bg-warning' },
   draft: { label: 'Draft', dot: 'bg-text-muted' },
   completed: { label: 'Completed', dot: 'bg-accent' },

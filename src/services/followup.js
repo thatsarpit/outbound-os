@@ -46,6 +46,7 @@ class FollowupEngine {
           status: 'sending',
           direction: 'outbound',
           channel: { not: 'imessage' },
+          campaignId: null,
           updatedAt: { lt: fiveMinAgo },
         },
         data: { status: 'queued' },

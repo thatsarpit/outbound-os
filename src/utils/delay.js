@@ -34,8 +34,9 @@ export function isBusinessHours(
   startHour = config.businessHours.start,
   endHour = config.businessHours.end,
   timeZone = config.businessHours.timezone,
+  at = new Date(),
 ) {
-  const hour = hourIn(timeZone);
+  const hour = hourIn(timeZone, at);
   if (startHour <= endHour) {
     return hour >= startHour && hour < endHour;
   }
@@ -44,19 +45,19 @@ export function isBusinessHours(
 }
 
 /** Current hour-of-day (0-23) in the given IANA timezone. */
-function hourIn(timeZone) {
+function hourIn(timeZone, at = new Date()) {
   try {
     return Number(
       new Intl.DateTimeFormat('en-GB', {
         timeZone,
         hour: '2-digit',
         hour12: false,
-      }).format(new Date()),
+      }).format(at),
     ) % 24;
   } catch {
     // An unknown zone must not stop outreach altogether; fall back to UTC and
     // let the misconfiguration show up as an odd window rather than silence.
-    return new Date().getUTCHours();
+    return at.getUTCHours();
   }
 }
 

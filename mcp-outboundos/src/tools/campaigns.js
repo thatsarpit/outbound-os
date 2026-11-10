@@ -123,6 +123,20 @@ export function registerCampaignTools(server) {
       catch (e) { return err(e.message); }
     });
 
+  server.tool('schedule_campaign',
+    'Authorize a reviewed populated draft to send automatically at a future absolute time, inside workspace sending hours. Does not populate or expand the audience. Missed launches pause for review.',
+    { campaign_id: CampaignId, scheduledAt: z.string().describe('Future ISO timestamp including Z or UTC offset'), timezone: z.string().describe('IANA time zone used to display the scheduled instant') },
+    async ({ campaign_id, ...body }) => {
+      try { const { data } = await post(`/api/campaigns/${campaign_id}/schedule`, body); return ok(data); }
+      catch (e) { return err(e.message); }
+    });
+  server.tool('cancel_campaign_schedule',
+    'Cancel a scheduled campaign and return it to draft. If launch has already started, pause the running campaign instead.',
+    { campaign_id: CampaignId }, async ({ campaign_id }) => {
+      try { const { data } = await del(`/api/campaigns/${campaign_id}/schedule`); return ok(data); }
+      catch (e) { return err(e.message); }
+    });
+
   // ── start_campaign ──
   server.tool(
     'start_campaign',

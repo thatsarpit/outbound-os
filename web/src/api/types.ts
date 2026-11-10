@@ -186,6 +186,8 @@ export interface Campaign {
   replyCount: number
   scheduledAt: string | null
   startedAt: string | null
+  scheduleTimezone?: string | null
+  scheduleError?: string | null
   completedAt: string | null
   createdAt: string
   updatedAt: string

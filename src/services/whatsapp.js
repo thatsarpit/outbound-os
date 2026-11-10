@@ -375,6 +375,7 @@ class WhatsAppManager {
         accountId: selectedAccountId,
         reason: result.reason || 'send_failed',
         error: result.rawError || result.reason || 'WhatsApp template send failed',
+        errorCode: result.errorCode ?? null,
       };
     }
 

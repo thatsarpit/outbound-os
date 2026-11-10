@@ -1,5 +1,6 @@
 import { startWebPush, stopWebPush } from './services/webPush.js';
 import cron from 'node-cron';
+import campaignScheduler from './services/campaignScheduler.js';
 import config from './config.js';
 import logger from './utils/logger.js';
 import whatsappManager from './services/whatsapp.js';
@@ -55,6 +56,7 @@ async function main() {
     await whatsappManager.initialize();
 
     // Recover any messages stuck in 'sending' from a prior crash
+    await campaignScheduler.recoverInterrupted();
     await followupEngine.recoverStuckMessages();
 
     // ── Step 2: Reply detection ──
@@ -276,6 +278,10 @@ async function main() {
     // timeout. It repairs channel queues left partially created by a crash.
     logger.info('Starting persistent runtime recovery...');
     const recovery = await recoveryCoordinator.start();
+    // Check due campaigns after startup recovery has reconciled inbound replies.
+    const runScheduledCampaigns = () => campaignScheduler.processDue().catch(() => logger.warn('Campaign schedule check failed; retrying next minute.'));
+    await runScheduledCampaigns();
+    cron.schedule('* * * * *', runScheduledCampaigns);
     logger.info(`🔁 Runtime recovery: ${recovery?.lastRecoveryStatus || recovery?.summary?.status || 'ready'}`);
 
     logger.info('='.repeat(50));

@@ -122,6 +122,7 @@ export default function CampaignsPage() {
       return result
     },
     enabled: detailId !== null,
+    refetchInterval: 15_000,
   })
 
   const pageCounts = campaigns.reduce(
@@ -397,7 +398,7 @@ export default function CampaignsPage() {
         description={
           <>
             <span className="tabular-nums">{counts.running}</span> live &middot;{' '}
-            <span className="tabular-nums">{counts.scheduled}</span> queued &middot;{' '}
+            <span className="tabular-nums">{counts.scheduled}</span> scheduled &middot;{' '}
             <span className="tabular-nums">{counts.draft}</span>{' '}
             {counts.draft === 1 ? 'draft' : 'drafts'} &middot;{' '}
             <span className="tabular-nums">{counts.completed}</span> completed

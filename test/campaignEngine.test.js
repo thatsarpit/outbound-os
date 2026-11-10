@@ -6,6 +6,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createPrismaClient } from '../src/utils/createPrismaClient.js';
 import { CampaignEngine } from '../src/services/campaignEngine.js';
+import { CampaignScheduler, validateSchedule } from '../src/services/campaignScheduler.js';
 import { campaignChannelEligibility, campaignSenderId, hasAllLeadTags } from '../src/utils/campaignAudience.js';
 
 async function fixture(run, hooks = {}) {
@@ -61,6 +62,117 @@ async function fixture(run, hooks = {}) {
   try { await run({ db, engine, calls, createLead, createCampaign, running, createWa }); }
   finally { await db.$disconnect(); sql.close(); rmSync(directory, { recursive: true, force: true }); }
 }
+
+test('schedule validation uses absolute instants and workspace time across DST', () => {
+  const hours = { start: 9, end: 18, timezone: 'Europe/London' };
+  const now = new Date('2026-01-01T00:00:00Z');
+  for (const scheduledAt of ['2026-03-29T08:30:00Z', '2026-10-25T09:30:00Z']) {
+    assert.ok(validateSchedule({ scheduledAt, timezone: 'Europe/London' }, now, hours));
+  }
+  for (const scheduledAt of ['2026-03-29T07:30:00Z', '2026-10-25T08:30:00Z', '2026-03-29T09:00', 'invalid', '2025-01-01T09:00Z']) {
+    assert.throws(() => validateSchedule({ scheduledAt, timezone: 'Europe/London' }, now, hours));
+  }
+  assert.throws(() => validateSchedule({ scheduledAt: '2026-03-29T09:30:00Z', timezone: 'Mars/Orbit' }, now, hours));
+});
+
+test('schedule requires a reviewed audience and cancel returns to editable draft', async () => fixture(async ({ db, engine, createLead, createCampaign }) => {
+  const now = new Date();
+  const scheduler = new CampaignScheduler({ db, engine, now: () => now, hours: () => ({ start: 0, end: 24, timezone: 'UTC' }) });
+  const campaign = await createCampaign();
+  const input = { scheduledAt: new Date(+now + 3600000).toISOString(), timezone: 'UTC' };
+  await assert.rejects(scheduler.schedule(campaign.id, input), /Populate/);
+  await createLead(1);
+  await engine.populateCampaign(campaign.id);
+  const scheduled = await scheduler.schedule(campaign.id, input);
+  assert.equal(scheduled.status, 'scheduled');
+  assert.equal(scheduled.scheduleTimezone, 'UTC');
+  await assert.rejects(engine.startCampaign(campaign.id), /Cancel the schedule/);
+  await scheduler.cancel(campaign.id);
+  assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).scheduledAt, null);
+  await assert.rejects(scheduler.cancel(campaign.id), /Schedule changed/);
+}));
+
+test('two due workers claim a scheduled campaign only once; stale reschedule cannot launch', async () => fixture(async ({ db, engine, createLead, createCampaign }) => {
+  const now = new Date();
+  const scheduler = new CampaignScheduler({ db, engine, now: () => new Date(+now - 3600000), hours: () => ({ start: 0, end: 24, timezone: 'UTC' }) });
+  const campaign = await createCampaign();
+  await createLead(1); await engine.populateCampaign(campaign.id);
+  const old = await scheduler.schedule(campaign.id, { scheduledAt: new Date(+now - 60000).toISOString(), timezone: 'UTC' });
+  await scheduler.schedule(campaign.id, { scheduledAt: new Date(+now + 60000).toISOString(), timezone: 'UTC' });
+  await assert.rejects(engine.startCampaign(campaign.id, { expectedSchedule: old }));
+  await scheduler.schedule(campaign.id, { scheduledAt: new Date(+now - 60000).toISOString(), timezone: 'UTC' });
+  let starts = 0;
+  engine._executeCampaign = async () => { starts++ };
+  scheduler.now = () => now;
+  await Promise.all([scheduler.processDue(), scheduler.processDue()]);
+  assert.equal(starts, 1);
+  assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'running');
+}));
+
+test('late and out-of-hours launches pause for review without sending', async () => fixture(async ({ db, engine, createLead, createCampaign, calls }) => {
+  await createLead(1);
+  const campaign = await createCampaign(); await engine.populateCampaign(campaign.id);
+  await db.campaign.update({ where: { id: campaign.id }, data: { status: 'scheduled', scheduleTimezone: 'UTC', scheduledAt: new Date(Date.now() - 7200000) } });
+  const scheduler = new CampaignScheduler({ db, engine });
+  await scheduler.processDue();
+  assert.match((await db.campaign.findUnique({ where: { id: campaign.id } })).scheduleError, /missed/);
+  await db.campaign.update({ where: { id: campaign.id }, data: { status: 'scheduled', scheduledAt: new Date(Date.now() - 1000) } });
+  engine.businessHours = () => false;
+  await scheduler.processDue();
+  assert.match((await db.campaign.findUnique({ where: { id: campaign.id } })).scheduleError, /Outside/);
+  assert.equal(calls.email.length, 0);
+}));
+
+test('startup quarantines interrupted scheduled attempts without requeueing them', async () => fixture(async ({ db, engine, createLead, createCampaign }) => {
+  const lead = await createLead(1); const campaign = await createCampaign(); await engine.populateCampaign(campaign.id);
+  await db.campaign.update({ where: { id: campaign.id }, data: { status: 'running', scheduleTimezone: 'UTC', scheduledAt: new Date() } });
+  await db.campaignLead.updateMany({ where: { campaignId: campaign.id }, data: { status: 'sending' } });
+  await db.message.create({ data: { leadId: lead.id, campaignId: campaign.id, direction: 'outbound', channel: 'email', content: 'Fixture', status: 'sending' } });
+  const scheduler = new CampaignScheduler({ db, engine, hours: () => ({ start: 0, end: 24, timezone: 'UTC' }) });
+  assert.deepEqual(await scheduler.recoverInterrupted(), { paused: 1 });
+  assert.equal((await db.message.findFirst({ where: { campaignId: campaign.id } })).status, 'unconfirmed');
+  assert.equal((await db.campaignLead.findFirst({ where: { campaignId: campaign.id } })).status, 'failed');
+  await assert.rejects(scheduler.schedule(campaign.id, { scheduledAt: new Date(Date.now() + 3600000).toISOString(), timezone: 'UTC' }), /already has send attempts/);
+}));
+
+test('a stale population request cannot add recipients to a reviewed schedule', async () => fixture(async ({ db, engine, createLead, createCampaign }) => {
+  const now = new Date();
+  const scheduler = new CampaignScheduler({ db, engine, now: () => now, hours: () => ({ start: 0, end: 24, timezone: 'UTC' }) });
+  const first = await createLead(1);
+  const campaign = await createCampaign();
+  await engine.populateCampaign(campaign.id);
+  const later = await createLead(2);
+  engine.getMatchingLeads = async () => {
+    await scheduler.schedule(campaign.id, { scheduledAt: new Date(+now + 3600000).toISOString(), timezone: 'UTC' });
+    return [first, later];
+  };
+  await assert.rejects(engine.populateCampaign(campaign.id), /Campaign changed/);
+  assert.equal(await db.campaignLead.count({ where: { campaignId: campaign.id } }), 1);
+}));
+
+test('worker ignores legacy schedule rows until they are explicitly scheduled', async () => fixture(async ({ db, engine, createCampaign }) => {
+  const campaign = await createCampaign();
+  await db.campaign.update({ where: { id: campaign.id }, data: { status: 'scheduled', scheduledAt: new Date(Date.now() - 1000) } });
+  const scheduler = new CampaignScheduler({ db, engine });
+  assert.deepEqual(await scheduler.processDue(), { checked: 0 });
+  assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'scheduled');
+}));
+
+test('provider payment refusal pauses the run and leaves later recipients pending', async () => fixture(async ({ db, engine, calls, createLead, createCampaign, createWa, running }) => {
+  await createLead(1);
+  await createLead(2);
+  await createWa(8);
+  const campaign = await createCampaign({ channel: 'whatsapp', whatsappSenderAccountId: 8, waCampaignName: 'fixture_template' });
+  await engine.populateCampaign(campaign.id);
+  await engine._executeCampaign(await running(campaign.id));
+  const result = await db.campaign.findUnique({ where: { id: campaign.id } });
+  assert.equal(result.status, 'paused');
+  assert.match(result.scheduleError, /balance/);
+  assert.equal(calls.whatsapp.length, 1);
+  assert.equal(await db.campaignLead.count({ where: { campaignId: campaign.id, status: 'pending' } }), 1);
+  const attempt = await db.message.findFirst({ where: { campaignId: campaign.id } });
+  assert.equal(attempt.providerStatusReason, 'payment_issue');
+}, { whatsapp: () => ({ success: false, reason: 'payment_issue', errorCode: 'BALANCE_INSUFFICIENT' }) }));
 
 test('campaign tags use case-insensitive whole tokens and all requested tags', () => {
   assert.equal(hasAllLeadTags(' bulk, UK-Retail ', 'uk'), false);
