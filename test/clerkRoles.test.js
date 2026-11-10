@@ -90,6 +90,23 @@ test('production preflight checks the current favicon and requires a pinned prod
   } finally { rmSync(folder, { recursive: true, force: true }); }
 });
 
+test('preflight accepts the shipped local config and rejects incomplete Clerk setup', () => {
+  const options = { encoding: 'utf8', cwd: fileURLToPath(new URL('../', import.meta.url)) };
+  const local = spawnSync(process.execPath, ['scripts/preflight.mjs', '.env.example'], options);
+  assert.equal(local.status, 0, local.stderr);
+  const folder = mkdtempSync(path.join(tmpdir(), 'outboundos-preflight-'));
+  const file = path.join(folder, 'fixture.env');
+  try {
+    writeFileSync(file, 'DATABASE_URL=file:fixture.db\nAUTH_PROVIDER=clerk\n');
+    const clerk = spawnSync(process.execPath, ['scripts/preflight.mjs', file], options);
+    assert.equal(clerk.status, 1);
+    assert.match(clerk.stderr, /CLERK_SECRET_KEY is missing/);
+    assert.match(clerk.stderr, /CLERK_PUBLISHABLE_KEY is missing/);
+    writeFileSync(file, 'DATABASE_URL=file:fixture.db\nAUTH_PROVIDER=invalid\n');
+    assert.equal(spawnSync(process.execPath, ['scripts/preflight.mjs', file], options).status, 1);
+  } finally { rmSync(folder, { recursive: true, force: true }); }
+});
+
 test('SSE rejects missing and malformed tokens before authorizing a live-update stream', async () => {
   assert.equal(await verifyQueryToken(null), null);
   assert.equal(await verifyQueryToken('not-a-signed-session'), null);
