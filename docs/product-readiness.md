@@ -50,6 +50,7 @@ promise of complete vulnerability coverage.
 | P1 | Durable campaign scheduler | User can schedule/cancel/reschedule from UI and MCP; future status alone never implies an active worker; database-backed due-work claim survives restart without duplicate sends |
 | P1 | Recipient time zones and dispatch pacing | Use explicit IANA zones, DST and weekday windows; ambiguous country-only locations are held or reviewed; apply workspace hours too; hourly/daily limits enforced even with explicit senders |
 | P1 | Audience and spend controls | Exact audience snapshot, deduplication, prior-contact rules and reason counts before launch; recheck replies/opt-outs per send; estimate by country/category and stop on budget/provider refusal |
+| P1 | Separate contact history from lifecycle state | Derive never-contacted from message history across every lead status; show paused-but-untouched counts separately; record pause actor, reason and time so bulk holds can be reviewed without guessing |
 | P1 | Queue recovery and operations console | Visible queued/accepted/delivered/read/failed/unknown states, last worker run, webhook freshness, reviewed retries and dead letters; provider acceptance never presented as delivery |
 | P1 | Reproducible self-host installation | Fresh and upgrade CI on amd64/arm64; Docker-only local auth; optional Clerk/MCP; Linux proxy and Windows/WSL acceptance; actionable readiness errors |
 | P1 | Restore and incident readiness | Off-host encrypted backup with DB, keys, media and originals; measured restore drill; alerts for failed backup, disk, worker lag and billing exhaustion |
@@ -74,6 +75,13 @@ The explicit-sender campaign template path currently updates counters without
 enforcing daily/hourly limits at that dispatch boundary. Its per-recipient
 delay is approximately 1–3 seconds. Scheduler work must address that path;
 changing documented account defaults alone cannot provide reliable pacing.
+
+Country routing also needs a provider-policy check. Twilio's
+[official WhatsApp notice](https://www.twilio.com/en-us/changelog/whatsapp-marketing-messages-to-u-s--numbers-no-longer-supported)
+documents Meta's pause on marketing templates to US numbers from April 2025.
+Verify the current provider policy before scheduling this route. A `131049`
+receipt alone does not establish that retrying after 24 hours is appropriate:
+country restrictions and per-user marketing limits can share that error code.
 
 ## Validation limits
 
