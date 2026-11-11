@@ -39,10 +39,10 @@ export const integrations: Integration[] = [
     slug: 'whatsapp-cloud-api',
     name: 'WhatsApp Cloud API',
     kind: 'Channel',
-    title: 'WhatsApp Cloud API integration',
+    title: 'WhatsApp CRM integration with Meta Cloud API',
     description:
       'Connect Meta’s WhatsApp Cloud API directly to Outbound OS for approved templates, customer replies and reported delivery status. Open source and self hosted.',
-    h1: 'The WhatsApp Cloud API, connected straight to your CRM.',
+    h1: 'Connect WhatsApp Cloud API to your CRM',
     summary: "Meta's official API, no reseller in between. Templates, replies and read receipts.",
     intro: [
       "Outbound OS talks to Meta's WhatsApp Cloud API directly. You create a Meta developer app, add your business number, and configure the number and access token in Integrations → WhatsApp. Messages are submitted from your server to Meta for delivery.",
@@ -101,6 +101,10 @@ export const integrations: Integration[] = [
       body: 'META_APP_SECRET=your-app-secret\nMETA_WEBHOOK_VERIFY_TOKEN=any-long-random-string',
     },
     faq: [
+      {
+        q: 'How do I verify my WhatsApp CRM integration?',
+        a: 'First run the Outbound OS connection test and confirm the number identity matches your Meta account. Then send a message from a test number you own and check that the reply appears on the correct lead in the shared inbox. This verifies the inbound webhook separately from token access.',
+      },
       {
         q: 'Is the WhatsApp Cloud API free?',
         a: 'Outbound OS has no software licence fee. Meta messaging charges depend on category, destination and applicable service-window rules. Check the current Meta rate card before budgeting.',
