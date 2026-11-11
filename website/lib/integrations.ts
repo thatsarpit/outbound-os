@@ -39,7 +39,7 @@ export const integrations: Integration[] = [
     slug: 'whatsapp-cloud-api',
     name: 'WhatsApp Cloud API',
     kind: 'Channel',
-    title: 'WhatsApp Cloud API CRM — connect Meta directly',
+    title: 'WhatsApp Cloud API integration',
     description:
       'Connect Meta’s WhatsApp Cloud API directly to Outbound OS for approved templates, customer replies and reported delivery status. Open source and self hosted.',
     h1: 'The WhatsApp Cloud API, connected straight to your CRM.',
@@ -537,10 +537,10 @@ export const integrations: Integration[] = [
     slug: 'webhooks',
     name: 'Lead intake & webhooks',
     kind: 'Data out',
-    title: 'CRM webhooks — lead intake and outgoing events',
+    title: 'CRM webhooks for leads and events',
     description:
       'Connect forms and external systems to your CRM. Import leads with source keys, then send signed lead and message events to your other tools.',
-    h1: 'Leads come in. Your other systems stay in sync.',
+    h1: 'CRM webhooks for lead intake and outgoing events',
     summary: 'Source-key lead intake, reviewed imports and signed outgoing events.',
     intro: [
       'Incoming lead sources receive JSON or form posts at /api/webhooks/inbound/<source>, authenticated with the source API key. Map your fields, test the connection and configure first contact before enabling live intake. Website forms and external systems use the same source settings.',

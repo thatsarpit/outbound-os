@@ -35,7 +35,7 @@ export const docs: Doc[] = [
   {
     slug: 'whatsapp-cloud-api',
     label: 'WhatsApp Cloud API',
-    title: 'Connect the WhatsApp Cloud API',
+    title: 'WhatsApp Cloud API setup guide',
     description:
       'Step-by-step: create a Meta app, get a permanent System User token, connect your number to Outbound OS, receive replies by webhook and set a first-contact template.',
     section: 'Connect',
