@@ -79,9 +79,14 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: 087e55611f032ad1d9109b2594756f6d
           PUBLISH: ${{ inputs.publish }}
         run: |
+          set -o pipefail
           test -n "$CLOUDFLARE_API_TOKEN"
           tar -xf pilot-release.tar
-          prior=$(npx --yes wrangler@4.151.0 pages deployment list --project-name outboundos-site --environment production --json | jq -er '.[0].Id')
+          project_url="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/outboundos-site"
+          cloudflare_get() {
+            curl --fail --silent --show-error --max-time 25 --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$1"
+          }
+          prior=$(cloudflare_get "$project_url" | jq -er '.result.canonical_deployment.id')
           echo "Previous production deployment: $prior" >> "$GITHUB_STEP_SUMMARY"
           branch=seo-pilot-preview
           if [ "$PUBLISH" = true ]; then branch=main; fi
@@ -91,7 +96,7 @@ jobs:
           echo "Cloudflare deployment: $url" >> "$GITHUB_STEP_SUMMARY"
           export CHECK_URL="$url"
           if [ "$PUBLISH" = true ]; then export CHECK_URL="https://${SITE_HOST}"; fi
-          python3 - <<'PY'
+          if ! python3 - <<'PY'
           import os, time, urllib.request
           from html.parser import HTMLParser
           class Head(HTMLParser):
@@ -123,3 +128,21 @@ jobs:
                           raise
                       time.sleep(5)
           PY
+          then
+            if [ "$PUBLISH" = true ]; then
+              active=$(cloudflare_get "$project_url" | jq -ce '.result.canonical_deployment')
+              if [ "$(jq -r .url <<< "$active")" = "$url" ]; then
+                curl --fail --silent --show-error --max-time 25 --request POST \
+                  --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+                  "$project_url/deployments/$prior/rollback" | jq -e '.success == true' >/dev/null
+                echo "Restored Pages deployment: $prior" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
+            exit 1
+          fi
+          if [ "$PUBLISH" = true ]; then
+            active=$(cloudflare_get "$project_url" | jq -ce '.result.canonical_deployment')
+            test "$(jq -r .url <<< "$active")" = "$url"
+            test "$(jq -r .deployment_trigger.metadata.commit_hash <<< "$active")" = "$REVISION"
+            echo "Active Pages deployment: $(jq -er .id <<< "$active")" >> "$GITHUB_STEP_SUMMARY"
+          fi
