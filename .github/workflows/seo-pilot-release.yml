@@ -1,0 +1,125 @@
+name: SEO pilot release
+run-name: SEO pilot ${{ inputs.publish && 'production' || 'preview' }} ${{ inputs.revision }}
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: Full SHA of the current pilot release branch
+        required: true
+        type: string
+      publish:
+        description: Activate on the production site
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: seo-pilot-release
+  cancel-in-progress: false
+env:
+  RELEASE_BRANCH: codex/seo-release-2026-11-11
+  REVISION: ${{ inputs.revision }}
+  SITE_HOST: outboundos.space
+  CHECK_ROUTES: '/ /whatsapp-crm /integrations/whatsapp-cloud-api'
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Verify the current release revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          [[ "$REVISION" =~ ^[a-f0-9]{40}$ ]]
+          head_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$RELEASE_BRANCH" --jq .object.sha)
+          test "$head_sha" = "$REVISION"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build release artifact
+        working-directory: website
+        run: |
+          npm ci
+          npm run build
+          npm run check:export
+          tar -cf "$RUNNER_TEMP/pilot-release.tar" out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seo-release
+          path: ${{ runner.temp }}/pilot-release.tar
+          retention-days: 2
+          if-no-files-found: error
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    environment: seo-production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: seo-release
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify release revision is still current
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$RELEASE_BRANCH" --jq .object.sha)
+          test "$head_sha" = "$REVISION"
+      - name: Deploy and verify the built artifact
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 087e55611f032ad1d9109b2594756f6d
+          PUBLISH: ${{ inputs.publish }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          tar -xf pilot-release.tar
+          prior=$(npx --yes wrangler@4.151.0 pages deployment list --project-name outboundos-site --environment production --json | jq -er '.[0].Id')
+          echo "Previous production deployment: $prior" >> "$GITHUB_STEP_SUMMARY"
+          branch=seo-pilot-preview
+          if [ "$PUBLISH" = true ]; then branch=main; fi
+          npx --yes wrangler@4.151.0 pages deploy out --project-name outboundos-site --branch "$branch" --commit-hash "$REVISION" --commit-dirty=true | tee "$RUNNER_TEMP/upload.log"
+          url=$(sed -nE 's/.*Deployment complete! Take a peek over at (https:\/\/[^ ]+).*/\1/p' "$RUNNER_TEMP/upload.log" | tail -n 1)
+          test -n "$url"
+          echo "Cloudflare deployment: $url" >> "$GITHUB_STEP_SUMMARY"
+          export CHECK_URL="$url"
+          if [ "$PUBLISH" = true ]; then export CHECK_URL="https://${SITE_HOST}"; fi
+          python3 - <<'PY'
+          import os, time, urllib.request
+          from html.parser import HTMLParser
+          class Head(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.canonical = []
+                  self.noindex = False
+              def handle_starttag(self, tag, attrs):
+                  a = dict(attrs)
+                  if tag == "link" and a.get("rel") == "canonical":
+                      self.canonical.append(a.get("href", "").rstrip("/"))
+                  if tag == "meta" and a.get("name", "").lower() in {"robots", "googlebot"}:
+                      self.noindex |= "noindex" in a.get("content", "").lower()
+          for route in os.environ["CHECK_ROUTES"].split():
+              for attempt in range(4):
+                  try:
+                      req = urllib.request.Request(os.environ["CHECK_URL"] + route, headers={"User-Agent": "Mozilla/5.0"})
+                      with urllib.request.urlopen(req, timeout=25) as res:
+                          head = Head()
+                          head.feed(res.read(512000).decode(errors="replace"))
+                          expected = ("https://" + os.environ["SITE_HOST"] + route).rstrip("/")
+                          assert res.status == 200 and head.canonical == [expected], (route, head.canonical)
+                          if os.environ["PUBLISH"] == "true":
+                              assert not head.noindex and "noindex" not in res.headers.get("X-Robots-Tag", "").lower(), route
+                      print("Verified", route)
+                      break
+                  except Exception:
+                      if attempt == 3:
+                          raise
+                      time.sleep(5)
+          PY
