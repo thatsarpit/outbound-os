@@ -1,0 +1,12 @@
+import {readFileSync,writeFileSync,mkdirSync,copyFileSync,chmodSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+const root=fileURLToPath(new URL('.',import.meta.url));
+const target=path.resolve(process.argv[2]||path.join(root,'dist'));
+mkdirSync(target,{recursive:true,mode:0o700});
+for(const f of ['manifest.json','background.mjs','ledger.mjs','options.html','options.mjs','mac-startup.py','Enable startup.command','Disable startup.command','README.md'])copyFileSync(path.join(root,f),path.join(target,f));
+const records=readFileSync(path.join(root,'../indiamart-live/records.mjs'),'utf8').replace(/^export /gm,'');
+const entry=readFileSync(path.join(root,'content-entry.js'),'utf8');
+writeFileSync(path.join(target,'content.js'),`(()=>{\n${records}\n${entry}\n})();\n`);
+for(const file of ['Enable startup.command','Disable startup.command'])chmodSync(path.join(target,file),0o700);
+console.log('Prepared relay extension. It is disabled until the owner loads and confirms the account.');

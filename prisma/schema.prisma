@@ -582,6 +582,9 @@ model ConnectorReceipt {
   state String
   reason String?
   recordJson String
+  liveState String @default("none")
+  liveLeadVersion DateTime?
+  liveError String?
   createdAt DateTime @default(now())
   @@unique([sourceId, externalId])
   @@index([leadId])

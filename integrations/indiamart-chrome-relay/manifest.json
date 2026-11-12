@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Outbound OS · IndiaMART Relay",
+  "version": "1.0.0",
+  "description": "Resume purchased-lead syncing from this Chrome profile after wake or restart.",
+  "minimum_chrome_version": "120",
+  "permissions": ["alarms", "storage", "scripting", "background"],
+  "host_permissions": ["https://seller.indiamart.com/*", "https://api.outboundos.space/*"],
+  "background": {"service_worker": "background.mjs", "type": "module"},
+  "action": {"default_title": "IndiaMART relay status", "default_popup": "options.html"},
+  "options_page": "options.html",
+  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'none'"}
+}

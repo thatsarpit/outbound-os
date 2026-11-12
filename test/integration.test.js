@@ -3729,3 +3729,21 @@ describe('Free bulk email verification and send protection', () => {
     error => error.code === 'email_verification_required');
   });
 });
+
+describe('IndiaMART signed source boundary', () => {
+  test('source credentials are required for purchases and health reports; status contains no source secret', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const source = await db.webhookSource.create({ data: { source: 'indiamart_live', name: 'Fixture IndiaMART', apiKey: 'fixture-private-intake-key' } });
+    const post = (suffix, key, body) => request('POST', `/api/webhooks/indiamart/indiamart_live${suffix}`, { body, headers: { 'x-api-key': key, 'X-Forwarded-For': '192.0.2.219' } });
+    assert.equal((await post('', 'wrong-key', {})).status, 401);
+    assert.equal((await post('/health', 'wrong-key', { state: 'ready' })).status, 401);
+    assert.equal((await post('', source.apiKey, { records: [] })).status, 422);
+    assert.equal((await post('/health', source.apiKey, { state: 'needs_attention', error: 'Sign-in required', lastCheck: null })).status, 200);
+    assert.equal((await post('/health', source.apiKey, { state: 'invalid' })).status, 422);
+    const response = await request('GET', '/api/system/status', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.219' } });
+    assert.equal(response.status, 200);
+    assert.ok(!JSON.stringify(response.body).includes(source.apiKey));
+    await db.webhookSource.update({ where: { id: source.id }, data: { enabled: false } });
+    assert.equal((await post('/health', source.apiKey, { state: 'ready' })).status, 404);
+  });
+});

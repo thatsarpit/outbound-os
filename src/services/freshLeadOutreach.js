@@ -160,7 +160,7 @@ class FreshLeadOutreach {
    * longer suppresses email/iMessage forever, and every create is protected by
    * a database unique key rather than an in-memory check.
    */
-  async queue(lead) {
+  async queue(lead, { channels = ['whatsapp', 'email', 'imessage', 'telegram'], whatsappAccountId, emailAccountId, templateName: chosenTemplate } = {}) {
     const liveLead = await prisma.lead.findUnique({ where: { id: lead.id } });
     if (!liveLead) throw new Error('Lead not found');
     if (BLOCKED_LEAD_STATUSES.includes(liveLead.status)) {
@@ -178,21 +178,21 @@ class FreshLeadOutreach {
 
     // WhatsApp: keep a durable queue row even when the account is temporarily
     // at its daily cap. The queue processor will hold it until capacity resets.
-    if (hasSendableMobile(liveLead)) {
+    if (channels.includes('whatsapp') && hasSendableMobile(liveLead)) {
       const key = buildFreshAutomationKey(liveLead.id, 'whatsapp');
       const existing = await findOrAdoptExisting(liveLead.id, 'whatsapp', key);
       if (existing) {
         summary.whatsapp = 'already_queued';
         assignedWaAccountId = existing.waAccount || null;
       } else {
-        const preferredId = await whatsappManager.getNextAccount({
+        const preferredId = whatsappAccountId || await whatsappManager.getNextAccount({
           forInitialOutreach: true,
           poolId: liveLead.poolId,
         });
         const account = preferredId
           ? await prisma.whatsAppAccount.findUnique({ where: { id: preferredId } })
           : await fallbackWhatsAppAccount(liveLead.poolId);
-        const templateName = account?.defaultCampaignName || DEFAULT_WA_CAMPAIGN;
+        const templateName = chosenTemplate || account?.defaultCampaignName || DEFAULT_WA_CAMPAIGN;
         if (account && !templateName) {
           summary.whatsapp = 'no_template';
           logger.warn(`Lead ${liveLead.id}: WhatsApp first touch skipped — set a default template on ${account.name} in Settings → WhatsApp`);
@@ -216,13 +216,13 @@ class FreshLeadOutreach {
       }
     }
 
-    if (liveLead.email && !liveLead.emailOptOut) {
+    if (channels.includes('email') && liveLead.email && !liveLead.emailOptOut) {
       const key = buildFreshAutomationKey(liveLead.id, 'email');
       const existing = await findOrAdoptExisting(liveLead.id, 'email', key);
       if (existing) {
         summary.email = 'already_queued';
       } else {
-        const preferredId = await emailService._getNextEmailAccount({ poolId: liveLead.poolId });
+        const preferredId = emailAccountId || await emailService._getNextEmailAccount({ poolId: liveLead.poolId });
         const account = preferredId
           ? await prisma.emailAccount.findUnique({ where: { id: preferredId } })
           : await fallbackEmailAccount(liveLead.poolId);
@@ -248,7 +248,7 @@ class FreshLeadOutreach {
       }
     }
 
-    if (hasSendableMobile(liveLead)) {
+    if (channels.includes('imessage') && hasSendableMobile(liveLead)) {
       const key = buildFreshAutomationKey(liveLead.id, 'imessage');
       const existing = await findOrAdoptExisting(liveLead.id, 'imessage', key);
       if (existing) {
@@ -281,7 +281,7 @@ class FreshLeadOutreach {
     // here would sit untouched forever. It needs an explicit peer: Telegram
     // user accounts can only message peers they are allowed to contact, and a
     // raw phone number from a lead is not one of them.
-    if (liveLead.telegramPeer) {
+    if (channels.includes('telegram') && liveLead.telegramPeer) {
       const key = buildFreshAutomationKey(liveLead.id, 'telegram');
       const existing = await findOrAdoptExisting(liveLead.id, 'telegram', key);
       if (existing) {
@@ -412,7 +412,7 @@ class FreshLeadOutreach {
       where: {
         // Live sources only: a lead that arrived by webhook expects a first
         // touch, a bulk import deliberately does not.
-        source: { notIn: ['csv_import', 'manual'] },
+        source: { notIn: ['csv_import', 'manual', 'indiamart_live'] },
         createdAt: { gte: from },
         status: { notIn: BLOCKED_LEAD_STATUSES },
       },
