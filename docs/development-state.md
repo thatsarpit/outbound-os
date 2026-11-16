@@ -2,6 +2,29 @@
 
 Updated 16 November 2026.
 
+## Live release checkpoint
+
+PR #94 consolidates the release. The production API and MCP images are
+`outbound-os:reconciled-a18a3e6` and `outbound-os-mcp:reconciled-a18a3e6`.
+The dashboard deployment is `e8db0156` and serves `index-CyuSjJKV.js`; its
+frontend source is unchanged by the later MCP packaging and CI fixes.
+Both services are healthy. Authentication guards return 401 without a session.
+All 24 database migrations are applied; the live schema diff is empty and
+integrity/foreign-key checks pass. The private watcher remains healthy.
+
+The first rollout exposed an MCP shared-module ownership issue and automatically
+restored the previous images. The corrected image passed isolated non-root boot,
+health and authentication checks before promotion. CI now repeats that test
+using restrictive file permissions from a release archive. Private rollback
+images, configuration and online database snapshots remain on the deployment
+host; no customer records or credentials belong in this document.
+
+The owner approved documenting the two intentional attachment-storage alerts
+as reviewed false positives. Exact provider origins, size/type limits, generated
+private paths and authenticated retrieval were independently reviewed.
+Security scanning remains enabled.
+
+
 The scheduler draft originally branched from `a2f182f` and omitted the maintenance
 branch deployed afterward. This checkout reconciles the following sources.
 
@@ -45,20 +68,22 @@ the tested MCP and dashboard security updates from the current development work.
 
 The local continuation branch is `codex/reconciled-frontend-20261116`.
 
-Use Git ancestry to check the revisions above, then inspect the current diff
-and the relevant release notes. The local Git history retains the pre-reconcile
-checkpoint and the maintenance, main and website merges.
+Resume from main after PR #94 is merged. Main requires linear history, so the
+release is squash-merged. The retained reconciliation branch and dated
+checkpoint tag preserve the original maintenance and development ancestry.
+Use that history for tracing older work, and compare source trees when checking
+a squash commit against a deployment revision.
 
 The dashboard development preview uses `/dev/shell`. Build and verify that
 preview and the normal dashboard entry points after changing their shared
-components. Installation, scheduler and public-repository release PRs still
-need a reviewed rollout against the deployed API.
+components. The installation, scheduler and maintenance stacks are incorporated
+in PR #94. Treat the separate Hermes experiment and remaining dependency
+upgrades as future work; do not silently import them into this baseline.
 
 ## Verification on November 16
 
 The reconciled API suite passed 155 tests and the MCP suite passed 29 tests.
-The main unit suite passed 426 tests with four existing TODOs, followed by the
-two restored first-touch email checks. Both dashboard builds and lint passed.
+The final main unit suite passed 431 tests with four existing TODOs. Both dashboard builds and lint passed.
 Prisma reported an empty migration diff after applying the combined migrations
 to a fresh database. All four public dependency lockfiles returned zero known
 advisories in the final npm audit.
