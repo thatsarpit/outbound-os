@@ -229,9 +229,10 @@ export async function sendManualWhatsApp(
             language,
             parameters,
             accountId,
-            { marketing: marketingTemplate },
+            // manual: an operator's own reply is never held by outreach caps.
+            { marketing: marketingTemplate, manual: true },
           )
-        : await manager.sendMessage(address, body, accountId, { replyTo });
+        : await manager.sendMessage(address, body, accountId, { replyTo, manual: true });
   } catch {
     result = { success: false, reason: 'confirmation_unknown' };
   }

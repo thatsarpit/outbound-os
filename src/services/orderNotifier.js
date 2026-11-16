@@ -182,7 +182,9 @@ class OrderNotifier {
             spec.campaign(),
             spec.params(order, ctx),
             null,
-            { source: 'order-update', userName: order.customerName || '' },
+            // transactional: a buyer's own order update must not be held
+            // behind the outreach capacity gate.
+            { source: 'order-update', userName: order.customerName || '', transactional: true },
           );
           if (!res?.success) {
             throw new Error(res?.reason || res?.error || 'WhatsApp template send failed');

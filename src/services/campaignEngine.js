@@ -1,5 +1,7 @@
 import { campaignFilter } from '../utils/campaignFilter.js';
 import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
+import { contactBudgetGate } from './contactBudget.js';
+import { CAPACITY_REASONS } from '../utils/whatsappCapacity.js';
 import { refreshCampaignMetrics, readCampaignMetrics } from './campaignMetrics.js';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
@@ -25,12 +27,24 @@ function countryOf(country) { return String(country || '').trim() || 'your count
 const ACCEPTED = new Set(['sent', 'delivered', 'read']);
 const UNCERTAIN = new Set(['timeout', 'exception', 'no_message_id', 'confirmation_unknown']);
 
+/**
+ * Early-failure canary. A bad template, a restricted sender or a provider
+ * outage shows up in the first sends; without a tripwire the executor keeps
+ * walking the audience, converting one mistake into hundreds of failures and
+ * a damaged sender rating. Counters are per run, so an operator's resume is
+ * itself the reset — the next run starts a fresh sample instead of tripping
+ * instantly on the failures it was paused for.
+ */
+export const CANARY_MIN_ATTEMPTS = 20;
+export const CANARY_FAILURE_RATE = 0.25;
+
 /** Campaign dispatch has injectable dependencies so its safety rules need no provider calls to test. */
 export class CampaignEngine {
   constructor({ db = prisma, whatsapp = whatsappManager, email = emailService,
     imessage = imessageService, delay = randomDelay, businessHours = isBusinessHours,
-    reconcileReceipts = reconcileMetaReceipts, verification = emailVerification } = {}) {
-    Object.assign(this, { db, whatsapp, email, imessage, delay, businessHours, reconcileReceipts, verification });
+    reconcileReceipts = reconcileMetaReceipts, verification = emailVerification,
+    budgetGate = contactBudgetGate } = {}) {
+    Object.assign(this, { db, whatsapp, email, imessage, delay, businessHours, reconcileReceipts, verification, budgetGate });
   }
 
   async createCampaign({ name, description, messageTemplate, targetFilter, channel = 'whatsapp',
@@ -200,6 +214,13 @@ export class CampaignEngine {
       const ready = await this.verification.readyEmails([lead.email]);
       if (ready && !ready.has(emailIdentity(lead.email))) return { reason: 'email_verification_required' };
     }
+    // A lead automation already touched recently is not campaign inventory.
+    // The campaign's own rows are excluded so a multi-channel campaign cannot
+    // block its second channel with its first.
+    if (eligibility.eligible) {
+      const budget = await this.budgetGate(lead, { excludeCampaignId: campaign.id, db: this.db });
+      if (!budget.allowed) return { reason: budget.reason };
+    }
     return eligibility.eligible ? { lead } : { reason: eligibility.reason };
   }
 
@@ -208,7 +229,8 @@ export class CampaignEngine {
     const pending = await this.db.campaignLead.findMany({
       where: { campaignId: campaign.id, status: 'pending' }, orderBy: { id: 'asc' },
     });
-    let billingBlocked = false;
+    let billingBlocked = false, capacityBlocked = false;
+    let runAccepted = 0, runFailed = 0, canaryTripped = false;
     try {
       for (const recipient of pending) {
         const claim = await this.db.campaignLead.updateMany({
@@ -244,7 +266,10 @@ export class CampaignEngine {
             if (context.halt) { halted = true; break; }
             if (!context.lead) { reasons.push(`${channel}:${context.reason}`); continue; }
             const result = await this._sendChannel(campaign, context.lead, channel, body, subject);
-            if (result.halt) { halted = true; break; }
+            if (result.halt) {
+              if (CAPACITY_REASONS.includes(result.reason) || result.reason === 'no_whatsapp_sender') capacityBlocked = true;
+              halted = true; break;
+            }
             if (result.success) {
               accepted++;
               // Publish acceptance before the delay so an immediate reply can
@@ -273,6 +298,14 @@ export class CampaignEngine {
               skipReason: reasons.length ? reasons.join('; ').slice(0, 500) : null,
             },
           });
+          runAccepted += accepted;
+          runFailed += failed;
+          const attempts = runAccepted + runFailed;
+          if (attempts >= CANARY_MIN_ATTEMPTS && runFailed / attempts >= CANARY_FAILURE_RATE) {
+            canaryTripped = true;
+            logger.warn(`Campaign ${campaign.id} paused by failure canary: ${runFailed} of ${attempts} sends failed this run`);
+            break;
+          }
         } catch (error) {
           // A failed local write after an accepted request cannot release a recipient for an automatic retry.
           await this.db.campaignLead.updateMany({ where: { id: recipient.id, status: { not: 'replied' } }, data: { status: 'failed', skipReason: 'dispatch_error_review_required' } });
@@ -283,11 +316,16 @@ export class CampaignEngine {
       const stats = await this.db.campaignLead.groupBy({ by: ['status'], where: { campaignId: campaign.id }, _count: true });
       const count = (status) => stats.find((item) => item.status === status)?._count || 0;
       const unfinished = count('pending') + count('sending');
+      const paused = unfinished || billingBlocked;
       await this.db.campaign.update({
         where: { id: campaign.id },
-        data: { status: unfinished || billingBlocked ? 'paused' : 'completed',
-          completedAt: unfinished || billingBlocked ? null : new Date(),
-          ...(billingBlocked ? { scheduleError: 'The provider rejected payment. Check the sending account balance before resuming.' } : {}) },
+        data: { status: paused ? 'paused' : 'completed',
+          completedAt: paused ? null : new Date(),
+          ...(billingBlocked ? { scheduleError: 'The provider rejected payment. Check the sending account balance before resuming.' }
+            // A canary trip on the final recipient leaves nothing pending, so
+            // the run completes normally and the note would only mislead.
+            : canaryTripped && unfinished ? { scheduleError: `Paused automatically: ${runFailed} of ${runAccepted + runFailed} sends in this run failed. Review the failed recipients before resuming.` }
+            : capacityBlocked && unfinished ? { scheduleError: 'No WhatsApp sender has capacity left (daily or hourly limit, or none available). Resume when an account has room.' } : {}) },
       });
       await refreshCampaignMetrics(this.db, campaign.id);
     } catch (error) {
@@ -305,7 +343,10 @@ export class CampaignEngine {
     } else if (channel === 'whatsapp') {
       accountId = campaignSenderId(campaign, channel) || lead.assignedAccount
         || await this.whatsapp.getNextAccount({ poolId: lead.poolId, forInitialOutreach: true });
-      if (!accountId) return { skipped: true, reason: 'no_whatsapp_sender' };
+      // Halt, not skip: with rotation skipping at-capacity accounts, "none
+      // available" is usually temporary, and a skipped recipient would be
+      // terminal for the run while a pending one survives to the resume.
+      if (!accountId) return { skipped: true, halt: true, reason: 'no_whatsapp_sender' };
       const account = await this.db.whatsAppAccount.findUnique({ where: { id: accountId } });
       if (!account?.enabled || !credentialState(account).ready) return { skipped: true, reason: 'whatsapp_sender_not_ready' };
       if (!campaign.waCampaignName) {
@@ -366,6 +407,13 @@ export class CampaignEngine {
       result = { success: false, reason: 'confirmation_unknown' };
     }
     const reason = result.reason || result.error || 'send_failed';
+    // Out of capacity is a fact about the sending account, not this recipient.
+    // The staged row is cancelled — a 'failed' row would permanently block
+    // this recipient on resume — and the run halts so the rest stay pending.
+    if (CAPACITY_REASONS.includes(reason)) {
+      await this.db.message.update({ where: { id: message.id }, data: { status: 'cancelled', providerStatusReason: reason } });
+      return { skipped: true, halt: true, reason };
+    }
     const status = result.success ? 'sent' : UNCERTAIN.has(reason) ? 'unconfirmed' : 'failed';
     await this.db.message.update({ where: { id: message.id }, data: {
       content: liveBody,

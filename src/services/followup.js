@@ -1,4 +1,7 @@
 import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
+import { contactBudgetGate } from './contactBudget.js';
+import { FRESH_AUTOMATION_KEY_PREFIX } from '../utils/automationKeys.js';
+import { CAPACITY_REASONS } from '../utils/whatsappCapacity.js';
 import prisma from '../utils/prismaClient.js';
 import deliveryRetry from './deliveryRetry.js';
 import { reapStaleWhatsAppMessages } from './undeliveredReaper.js';
@@ -469,6 +472,26 @@ class FollowupEngine {
             continue;
           }
 
+          // ── CROSS-CHANNEL CONTACT BUDGET ──
+          // Follow-ups, the email queue and campaigns each decide alone, so
+          // this shared gate is what keeps their combined frequency honest.
+          // The sanctioned first-touch burst and operator-initiated sends are
+          // exempt; a blocked follow-up defers to the budget's next eligible
+          // time rather than being cancelled.
+          const isFreshTouch = String(claimedMsg.automationKey || '').startsWith(FRESH_AUTOMATION_KEY_PREFIX);
+          const isManualSend = String(claimedMsg.idempotencyKey || '').startsWith('manual-wa:');
+          if (!isFreshTouch && !isManualSend) {
+            const budget = await contactBudgetGate(liveLead);
+            if (!budget.allowed) {
+              logger.info(`⏳ Lead ${liveLead.id}: WA follow-up ${claimedMsg.id} deferred by ${budget.reason} until ${budget.nextEligibleAt.toISOString()}`);
+              await prisma.message.updateMany({
+                where: { id: claimedMsg.id, status: 'sending' },
+                data: { status: 'queued', scheduledAt: budget.nextEligibleAt, providerStatusReason: budget.reason },
+              });
+              continue;
+            }
+          }
+
           const isInitialOutreach = liveLead.followupCount === 0;
           // ── PRE-SEND NUMBER VALIDATION (initial outreach only) ──
           // Check if the phone is registered on WhatsApp BEFORE we burn a send slot.
@@ -602,6 +625,21 @@ class FollowupEngine {
             }
 
             await randomDelay(config.whatsapp.minDelay, config.whatsapp.maxDelay);
+            continue;
+          }
+
+          // A capacity hold is not a failure: the recipient is fine, the
+          // account is just out of budget. Defer to when capacity can exist
+          // again without consuming a retry — the old path burned all three
+          // retries inside six minutes of cron ticks and permanently failed
+          // the message while the daily counter was simply full.
+          if (CAPACITY_REASONS.includes(sendResult.reason)) {
+            const deferMs = sendResult.reason === 'hourly_limit_reached' ? 15 * 60 * 1000 : 60 * 60 * 1000;
+            await prisma.message.updateMany({
+              where: { id: claimedMsg.id, status: 'sending' },
+              data: { status: 'queued', scheduledAt: new Date(Date.now() + deferMs), providerStatusReason: sendResult.reason },
+            });
+            logger.info(`⏳ Message ${claimedMsg.id} held for account capacity (${sendResult.reason})`);
             continue;
           }
 

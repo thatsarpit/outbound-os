@@ -159,6 +159,10 @@ async function main() {
     cron.schedule('0 0 * * *', async () => {
       await whatsappManager.resetDailyCounters();
       await emailService.resetDailyCounters();
+      // Refresh each number's Meta messaging tier alongside the reset, so a
+      // tier upgrade or downgrade reaches the capacity checks within a day.
+      await whatsappManager.syncMessagingTiers().catch((error) =>
+        logger.warn(`Messaging tier sync failed: ${error.message}`));
       // iMessage daily counter reset
       try {
         const { default: imessageService } = await import('./services/imessage.js');
