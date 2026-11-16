@@ -17,6 +17,8 @@ import { EMAIL_INGRESS_MAX_BYTES } from '../utils/emailIngressSignature.js';
 import { usesCloudflareReceiving, emailReceivingStatus } from '../utils/emailReceiving.js';
 import emailVerification from './emailVerification.js';
 import { recipientAddresses } from '../utils/emailVerification.js';
+import { contactBudgetGate } from './contactBudget.js';
+import { FRESH_AUTOMATION_KEY_PREFIX } from '../utils/automationKeys.js';
 
 /**
  * Unsubscribe requests go to the mailbox that sent the email, which is the one
@@ -1248,6 +1250,26 @@ class EmailService {
             data: { status: 'cancelled', providerStatusReason: 'marketing_consent_missing' },
           });
           continue;
+        }
+
+        // ── CROSS-CHANNEL CONTACT BUDGET ──
+        // Automated emails share one frequency budget with every other
+        // channel's automation. Automated means the row carries an automation
+        // key or a template variant; an operator's own email has neither and
+        // is never gated. The sanctioned first-touch burst is exempt, and a
+        // blocked send defers to the next eligible time instead of cancelling.
+        const isAutomatedEmail = (msg.automationKey || msg.templateVariant)
+          && !String(msg.automationKey || '').startsWith(FRESH_AUTOMATION_KEY_PREFIX);
+        if (isAutomatedEmail) {
+          const budget = await contactBudgetGate(liveLead);
+          if (!budget.allowed) {
+            logger.info(`⏳ Lead ${liveLead.id}: email ${msg.id} deferred by ${budget.reason} until ${budget.nextEligibleAt.toISOString()}`);
+            await prisma.message.updateMany({
+              where: { id: msg.id, status: 'sending' },
+              data: { status: 'queued', scheduledAt: budget.nextEligibleAt, providerStatusReason: budget.reason },
+            });
+            continue;
+          }
         }
 
         const accountId = msg.emailAccountId || await this._getNextEmailAccount({ poolId: liveLead.poolId });

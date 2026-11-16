@@ -1,5 +1,6 @@
 import { campaignFilter } from '../utils/campaignFilter.js';
 import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
+import { contactBudgetGate } from './contactBudget.js';
 import { refreshCampaignMetrics, readCampaignMetrics } from './campaignMetrics.js';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
@@ -40,8 +41,9 @@ export const CANARY_FAILURE_RATE = 0.25;
 export class CampaignEngine {
   constructor({ db = prisma, whatsapp = whatsappManager, email = emailService,
     imessage = imessageService, delay = randomDelay, businessHours = isBusinessHours,
-    reconcileReceipts = reconcileMetaReceipts, verification = emailVerification } = {}) {
-    Object.assign(this, { db, whatsapp, email, imessage, delay, businessHours, reconcileReceipts, verification });
+    reconcileReceipts = reconcileMetaReceipts, verification = emailVerification,
+    budgetGate = contactBudgetGate } = {}) {
+    Object.assign(this, { db, whatsapp, email, imessage, delay, businessHours, reconcileReceipts, verification, budgetGate });
   }
 
   async createCampaign({ name, description, messageTemplate, targetFilter, channel = 'whatsapp',
@@ -210,6 +212,13 @@ export class CampaignEngine {
     if (eligibility.eligible && channel === 'email') {
       const ready = await this.verification.readyEmails([lead.email]);
       if (ready && !ready.has(emailIdentity(lead.email))) return { reason: 'email_verification_required' };
+    }
+    // A lead automation already touched recently is not campaign inventory.
+    // The campaign's own rows are excluded so a multi-channel campaign cannot
+    // block its second channel with its first.
+    if (eligibility.eligible) {
+      const budget = await this.budgetGate(lead, { excludeCampaignId: campaign.id, db: this.db });
+      if (!budget.allowed) return { reason: budget.reason };
     }
     return eligibility.eligible ? { lead } : { reason: eligibility.reason };
   }

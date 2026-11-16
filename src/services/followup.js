@@ -1,4 +1,6 @@
 import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
+import { contactBudgetGate } from './contactBudget.js';
+import { FRESH_AUTOMATION_KEY_PREFIX } from '../utils/automationKeys.js';
 import prisma from '../utils/prismaClient.js';
 import deliveryRetry from './deliveryRetry.js';
 import { reapStaleWhatsAppMessages } from './undeliveredReaper.js';
@@ -467,6 +469,26 @@ class FollowupEngine {
           if ((await suppressedWhatsAppLeads(prisma, [liveLead.id], sendAccountId || null)).has(liveLead.id)) {
             await prisma.message.updateMany({ where: { id: claimedMsg.id, status: 'sending' }, data: { status: 'cancelled', providerStatusReason: 'whatsapp_marketing_opted_out' } });
             continue;
+          }
+
+          // ── CROSS-CHANNEL CONTACT BUDGET ──
+          // Follow-ups, the email queue and campaigns each decide alone, so
+          // this shared gate is what keeps their combined frequency honest.
+          // The sanctioned first-touch burst and operator-initiated sends are
+          // exempt; a blocked follow-up defers to the budget's next eligible
+          // time rather than being cancelled.
+          const isFreshTouch = String(claimedMsg.automationKey || '').startsWith(FRESH_AUTOMATION_KEY_PREFIX);
+          const isManualSend = String(claimedMsg.idempotencyKey || '').startsWith('manual-wa:');
+          if (!isFreshTouch && !isManualSend) {
+            const budget = await contactBudgetGate(liveLead);
+            if (!budget.allowed) {
+              logger.info(`⏳ Lead ${liveLead.id}: WA follow-up ${claimedMsg.id} deferred by ${budget.reason} until ${budget.nextEligibleAt.toISOString()}`);
+              await prisma.message.updateMany({
+                where: { id: claimedMsg.id, status: 'sending' },
+                data: { status: 'queued', scheduledAt: budget.nextEligibleAt, providerStatusReason: budget.reason },
+              });
+              continue;
+            }
           }
 
           const isInitialOutreach = liveLead.followupCount === 0;

@@ -200,6 +200,20 @@ test('provider payment refusal pauses the run and leaves later recipients pendin
   assert.equal(attempt.providerStatusReason, 'payment_issue');
 }, { whatsapp: () => ({ success: false, reason: 'payment_issue', errorCode: 'BALANCE_INSUFFICIENT' }) }));
 
+test('a campaign cannot pile onto a lead automation touched minutes earlier', async () => fixture(async ({ db, engine, calls, createLead, createCampaign, running }) => {
+  // Past the first-day exemption, with a follow-up sent ten minutes ago.
+  await createLead(1, { createdAt: new Date(Date.now() - 4 * 24 * 3600000) });
+  await db.message.create({ data: { leadId: 1, direction: 'outbound', channel: 'whatsapp',
+    content: 'Fixture follow-up', status: 'sent', sentAt: new Date(Date.now() - 10 * 60000) } });
+  const campaign = await createCampaign();
+  await engine.populateCampaign(campaign.id);
+  await engine._executeCampaign(await running(campaign.id));
+  const recipient = await db.campaignLead.findFirst({ where: { campaignId: campaign.id } });
+  assert.equal(recipient.status, 'skipped');
+  assert.match(recipient.skipReason, /contact_budget_gap/);
+  assert.equal(calls.email.length, 0);
+}));
+
 test('early failure spike pauses the run before it burns the audience', async () => fixture(async ({ db, engine, calls, createLead, createCampaign, createWa, running }) => {
   for (let id = 1; id <= 25; id++) await createLead(id);
   await createWa(8);

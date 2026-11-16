@@ -112,6 +112,22 @@ const config = {
     timezone: process.env.BUSINESS_TIMEZONE || "UTC",
   },
 
+  // Cross-channel contact frequency budget — how often automation may touch
+  // one lead, counted across WhatsApp, email, iMessage and Telegram together.
+  // Defaults are set so nothing deliberate changes: the first-touch burst and
+  // a lead's first day are exempt (see src/services/contactBudget.js), the
+  // follow-up engine's WhatsApp + 30-minute email pairing fits the gap, and
+  // the steady two-touch follow-up day fits maxPerDay. What the defaults do
+  // stop is a campaign landing on top of a lead already in an active
+  // follow-up day, and automation drift past twelve touches a week.
+  contactBudget: {
+    enabled: process.env.CONTACT_BUDGET_ENABLED !== "false",
+    maxPerDay: parseEnvInt("CONTACT_MAX_PER_DAY", 2),
+    maxPerWeek: parseEnvInt("CONTACT_MAX_PER_WEEK", 12),
+    minGapMinutes: parseEnvInt("CONTACT_MIN_GAP_MINUTES", 25),
+    exemptFirstHours: parseEnvInt("CONTACT_EXEMPT_FIRST_HOURS", 24),
+  },
+
   api: {
     port: parseEnvInt("API_PORT", 3001),
   },
