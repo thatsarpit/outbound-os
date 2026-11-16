@@ -20,6 +20,6 @@ test('missing fields and untrusted text cannot inject HTML or email headers', ()
   assert.match(empty.textBody, /confirm the delivery country/);
   const bad = buildIndiaMartFirstTouchEmail({ name: '<script>alert(1)</script>', product: 'Item\r\nBcc: other@example.test', quantity: '<img onerror=alert(1)>' }, profile);
   assert.doesNotMatch(bad.subject, /[\r\n]/);
-  assert.doesNotMatch(bad.htmlBody, /<script>|<img/);
+  assert.doesNotMatch(bad.htmlBody, /<script\b|<img\b/i);
   assert.match(bad.htmlBody, /&lt;script&gt;/);
 });
