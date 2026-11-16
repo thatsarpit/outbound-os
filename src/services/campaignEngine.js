@@ -25,6 +25,17 @@ function countryOf(country) { return String(country || '').trim() || 'your count
 const ACCEPTED = new Set(['sent', 'delivered', 'read']);
 const UNCERTAIN = new Set(['timeout', 'exception', 'no_message_id', 'confirmation_unknown']);
 
+/**
+ * Early-failure canary. A bad template, a restricted sender or a provider
+ * outage shows up in the first sends; without a tripwire the executor keeps
+ * walking the audience, converting one mistake into hundreds of failures and
+ * a damaged sender rating. Counters are per run, so an operator's resume is
+ * itself the reset — the next run starts a fresh sample instead of tripping
+ * instantly on the failures it was paused for.
+ */
+export const CANARY_MIN_ATTEMPTS = 20;
+export const CANARY_FAILURE_RATE = 0.25;
+
 /** Campaign dispatch has injectable dependencies so its safety rules need no provider calls to test. */
 export class CampaignEngine {
   constructor({ db = prisma, whatsapp = whatsappManager, email = emailService,
@@ -209,6 +220,7 @@ export class CampaignEngine {
       where: { campaignId: campaign.id, status: 'pending' }, orderBy: { id: 'asc' },
     });
     let billingBlocked = false;
+    let runAccepted = 0, runFailed = 0, canaryTripped = false;
     try {
       for (const recipient of pending) {
         const claim = await this.db.campaignLead.updateMany({
@@ -273,6 +285,14 @@ export class CampaignEngine {
               skipReason: reasons.length ? reasons.join('; ').slice(0, 500) : null,
             },
           });
+          runAccepted += accepted;
+          runFailed += failed;
+          const attempts = runAccepted + runFailed;
+          if (attempts >= CANARY_MIN_ATTEMPTS && runFailed / attempts >= CANARY_FAILURE_RATE) {
+            canaryTripped = true;
+            logger.warn(`Campaign ${campaign.id} paused by failure canary: ${runFailed} of ${attempts} sends failed this run`);
+            break;
+          }
         } catch (error) {
           // A failed local write after an accepted request cannot release a recipient for an automatic retry.
           await this.db.campaignLead.updateMany({ where: { id: recipient.id, status: { not: 'replied' } }, data: { status: 'failed', skipReason: 'dispatch_error_review_required' } });
@@ -283,11 +303,15 @@ export class CampaignEngine {
       const stats = await this.db.campaignLead.groupBy({ by: ['status'], where: { campaignId: campaign.id }, _count: true });
       const count = (status) => stats.find((item) => item.status === status)?._count || 0;
       const unfinished = count('pending') + count('sending');
+      const paused = unfinished || billingBlocked;
       await this.db.campaign.update({
         where: { id: campaign.id },
-        data: { status: unfinished || billingBlocked ? 'paused' : 'completed',
-          completedAt: unfinished || billingBlocked ? null : new Date(),
-          ...(billingBlocked ? { scheduleError: 'The provider rejected payment. Check the sending account balance before resuming.' } : {}) },
+        data: { status: paused ? 'paused' : 'completed',
+          completedAt: paused ? null : new Date(),
+          ...(billingBlocked ? { scheduleError: 'The provider rejected payment. Check the sending account balance before resuming.' }
+            // A canary trip on the final recipient leaves nothing pending, so
+            // the run completes normally and the note would only mislead.
+            : canaryTripped && unfinished ? { scheduleError: `Paused automatically: ${runFailed} of ${runAccepted + runFailed} sends in this run failed. Review the failed recipients before resuming.` } : {}) },
       });
       await refreshCampaignMetrics(this.db, campaign.id);
     } catch (error) {
