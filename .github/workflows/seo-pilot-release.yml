@@ -34,7 +34,7 @@ jobs:
           [[ "$REVISION" =~ ^[a-f0-9]{40}$ ]]
           head_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$RELEASE_BRANCH" --jq .object.sha)
           test "$head_sha" = "$REVISION"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.revision }}
           persist-credentials: false
