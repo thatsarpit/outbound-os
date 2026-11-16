@@ -19,7 +19,7 @@ test('changing channel cannot reinterpret a legacy WhatsApp ID as an email ID', 
   assert.equal(value.emailSenderAccountId, null);
 });
 test('invalid input and unavailable sender fail before a campaign can be saved', async () => {
-  for (const patch of [{ name: ' ' }, { targetFilter: '[]' }, { emailSenderAccountId: '2' }, { channel: 'other' }]) {
+  for (const patch of [{ name: ' ' }, { targetFilter: '[]' }, { targetFilter: { poolId: 1 } }, { emailSenderAccountId: '2' }, { channel: 'other' }]) {
     await assert.rejects(campaignInput({ ...base, ...patch }, { db }), error => error.statusCode === 400);
   }
   await assert.rejects(campaignInput({ ...base, emailSenderAccountId: 1 }, { db: { emailAccount: { findUnique: async () => ({ enabled: false }) } } }), /verified email sender/);
@@ -31,4 +31,12 @@ test('clearing a typed sender does not restore the legacy sender', async () => {
   const whatsapp = await campaignInput({ whatsappSenderAccountId: null }, { db, existing: { ...base, channel: 'whatsapp', senderAccountId: 4, whatsappSenderAccountId: 4 } });
   assert.equal(whatsapp.senderAccountId, null);
   assert.equal(whatsapp.whatsappSenderAccountId, null);
+});
+
+
+test('campaign caps reject unsupported filters and invalid limits before saving', async () => {
+  for (const filter of [{ limit: 0 }, { limit: -1 }, { limit: 1.5 }, { limit: '500' }, { limit: 10001 }, { limti: 500 }, { country: {} }, { status: [] }, { status: ['new', 'bogus'] }, { tags: [1] }, { minScore: 20, maxScore: 10 }]) {
+    await assert.rejects(campaignInput({ ...base, targetFilter: filter }, { db }), error => error.statusCode === 400);
+  }
+  assert.equal(JSON.parse((await campaignInput({ ...base, targetFilter: { limit: 500 } }, { db })).targetFilter).limit, 500);
 });

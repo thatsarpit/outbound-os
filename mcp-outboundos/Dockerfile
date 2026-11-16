@@ -31,7 +31,7 @@ RUN npm ci --omit=dev
 COPY mcp-outboundos/src ./src
 COPY shared /shared
 
-RUN mkdir -p /app/data && chown -R appuser:appuser /app
+RUN mkdir -p /app/data && chown -R appuser:appuser /app /shared
 USER appuser
 
 EXPOSE ${PORT}

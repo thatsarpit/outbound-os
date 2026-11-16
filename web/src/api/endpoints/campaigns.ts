@@ -31,14 +31,13 @@ export interface CampaignMutationPayload {
   variantBSubject?: string | null
 }
 
-export interface CampaignPreviewLeadsPayload {
-  filter?: Record<string, unknown>
-}
-
 export interface CampaignPreviewLeadsResponse {
   emailVerificationRequired?: boolean
   count: number
   sample: Lead[]
+  matchedCount?: number
+  excludedCount?: number
+  exclusionCounts?: Record<string, number>
 }
 
 export interface CampaignLeadsResponse {
@@ -50,6 +49,7 @@ export interface CampaignLeadsResponse {
   total: number
   page: number
   pages: number
+  campaignUpdatedAt: string | null
 }
 
 export const campaignsApi = {
@@ -87,8 +87,13 @@ export const campaignsApi = {
 
   pause: (id: number) => api.post(`/campaigns/${id}/pause`),
 
-  previewLeads: (filter: Record<string, unknown> = {}, channel: Campaign['channel'] = 'whatsapp') =>
-    api.post<CampaignPreviewLeadsResponse>('/campaigns/preview-leads', { filter, channel }),
+  schedule: (id: number, scheduledAt: string, timezone: string, review: { updatedAt: string; recipientCount: number }) =>
+    api.post<Campaign>(`/campaigns/${id}/schedule`, { scheduledAt, timezone, review }),
+
+  cancelSchedule: (id: number) => api.delete(`/campaigns/${id}/schedule`),
+
+  previewLeads: (filter: Record<string, unknown> = {}, channel: Campaign['channel'] = 'whatsapp', whatsappSenderAccountId?: number | null) =>
+    api.post<CampaignPreviewLeadsResponse>('/campaigns/preview-leads', { filter, channel, ...(whatsappSenderAccountId ? { whatsappSenderAccountId } : {}) }),
 
   testSend: (id: number, testEmail?: string) =>
     api.post<{ success: boolean; sentTo: string; subject: string; messageId?: string }>(

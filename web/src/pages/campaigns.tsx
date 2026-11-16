@@ -122,6 +122,7 @@ export default function CampaignsPage() {
       return result
     },
     enabled: detailId !== null,
+    refetchInterval: 15_000,
   })
 
   const pageCounts = campaigns.reduce(
@@ -319,7 +320,7 @@ export default function CampaignsPage() {
     },
     {
       accessorKey: 'sentCount',
-      header: 'Sent',
+      header: 'Accepted',
       cell: ({ row }) => {
         const sent = num(row.original.sentCount)
         const total = num(row.original.totalLeads)
@@ -397,7 +398,7 @@ export default function CampaignsPage() {
         description={
           <>
             <span className="tabular-nums">{counts.running}</span> live &middot;{' '}
-            <span className="tabular-nums">{counts.scheduled}</span> queued &middot;{' '}
+            <span className="tabular-nums">{counts.scheduled}</span> scheduled &middot;{' '}
             <span className="tabular-nums">{counts.draft}</span>{' '}
             {counts.draft === 1 ? 'draft' : 'drafts'} &middot;{' '}
             <span className="tabular-nums">{counts.completed}</span> completed
@@ -427,7 +428,7 @@ export default function CampaignsPage() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               icon={Users}
-              label="Leads in play"
+              label="Audience memberships"
               value={formatCount(totalLeads)}
               hint={`across ${formatCount(response?.total ?? campaigns.length)} ${
                 response?.total === 1 ? 'campaign' : 'campaigns'
@@ -435,7 +436,7 @@ export default function CampaignsPage() {
             />
             <MetricCard
               icon={Send}
-              label="Messages sent"
+              label="Accepted messages"
               value={formatCount(totalSent)}
               hint={
                 totalFailed > 0 ? `${formatCount(totalFailed)} failed` : 'No failed sends recorded'
@@ -543,7 +544,7 @@ export default function CampaignsPage() {
         </nav>
       )}
 
-      {showCreate && <CreateCampaignModal onClose={() => setShowCreate(false)} />}
+      {showCreate && <CreateCampaignModal onClose={() => setShowCreate(false)} onCreated={id => setDetailId(id)} />}
       {detailId && detailResult.isError && (
         <ErrorState
           title="Could not open this campaign"

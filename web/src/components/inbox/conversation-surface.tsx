@@ -1,3 +1,4 @@
+import { ReplyPreview, MessageInteractions } from './message-interactions'
 /**
  * The conversation pane — thread header, timeline and composer for one lead.
  *
@@ -6,10 +7,10 @@
  * cleanly while the rest of that file could not.
  */
 import { WhatsAppReplyWindow, isWhatsAppWindowClosed } from './whatsapp-reply-window'
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useConversationRead } from '@/hooks/use-conversation-read'
 import { type EmailTemplate } from '@/api/endpoints/templates'
-import type { InboxChannel, InboxThreadDetail, MediaFile } from '@/api/types'
+import type { InboxChannel, InboxThreadDetail, InboxMessage, MediaFile } from '@/api/types'
 import { ComposerBar } from '@/components/inbox/composer-bar'
 import { EmailMessageCard } from '@/components/inbox/email-message-card'
 import { ThreadHeader } from '@/components/inbox/thread-header'
@@ -117,7 +118,7 @@ export interface ConversationSurfaceProps {
   onApplyTemplate: () => void
   templatesLoading: boolean
   templateApplyPending: boolean
-  onSend: () => void
+  onSend: (messageId?: number) => Promise<unknown>
   replyPending: boolean
   replyError: Error | null
   replyDisabledReason: string | null
@@ -176,6 +177,12 @@ export function ConversationSurface({
   onBccChange,
   onScheduleSend,
 }: ConversationSurfaceProps) {
+  const [selectedReply, setSelectedReply] = useState<InboxMessage | null>(null)
+  const replyTarget =
+    selectedReply?.leadId === activeThread?.leadId && selectedReply?.channel === composerChannel
+      ? selectedReply
+      : null
+
   const markRead = useConversationRead(activeThread)
   const { timelineRef, contentRef, timelineProps } = useStickToBottom(
     activeThread?.leadId,
@@ -256,17 +263,39 @@ export function ConversationSurface({
               // unambiguously.
               const showChannel = index === 0 || all[index - 1].channel !== message.channel
               return message.channel === 'email' ? (
-                <EmailMessageCard
+                <MessageInteractions
                   key={message.id}
                   message={message}
-                  className={cn(
-                    message.direction === 'outbound'
-                      ? 'ml-auto max-w-[92%]'
-                      : 'mr-auto max-w-[92%]',
-                  )}
-                />
+                  onReply={(m) => {
+                    setSelectedReply({ ...m })
+                    setComposerChannel(m.channel)
+                  }}
+                >
+                  <EmailMessageCard
+                    message={message}
+                    className={cn(
+                      message.direction === 'outbound'
+                        ? 'ml-auto max-w-[92%]'
+                        : 'mr-auto max-w-[92%]',
+                    )}
+                  />
+                </MessageInteractions>
               ) : (
-                <MessageBubble key={message.id} message={message} showChannel={showChannel} />
+                <MessageBubble
+                  key={message.id}
+                  message={message}
+                  showChannel={showChannel}
+                  onReply={(m) => {
+                    setSelectedReply({ ...m })
+                    setComposerChannel(m.channel)
+                  }}
+                  quotedMessage={all.find((m) => m.id === message.replyToMessageId)}
+                  showDate={
+                    index === 0 ||
+                    new Date(all[index - 1].sentAt || all[index - 1].createdAt).toDateString() !==
+                      new Date(message.sentAt || message.createdAt).toDateString()
+                  }
+                />
               )
             })
           )}
@@ -281,16 +310,28 @@ export function ConversationSurface({
         </div>
       </div>
 
+      {replyTarget && (
+        <div className="px-4 pt-2">
+          <ReplyPreview message={replyTarget} onCancel={() => setSelectedReply(null)} />
+        </div>
+      )}
       <ComposerBar
         channel={composerChannel}
-        onChannelChange={setComposerChannel}
+        onChannelChange={(channel) => {
+          setSelectedReply(null)
+          setComposerChannel(channel)
+        }}
         subject={composerSubject}
         onSubjectChange={setComposerSubject}
         text={replyText}
         onTextChange={setReplyText}
         htmlBody={htmlBody}
         onHtmlBodyChange={setHtmlBody}
-        onSend={onSend}
+        onSend={() => {
+          void onSend(replyTarget?.id)
+            .then(() => setSelectedReply((current) => (current === replyTarget ? null : current)))
+            .catch(() => {})
+        }}
         sendPending={replyPending}
         senderAccounts={availableSenderAccounts}
         senderAccountId={senderAccountId}
@@ -311,7 +352,7 @@ export function ConversationSurface({
         onCcChange={onCcChange}
         bcc={bcc}
         onBccChange={onBccChange}
-        onScheduleSend={onScheduleSend}
+        onScheduleSend={replyTarget ? undefined : onScheduleSend}
         helperLabel={
           composerChannel === 'email'
             ? 'Ctrl / ⌘ + Enter to send'

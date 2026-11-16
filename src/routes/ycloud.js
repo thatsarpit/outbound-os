@@ -1,10 +1,13 @@
+import { recordReaction } from '../services/messageReactions.js';
 import { Router } from 'express';
+import { rm } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
 import whatsappCloudApi from '../services/whatsappCloudApi.js';
 import replyDetector from '../services/replyDetector.js';
 import { recordMetaReceipt } from '../services/whatsappDelivery.js';
-import { downloadYCloudInboundMedia } from '../services/whatsappMedia.js';
+import { downloadYCloudInboundMedia, MEDIA_DIR } from '../services/whatsappMedia.js';
 import { metaInboundText } from '../utils/metaWebhook.js';
 import { ycloudSignatureValid, ycloudPricing } from '../utils/ycloudWebhook.js';
 
@@ -27,7 +30,7 @@ router.post('/webhook/ycloud/:accountId', async (req, res) => {
         || (message.from && digits(message.from) !== digits(account.ycloudPhoneNumber))) return res.sendStatus(422);
       // The YCloud id is returned synchronously even before a wamid exists.
       // Keep it as the receipt key so early receipts can be reconciled later.
-      await recordMetaReceipt({ accountId: id, waMessageId: message.id,
+      await recordMetaReceipt({ accountId: id, waMessageId: message.id, nativeMessageId: message.wamid,
         status: message.status, timestamp: message.updateTime || event.createTime,
         failureCode: Number(message.errorCode || message.whatsappApiError?.code) || undefined,
         failureReason: message.whatsappApiError?.error_data?.details || message.errorMessage,
@@ -36,6 +39,10 @@ router.post('/webhook/ycloud/:accountId', async (req, res) => {
       const message = event.whatsappInboundMessage || {};
       if (String(message.wabaId) !== account.ycloudWabaId
         || digits(message.to) !== digits(account.ycloudPhoneNumber)) return res.sendStatus(422);
+      if (message.type === 'reaction') {
+        await recordReaction({ channel: 'whatsapp', accountId: id, targetId: message.reaction?.message_id, actorKey: 'customer', emoji: message.reaction?.emoji ?? '', eventAt: new Date(message.sendTime || event.createTime) });
+        return res.sendStatus(200);
+      }
       const messageId = message.wamid || message.id;
       const senderId = message.fromUserId || message.fromParentUserId;
       if (!messageId || (!message.from && !senderId) || !message.sendTime
@@ -59,24 +66,51 @@ router.post('/webhook/ycloud/:accountId', async (req, res) => {
         inbound = await prisma.message.findFirst({ where: { direction: 'inbound', waMessageId: messageId, waAccount: id } });
         if (!inbound) throw new Error('Inbound persistence not confirmed.');
       }
+      if (message.context?.id) await prisma.message.update({ where: { id: inbound.id }, data: { quotedRemoteId: message.context.id } });
       if (!inbound.idempotencyKey) await prisma.message.updateMany({ where: { id: inbound.id, idempotencyKey: null }, data: { idempotencyKey: `ycloud-inbound:${messageId}` } });
       logger.info(`YCloud inbound authenticated and stored for WhatsApp account ${id}.`);
       if (!inbound.mediaUrl && inbound.providerStatusReason !== 'media_unavailable') {
+        const pending = { id: inbound.id, mediaUrl: null };
+        let media;
+        let attached = false;
+        let retry = false;
         try {
-          const media = await downloadYCloudInboundMedia(message, id);
-          if (media) await prisma.message.update({ where: { id: inbound.id }, data: {
-            mediaUrl: media.mediaUrl, mediaType: media.mediaType, mediaFilename: media.mediaFilename,
-            content: text, providerStatusReason: null,
-          } });
+          media = await downloadYCloudInboundMedia(message, id);
+          if (media) {
+            const saved = await prisma.message.updateMany({ where: pending, data: {
+              mediaUrl: media.mediaUrl, mediaType: media.mediaType, mediaFilename: media.mediaFilename,
+              content: text, providerStatusReason: null,
+            } });
+            attached = saved.count === 1;
+            if (!attached && !await prisma.message.count({ where: { id: inbound.id, mediaUrl: { not: null } } })) {
+              throw new Error('Inbound attachment persistence not confirmed.');
+            }
+          }
         } catch (error) {
           const permanent = ['media_too_large', 'untrusted_media_url', 'media_checksum_mismatch', 'unsupported_media_type'].includes(error.code);
-          await prisma.message.update({ where: { id: inbound.id }, data: {
-            providerStatusReason: permanent ? 'media_unavailable' : 'media_pending_retry',
-            content: `${text}\n[Attachment ${permanent ? 'unavailable' : 'download pending'}]`,
-          } });
-          logger.warn(`YCloud attachment unavailable for WhatsApp account ${id}; reply retained and outreach stopped.`);
-          if (!permanent) return res.sendStatus(503);
+          const marked = await prisma.message.updateMany({
+            where: { ...pending, OR: [{ providerStatusReason: null }, { providerStatusReason: { not: 'media_unavailable' } }] },
+            data: {
+              providerStatusReason: permanent ? 'media_unavailable' : 'media_pending_retry',
+              content: `${text}\n[Attachment ${permanent ? 'unavailable' : 'download pending'}]`,
+            },
+          });
+          if (marked.count) {
+            logger.warn(`YCloud attachment unavailable for WhatsApp account ${id}; reply retained and outreach stopped.`);
+            retry = !permanent;
+          } else if (!await prisma.message.findUnique({ where: { id: inbound.id }, select: { id: true } })) {
+            retry = true;
+          }
+        } finally {
+          // Every download creates its own exclusive file. Concurrent deliveries
+          // keep only the file that was attached to the message.
+          if (media && !attached) {
+            await rm(join(MEDIA_DIR, basename(media.mediaUrl)), { force: true }).catch(() => {
+              logger.warn('Could not remove an unreferenced YCloud attachment.');
+            });
+          }
         }
+        if (retry) return res.sendStatus(503);
       }
     }
     // Reply only after durable storage. A 503 asks YCloud to redeliver safely.

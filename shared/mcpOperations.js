@@ -39,6 +39,8 @@ export const MCP_WRITE_OPERATIONS = Object.freeze({
   populate_campaign: ['POST', /^\/api\/campaigns\/[1-9]\d*\/populate$/],
   start_campaign: ['POST', /^\/api\/campaigns\/[1-9]\d*\/start$/],
   pause_campaign: ['POST', /^\/api\/campaigns\/[1-9]\d*\/pause$/],
+  schedule_campaign: ['POST', /^\/api\/campaigns\/[1-9]\d*\/schedule$/],
+  cancel_campaign_schedule: ['DELETE', /^\/api\/campaigns\/[1-9]\d*\/schedule$/],
   send_whatsapp: ['POST', /^\/api\/leads\/[1-9]\d*\/send$/],
   send_whatsapp_file: ['POST', /^\/api\/leads\/[1-9]\d*\/send-media$/],
   send_email: ['POST', /^\/api\/leads\/[1-9]\d*\/email\/send$/],

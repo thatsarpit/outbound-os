@@ -262,6 +262,37 @@ describe('POST /webhook/imessage', () => {
   });
 });
 
+test('iMessage bridge updates are admin-only and require a credential for a new origin', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const users = await Promise.all(['manager', 'admin'].map(role => prisma.user.create({
+    data: { name: 'Bridge Fixture', email: `bridge-${role}@example.test`, passwordHash: 'fixture-only', role },
+  })));
+  const account = await prisma.iMessageAccount.create({
+    data: { name: 'Bridge Fixture', serverUrl: 'https://bridge.example.test', password: 'fixture-only' },
+  });
+  const headers = index => ({
+    Authorization: `Bearer ${signToken(users[index])}`,
+    'X-Forwarded-For': `198.51.100.${210 + index}`,
+  });
+  const path = `/api/imessage/accounts/${account.id}`;
+  try {
+    const body = { serverUrl: 'https://other-bridge.example.test' };
+    assert.equal((await request('POST', '/api/imessage/accounts', { headers: headers(0), body })).status, 403);
+    assert.equal((await request('PUT', path, { headers: headers(0), body })).status, 403);
+    assert.equal((await request('PUT', path, { headers: headers(1), body })).status, 400);
+    assert.equal((await prisma.iMessageAccount.findUnique({ where: { id: account.id } })).serverUrl, account.serverUrl);
+    assert.equal((await request('PUT', path, { headers: headers(1), body: { serverUrl: account.serverUrl + '/' } })).status, 200);
+    const updated = await request('PUT', path, { headers: headers(1), body: { ...body, password: 'new-fixture-password' } });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.serverUrl, body.serverUrl);
+    assert.equal(Object.hasOwn(updated.body, 'password'), false);
+  } finally {
+    await prisma.iMessageAccount.delete({ where: { id: account.id } });
+    await prisma.user.deleteMany({ where: { id: { in: users.map(user => user.id) } } });
+  }
+});
+
 describe('POST /api/leads', () => {
   test('creates a lead with required fields', async () => {
     const res = await request('POST', '/api/leads', {
@@ -1194,19 +1225,22 @@ describe('Built-in email and password sign-in', () => {
     assert.equal(relogin.status, 200);
   });
 
-  test('the live-updates stream accepts the token in its URL, and only that route does', async () => {
-    const ok = await request('POST', '/api/auth/login', { body: { email, password: 'a much longer new password' } });
-    const token = encodeURIComponent(ok.body.token);
+  test('the live-updates stream accepts a session header and rejects URL credentials', async () => {
+    const headers = { 'X-Forwarded-For': '198.51.100.212' };
+    const ok = await request('POST', '/api/auth/login', { headers, body: { email, password: 'a much longer new password' } });
+    const token = ok.body.token;
     const stream = await new Promise((resolve, reject) => {
-      const req = http.get(new URL(`/api/events?token=${token}`, baseUrl), (res) => {
+      const req = http.get(new URL('/api/events', baseUrl), { headers: { ...headers, Authorization: `Bearer ${token}` } }, (res) => {
         resolve(res.statusCode);
         res.destroy();
       });
       req.on('error', reject);
     });
     assert.equal(stream, 200);
-    const elsewhere = await request('GET', `/api/leads?token=${token}`);
-    assert.equal(elsewhere.status, 401);
+    for (const path of ['/api/events', '/api/leads']) {
+      const query = await request('GET', `${path}?token=${encodeURIComponent(token)}`, { headers });
+      assert.equal(query.status, 401);
+    }
   });
 
   test('rejects requests with no session', async () => {
@@ -1292,6 +1326,49 @@ describe('Workspace profile and onboarding', () => {
     });
     assert.equal(res.status, 403);
     assert.match(res.body.error, /trusted origin/);
+  });
+  test('an outbound webhook test checks one destination and does not follow a redirect', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const calls = [];
+    const receiver = http.createServer((req, res) => {
+      calls.push(req.url);
+      req.resume();
+      if (req.url === '/redirect') res.writeHead(307, { Location: '/unexpected' });
+      else res.writeHead(204);
+      res.end();
+    });
+    await new Promise(resolve => receiver.listen(0, '127.0.0.1', resolve));
+    const origin = `http://127.0.0.1:${receiver.address().port}`;
+    const previous = process.env.OUTBOUND_WEBHOOK_TRUSTED_ORIGINS;
+    delete process.env.OUTBOUND_WEBHOOK_TRUSTED_ORIGINS;
+    const headers = { ...authHeader(), 'X-Forwarded-For': '198.51.100.227' };
+    const root = '/api/webhooks/subscriptions';
+    try {
+      const blocked = await request('POST', root, { headers, body: { name: 'Blocked fixture', url: origin + '/unexpected' } });
+      assert.equal(blocked.status, 400);
+      const legacy = await db.webhookSubscription.create({ data: { name: 'Legacy fixture', url: origin + '/unexpected', enabled: false } });
+      const blockedTest = await request('POST', `${root}/${legacy.id}/test`, { headers });
+      assert.equal(blockedTest.status, 422);
+      assert.deepEqual(calls, []);
+      process.env.OUTBOUND_WEBHOOK_TRUSTED_ORIGINS = origin;
+      const other = await request('POST', root, { headers, body: { name: 'Other fixture', url: origin + '/other' } });
+      const selected = await request('POST', root, { headers, body: { name: 'Selected fixture', url: origin + '/redirect', events: ['lead.replied'] } });
+      assert.equal(other.status, 200);
+      assert.equal(selected.status, 200);
+      const testId = `${root}/${selected.body.id}`;
+      const failure = await request('POST', `${testId}/test`, { headers });
+      assert.equal(failure.status, 422);
+      assert.equal(failure.body.status, 307);
+      assert.equal((await request('PATCH', testId, { headers, body: { url: origin + '/selected' } })).status, 200);
+      const success = await request('POST', `${testId}/test`, { headers });
+      assert.equal(success.status, 200);
+      assert.deepEqual(calls, ['/redirect', '/selected']);
+    } finally {
+      if (previous === undefined) delete process.env.OUTBOUND_WEBHOOK_TRUSTED_ORIGINS;
+      else process.env.OUTBOUND_WEBHOOK_TRUSTED_ORIGINS = previous;
+      await db.webhookSubscription.deleteMany({ where: { url: { startsWith: origin } } });
+      await new Promise(resolve => receiver.close(resolve));
+    }
   });
   test('a new workspace reports what is left to set up', async () => {
     const res = await request('GET', '/api/onboarding/status', { headers: authHeader() });
@@ -1712,6 +1789,46 @@ test('Inbox thread exposes Meta pricing without inventing an amount', async () =
   assert.equal(message.pricingCategory, 'marketing');
   assert.equal(message.pricingType, 'regular');
   assert.equal(message.billable, true);
+});
+
+describe('Campaign schedule API', () => {
+  test('requires manager access and persists/cancels a populated future schedule without sending', async () => {
+    const scheduleRequest = (method, url, options = {}) => request(method, url, { ...options, headers: { ...options.headers, 'X-Forwarded-For': '192.0.2.182' } });
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const { signToken } = await import('../src/auth/rbac.js');
+    const user = await db.user.create({ data: { name: 'Schedule viewer', email: 'schedule-viewer@example.test', role: 'viewer', passwordHash: 'fixture' } });
+    const lead = await db.lead.create({ data: { name: 'Schedule fixture', mobile: '15550001998', email: 'schedule-fixture@example.test' } });
+    const campaign = await db.campaign.create({ data: { name: 'Schedule fixture', messageTemplate: 'Hello', channel: 'email' } });
+    await db.campaignLead.create({ data: { campaignId: campaign.id, leadId: lead.id } });
+    const url = `/api/campaigns/${campaign.id}/schedule`;
+    const scheduledAt = new Date(Date.now() + 86400000);
+    scheduledAt.setUTCHours(12, 0, 0, 0);
+    const body = { scheduledAt: scheduledAt.toISOString(), timezone: 'UTC' };
+    const { default: config } = await import('../src/config.js');
+    const old = { ...config.businessHours };
+    config.businessHours = { start: 0, end: 24, timezone: 'UTC' };
+    try {
+      assert.equal((await scheduleRequest('POST', url, { body })).status, 401);
+      const viewer = { Authorization: `Bearer ${signToken(user)}` };
+      assert.equal((await scheduleRequest('POST', url, { body, headers: viewer })).status, 403);
+      assert.equal((await scheduleRequest('DELETE', url, { headers: viewer })).status, 403);
+      const scheduled = await scheduleRequest('POST', url, { body, headers: authHeader() });
+      assert.equal(scheduled.status, 200);
+      assert.equal(scheduled.body.status, 'scheduled');
+      assert.equal(scheduled.body.scheduleTimezone, 'UTC');
+      assert.equal(await db.message.count({ where: { campaignId: campaign.id } }), 0);
+      assert.equal((await scheduleRequest('POST', `/api/campaigns/${campaign.id}/start`, { headers: authHeader() })).status, 409);
+      assert.equal((await scheduleRequest('DELETE', url, { headers: authHeader() })).status, 200);
+      assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'draft');
+      assert.equal((await scheduleRequest('POST', url, { body: { scheduledAt: 'invalid', timezone: 'UTC' }, headers: authHeader() })).status, 400);
+    } finally {
+      config.businessHours = old;
+      await db.campaignLead.deleteMany({ where: { campaignId: campaign.id } });
+      await db.campaign.delete({ where: { id: campaign.id } });
+      await db.lead.delete({ where: { id: lead.id } });
+      await db.user.delete({ where: { id: user.id } });
+    }
+  });
 });
 
 describe('Account dashboard layouts', () => {
@@ -3011,11 +3128,24 @@ test('Web Push enforces personal device ownership and retries durable reply curs
     const sent = [];
     await deliverDeviceReplies(subscription, async (_device, payload) => { sent.push(payload); });
     assert.equal(sent.length, 1);
-    assert.equal(sent[0].tag, `message-${human.id}`);
+    assert.equal(sent[0].tag, `conversation-${lead.id}-email`);
     assert.ok(!JSON.stringify(sent).includes('Private customer'));
     subscription = await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } });
     assert.equal(subscription.lastMessageId, human.id);
     await deliverDeviceReplies(subscription, async () => assert.fail('Already delivered messages must not send again'));
+    assert.equal((await request('PATCH', `/api/push/subscriptions/${subscription.id}/preview`, { headers: headers(0), body: { previewMode: 'message' } })).status, 200);
+    const previewMessage = await prisma.message.create({ data: { leadId: lead.id, direction: 'inbound', channel: 'telegram', content: '<b>Fixture</b> message preview', status: 'delivered' } });
+    subscription = await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } });
+    const previews = [];
+    await deliverDeviceReplies(subscription, async (_device, payload) => previews.push(payload));
+    assert.equal(previews.length, 1);
+    assert.equal(previews[0].title, 'Push Reply Fixture · Telegram');
+    assert.equal(previews[0].body, 'Fixture message preview');
+    assert.equal(previews[0].url, `/m/inbox?leadId=${lead.id}&channel=telegram`);
+    assert.ok(!previews[0].url.includes('Fixture'));
+    assert.equal(previews[0].timestamp, previewMessage.createdAt.getTime());
+    assert.equal((await request('PATCH', `/api/push/subscriptions/${subscription.id}/preview`, { headers: headers(0), body: { previewMode: 'private' } })).status, 200);
+    subscription = await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } });
     const newer = await prisma.message.create({ data: { leadId: lead.id, direction: 'inbound', channel: 'whatsapp', content: 'Another question', status: 'delivered' } });
     await prisma.inboxReadState.create({ data: { leadId: lead.id, viewerKey: subscription.viewerKey, lastReadMessageId: newer.id } });
     await deliverDeviceReplies(subscription, async () => assert.fail('Messages read in the foreground must not alert again'));
@@ -3066,16 +3196,38 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
     assert.equal(accepted.status, 200, JSON.stringify(accepted.body));
     assert.equal(accepted.body.message.content, 'Hello Buyer, still interested?');
     assert.equal((await send({ text: 'Template did not reopen the window' })).status, 409);
+    const mcpTemplate = await request('POST', `/api/leads/${lead.id}/send`, { headers, body: { accountId: account.id, whatsappTemplate: template, clientMessageId: 'fixture-mcp-template-001' } });
+    assert.equal(mcpTemplate.status, 200);
+    assert.equal(mcpTemplate.body.message.waCampaignName, 'reconnect_fixture');
+    assert.equal(mcpTemplate.body.message.content, 'Hello Buyer, still interested?');
+    const repeatTemplate = await request('POST', `/api/leads/${lead.id}/send`, { headers, body: { accountId: account.id, whatsappTemplate: template, clientMessageId: 'fixture-mcp-template-001' } });
+    assert.equal(repeatTemplate.body.message.id, mcpTemplate.body.message.id);
+    assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'paused');
+    const explained = await request('POST', '/api/campaigns/preview-leads', { headers, body: { channel: 'whatsapp', filter: { product: 'unmatched-fixture-product', poolId: 1 } } });
+    assert.equal(explained.status, 400);
+
     await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'inbound', waAccount: account.id, content: 'Yes, please', status: 'delivered', sentAt: new Date() } });
     const body = { text: 'Here are the details', clientMessageId: 'fixture-message-00001' };
     const sent = await send(body); assert.equal(sent.status, 200);
     assert.equal(sent.body.message.waMessageId, 'wamid.MANUAL-FIXTURE');
-    const duplicate = await send(body); assert.equal(duplicate.body.message.id, sent.body.message.id); assert.equal(sends, 2);
+    const duplicate = await send(body); assert.equal(duplicate.body.message.id, sent.body.message.id); assert.equal(sends, 3);
     assert.equal((await prisma.lead.findUnique({ where: { id: lead.id } })).status, 'paused');
     await prisma.message.update({ where: { id: sent.body.message.id }, data: { status: 'failed', providerStatusReason: 're_engagement_required' } });
     const detail = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
     assert.ok(detail.body.messages.some(row => row.id === sent.body.message.id && row.status === 'failed'));
     assert.equal(detail.body.replyNeeded, true, 'failed attempts never clear the unanswered human reply');
+    manager.sendMessage = async () => ({ success: false, reason: 'send_failed', error: 'Provider rejected the fixture request', errorCode: 'PARAM_INVALID', requestId: 'req_fixture_manual', waMessageId: 'ycloud.failed-fixture' });
+    const rejected = await send({ text: 'A provider-rejected reply', clientMessageId: 'fixture-rejected-0001' });
+    assert.equal(rejected.status, 409);
+    assert.match(rejected.body.error, /Provider rejected the fixture request/);
+    const rejectedRow = await prisma.message.findFirst({ where: { idempotencyKey: `manual-wa:${lead.id}:fixture-rejected-0001` } });
+    assert.equal(rejectedRow.status, 'failed');
+    assert.equal(rejectedRow.providerErrorMessage, 'Provider rejected the fixture request');
+    assert.equal(rejectedRow.providerErrorCode, 'PARAM_INVALID');
+    assert.equal(rejectedRow.providerRequestId, 'req_fixture_manual');
+    assert.equal(rejectedRow.waMessageId, 'ycloud.failed-fixture');
+    const rejectedDetail = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+    assert.equal(rejectedDetail.body.messages.find(row => row.id === rejectedRow.id).providerErrorCode, 'PARAM_INVALID');
     manager.sendMessage = async () => ({ success: false, reason: 'timeout' });
     const unknown = await send({ text: 'Uncertain send', clientMessageId: 'fixture-uncertain-0001' });
     assert.equal(unknown.status, 409);
@@ -3088,6 +3240,7 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
     const parallel = await Promise.all([sendManualWhatsApp(parallelBody, dependencies), sendManualWhatsApp(parallelBody, dependencies)]);
     assert.equal(concurrentSends, 1);
     assert.equal(parallel[0].message.id, parallel[1].message.id);
+    const retainedFollowup = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Fixture pending followup', status: 'queued', waAccount: account.id } });
     const finalFailure = await sendManualWhatsApp({ leadId: lead.id, text: 'Receipt arrived first', clientMessageId: 'fixture-receipt-first1' }, { manager: { sendMessage: async () => {
       await recordMetaReceipt({ accountId: account.id, waMessageId: 'wamid.MANUAL-EARLY-FAILURE', status: 'failed', failureCode: 131047 });
       return { success: true, waMessageId: 'wamid.MANUAL-EARLY-FAILURE' };
@@ -3095,6 +3248,7 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
     assert.equal(finalFailure.success, false, 'an early failure must not produce a success response');
     assert.equal(finalFailure.message.status, 'failed');
     assert.equal(finalFailure.reason, 're_engagement_required');
+    assert.equal((await prisma.message.findUnique({ where: { id: retainedFollowup.id } })).status, 'queued', 'a rejected manual attempt must not cancel unrelated pending work');
     for (const route of [`/api/leads/${lead.id}/send-cloud-text`, `/api/leads/${lead.id}/send`]) {
       const response = await request('POST', route, { headers, body: { text: 'Legacy route', message: 'Legacy route', accountId: 999999 } });
       assert.equal(response.status, 503, 'an unavailable explicit sender cannot silently switch numbers');
@@ -3108,18 +3262,81 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
     const stale = new Date(Date.now() - 10 * 60_000);
     const manual = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Interrupted manual attempt', status: 'sending', idempotencyKey: `manual-wa:${lead.id}:fixture-interrupted-0001`, updatedAt: stale } });
     const automated = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Interrupted queue attempt', status: 'sending', updatedAt: stale } });
+    const interruptedCampaign = await prisma.message.create({ data: { leadId: lead.id, campaignId: 987654, channel: 'whatsapp', direction: 'outbound', content: 'Synthetic interrupted campaign attempt', status: 'sending', updatedAt: stale } });
     imessage.recoverStuckMessages = async () => ({ count: 0, confirmed: 0, requeued: 0 });
     try {
       const recovered = await followup.recoverStuckMessages();
       assert.ok(recovered.unconfirmed >= 1);
       assert.equal((await prisma.message.findUnique({ where: { id: manual.id } })).status, 'unconfirmed');
       assert.equal((await prisma.message.findUnique({ where: { id: automated.id } })).status, 'queued');
+      assert.equal((await prisma.message.findUnique({ where: { id: interruptedCampaign.id } })).status, 'unconfirmed');
     } finally { imessage.recoverStuckMessages = previousRecovery; }
 
   } finally {
     manager.sendMessage = originalSend; manager.sendApprovedTemplate = originalTemplate; cloud.listApprovedTemplates = originalList;
     await prisma.whatsAppReceipt.deleteMany({ where: { accountId: account.id } });
     await prisma.lead.delete({ where: { id: lead.id } });
+    await prisma.whatsAppAccount.delete({ where: { id: account.id } });
+  }
+});
+
+test('campaign receipts expose delivery failure, preserve opt-outs, and retain numeric retry classification', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { recordMetaReceipt } = await import('../src/services/whatsappDelivery.js');
+  const { suppressedWhatsAppLeads } = await import('../src/services/whatsappSuppression.js');
+  const { findRetryable } = await import('../src/services/deliveryRetry.js');
+  const { sendManualWhatsApp } = await import('../src/services/manualWhatsApp.js');
+  const account = await prisma.whatsAppAccount.create({ data: { name: 'Synthetic campaign receipts', enabled: true } });
+  const lead = await prisma.lead.create({ data: { name: 'Synthetic receipt lead', mobile: '15550000181', status: 'contacted' } });
+  const temporaryLead = await prisma.lead.create({ data: { name: 'Synthetic retry lead', mobile: '15550000182', status: 'contacted' } });
+  const campaign = await prisma.campaign.create({ data: { name: 'Synthetic dispatch complete', messageTemplate: 'Fixture', channel: 'whatsapp', status: 'completed', totalLeads: 2 } });
+  try {
+    const sentAt = new Date(Date.now() - 48 * 3600000);
+    for (const [index, contact] of [lead, temporaryLead].entries()) {
+      await prisma.campaignLead.create({ data: { campaignId: campaign.id, leadId: contact.id, status: 'sent', sentAt } });
+      await prisma.message.create({ data: { leadId: contact.id, campaignId: campaign.id, channel: 'whatsapp', direction: 'outbound', content: 'Synthetic template', status: 'sent', sentAt, waAccount: account.id, waMessageId: `fixture-campaign-receipt-${index}` } });
+    }
+    await recordMetaReceipt({ accountId: account.id, waMessageId: 'fixture-campaign-receipt-0', status: 'sent', timestamp: '1' });
+    let message = await prisma.message.findFirst({ where: { campaignId: campaign.id, leadId: lead.id } });
+    assert.equal(message.ackStatus, 1, 'provider-sent acknowledgement advances after local acceptance');
+    await recordMetaReceipt({ accountId: account.id, waMessageId: message.waMessageId, status: 'failed', failureCode: 131050, failureReason: 'Stopped receiving business marketing', timestamp: '2' });
+    await recordMetaReceipt({ accountId: account.id, waMessageId: 'fixture-campaign-receipt-1', status: 'failed', failureCode: 131049, failureReason: 'Marketing quality throttle', timestamp: '3' });
+    message = await prisma.message.findFirst({ where: { campaignId: campaign.id, leadId: temporaryLead.id } });
+    assert.equal(message.providerErrorCode, '131049');
+    const { default: engine } = await import('../src/services/campaignEngine.js');
+    const detail = await engine.getCampaign(campaign.id);
+    assert.equal(detail.sentCount, 2); assert.equal(detail.failedCount, 2);
+    assert.equal(detail.delivery.failed, 2);
+    assert.ok((await suppressedWhatsAppLeads(prisma, [lead.id], account.id)).has(lead.id));
+    const cloud = { listApprovedTemplates: async () => ({ ok: true, templates: [{ name: 'fixture_marketing', language: 'en', category: 'MARKETING', body: 'Fixture', bodyVariables: [] }] }) };
+    await assert.rejects(sendManualWhatsApp({ leadId: lead.id, accountId: account.id, template: { name: 'fixture_marketing', language: 'en', parameters: [] } }, { cloud }), error => error.reason === 'whatsapp_marketing_opted_out');
+    const due = await findRetryable({ now: new Date(Date.now() + 48 * 3600000) });
+    assert.ok(due.some(row => row.id === message.id), 'numeric 131049 reaches the retryable path after backoff');
+    assert.ok(!due.some(row => row.leadId === lead.id), 'explicit marketing opt-outs never enter retries');
+    await recordMetaReceipt({ accountId: account.id, waMessageId: 'fixture-campaign-receipt-0', status: 'read', timestamp: '4' });
+    assert.ok((await suppressedWhatsAppLeads(prisma, [lead.id], account.id)).has(lead.id), 'a late receipt cannot erase an opt-out');
+    const { sweep } = await import('../src/services/deliveryRetry.js');
+    const previousTime = new Date(Date.now() - 4 * 86400000);
+    await prisma.message.update({ where: { id: message.id }, data: { updatedAt: previousTime, ackUpdatedAt: previousTime } });
+    const swept = await sweep({ dryRun: false });
+    assert.ok(swept.reviewRequired >= 1, 'campaign retry requires reviewed campaign dispatch');
+    assert.equal((await prisma.message.findUnique({ where: { id: message.id } })).status, 'failed');
+    const { default: followup } = await import('../src/services/followup.js');
+    await prisma.message.update({ where: { id: message.id }, data: { status: 'queued', scheduledAt: previousTime } });
+    await followup.processQueue({ messageIds: [message.id] });
+    const quarantined = await prisma.message.findUnique({ where: { id: message.id } });
+    assert.equal(quarantined.status, 'unconfirmed');
+    assert.equal(quarantined.providerStatusReason, 'campaign_retry_review_required');
+    const uncertain = await prisma.message.create({ data: { leadId: temporaryLead.id, campaignId: campaign.id, channel: 'whatsapp', direction: 'outbound', status: 'unconfirmed', content: 'Synthetic timeout', waAccount: account.id, waMessageId: 'fixture-uncertain-receipt', providerStatusReason: 'confirmation_unknown' } });
+    await recordMetaReceipt({ accountId: account.id, waMessageId: uncertain.waMessageId, status: 'sent', timestamp: '5' });
+    const confirmed = await prisma.message.findUnique({ where: { id: uncertain.id } });
+    assert.equal(confirmed.status, 'sent'); assert.equal(confirmed.ackStatus, 1);
+    assert.equal(confirmed.providerErrorCode, null);
+    assert.ok(confirmed.sentAt);
+  } finally {
+    await prisma.whatsAppReceipt.deleteMany({ where: { accountId: account.id } });
+    await prisma.lead.deleteMany({ where: { id: { in: [lead.id, temporaryLead.id] } } });
+    await prisma.campaign.delete({ where: { id: campaign.id } });
     await prisma.whatsAppAccount.delete({ where: { id: account.id } });
   }
 });
@@ -3203,6 +3420,8 @@ describe('Audit workflow repairs', () => {
       const preview = await request('POST', '/api/campaigns/preview-leads', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.211' }, body: { filter: { status: 'new' }, channel: 'whatsapp' } });
       assert.equal(preview.status, 200);
       assert.equal(typeof preview.body.count, 'number');
+      assert.equal(preview.body.matchedCount, preview.body.count + preview.body.excludedCount);
+      assert.equal(typeof preview.body.exclusionCounts, 'object');
     } finally {
       await db.lead.deleteMany({ where: { name } });
       await db.importBatch.deleteMany({ where: { filename: 'audit-fixture.csv' } });
@@ -3449,6 +3668,14 @@ describe('YCloud WhatsApp provider', () => {
       } else if (req.url.includes('/upload')) res.end(JSON.stringify({ id: 'media-fixture' }));
       else if (req.url.includes('/download/')) { res.setHeader('Content-Type', 'image/png'); res.end(Buffer.from('fixture-image')); }
       else if (req.url === '/v2/whatsapp/messages/sendDirectly') {
+        if (sendFailure === 'balance') {
+          res.statusCode = 403;
+          return res.end(JSON.stringify({ code: 'BALANCE_INSUFFICIENT', message: 'Payment fixture' }));
+        } else if (sendFailure === 'thread') {
+          res.statusCode = 400;
+          res.end(JSON.stringify({ error: { code: 'BAD_REQUEST', requestId: 'req_thread_fixture', whatsappApiError: { code: '131070', message: 'Caller is not thread owner', error_data: { details: 'Another app is controlling this thread now' } } } }));
+          return;
+        }
         res.end(JSON.stringify(sendFailure ? { id: 'failed-fixture', status: 'failed', errorCode: '131042', errorMessage: 'Payment fixture' } : { id: 'ycloud-message-fixture', wamid: 'wamid.fixture', status: 'sent' }));
       } else { res.statusCode = 404; res.end('{}'); }
     });
@@ -3519,7 +3746,31 @@ describe('YCloud WhatsApp provider', () => {
     } finally { fs.unlinkSync(file); }
     sendFailure = true;
     assert.equal((await cloud.sendTextMessage('15550100001', 'Fixture only', account.id)).reason, 'payment_issue');
+    sendFailure = 'balance';
+    const balance = await cloud.sendCampaignTemplate({ phone: '15550100001', campaignName: 'fixture_template', templateParams: ['Taylor'], accountId: account.id });
+    assert.equal(balance.reason, 'payment_issue');
+    assert.equal(balance.errorCode, 'BALANCE_INSUFFICIENT');
+    sendFailure = true;
+    const failure = await cloud.sendTextMessage('15550100001', 'Fixture only', account.id);
+    assert.equal(failure.reason, 'payment_issue');
+    assert.equal(failure.messageId, 'failed-fixture');
+    assert.equal(failure.errorCode, '131042');
+    assert.equal(failure.rawError, 'Payment fixture');
     sendFailure = false;
+  });
+
+  test('thread ownership rejection is actionable and never retried by the transport', async () => {
+    calls = [];
+    sendFailure = 'thread';
+    try {
+      const failure = await cloud.sendTextMessage('15550100001', 'Fixture only', account.id);
+      assert.equal(failure.success, false);
+      assert.equal(failure.reason, 'thread_not_owned');
+      assert.equal(failure.errorCode, '131070');
+      assert.equal(failure.requestId, 'req_thread_fixture');
+      assert.equal(failure.rawError, 'Another app is controlling this thread now');
+      assert.equal(calls.length, 1);
+    } finally { sendFailure = false; }
   });
 
   test('rejects unsigned and cross-account events; stores one reply with original time and stops automation', async () => {
@@ -3569,6 +3820,7 @@ describe('YCloud WhatsApp provider', () => {
     const old = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Old followup', status: 'queued' } });
     const body = { type: 'whatsapp.inbound_message.received', whatsappInboundMessage: { id: 'yc-retry-media', wamid: 'wamid.yc-retry-media', from: '+15550100005', to: phone, wabaId: waba, sendTime: new Date().toISOString(), type: 'image', image: { id: 'retry', mime_type: 'image/png', link: `${process.env.YCLOUD_API_BASE}/whatsapp/media/download/retry?sig=fixture` } } };
     const previousFetch = global.fetch;
+    const { MEDIA_DIR } = await import('../src/services/whatsappMedia.js');
     let downloads = 0;
     global.fetch = async () => ++downloads === 1 ? new Response('', { status: 503 }) : new Response('fixture-image', { headers: { 'Content-Type': 'image/png' } });
     try {
@@ -3577,6 +3829,16 @@ describe('YCloud WhatsApp provider', () => {
       const inbound = await prisma.message.findFirst({ where: { waMessageId: 'wamid.yc-retry-media' } });
       assert.equal(inbound.providerStatusReason, 'media_pending_retry');
       const later = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'New reminder', status: 'queued' } });
+      const existingFiles = fs.readdirSync(MEDIA_DIR).sort();
+      await prisma.$executeRaw`CREATE TRIGGER fixture_block_attachment
+        BEFORE UPDATE OF mediaUrl ON Message WHEN NEW.mediaUrl IS NOT NULL
+        BEGIN SELECT RAISE(ABORT, 'Synthetic database write failure'); END`;
+      try {
+        assert.equal((await postEvent(body)).status, 503);
+        assert.deepEqual(fs.readdirSync(MEDIA_DIR).sort(), existingFiles, 'a failed database update discards its downloaded file');
+      } finally {
+        await prisma.$executeRaw`DROP TRIGGER fixture_block_attachment`;
+      }
       assert.equal((await postEvent(body)).status, 200);
       const completed = await prisma.message.findUnique({ where: { id: inbound.id } });
       assert.ok(completed.mediaUrl);
@@ -3584,6 +3846,50 @@ describe('YCloud WhatsApp provider', () => {
       assert.equal((await prisma.message.findUnique({ where: { id: later.id } })).status, 'queued');
       fs.unlinkSync(path.join(__dirname, '..', completed.mediaUrl));
     } finally { global.fetch = previousFetch; }
+  });
+
+  test('concurrent signed replays keep one attached file and remove losing downloads', async () => {
+    const { MEDIA_DIR } = await import('../src/services/whatsappMedia.js');
+    const lead = await prisma.lead.create({ data: {
+      name: 'Concurrent attachment fixture', mobile: '15550100007', status: 'replied',
+    } });
+    const messageId = 'wamid.yc-media-race';
+    const inbound = await prisma.message.create({ data: {
+      leadId: lead.id, direction: 'inbound', channel: 'whatsapp', status: 'received',
+      waAccount: account.id, waMessageId: messageId, idempotencyKey: `ycloud-inbound:${messageId}`,
+      content: 'Concurrent attachment fixture',
+    } });
+    const event = { type: 'whatsapp.inbound_message.received', whatsappInboundMessage: {
+      wamid: messageId, from: '+15550100007', to: phone, wabaId: waba,
+      sendTime: new Date().toISOString(), type: 'image', image: {
+        id: 'fixture-race', mime_type: 'image/png',
+        link: `${process.env.YCLOUD_API_BASE}/whatsapp/media/download/fixture-race?sig=fixture`,
+      },
+    } };
+    const initialFiles = new Set(fs.readdirSync(MEDIA_DIR));
+    const newFiles = () => fs.readdirSync(MEDIA_DIR).filter(file => !initialFiles.has(file));
+    const previousFetch = global.fetch;
+    const gate = Promise.withResolvers();
+    const timeout = setTimeout(gate.resolve, 5_000);
+    let downloads = 0;
+    global.fetch = async () => {
+      if (++downloads === 2) gate.resolve();
+      await gate.promise;
+      return new Response('Concurrent synthetic attachment');
+    };
+    try {
+      const results = await Promise.all([postEvent(event), postEvent(event)]);
+      assert.equal(downloads, 2, 'both requests overlapped while the attachment was missing');
+      assert.deepEqual(results.map(result => result.status), [200, 200]);
+      const saved = await prisma.message.findUnique({ where: { id: inbound.id } });
+      assert.ok(saved.mediaUrl);
+      assert.equal(saved.providerStatusReason, null);
+      assert.deepEqual(newFiles(), [path.basename(saved.mediaUrl)]);
+    } finally {
+      clearTimeout(timeout);
+      global.fetch = previousFetch;
+      for (const file of newFiles()) fs.unlinkSync(path.join(MEDIA_DIR, file));
+    }
   });
 
   test('retains early receipts, deduplicates replays and never downgrades read delivery', async () => {
@@ -3727,5 +4033,137 @@ describe('Free bulk email verification and send protection', () => {
     await assert.rejects(marketing.dispatchDailyBatch({ date: '2026-10-29', template, countries: ['US'],
       allocations: [{ lead: { email: 'buyer@blocked.bulk.example.test', country: 'US' }, account: { id: 999 } }], validateRecipients: async () => true }),
     error => error.code === 'email_verification_required');
+  });
+});
+
+describe('IndiaMART signed source boundary', () => {
+  test('source readiness is authenticated, exact-page intake stays non-sending, and fresh enquiry email queues once', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const { default: fresh } = await import('../src/services/freshLeadOutreach.js');
+    const source = await db.webhookSource.create({ data: { source: 'indiamart_live', name: 'Page-restricted fixture', apiKey: 'fixture-page-private-key' } });
+    const supplier = await db.supplier.create({ data: { name: 'Page fixture supplier', matchTag: 'page-fixture' } });
+    const wa = await db.whatsAppAccount.create({ data: { name: 'Page fixture WA', phone: '15555550991', enabled: true } });
+    const email = await db.emailAccount.create({ data: { name: 'Page fixture email', email: 'sender@page.example.test', smtpHost: 'smtp.example.test', smtpUser: 'fixture', smtpPass: 'fixture', whatsappAccountId: wa.id } });
+    const prior = await db.systemConfig.findUnique({ where: { key: 'indiamart.livePolicy' } });
+    const endpoint = '/api/webhooks/indiamart/indiamart_live';
+    const headers = { 'x-api-key': source.apiKey, 'X-Forwarded-For': '192.0.2.218' };
+    const target = 'https://seller.indiamart.com/blproduct/mypurchasedbl?disp=D';
+    const fixtureIds = [];
+    try {
+      await db.webhookSource.update({ where: { id: source.id }, data: { importSupplierId: supplier.id, importTags: 'page-fixture' } });
+      const policy = { sourceId: source.id, sellerId: '10001', enabled: false, armedAt: null, requireExactPage: true,
+        enableAfterBaseline: false, whatsappAccountId: wa.id, emailAccountId: email.id, templateName: 'fixture_approved_template' };
+      await db.systemConfig.upsert({ where: { key: 'indiamart.livePolicy' }, create: { key: 'indiamart.livePolicy', value: JSON.stringify(policy) }, update: { value: JSON.stringify(policy) } });
+      assert.equal((await request('GET', endpoint+'/status', { headers: { 'X-Forwarded-For': '192.0.2.218' } })).status, 401);
+      assert.equal((await request('GET', endpoint+'/status', { headers: { ...headers, 'x-api-key': 'wrong' } })).status, 401);
+      const readiness = await request('GET', endpoint+'/status', { headers });
+      assert.equal(readiness.status, 200); assert.equal(readiness.body.targetUrl, target);
+      assert.equal(readiness.body.senderPairConfigured, true); assert.equal(readiness.body.emailFrom, email.email);
+      assert.equal(readiness.body.enabled, false); assert.ok(!JSON.stringify(readiness.body).includes(source.apiKey));
+      const row = { externalId: '990000001', acquiredAt: new Date().toISOString(), name: 'Page Fixture Buyer', email: 'buyer@page.example.test', product: 'Fixture product', quantity: '2 boxes' };
+      const body = { sourceUrl: target, sellerId: '10001', mode: 'baseline', records: [row] };
+      assert.equal((await request('POST', endpoint, { headers, body: { ...body, sourceUrl: 'https://seller.indiamart.com/' } })).status, 422);
+      assert.equal(await db.connectorReceipt.count({ where: { sourceId: source.id } }), 0);
+      const baseline = await request('POST', endpoint, { headers, body });
+      assert.equal(baseline.status, 200); assert.equal(baseline.body.automationEnabled, false);
+      const baselineLead = await db.lead.findUnique({ where: { id: baseline.body.results[0].leadId } }); fixtureIds.push(baselineLead.id);
+      assert.equal(baselineLead.status, 'paused'); assert.match(baselineLead.mobile, /^no-phone:/);
+      assert.equal(await db.message.count({ where: { leadId: baselineLead.id } }), 0);
+      const lead = await db.lead.create({ data: { name: 'Fresh Fixture Buyer', mobile: 'no-phone:fresh-page-fixture', source: 'indiamart_live', email: 'fresh@page.example.test', product: 'Fixture product', quantity: '2 boxes', country: 'Spain' } });
+      fixtureIds.push(lead.id);
+      await fresh.queue(lead, { channels: ['email'], emailAccountId: email.id });
+      await fresh.queue(lead, { channels: ['email'], emailAccountId: email.id });
+      const messages = await db.message.findMany({ where: { leadId: lead.id } });
+      assert.equal(messages.length, 1); assert.equal(messages[0].status, 'queued');
+      assert.equal(messages[0].emailAccountId, email.id);
+      assert.equal(messages[0].emailSubject, 'Your IndiaMART enquiry: Fixture product');
+      assert.match(messages[0].content, /noted your requested quantity as 2 boxes/);
+      assert.doesNotMatch(messages[0].content, /still need|contacted us earlier/i);
+    } finally {
+      await db.connectorReceipt.deleteMany({ where: { sourceId: source.id } });
+      await db.lead.deleteMany({ where: { id: { in: fixtureIds } } });
+      if (prior) await db.systemConfig.update({ where: { key: prior.key }, data: { value: prior.value } });
+      else await db.systemConfig.deleteMany({ where: { key: 'indiamart.livePolicy' } });
+      await db.webhookSource.delete({ where: { id: source.id } });
+      await db.emailAccount.delete({ where: { id: email.id } });
+      await db.whatsAppAccount.delete({ where: { id: wa.id } });
+      await db.supplier.delete({ where: { id: supplier.id } });
+    }
+  });
+  test('source credentials are required for purchases and health reports; status contains no source secret', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const source = await db.webhookSource.create({ data: { source: 'indiamart_live', name: 'Fixture IndiaMART', apiKey: 'fixture-private-intake-key' } });
+    const post = (suffix, key, body) => request('POST', `/api/webhooks/indiamart/indiamart_live${suffix}`, { body, headers: { 'x-api-key': key, 'X-Forwarded-For': '192.0.2.219' } });
+    assert.equal((await post('', 'wrong-key', {})).status, 401);
+    assert.equal((await post('/health', 'wrong-key', { state: 'ready' })).status, 401);
+    assert.equal((await post('', source.apiKey, { records: [] })).status, 422);
+    assert.equal((await post('/health', source.apiKey, { state: 'needs_attention', error: 'Sign-in required', lastCheck: null })).status, 200);
+    assert.equal((await post('/health', source.apiKey, { state: 'invalid' })).status, 422);
+    assert.equal((await post('/health', source.apiKey, { state: 'ready', localPending: -1 })).status, 422);
+    assert.equal((await post('/health', source.apiKey, { state: 'ready', targetUrl: 'https://seller.indiamart.com/' })).status, 422);
+    assert.equal((await post('/health', source.apiKey, { state: 'ready', mode: 'login', localPending: 0,
+      targetUrl: 'https://seller.indiamart.com/blproduct/mypurchasedbl?disp=D', lastSavedScanAt: null, lastUploadAt: null })).status, 200);
+    const response = await request('GET', '/api/system/status', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.219' } });
+    assert.equal(response.status, 200);
+    assert.ok(!JSON.stringify(response.body).includes(source.apiKey));
+    await db.webhookSource.update({ where: { id: source.id }, data: { enabled: false } });
+    assert.equal((await post('/health', source.apiKey, { state: 'ready' })).status, 404);
+  });
+});
+
+describe('Message interaction identity and reaction boundaries', () => {
+  test('quoted WhatsApp sends preserve native targets, reject other threads and keep reactions out of reply counts', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const { default: manager } = await import('../src/services/whatsapp.js');
+    const { recordReaction } = await import('../src/services/messageReactions.js');
+    const { recordMetaReceipt, reconcileMetaReceipts } = await import('../src/services/whatsappDelivery.js');
+    const account = await db.whatsAppAccount.create({ data: { name: 'Interaction fixture', enabled: true } });
+    const lead = await db.lead.create({ data: { name: 'Interaction fixture', mobile: '15550001194', assignedAccount: account.id } });
+    const other = await db.lead.create({ data: { name: 'Other interaction fixture', mobile: '15550001195', assignedAccount: account.id } });
+    const parent = await db.message.create({ data: { leadId: lead.id, channel: 'whatsapp', waAccount: account.id, direction: 'inbound', status: 'delivered', content: 'A fixture enquiry', waMessageId: 'wamid.INTERACTION_PARENT', sentAt: new Date() } });
+    const { default: cloud } = await import('../src/services/whatsappCloudApi.js');
+    const oldReaction = cloud.sendReaction;
+    let reactionCalls = 0;
+    cloud.sendReaction = async (_address, target, emoji, id) => { reactionCalls++; assert.equal(target, parent.waMessageId); assert.equal(emoji, '👍'); assert.equal(id, account.id); return { success: true }; };
+    const oldSend = manager.sendMessage;
+    const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.204' };
+    let calls = 0;
+    manager.sendMessage = async (_address, _text, id, options) => { calls++; assert.equal(id, account.id); assert.equal(options.replyTo, parent.waMessageId); return { success: true, waMessageId: 'wamid.INTERACTION_REPLY' }; };
+    try {
+      const send = body => request('POST', '/api/inbox/send', { headers, body: { leadId: lead.id, channel: 'whatsapp', text: 'Fixture reply', replyToMessageId: parent.id, clientMessageId: 'fixture-interaction-001', ...body } });
+      assert.equal((await send({ leadId: other.id })).status, 400);
+      assert.equal(calls, 0);
+      const response = await send({});
+      assert.equal(response.status, 200, JSON.stringify(response.body));
+      assert.equal(response.body.message.quotedMessageId, parent.id);
+      assert.equal(response.body.message.quotedRemoteId, parent.waMessageId);
+      assert.equal((await send({})).status, 200);
+      assert.equal(calls, 1, 'same client key does not resend a quote');
+      const reacted = await request('POST', `/api/inbox/threads/${lead.id}/messages/${parent.id}/reaction`, { headers, body: { emoji: '👍' } });
+      assert.equal(reacted.status, 200, JSON.stringify(reacted.body));
+      assert.equal(reactionCalls, 1);
+      assert.equal((await request('POST', `/api/inbox/threads/${lead.id}/messages/${parent.id}/reaction`, { headers, body: { emoji: 'not-an-emoji' } })).status, 400);
+      await db.messageReaction.deleteMany({ where: { accountId: account.id } });
+      const before = await db.message.count({ where: { leadId: lead.id, direction: 'inbound' } });
+      await recordReaction({ channel: 'whatsapp', accountId: account.id, targetId: parent.waMessageId, actorKey: 'business', emoji: '👍', eventAt: new Date('2026-11-05T02:00:00Z') });
+      await recordReaction({ channel: 'whatsapp', accountId: account.id, targetId: parent.waMessageId, actorKey: 'business', emoji: '❤️', eventAt: new Date('2026-11-05T01:00:00Z') });
+      const thread = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+      assert.equal(thread.status, 200);
+      assert.equal(thread.body.messages.find(m => m.id === parent.id).reactions[0].emoji, '👍', 'stale events do not replace a newer reaction');
+      assert.equal(thread.body.messages.find(m => m.id === response.body.message.id).replyToMessageId, parent.id);
+      await recordReaction({ channel: 'whatsapp', accountId: account.id, targetId: parent.waMessageId, actorKey: 'business', emoji: '', eventAt: new Date('2026-11-05T03:00:00Z') });
+      assert.equal(await db.message.count({ where: { leadId: lead.id, direction: 'inbound' } }), before);
+      assert.equal((await request('POST', `/api/inbox/threads/${other.id}/messages/${parent.id}/reaction`, { headers, body: { emoji: '👍' } })).status, 409);
+      await recordMetaReceipt({ accountId: account.id, waMessageId: 'ycloud-identity-fixture', nativeMessageId: 'wamid.RECEIPT_FIRST', status: 'sent' });
+      const late = await db.message.create({ data: { leadId: lead.id, channel: 'whatsapp', waAccount: account.id, direction: 'outbound', status: 'sent', content: 'Fixture receipt timing', waMessageId: 'ycloud-identity-fixture' } });
+      await reconcileMetaReceipts('ycloud-identity-fixture', account.id);
+      assert.equal((await db.message.findUnique({ where: { id: late.id } })).providerMessageId, 'wamid.RECEIPT_FIRST');
+    } finally {
+      manager.sendMessage = oldSend;
+      cloud.sendReaction = oldReaction;
+      await db.messageReaction.deleteMany({ where: { accountId: account.id, channel: 'whatsapp' } });
+      await db.lead.deleteMany({ where: { id: { in: [lead.id, other.id] } } });
+      await db.whatsAppAccount.delete({ where: { id: account.id } });
+    }
   });
 });

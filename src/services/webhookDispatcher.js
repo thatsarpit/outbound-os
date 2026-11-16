@@ -1,6 +1,7 @@
 import { createHmac } from 'crypto';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
+import { OutboundWebhookTargetError, postOutboundWebhook } from '../utils/outboundWebhookTarget.js';
 
 /**
  * Outbound Webhook Dispatcher
@@ -17,9 +18,14 @@ import logger from '../utils/logger.js';
  * Retry: up to 2 retries on network failure (not on 4xx).
  */
 class WebhookDispatcher {
-  constructor() {
-    this._queue = [];
-    this._processing = false;
+  async test(sub) {
+    const event = 'webhook.test';
+    const body = JSON.stringify({
+      event,
+      timestamp: new Date().toISOString(),
+      data: { message: 'This is a test event from Outbound OS', subscriptionId: sub.id },
+    });
+    return this._deliver(sub, body, event, 1, 1);
   }
 
   /**
@@ -48,7 +54,7 @@ class WebhookDispatcher {
     }
   }
 
-  async _deliver(sub, body, event, attempt = 1) {
+  async _deliver(sub, body, event, attempt = 1, maxAttempts = 3) {
     const headers = {
       'Content-Type': 'application/json',
       'User-Agent': 'OutboundOS-Webhook/1.0',
@@ -60,42 +66,27 @@ class WebhookDispatcher {
       headers['X-Webhook-Signature'] = `sha256=${createHmac('sha256', sub.secret).update(body).digest('hex')}`;
     }
 
+    let status, blocked;
     try {
-      const res = await fetch(sub.url, {
-        method: 'POST',
-        headers,
-        body,
-        signal: AbortSignal.timeout(8000),
-      });
-
-      if (res.ok) {
-        await prisma.webhookSubscription.update({
-          where: { id: sub.id },
-          data: { lastTriggeredAt: new Date(), failCount: 0 },
-        });
-        logger.info(`📤 Webhook delivered: ${event} → ${sub.url} [${res.status}]`);
-      } else if (res.status >= 500 && attempt < 3) {
-        // Retry on 5xx
-        await new Promise(r => setTimeout(r, attempt * 2000));
-        return this._deliver(sub, body, event, attempt + 1);
-      } else {
-        logger.warn(`📤 Webhook ${event} → ${sub.url} responded ${res.status}`);
-        await prisma.webhookSubscription.update({
-          where: { id: sub.id },
-          data: { failCount: { increment: 1 } },
-        });
-      }
-    } catch (err) {
-      if (attempt < 3) {
-        await new Promise(r => setTimeout(r, attempt * 2000));
-        return this._deliver(sub, body, event, attempt + 1);
-      }
-      logger.warn(`📤 Webhook delivery failed: ${event} → ${sub.url}: ${err.message}`);
-      await prisma.webhookSubscription.update({
-        where: { id: sub.id },
-        data: { failCount: { increment: 1 } },
-      }).catch(() => {});
+      status = await postOutboundWebhook(sub.url, headers, body);
+    } catch (error) {
+      if (error instanceof OutboundWebhookTargetError) blocked = error.message;
     }
+    if (!blocked && (status == null || status >= 500) && attempt < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, attempt * 2000));
+      return this._deliver(sub, body, event, attempt + 1, maxAttempts);
+    }
+    const ok = status >= 200 && status < 300;
+    // Keep recipient URLs out of logs because query strings can contain credentials.
+    if (ok) logger.info(`Webhook ${sub.id} delivered ${event} (HTTP ${status}).`);
+    else logger.warn(`Webhook ${sub.id} failed to deliver ${event} (${status ?? 'blocked or unreachable'}).`);
+    await prisma.webhookSubscription.update({
+      where: { id: sub.id },
+      data: ok ? { lastTriggeredAt: new Date(), failCount: 0 } : { failCount: { increment: 1 } },
+    }).catch(() => {});
+    if (ok) return { ok, status };
+    const error = blocked || (status == null ? 'Could not reach the webhook destination.' : `The webhook destination returned HTTP ${status}.`);
+    return { ok, status, error };
   }
 }
 

@@ -520,19 +520,18 @@ class ReplyDetector {
           campaignAttribution.variant === 'B'
             ? 'variantBReplies'
             : 'variantAReplies';
-        await prisma.$transaction([
-          prisma.campaignLead.update({
-            where: { id: campaignAttribution.id },
+        await prisma.$transaction(async tx => {
+          // Concurrent replies can select the same campaign. Only the first
+          // state transition earns the unique-recipient reply counters.
+          const claimed = await tx.campaignLead.updateMany({
+            where: { id: campaignAttribution.id, status: 'sent' },
             data: { status: 'replied' },
-          }),
-          prisma.campaign.update({
+          });
+          if (claimed.count) await tx.campaign.update({
             where: { id: campaignAttribution.campaignId },
-            data: {
-              replyCount: { increment: 1 },
-              [variantReplyField]: { increment: 1 },
-            },
-          }),
-        ]);
+            data: { replyCount: { increment: 1 }, [variantReplyField]: { increment: 1 } },
+          });
+        });
       }
 
       // ── Recalculate lead score ──

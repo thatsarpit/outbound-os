@@ -313,12 +313,13 @@ function InboxInner() {
   const sendMutation = useMutation({
     networkMode: 'always',
     retry: false,
-    mutationFn: async () => {
+    mutationFn: async (quotedMessageId?: number) => {
       if (!selectedLeadId) throw new Error('No lead selected')
       if (replyDisabledReason) throw new Error(replyDisabledReason)
       const submitted = loadDraft(dashboardScope, selectedLeadId, composerChannel, draftAccountId)
       const fingerprint = JSON.stringify([
         draftContext,
+        quotedMessageId,
         replyText,
         attachments.map((file) => file.id),
       ])
@@ -326,7 +327,11 @@ function InboxInner() {
       const requestId = requestIds.current.get(fingerprint) || crypto.randomUUID()
       requestIds.current.set(fingerprint, requestId)
       const send = async (payload: Parameters<typeof inboxApi.send>[0]) => ({
-        response: await inboxApi.send({ ...payload, clientMessageId: requestId }),
+        response: await inboxApi.send({
+          ...payload,
+          ...(quotedMessageId ? { replyToMessageId: quotedMessageId } : {}),
+          clientMessageId: requestId,
+        }),
         submitted,
         fingerprint,
         leadId: selectedLeadId,
@@ -374,7 +379,7 @@ function InboxInner() {
         text: messageBody,
       })
     },
-    onSuccess: ({ submitted, leadId, context, fingerprint, channel }) => {
+    onSuccess: ({ submitted, leadId, context, fingerprint }) => {
       requestIds.current.delete(fingerprint)
       clearSubmittedDraft(dashboardScope, leadId, submitted)
       // A reply completing after navigation must not clear another lead's editor.
@@ -385,15 +390,6 @@ function InboxInner() {
         setCc('')
         setBcc('')
       }
-      toast.success(
-        channel === 'email'
-          ? 'Email sent from Inbox'
-          : channel === 'imessage'
-            ? 'iMessage sent'
-            : channel === 'telegram'
-              ? 'Telegram message sent'
-              : 'Accepted by Meta. Waiting for delivery confirmation.',
-      )
       queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
       queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
     },
@@ -854,7 +850,7 @@ function InboxInner() {
                     }}
                     templatesLoading={templatesLoading}
                     templateApplyPending={applyTemplateMutation.isPending}
-                    onSend={() => sendMutation.mutate()}
+                    onSend={(messageId) => sendMutation.mutateAsync(messageId)}
                     replyPending={sendMutation.isPending || scheduleSendMutation.isPending}
                     replyError={resolvedReplyError}
                     replyDisabledReason={replyDisabledReason}
@@ -930,7 +926,7 @@ function InboxInner() {
               }}
               templatesLoading={templatesLoading}
               templateApplyPending={applyTemplateMutation.isPending}
-              onSend={() => sendMutation.mutate()}
+              onSend={(messageId) => sendMutation.mutateAsync(messageId)}
               replyPending={sendMutation.isPending || scheduleSendMutation.isPending}
               replyError={resolvedReplyError}
               replyDisabledReason={replyDisabledReason}

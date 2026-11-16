@@ -1,3 +1,4 @@
+import { refreshCampaignMetrics } from './campaignMetrics.js';
 import { createHash } from 'node:crypto';
 import activityLog, { EVENT_TYPES } from '../utils/activityLog.js';
 import prisma from '../utils/prismaClient.js';
@@ -5,7 +6,7 @@ import { whatsappFailureReason } from '../utils/whatsappSession.js';
 
 const ranks = { sent: 1, failed: 1, delivered: 2, read: 3 };
 export async function applyMetaReceipt(receipt) {
-  let failedLeadId = null;
+  let failedLeadId = null, campaignId = null;
   const applied = await prisma.$transaction(async (tx) => {
     const messages = await tx.message.findMany({
       where: {
@@ -14,10 +15,11 @@ export async function applyMetaReceipt(receipt) {
         waMessageId: receipt.waMessageId,
         waAccount: receipt.accountId,
       },
-      select: { id: true, leadId: true, status: true, ackStatus: true },
+      select: { id: true, leadId: true, status: true, ackStatus: true, campaignId: true, sentAt: true },
     });
     if (messages.length !== 1) return false; // Never guess from a recipient's number.
     const message = messages[0];
+    campaignId = message.campaignId;
     let pricing = {};
     try {
       pricing = JSON.parse(receipt.pricing || '{}');
@@ -25,6 +27,7 @@ export async function applyMetaReceipt(receipt) {
       /* Retain delivery even without pricing. */
     }
     const data = {
+      ...(/^wamid\./.test(receipt.nativeMessageId || '') ? { providerMessageId: receipt.nativeMessageId } : {}),
       ...(pricing.category ? { pricingCategory: pricing.category } : {}),
       ...(pricing.type ? { pricingType: pricing.type } : {}),
       ...(typeof pricing.billable === 'boolean'
@@ -40,12 +43,16 @@ export async function applyMetaReceipt(receipt) {
     if (
       incomingRank > currentRank ||
       (receipt.status === 'failed' && currentRank < 2) ||
-      (receipt.status === 'sent' && message.status === 'sending')
+      (receipt.status === 'sent' && !['failed', 'permanently_failed'].includes(message.status) && currentRank < 2 && (message.ackStatus || 0) < 1)
     ) {
       data.status = receipt.status;
       data.ackStatus =
         receipt.status === 'failed' ? message.ackStatus : incomingRank;
       data.ackUpdatedAt = receipt.receivedAt;
+      // An authenticated receipt can resolve a timeout without another send.
+      if (receipt.status !== 'failed' && !message.sentAt) data.sentAt = receipt.receivedAt;
+      data.providerErrorCode = receipt.status === 'failed' && receipt.failureCode != null ? String(receipt.failureCode) : null;
+      data.providerErrorMessage = receipt.status === 'failed' ? receipt.failureReason || null : null;
       data.providerStatusReason =
         receipt.status === 'failed'
           ? whatsappFailureReason(receipt.failureCode, receipt.failureReason)
@@ -62,6 +69,7 @@ export async function applyMetaReceipt(receipt) {
     });
     return true;
   });
+  if (applied && campaignId) await refreshCampaignMetrics(prisma, campaignId);
   if (failedLeadId !== null)
     activityLog.add(
       EVENT_TYPES.MESSAGE_FAILED,
@@ -81,6 +89,7 @@ export async function applyMetaReceipt(receipt) {
 export async function recordMetaReceipt({
   accountId,
   waMessageId,
+  nativeMessageId,
   status,
   failureCode,
   failureReason,
@@ -107,6 +116,7 @@ export async function recordMetaReceipt({
   const data = {
     accountId,
     waMessageId,
+    ...(/^wamid\./.test(nativeMessageId || '') ? { nativeMessageId } : {}),
     status,
     failureCode: Number.isSafeInteger(failureCode) ? failureCode : null,
     failureReason:

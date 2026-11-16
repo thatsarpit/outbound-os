@@ -1,3 +1,5 @@
+import { VoiceRecorder } from '@/components/inbox/voice-recorder'
+import { ReplyPreview, MessageInteractions } from '@/components/inbox/message-interactions'
 import { ApiClientError } from '@/api/client'
 import {
   WhatsAppReplyWindow,
@@ -5,10 +7,10 @@ import {
 } from '@/components/inbox/whatsapp-reply-window'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowLeft, ChevronDown, Info, Send } from 'lucide-react'
+import { ArrowDown, ArrowLeft, ChevronDown, Info, Send, Search } from 'lucide-react'
 import { inboxApi } from '@/api/endpoints/inbox'
 import { EMAIL_TEMPLATE_LIST_QUERY_KEY, templatesApi } from '@/api/endpoints/templates'
-import type { InboxChannel, InboxThreadDetail, MediaFile } from '@/api/types'
+import type { InboxChannel, InboxThreadDetail, InboxMessage, MediaFile } from '@/api/types'
 import { EmailMessageCard } from '@/components/inbox/email-message-card'
 import { EmailEditor } from '@/components/inbox/email-editor'
 import { AttachmentPicker } from '@/components/inbox/attachment-picker'
@@ -91,7 +93,10 @@ export function MobileConversation({
   const stick = useRef(true)
   const lastInteraction = useRef(0)
   const [showLatest, setShowLatest] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [messageSearch, setMessageSearch] = useState('')
   const [details, setDetails] = useState(false)
+  const [replyTarget, setReplyTarget] = useState<InboxMessage | null>(null)
   const queryClient = useQueryClient()
   const user = useAuthStore((state) => state.user)
   const resolve = useMutation({
@@ -186,6 +191,15 @@ export function MobileConversation({
         </button>
         <button
           type="button"
+          aria-label="Search conversation"
+          aria-expanded={searchOpen}
+          className="flex h-11 w-11 shrink-0 items-center justify-center"
+          onClick={() => setSearchOpen(!searchOpen)}
+        >
+          <Search className="h-5 w-5" />
+        </button>
+        <button
+          type="button"
           className="flex h-11 w-11 shrink-0 items-center justify-center text-text-secondary"
           aria-label="Lead details and follow-ups"
           onClick={() => setDetails(true)}
@@ -199,9 +213,43 @@ export function MobileConversation({
           disabled={!thread || resolve.isPending || user?.role === 'viewer'}
           onClick={() => resolve.mutate()}
         >
-          {thread?.threadState === 'resolved' ? 'Reopen' : 'Done'}
+          {thread?.threadState === 'resolved' ? 'Reopen' : 'Resolve'}
         </button>
       </header>
+      {searchOpen && (
+        <label className="shrink-0 border-b border-border bg-surface p-3">
+          <span className="sr-only">Search message text</span>
+          <input
+            type="search"
+            placeholder="Find in this conversation"
+            value={messageSearch}
+            onChange={(event) => setMessageSearch(event.target.value)}
+            className={mobileInput}
+          />
+          {messageSearch && (
+            <div className="max-h-36 overflow-auto">
+              {thread?.messages
+                .filter((m) =>
+                  m.content.toLocaleLowerCase().includes(messageSearch.toLocaleLowerCase()),
+                )
+                .map((m) => (
+                  <button
+                    type="button"
+                    key={m.id}
+                    className="block min-h-11 w-full truncate text-left text-sm"
+                    onClick={() =>
+                      document
+                        .getElementById(`message-${m.id}`)
+                        ?.scrollIntoView({ block: 'center' })
+                    }
+                  >
+                    {m.content}
+                  </button>
+                ))}
+            </div>
+          )}
+        </label>
+      )}
       {channel === 'whatsapp' && !!thread && <WhatsAppReplyWindow key={leadId} thread={thread} />}
       <div
         ref={timeline}
@@ -244,15 +292,40 @@ export function MobileConversation({
           ) : (
             thread.messages.map((message, index, all) => {
               return message.channel === 'email' ? (
-                <EmailMessageCard
+                <MessageInteractions
                   key={message.id}
                   message={message}
-                  className={`max-w-[95%] p-3 ${message.direction === 'inbound' ? 'mr-auto' : 'ml-auto'}`}
-                />
+                  onReply={(m) => {
+                    setReplyTarget(m)
+                    setChannel(m.channel)
+                    onChannelNavigate(m.channel)
+                  }}
+                >
+                  <EmailMessageCard
+                    message={message}
+                    className={`max-w-[95%] p-3 ${message.direction === 'inbound' ? 'mr-auto' : 'ml-auto'}`}
+                  />
+                </MessageInteractions>
               ) : (
                 <MessageBubble
                   key={message.id}
                   message={message}
+                  onReply={(m) => {
+                    setReplyTarget(m)
+                    setChannel(m.channel)
+                    onChannelNavigate(m.channel)
+                    requestAnimationFrame(() =>
+                      document
+                        .querySelector<HTMLTextAreaElement>('textarea[aria-label="Reply message"]')
+                        ?.focus(),
+                    )
+                  }}
+                  quotedMessage={all.find((m) => m.id === message.replyToMessageId)}
+                  showDate={
+                    index === 0 ||
+                    new Date(all[index - 1].sentAt || all[index - 1].createdAt).toDateString() !==
+                      new Date(message.sentAt || message.createdAt).toDateString()
+                  }
                   showChannel={index === 0 || all[index - 1].channel !== message.channel}
                 />
               )
@@ -279,9 +352,12 @@ export function MobileConversation({
         <MobileReplyComposer
           key={`${channel}:${channel === 'email' ? accountId : 'default'}`}
           thread={thread}
+          replyTarget={replyTarget}
+          clearReply={() => setReplyTarget(null)}
           channel={channel}
           accountId={channel === 'email' ? accountId : null}
           onChannelChange={(next) => {
+            setReplyTarget(null)
             setChannel(next)
             onChannelNavigate(next)
           }}
@@ -319,6 +395,8 @@ function MobileReplyComposer({
   onChannelChange,
   onAccountChange,
   onSent,
+  replyTarget,
+  clearReply,
 }: {
   thread: InboxThreadDetail
   channel: InboxChannel
@@ -326,6 +404,8 @@ function MobileReplyComposer({
   onChannelChange: (channel: InboxChannel) => void
   onAccountChange: (id: number | null) => void
   onSent: () => void
+  replyTarget: InboxMessage | null
+  clearReply: () => void
 }) {
   const { dashboardScope, user } = useAuthStore()
   const online = useOnlineStatus()
@@ -348,10 +428,12 @@ function MobileReplyComposer({
   const [attachments, setAttachments] = useState<MediaFile[]>([])
   const [templateId, setTemplateId] = useState('')
   const [uploading, setUploading] = useState(false)
-  const [requestId, setRequestId] = useState(() => crypto.randomUUID())
+  const [recordingBusy, setRecordingBusy] = useState(false)
+  const [emojiOpen, setEmojiOpen] = useState(false)
+  const requestIds = useRef(new Map<string, string>())
+  const pendingFingerprint = useRef('')
   const updateDraft = (patch: Partial<typeof draft>) => {
     const next = { ...draft, ...patch }
-    setRequestId(crypto.randomUUID())
     setDraft(next)
     // Persist on each edit, including just before iOS backgrounds this tab.
     // No delayed callback can save one conversation's text into another.
@@ -400,12 +482,24 @@ function MobileReplyComposer({
     retry: false,
     mutationFn: () => {
       if (disabledReason) throw new Error(disabledReason)
+      const fingerprint = JSON.stringify([
+        thread.leadId,
+        channel,
+        accountId,
+        draft,
+        replyTarget?.id,
+        attachments.map((file) => file.id),
+      ])
+      pendingFingerprint.current = fingerprint
+      const requestId = requestIds.current.get(fingerprint) || crypto.randomUUID()
+      requestIds.current.set(fingerprint, requestId)
       const submitted = loadDraft(dashboardScope, thread.leadId, channel, accountId)
       return inboxApi
         .send({
           leadId: thread.leadId,
           channel,
           clientMessageId: requestId,
+          replyToMessageId: replyTarget?.id,
           text: draft.plainBody.trim(),
           ...(channel === 'email'
             ? {
@@ -413,33 +507,29 @@ function MobileReplyComposer({
                 htmlBody: draft.htmlBody || undefined,
                 subject: draft.subject.trim(),
                 accountId,
-                replyToMessageId: latestEmail?.emailMessageId ? latestEmail.id : undefined,
+                replyToMessageId:
+                  replyTarget?.id || (latestEmail?.emailMessageId ? latestEmail.id : undefined),
                 cc: draft.cc.trim() || undefined,
                 bcc: draft.bcc.trim() || undefined,
               }
             : {}),
           attachmentIds: attachments.length ? attachments.map((file) => file.id) : undefined,
         })
-        .then((response) => ({ response, submitted }))
+        .then((response) => ({ response, submitted, fingerprint }))
     },
-    onSuccess: ({ submitted }) => {
+    onSuccess: ({ submitted, fingerprint }) => {
+      requestIds.current.delete(fingerprint)
       clearSubmittedDraft(dashboardScope, thread.leadId, submitted)
       setDraft(empty())
       setAttachments([])
       client.invalidateQueries({ queryKey: ['inbox-thread', thread.leadId] })
       client.invalidateQueries({ queryKey: ['inbox-threads'] })
-      setRequestId(crypto.randomUUID())
-      toast.success(
-        channel === 'whatsapp'
-          ? 'Accepted by Meta. Waiting for delivery confirmation.'
-          : 'Reply submitted',
-      )
+      clearReply()
       onSent()
     },
     onError: (err: Error) => {
       if (err instanceof ApiClientError && err.code === 'manual_send_failed')
-        setRequestId(crypto.randomUUID())
-      toast.error(err.message)
+        requestIds.current.delete(pendingFingerprint.current)
     },
     onSettled: () => {
       void client.invalidateQueries({ queryKey: ['inbox-thread', thread.leadId] })
@@ -477,6 +567,8 @@ function MobileReplyComposer({
     !send.isPending &&
     !apply.isPending &&
     !uploading &&
+    !recordingBusy &&
+    !(replyTarget && attachments.length) &&
     (draft.plainBody.trim() || (channel === 'whatsapp' && attachments.length)) &&
     (channel !== 'email' || draft.subject.trim())
   return (
@@ -514,6 +606,60 @@ function MobileReplyComposer({
           </span>
           <ChevronDown className="h-4 w-4 shrink-0" />
         </button>
+      </div>
+      <div className="flex flex-wrap items-center gap-1">
+        {channel === 'whatsapp' && (
+          <VoiceRecorder
+            disabled={send.isPending || !!disabledReason || !!replyTarget}
+            onBusy={setRecordingBusy}
+            onAdd={(file) => setAttachments((previous) => [...previous, file])}
+          />
+        )}
+        {channel !== 'email' && (
+          <div>
+            <button
+              type="button"
+              aria-expanded={emojiOpen}
+              className="min-h-11 rounded-xl px-3 text-sm text-text-secondary"
+              onClick={() => setEmojiOpen(!emojiOpen)}
+            >
+              Emoji
+            </button>
+            {emojiOpen && (
+              <div className="flex flex-wrap gap-1">
+                {['😀', '😊', '👍', '❤️', '🙏', '✅', '👋', '🎉'].map((value) => (
+                  <button
+                    type="button"
+                    key={value}
+                    className="h-11 w-11 text-2xl"
+                    aria-label={`Insert ${value}`}
+                    disabled={send.isPending}
+                    onClick={() => updateDraft({ plainBody: draft.plainBody + value })}
+                  >
+                    {value}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        {replyTarget && attachments.length > 0 && (
+          <p role="status" className="text-sm text-warning">
+            Remove the quote or attachments before sending.
+          </p>
+        )}
+        {replyTarget && <ReplyPreview message={replyTarget} onCancel={clearReply} />}
+        {(channel === 'email' || channel === 'whatsapp') && (
+          <AttachmentPicker
+            attachments={attachments}
+            onUploadingChange={setUploading}
+            onAdd={(file) => setAttachments((previous) => [...previous, file])}
+            onRemove={(id) =>
+              setAttachments((previous) => previous.filter((file) => file.id !== id))
+            }
+            disabled={send.isPending || !!disabledReason || !!replyTarget}
+          />
+        )}
       </div>
       {options && (
         <div className="mb-3 max-h-[min(35dvh,max(3rem,calc(var(--conversation-height,100dvh)-16rem)))] space-y-3 overflow-y-auto rounded-lg border border-border p-3">
@@ -597,22 +743,20 @@ function MobileReplyComposer({
               </button>
             </>
           )}
-          {(channel === 'email' || channel === 'whatsapp') && (
-            <AttachmentPicker
-              attachments={attachments}
-              onUploadingChange={setUploading}
-              onAdd={(file) => setAttachments((previous) => [...previous, file])}
-              onRemove={(id) =>
-                setAttachments((previous) => previous.filter((file) => file.id !== id))
-              }
-              disabled={send.isPending || !!disabledReason}
-            />
-          )}
           <p className="text-xs leading-5 text-text-muted">
             Text drafts are saved on this device, separately for each channel and sender. Reattach
             files after reopening a conversation.
           </p>
         </div>
+      )}
+      {send.isPending && (
+        <p
+          role="status"
+          className="mb-3 ml-auto max-w-[85%] whitespace-pre-wrap rounded-2xl bg-accent-muted p-3 text-sm"
+        >
+          {draft.plainBody}
+          <span className="mt-1 block text-xs text-text-secondary">Submitting…</span>
+        </p>
       )}
       <div className="flex items-end gap-2">
         <div className="min-w-0 flex-1">
@@ -630,7 +774,11 @@ function MobileReplyComposer({
               className={`${mobileInput} max-h-36 resize-none`}
               rows={2}
               value={draft.plainBody}
-              onChange={(event) => updateDraft({ plainBody: event.target.value })}
+              onChange={(event) => {
+                event.target.style.height = 'auto'
+                event.target.style.height = `${Math.min(event.target.scrollHeight, 144)}px`
+                updateDraft({ plainBody: event.target.value })
+              }}
               disabled={send.isPending || user?.role === 'viewer'}
               placeholder="Write your reply…"
             />

@@ -31,6 +31,19 @@ test('campaign preparation forwards explicit independent senders, Meta template 
   assert.equal(calls.at(-1).url.searchParams.get('status'), 'pending');
 });
 
+test('scheduling and cancellation forward explicit time and never launch immediately', async t => {
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ path: new URL(url).pathname, method: options.method, body: options.body && JSON.parse(options.body) });
+    return Response.json({ status: options.method === 'DELETE' ? 'draft' : 'scheduled' });
+  });
+  await invoke('schedule_campaign', { campaign_id: 7, scheduledAt: '2027-01-15T15:00:00Z', timezone: 'Europe/London' });
+  assert.deepEqual(calls[0], { path: '/api/campaigns/7/schedule', method: 'POST', body: { scheduledAt: '2027-01-15T15:00:00Z', timezone: 'Europe/London' } });
+  await invoke('cancel_campaign_schedule', { campaign_id: 7 });
+  assert.equal(calls[1].path, '/api/campaigns/7/schedule');
+  assert.equal(calls[1].method, 'DELETE');
+});
+
 test('email sender discovery exposes readiness and persona ID without returning account credentials', async t => {
   t.mock.method(globalThis, 'fetch', async () => Response.json([{ id: 2, email: 'sales@example.test', enabled: true,
     status: 'verified', whatsappAccountId: 3, smtpPass: 'synthetic-secret', smtpUser: 'synthetic-private', imapPass: 'synthetic-secret' }]));
@@ -41,4 +54,24 @@ test('email sender discovery exposes readiness and persona ID without returning 
   assert.equal(accounts[0].enabled, true);
   assert.equal(JSON.stringify(accounts).includes('synthetic-secret'), false);
   assert.equal(JSON.stringify(accounts).includes('synthetic-private'), false);
+});
+
+
+test('campaign preview forwards pool scope outside the filter and preserves exclusion diagnostics', async t => {
+  let body;
+  t.mock.method(globalThis, 'fetch', async (_url, options) => {
+    body = JSON.parse(options.body);
+    return Response.json({ count: 0, poolId: 3, exclusionCounts: { 'whatsapp:customer_replied': 1 } });
+  });
+  const result = await invoke('campaign_preview_leads', { channel: 'whatsapp', poolId: 3, filter: { tags: 'owner_fixture' } });
+  assert.deepEqual(body, { channel: 'whatsapp', poolId: 3, filter: { tags: 'owner_fixture' } });
+  assert.equal(JSON.parse(result.content[0].text).exclusionCounts['whatsapp:customer_replied'], 1);
+});
+
+
+test('preview forwards the recipient cap and the exact WhatsApp business identity', async t => {
+  let body;
+  t.mock.method(globalThis, 'fetch', async (_url, options) => { body = JSON.parse(options.body); return Response.json({ count: 1 }); });
+  await invoke('campaign_preview_leads', { channel: 'whatsapp', whatsappSenderAccountId: 8, filter: { limit: 1, country: 'Australia' } });
+  assert.equal(body.whatsappSenderAccountId, 8); assert.equal(body.filter.limit, 1);
 });

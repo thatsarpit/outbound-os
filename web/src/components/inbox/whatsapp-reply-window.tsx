@@ -94,7 +94,7 @@ export function WhatsAppReplyWindow({ thread }: { thread: InboxThreadDetail }) {
             ? 'No WhatsApp sender connected'
             : closed
               ? '24-hour reply window closed'
-              : `Reply window open until ${new Date(session.expiresAt!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
+              : `Reply available until ${new Date(session.expiresAt!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`}
         </p>
         {session.accountId && (
           <button

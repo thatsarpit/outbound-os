@@ -33,7 +33,10 @@ if (!fs.existsSync(envPath)) {
 } else {
   const env = parseEnv(fs.readFileSync(envPath, 'utf8'));
 
-  const required = ['DATABASE_URL', 'CLERK_SECRET_KEY'];
+  // Match runtime selection: an explicit local install needs no hosted auth.
+  const authProvider = (env.AUTH_PROVIDER || (env.CLERK_SECRET_KEY ? 'clerk' : 'local')).toLowerCase();
+  if (!['local', 'clerk'].includes(authProvider)) problems.push('AUTH_PROVIDER must be local or clerk');
+  const required = ['DATABASE_URL', ...(authProvider === 'clerk' ? ['CLERK_SECRET_KEY', 'CLERK_PUBLISHABLE_KEY'] : [])];
   for (const key of required) {
     if (!env[key]) problems.push(`${key} is missing`);
   }
@@ -42,13 +45,13 @@ if (!fs.existsSync(envPath)) {
   const clerkPublishableKey = env.CLERK_PUBLISHABLE_KEY || '';
   const jwtSecret = env.JWT_SECRET || '';
   const leadSyncKey = env.LEAD_SYNC_ENCRYPTION_KEY || '';
-  if (clerkSecretKey && !clerkSecretKey.startsWith('sk_live_')) {
+  if (authProvider === 'clerk' && clerkSecretKey && !clerkSecretKey.startsWith('sk_live_')) {
     problems.push('CLERK_SECRET_KEY must use a Clerk production key (sk_live_)');
   }
-  if (clerkSecretKey.startsWith('sk_live_') && !/^org_[A-Za-z0-9]+$/.test(env.CLERK_ORGANIZATION_ID || '')) {
+  if (authProvider === 'clerk' && clerkSecretKey.startsWith('sk_live_') && !/^org_[A-Za-z0-9]+$/.test(env.CLERK_ORGANIZATION_ID || '')) {
     problems.push('CLERK_ORGANIZATION_ID must identify the single production workspace');
   }
-  if (clerkPublishableKey && !clerkPublishableKey.startsWith('pk_live_')) {
+  if (authProvider === 'clerk' && clerkPublishableKey && !clerkPublishableKey.startsWith('pk_live_')) {
     problems.push('CLERK_PUBLISHABLE_KEY must use a Clerk production key (pk_live_)');
   }
   if (jwtSecret && jwtSecret.length < 24) {

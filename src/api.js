@@ -1,5 +1,9 @@
+import messageActionRoutes from './routes/messageActions.js';
+import { assertReplyTarget, nativeMessageId, messageAccount, reactionTarget } from './utils/messageActions.js';
 import websiteEnquiries from './routes/websiteEnquiries.js';
 import connectorIntake from './routes/connectorIntake.js';
+import indiamartIntake from './routes/indiamartIntake.js';
+import indiamartIntakeService from './services/indiamartIntake.js';
 import connectorAdmin from './routes/connectorAdmin.js';
 import mcpSetup from './routes/mcpSetup.js';
 import mcpAuthorizationRouter from './routes/mcpAuthorization.js';
@@ -22,6 +26,7 @@ import { createClerkTeamRouter } from './routes/clerkTeam.js';
 import { ACTIONABLE_CONVERSATION_WHERE, HUMAN_REPLY_WHERE, isActionableConversationMessage, isHumanReply } from './utils/emailInbound.js';
 import salesRoutes from './routes/sales.js';
 import analyticsViewRoutes from './routes/analyticsViews.js';
+import campaignScheduleRoutes from './routes/campaignSchedules.js';
 import { analyticsWindow } from './utils/analyticsWindow.js';
 import leadFollowupRoutes from './routes/leadFollowups.js';
 import dashboardPreferenceRoutes from './routes/dashboardPreferences.js';
@@ -73,6 +78,7 @@ import reportingService from './services/reportingService.js';
 import recoveryCoordinator from './services/recoveryCoordinator.js';
 import resourceMonitor from './utils/resourceMonitor.js';
 import webhookDispatcher from './services/webhookDispatcher.js';
+import { OutboundWebhookTargetError, parseOutboundWebhookTarget } from './utils/outboundWebhookTarget.js';
 import { workspaceTimezone, zonedParts, zonedTimeToUtc } from './utils/workspaceTime.js';
 import { MEDIA_DIR as WHATSAPP_MEDIA_DIR } from './services/whatsappMedia.js';
 import { whatsappAddress } from './utils/whatsappAddress.js';
@@ -103,7 +109,7 @@ import {
 // removing lead pools; kept only for call-site compatibility.
 import { hashPassword, requirePoolAccess, requireLeadAccess, getAccessiblePoolIds, userCanAccessPool } from './auth/rbac.js';
 import {
-  AUTH_PROVIDER, authMiddleware, requireRole, verifyQueryToken, clerkClient,
+  AUTH_PROVIDER, authMiddleware, requireRole, verifyStreamSession, clerkClient,
   localLogin, localChangePassword, publicAuthConfig,
 } from './auth/index.js';
 
@@ -203,7 +209,7 @@ function buildInboxMessage(message, emailAccountsById = {}, telegramAccountsById
     subject: message.emailSubject || null,
     senderAccountId: message.emailAccountId || message.imessageAccountId || message.telegramAccountId || message.waAccount || null,
     senderDisplay: message.direction === 'inbound' ? null : telegramAccount?.displayName || telegramAccount?.name || senderAccount?.senderName || senderAccount?.name || senderAccount?.email || null,
-    replyToMessageId: null,
+    replyToMessageId: message.quotedMessageId || null,
   };
 }
 
@@ -371,7 +377,11 @@ async function renderEmailTemplateForLead(templateId, leadId) {
 async function sendManualWhatsAppMessage(payload) {
   const result = await sendManualWhatsApp(payload);
   if (!result.success) {
-    const error = new Error(result.reason === 're_engagement_required' ? 'The WhatsApp reply window is closed. Use an approved template.' : 'This message was not confirmed sent. Review its status in the conversation before retrying.');
+    const rejected = ['failed', 'permanently_failed'].includes(result.message?.status);
+    const error = new Error(result.reason === 're_engagement_required' ? 'The WhatsApp reply window is closed. Use an approved template.'
+      : result.reason === 'thread_not_owned' ? 'Another app controls this WhatsApp conversation. Set the connected provider as the primary responder in Meta conversation routing before retrying.'
+      : rejected && result.message?.providerErrorMessage ? `WhatsApp rejected this message: ${result.message.providerErrorMessage}`
+      : 'This message was not confirmed sent. Review its status in the conversation before retrying.');
     Object.assign(error, { statusCode: 409, reason: result.reason, code: ['failed', 'permanently_failed'].includes(result.message?.status) ? 'manual_send_failed' : 'manual_send_unconfirmed' });
     throw error;
   }
@@ -478,6 +488,7 @@ app.use('/api/config/env', bulkLimiter);
 // Public website intake has its own opt-in origin and rate-limit boundary.
 app.use('/api/public/request-access', websiteEnquiries);
 app.use('/api/webhooks/connector', connectorIntake);
+app.use('/api/webhooks/indiamart', indiamartIntake);
 
 // Browsers only need CORS when the dashboard is served from a different origin
 // than this API (for example a CDN in front of a separate API host). The
@@ -819,22 +830,30 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
 // captured above. They must not require a dashboard session.
 app.use(providerWebhookRoutes);
 
-// EventSource cannot send an Authorization header. Authenticate its signed
-// query token before the ordinary API guard, which accepts header sessions.
+// Authenticate user sessions before the API guard that also admits MCP service credentials.
 app.get('/api/events', async (req, res) => {
   if (req.method !== 'GET') return res.status(405).set('Allow', 'GET').end();
-  const auth = await verifyQueryToken(req.query.token);
-  if (!auth?.role) return res.status(401).end();
+  const token = req.get('Authorization')?.match(/^Bearer (\S+)$/i)?.[1];
+  const session = await verifyStreamSession(token);
+  const remaining = session?.expiresAt - Date.now();
+  if (!Number.isFinite(remaining) || remaining <= 0) return res.status(401).end();
 
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
   res.write(`data: ${JSON.stringify({ type: 'connected', ts: Date.now() })}
 
 `);
   sseClients.add(res);
-  req.on('close', () => sseClients.delete(res));
+  // Bound the lifetime even for long-lived local tokens so the next connection
+  // verifies the user's current access. A stream also ends at token expiry.
+  const renew = setTimeout(() => res.end(), Math.min(remaining, 60_000));
+  renew.unref();
+  res.once('close', () => {
+    clearTimeout(renew);
+    sseClients.delete(res);
+  });
 });
 
 app.use('/api', requireRole('viewer'));
@@ -867,8 +886,10 @@ app.use('/api', emailAttachmentRoutes);
 // 403'd if they reference a poolId they don't have a UserPool row for.
 app.use('/api', requirePoolAccess());
 app.use('/api', inboxReadStateRoutes);
+app.use('/api', messageActionRoutes);
 app.use('/api', webPushRoutes);
 app.use('/api', analyticsViewRoutes);
+app.use('/api', campaignScheduleRoutes);
 // Per-lead authorization: every /api/leads/<numeric>/... request resolves
 // the lead's poolId once and 403s if the user can't access it. This covers
 // detail / patch / delete / send / notes / tasks / etc. without each handler
@@ -987,6 +1008,7 @@ app.get('/api/system/status', requireRole('manager'), async (req, res) => {
       connectedAccounts,
       enabledAccounts,
       dashboardConnections: sseClients.size,
+      indiamart: await indiamartIntakeService.health(),
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1537,6 +1559,7 @@ app.get('/api/leads', async (req, res) => {
       }
     }
 
+    if (req.query.hasQueuedMessages === 'true') andClauses.push({ messages: { some: { status: { in: ['queued', 'sending'] } } } });
     if (status && status !== 'all') {
       if (status === 'wa_unavailable') {
         andClauses.push({ isOnWhatsApp: false });
@@ -1958,12 +1981,12 @@ app.post('/api/leads/:id/send', requireRole('agent'), async (req, res) => {
     const lead = await prisma.lead.findUnique({ where: { id: parseInt(req.params.id) } });
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-    const { message, accountId } = req.body;
-    if (!message) return res.status(400).json({ error: 'Message is required' });
+    const { message, accountId, whatsappTemplate } = req.body;
+    if (!message && !whatsappTemplate) return res.status(400).json({ error: 'A message or approved WhatsApp template is required' });
 
     // accountId (optional): forces a specific sender — used by AI outreach so the
     // message is sent from the same round-robin account whose persona drafted it.
-    const result = await sendManualWhatsApp({ leadId: lead.id, text: message, accountId: parsePositiveInt(accountId), clientMessageId: req.body.clientMessageId });
+    const result = await sendManualWhatsApp({ leadId: lead.id, text: message, template: whatsappTemplate, accountId: parsePositiveInt(accountId), clientMessageId: req.body.clientMessageId });
     const sendResult = { ...result, accountId: result.accountId };
     const sent = result.success;
     const msg = result.message;
@@ -2372,7 +2395,7 @@ app.post('/api/campaigns/:id/populate', requireRole('manager'), async (req, res)
     const result = await campaignEngine.populateCampaign(parseInt(req.params.id));
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -2381,7 +2404,7 @@ app.post('/api/campaigns/:id/start', requireRole('manager'), async (req, res) =>
     const result = await campaignEngine.startCampaign(parseInt(req.params.id));
     res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message, ...(error.reason ? { reason: error.reason } : {}) });
   }
 });
 
@@ -2404,7 +2427,9 @@ app.patch('/api/campaigns/:id', requireRole('manager'), async (req, res) => {
 
     const updates = await campaignInput(req.body, { db: prisma, existing: campaign });
 
-    const updated = await prisma.campaign.update({ where: { id }, data: updates });
+    const result = await prisma.campaign.updateMany({ where: { id, status: 'draft', updatedAt: campaign.updatedAt }, data: updates });
+    if (!result.count) return res.status(409).json({ error: 'Campaign changed. Refresh before editing.' });
+    const updated = await prisma.campaign.findUnique({ where: { id } });
     res.json(updated);
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
@@ -2417,12 +2442,12 @@ app.delete('/api/campaigns/:id', requireRole('manager'), async (req, res) => {
     const id = parseInt(req.params.id);
     const campaign = await prisma.campaign.findUnique({ where: { id } });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-    if (campaign.status === 'running') return res.status(400).json({ error: 'Cannot delete a running campaign. Pause it first.' });
+    if (['running', 'scheduled'].includes(campaign.status)) {
+      return res.status(409).json({ error: 'Pause a running campaign or cancel its schedule before deleting it.' });
+    }
 
-    await prisma.$transaction([
-      prisma.campaignLead.deleteMany({ where: { campaignId: id } }),
-      prisma.campaign.delete({ where: { id } }),
-    ]);
+    const result = await prisma.campaign.deleteMany({ where: { id, status: campaign.status, updatedAt: campaign.updatedAt } });
+    if (!result.count) return res.status(409).json({ error: 'Campaign changed. Refresh before deleting it.' });
 
     logger.info(`🗑️ Campaign ${id} (${campaign.name}) deleted by ${req.user?.email || 'unknown'}`);
     res.json({ success: true, deleted: id });
@@ -2439,7 +2464,8 @@ app.get('/api/campaigns/:id/leads', requireRole('manager'), async (req, res) => 
     const where = { campaignId: parseInt(req.params.id) };
     if (status) where.status = status;
 
-    const [campaignLeads, total] = await Promise.all([
+    const [campaign, campaignLeads, total] = await prisma.$transaction([
+      prisma.campaign.findUnique({ where: { id: where.campaignId }, select: { updatedAt: true } }),
       prisma.campaignLead.findMany({
         where,
         // The private sales approval snapshot must cover actual destinations,
@@ -2451,13 +2477,13 @@ app.get('/api/campaigns/:id/leads', requireRole('manager'), async (req, res) => 
           emailOptOut: true, emailStatus: true, isOnWhatsApp: true,
           assignedAccount: true, assignedEmailAccountId: true,
         } } },
-        orderBy: { sentAt: 'desc' },
+        orderBy: [{ sentAt: 'desc' }, { id: 'asc' }],
         skip: (page - 1) * limit,
         take: limit,
       }),
       prisma.campaignLead.count({ where }),
     ]);
-    res.json({ leads: campaignLeads, total, page, pages: Math.ceil(total / limit) });
+    res.json({ leads: campaignLeads, total, page, pages: Math.ceil(total / limit), campaignUpdatedAt: campaign?.updatedAt ?? null });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -2469,7 +2495,13 @@ app.post('/api/campaigns/preview-leads', requireRole('manager'), async (req, res
     // poolId when supplied (membership already checked by requirePoolAccess
     // when the caller passes one in the body), else any single pool the user
     // has access to.
-    let previewPoolId = req.body.poolId ? parseInt(req.body.poolId) : null;
+    let previewPoolId = req.body.poolId == null ? null : Number(req.body.poolId);
+    if (previewPoolId !== null && (!Number.isSafeInteger(previewPoolId) || previewPoolId < 1)) {
+      return res.status(400).json({ error: 'Invalid lead pool.' });
+    }
+    if (req.body.filter && Object.hasOwn(req.body.filter, 'poolId')) {
+      return res.status(400).json({ error: 'Pass poolId alongside the lead filter.' });
+    }
     if (previewPoolId && !(await userCanAccessPool(req, previewPoolId))) {
       return res.status(403).json({ error: 'You do not have access to this lead pool.' });
     }
@@ -2479,10 +2511,12 @@ app.post('/api/campaigns/preview-leads', requireRole('manager'), async (req, res
     }
     const channel = req.body.channel || 'whatsapp';
     if (!VALID_CHANNELS.includes(channel)) return res.status(400).json({ error: 'Invalid campaign channel.' });
-    const leads = await campaignEngine.getMatchingLeads(req.body.filter || {}, previewPoolId, channel);
-    res.json({ count: leads.length, sample: leads.slice(0, 10), poolId: previewPoolId, emailVerificationRequired: verificationEnabled() && ['email', 'both'].includes(channel) });
+    const sender = req.body.whatsappSenderAccountId;
+    if (sender != null && (!Number.isSafeInteger(sender) || sender < 1)) return res.status(400).json({ error: 'Invalid WhatsApp sender.' });
+    const { leads, ...diagnostics } = await campaignEngine.getAudience(req.body.filter || {}, previewPoolId, channel, sender || null);
+    res.json({ count: leads.length, sample: leads.slice(0, 10), ...diagnostics, poolId: previewPoolId, emailVerificationRequired: verificationEnabled() && ['email', 'both'].includes(channel) });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -3225,7 +3259,15 @@ async function sendInboxThreadDetail(req, res) {
     const emailAccountsById = Object.fromEntries(emailAccounts.map((account) => [account.id, account]));
     const telegramAccountsById = Object.fromEntries(telegramSenderAccounts.map((account) => [account.id, account]));
     const orderedMessages = sortConversationMessages(lead.messages);
-    const mappedMessages = orderedMessages.map((message) => buildInboxMessage(message, emailAccountsById, telegramAccountsById));
+    const reactionTargets = orderedMessages.filter(m => ['whatsapp', 'telegram'].includes(m.channel) && nativeMessageId(m)).map(m => ({ channel: m.channel, accountId: messageAccount(m), targetId: reactionTarget(m) }));
+    const reactions = reactionTargets.length ? await prisma.messageReaction.findMany({ where: { OR: reactionTargets, emoji: { not: '' } } }) : [];
+    const mappedMessages = orderedMessages.map((message) => ({
+      ...buildInboxMessage(message, emailAccountsById, telegramAccountsById),
+      replyToMessageId: message.quotedMessageId || orderedMessages.find(m => m.channel === message.channel && messageAccount(m) === messageAccount(message) && nativeMessageId(m) === message.quotedRemoteId)?.id || null,
+      canReply: Boolean(nativeMessageId(message) && ['whatsapp', 'telegram', 'email'].includes(message.channel)),
+      canReact: Boolean(nativeMessageId(message) && ['whatsapp', 'telegram'].includes(message.channel) && (message.channel !== 'whatsapp' || Date.now() - new Date(message.sentAt || message.createdAt).getTime() < 30 * 86400000)),
+      reactions: reactions.filter(r => r.channel === message.channel && r.accountId === messageAccount(message) && r.targetId === reactionTarget(message)).map(r => ({ emoji: r.emoji, own: r.actorKey === 'business' })),
+    }));
     const lastMessage = orderedMessages.at(-1) || null;
     const viewerKey = inboxViewerKey(req.user);
     const readState = viewerKey ? await prisma.inboxReadState.findUnique({ where: { leadId_viewerKey: { leadId, viewerKey } }, select: { lastReadMessageId: true } }) : null;
@@ -3629,10 +3671,14 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
         return res.status(400).json({ error: 'Add a Telegram @username, phone number, or peer ID to this lead first' });
       }
 
+      const target = req.body?.replyToMessageId ? await prisma.message.findUnique({ where: { id: Number(req.body.replyToMessageId) || -1 } }) : null;
+      const replyTo = target ? assertReplyTarget(target, leadId, 'telegram', lead.assignedTelegramAccountId) : null;
+      if (req.body?.replyToMessageId && !target) return res.status(400).json({ error: 'Original message unavailable.' });
       const result = await telegramService.sendMessage({
-        accountId: parsePositiveInt(req.body?.accountId),
+        accountId: target?.telegramAccountId || parsePositiveInt(req.body?.accountId),
         peer: lead.telegramPeer,
         message: text,
+        replyTo,
       });
       const now = result.sentAt || new Date();
       const [savedMsg] = await prisma.$transaction([
@@ -3643,6 +3689,8 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
             channel: 'telegram',
             telegramAccountId: result.accountId,
             telegramMessageId: result.messageId || null,
+            quotedMessageId: target?.id || null,
+            quotedRemoteId: replyTo,
             content: text,
             status: 'sent',
             sentAt: now,
@@ -3672,6 +3720,7 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
 
       // Files, with the typed text as the first file's caption.
       if (attachmentIds.length > 0) {
+        if (req.body?.replyToMessageId) return res.status(400).json({ error: 'Remove the quote before sending attachments.' });
         const sent = await sendWhatsAppFiles({ leadId, mediaFileIds: attachmentIds, caption: text, accountId: parsePositiveInt(req.body?.accountId), clientMessageId: req.body?.clientMessageId });
         broadcastEvent('manual_reply', {
           leadId: sent.lead.id,
@@ -3684,7 +3733,7 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
 
       if (!text && !req.body?.whatsappTemplate) return res.status(400).json({ error: 'Write a reply or choose an approved template.' });
 
-      const result = await sendManualWhatsAppMessage({ leadId, text, accountId: parsePositiveInt(req.body?.accountId), template: req.body?.whatsappTemplate, clientMessageId: req.body?.clientMessageId });
+      const result = await sendManualWhatsAppMessage({ leadId, text, replyToMessageId: req.body?.replyToMessageId, accountId: parsePositiveInt(req.body?.accountId), template: req.body?.whatsappTemplate, clientMessageId: req.body?.clientMessageId });
       broadcastEvent('manual_reply', {
         leadId: result.lead.id,
         accountId: result.accountId,
@@ -4100,7 +4149,7 @@ app.get('/api/analytics/funnel', async (req, res) => {
     };
     const activeWhere = {
       ...baseWhere,
-      status: { notIn: ['paused', 'wa_unavailable'] },
+      status: { in: ['new', 'contacted', 'replied', 'engaged', 'closed'] },
     };
 
     const stages = ['new', 'contacted', 'replied', 'engaged', 'closed'];
@@ -4137,8 +4186,7 @@ app.get('/api/analytics/funnel', async (req, res) => {
         conversionRate: convRate,
         dropoff: i === 0 ? 0 : dropoff,
       });
-      if (i === 0) prevCount = allContactedPlus;
-      else prevCount = stageCounts.slice(i).reduce((a, b) => a + b, 0);
+      prevCount = reachedCount;
     }
 
     // Source breakdown
@@ -4285,8 +4333,8 @@ app.get('/api/analytics/campaign-roi', async (req, res) => {
       const revenue = leads
         .filter((lead) => lead.status === 'closed' && lead.dealValue != null)
         .reduce((sum, lead) => sum + (lead.dealValue || 0), 0);
-      const replyRate = sent > 0 ? Math.round((replied / sent) * 100) : 0;
-      const convRate = sent > 0 ? Math.round((converted / sent) * 100) : 0;
+      const replyRate = sent > 0 ? Math.round((replied / sent) * 1000) / 10 : 0;
+      const convRate = sent > 0 ? Math.round((converted / sent) * 1000) / 10 : 0;
 
       return {
         id: c.id,
@@ -4650,13 +4698,13 @@ app.post('/api/webhooks/subscriptions', requireRole('admin'), async (req, res) =
   try {
     const { name, url, events = [], secret = '' } = req.body;
     if (!name || !url) return res.status(400).json({ error: 'name and url required' });
-    new URL(url); // validate URL format
+    parseOutboundWebhookTarget(url);
     const sub = await prisma.webhookSubscription.create({
       data: { name, url, events: JSON.stringify(events), secret },
     });
     res.json(sub);
   } catch (e) {
-    if (e instanceof TypeError) return res.status(400).json({ error: 'Invalid URL' });
+    if (e instanceof OutboundWebhookTargetError) return res.status(400).json({ error: e.message });
     res.status(500).json({ error: e.message });
   }
 });
@@ -4666,13 +4714,16 @@ app.patch('/api/webhooks/subscriptions/:id', requireRole('admin'), async (req, r
     const { name, url, events, secret, enabled } = req.body;
     const data = {};
     if (name !== undefined) data.name = name;
-    if (url !== undefined) { new URL(url); data.url = url; }
+    if (url !== undefined) { parseOutboundWebhookTarget(url); data.url = url; }
     if (events !== undefined) data.events = JSON.stringify(events);
     if (secret !== undefined) data.secret = secret;
     if (enabled !== undefined) data.enabled = Boolean(enabled);
     const sub = await prisma.webhookSubscription.update({ where: { id: parseInt(req.params.id) }, data });
     res.json({ ...sub, secret: sub.secret ? '••••••••' : '' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    if (e instanceof OutboundWebhookTargetError) return res.status(400).json({ error: e.message });
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.delete('/api/webhooks/subscriptions/:id', requireRole('admin'), async (req, res) => {
@@ -4687,8 +4738,9 @@ app.post('/api/webhooks/subscriptions/:id/test', requireRole('admin'), async (re
   try {
     const sub = await prisma.webhookSubscription.findUnique({ where: { id: parseInt(req.params.id) } });
     if (!sub) return res.status(404).json({ error: 'Subscription not found' });
-    await webhookDispatcher.dispatch('webhook.test', { message: 'This is a test event from Outbound OS', subscriptionId: sub.id });
-    res.json({ ok: true, message: 'Test event dispatched' });
+    const result = await webhookDispatcher.test(sub);
+    if (!result.ok) return res.status(422).json(result);
+    res.json({ ...result, message: 'Test event delivered' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -5058,7 +5110,7 @@ app.get('/api/imessage/accounts', requireRole('manager'), async (req, res) => {
 });
 
 // POST /api/imessage/accounts — add a new BlueBubbles server account
-app.post('/api/imessage/accounts', requireRole('manager'), async (req, res) => {
+app.post('/api/imessage/accounts', requireRole('admin'), async (req, res) => {
   try {
     const { name, serverUrl, password, appleId, hourlyLimit, dailyLimit, enabled } = req.body;
     if (!name || !serverUrl || !password) {
@@ -5087,7 +5139,7 @@ app.post('/api/imessage/accounts', requireRole('manager'), async (req, res) => {
 });
 
 // PUT /api/imessage/accounts/:id — update account settings
-app.put('/api/imessage/accounts/:id', requireRole('manager'), async (req, res) => {
+app.put('/api/imessage/accounts/:id', requireRole('admin'), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Invalid account ID' });
@@ -5095,9 +5147,18 @@ app.put('/api/imessage/accounts/:id', requireRole('manager'), async (req, res) =
 
     const updateData = {};
     if (name !== undefined) updateData.name = String(name);
-    if (serverUrl !== undefined) updateData.serverUrl = normalizeIMessageServerUrl(serverUrl);
-    if (password !== undefined && password !== '') {
-      updateData.password = imessageService.encryptPassword(String(password));
+    const hasPassword = typeof password === 'string' && password.trim().length > 0;
+    if (hasPassword) updateData.password = imessageService.encryptPassword(password);
+    const where = { id };
+    if (serverUrl !== undefined) {
+      updateData.serverUrl = normalizeIMessageServerUrl(serverUrl);
+      const existing = await prisma.iMessageAccount.findUnique({ where: { id }, select: { serverUrl: true } });
+      if (!existing) return res.status(404).json({ error: 'iMessage account not found.' });
+      if (!hasPassword && new URL(existing.serverUrl).origin !== new URL(updateData.serverUrl).origin) {
+        return res.status(400).json({ error: 'Enter the bridge password for the new server address.' });
+      }
+      // Bind the update to the address just checked so a concurrent edit cannot move another server's password.
+      where.serverUrl = existing.serverUrl;
     }
     if (appleId !== undefined) updateData.appleId = String(appleId);
     if (hourlyLimit !== undefined) updateData.hourlyLimit = parseInt(hourlyLimit);
@@ -5111,6 +5172,7 @@ app.put('/api/imessage/accounts/:id', requireRole('manager'), async (req, res) =
 
     res.json({ ...account, password: undefined });
   } catch (err) {
+    if (err.code === 'P2025') return res.status(409).json({ error: 'The iMessage account changed. Reload it and try again.' });
     res.status(500).json({ error: err.message });
   }
 });

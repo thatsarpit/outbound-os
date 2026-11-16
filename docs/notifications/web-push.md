@@ -13,7 +13,7 @@ Device subscriptions are encrypted using the existing `LEAD_SYNC_ENCRYPTION_KEY`
 
 ## iPhone setup
 
-Use iOS 16.4 or later. Open the dashboard in Safari, choose Share → Add to Home Screen, then open the installed icon and sign in. Open More → Device notifications → Enable notifications and approve the iOS prompt. Permission is requested only after tapping the button.
+Use iOS 16.4 or later. Open the dashboard in Safari, choose Share → Add to Home Screen, then open the installed icon and sign in. Open More → Notifications → Enable notifications and approve the iOS prompt. Permission is requested only after tapping the button.
 
 Use Send test, then inspect Notification Center. Also test with the app backgrounded and the phone locked. An accepted provider request does not prove that a physical phone displayed its alert: Focus, notification permissions and device connectivity affect delivery.
 
@@ -25,9 +25,10 @@ The Home Screen icon is supplied by the existing Apple touch icon and manifest a
 - Notifications start after registration; existing inbox history is not replayed.
 - Outbound campaign emails, delivery reports and classified automatic email replies do not trigger customer-message alerts. Legacy unclassified inbound messages retain their existing classification.
 - Reading the latest message in the foreground suppresses its subsequent device alert. Reading does not resolve a conversation or change the sales pipeline.
-- Alert bodies contain a generic prompt to open the workspace. Customer names, contact details and message text are not put on the Lock Screen.
+- Each device has a **Notification content** choice: hide sender and message, show sender and channel, or show sender and message. Existing registrations retain the original private behavior. Select **Show sender and message** in More → Notifications for an informative banner such as “Alex · WhatsApp” with a short message preview. A live example explains the choice before enabling notifications. The same setting can be changed for another device in your own notification-device list without re-registering it.
+- Preview preferences are stored inside the encrypted subscription metadata. Unknown, legacy or unreadable metadata fails to the private setting. No schema change or push key rotation is needed. Private mode excludes both sender and message text; sender-only mode excludes message text and attachment captions. Message-preview mode uses bounded plain text, strips HTML/invisible controls and describes photos, audio and documents. Rich previews may appear on a locked phone; the operating system's own preview settings still apply.
 - Tapping an alert opens the corresponding mobile conversation. Normal sign-in and API authorization still apply. The worker does not store tokens or cache CRM responses.
-- Delivery progress is stored per device. Temporary provider failures retry; HTTP 404/410 removes expired subscriptions. Retries share a message notification tag to limit duplicate banners after a crash.
+- Delivery progress is stored per device. Temporary provider failures retry; HTTP 404/410 removes expired subscriptions. Alerts share a per-conversation/channel tag so bursts update one banner. The original message event time is supplied where supported. Tapping an alert focuses an already-open matching conversation without reloading its draft; other cases navigate to the exact mobile thread. Message text and sender names never enter the deep-link URL.
 - Local enabled-user/role checks and Clerk organization membership checks run before background delivery. An unavailable authorization provider defers delivery.
 - Signing out unsubscribes the browser and requests removal of its server registration. Devices can also be disabled from Account or OS notification settings.
 
@@ -35,6 +36,6 @@ This release sends background push for customer messages. Task reminders, campai
 
 ## Verification
 
-Unit tests cover endpoint destination validation and encryption/tamper detection. API integration tests cover personal ownership, MCP denial, read-state suppression, retries, durable cursors and expired subscriptions with mocked delivery. These tests do not claim a live Apple/Google delivery test.
+Unit tests cover endpoint destination validation, encryption/tamper detection, preview privacy and sanitization, media labels, conversation grouping and service-worker navigation. API tests cover personal ownership of preview changes, MCP denial, read-state suppression, retries, durable cursors, rich preview delivery and expired subscriptions with mocked delivery. These tests do not claim a live Apple/Google delivery test.
 
 References: [Apple Web Push](https://developer.apple.com/documentation/usernotifications/sending-web-push-notifications-in-web-apps-and-browsers), [WebKit's iOS requirements](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/), [web-push library](https://github.com/web-push-libs/web-push).

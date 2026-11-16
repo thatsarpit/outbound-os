@@ -230,7 +230,13 @@ export default function LeadsPage() {
   const [showFilters, setShowFilters] = useState(false)
   const [deleteConfirmLead, setDeleteConfirmLead] = useState<Lead | null>(null)
 
-  const pooledFilters = useMemo(() => ({ ...filters }), [filters])
+  const pooledFilters = useMemo(
+    () => ({
+      ...filters,
+      ...(searchParams.get('hasQueuedMessages') === 'true' ? { hasQueuedMessages: true } : {}),
+    }),
+    [filters, searchParams],
+  )
 
   const { data: tagData } = useQuery({
     queryKey: ['lead-tags'],

@@ -27,15 +27,7 @@ function matchesServiceToken(candidate) {
 
 function bearerFrom(req) {
   const header = req.headers.authorization || '';
-  if (header.startsWith('Bearer ')) return header.slice(7);
-  // EventSource cannot set headers, so the live-updates stream sends its token
-  // in the query string. Accepted for that one path only, so tokens do not
-  // start appearing in URLs (and logs) anywhere else.
-  const path = (req.originalUrl || '').split('?')[0];
-  if (req.method === 'GET' && path === '/api/events' && typeof req.query?.token === 'string') {
-    return req.query.token;
-  }
-  return '';
+  return header.startsWith('Bearer ') ? header.slice(7) : '';
 }
 
 function toSessionUser(user) {
@@ -50,7 +42,7 @@ function toSessionUser(user) {
 }
 
 /** Resolve a session token to a live, enabled user, or null. */
-async function userForToken(token) {
+async function sessionForToken(token) {
   if (!token) return null;
   let payload;
   try {
@@ -60,7 +52,7 @@ async function userForToken(token) {
   }
   const user = await prisma.user.findUnique({ where: { id: Number(payload.sub) } }).catch(() => null);
   if (!user || user.enabled === false || !ROLE_LEVELS.hasOwnProperty(user.role)) return null;
-  return user;
+  return { user, expiresAt: payload.exp * 1000 };
 }
 
 /** No request-wide middleware is needed for local sessions. */
@@ -79,7 +71,7 @@ export function requireRole(minRole) {
       req.user = { id: 'mcp-service', orgId: 'service', role: 'admin' };
       return next();
     }
-    const user = await userForToken(bearer);
+    const user = (await sessionForToken(bearer))?.user;
     if (!user) return res.status(401).json({ error: 'Not signed in.' });
     if (ROLE_LEVELS[user.role] < minLevel) {
       return res.status(403).json({ error: `Requires ${minRole} role or above.` });
@@ -89,10 +81,10 @@ export function requireRole(minRole) {
   };
 }
 
-/** EventSource cannot send headers, so the SSE route passes the token in the query. */
-export async function verifyQueryToken(token) {
-  const user = await userForToken(token);
-  return user ? { userId: user.id, orgId: 'local', role: user.role } : null;
+/** Dashboard streams require a user session. Service tokens are handled separately. */
+export async function verifyStreamSession(token) {
+  const session = await sessionForToken(token);
+  return session ? { expiresAt: session.expiresAt } : null;
 }
 
 export async function currentUserPayload(req) {
@@ -132,4 +124,4 @@ export async function changePassword(req, res) {
   res.json({ ok: true });
 }
 
-export default { authMiddleware, requireRole, verifyQueryToken, currentUserPayload, login, changePassword };
+export default { authMiddleware, requireRole, verifyStreamSession, currentUserPayload, login, changePassword };

@@ -431,7 +431,18 @@ class TelegramService {
     }
   }
 
-  async sendMessage({ accountId, peer, message }) {
+  async react({ accountId, peer, messageId, emoji }) {
+    const account = await prisma.telegramAccount.findUnique({ where: { id: accountId } });
+    if (!account?.enabled || account.status !== 'connected') throw new Error('Telegram is not connected');
+    const client = this.createClient(account);
+    try {
+      await client.connect();
+      const recipient = await client.getInputEntity(normalizePeer(peer));
+      await client.invoke(new Api.messages.SendReaction({ peer: recipient, msgId: Number(messageId), reaction: emoji ? [new Api.ReactionEmoji({ emoticon: emoji })] : [] }));
+    } finally { await disconnectQuietly(client); }
+  }
+
+  async sendMessage({ accountId, peer, message, replyTo }) {
     let account = accountId
       ? await prisma.telegramAccount.findUnique({ where: { id: Number(accountId) } })
       : await prisma.telegramAccount.findFirst({
@@ -462,7 +473,7 @@ class TelegramService {
       client = this.createClient(account);
       await client.connect();
       if (!(await client.checkAuthorization())) throw new Error('Telegram session is no longer authorized');
-      const sent = await client.sendMessage(recipient, { message: text });
+      const sent = await client.sendMessage(recipient, { message: text, ...(replyTo ? { replyTo: Number(replyTo) } : {}) });
       await prisma.telegramAccount.update({
         where: { id: account.id },
         data: { sentToday: { increment: 1 }, lastConnectedAt: now, lastError: null },

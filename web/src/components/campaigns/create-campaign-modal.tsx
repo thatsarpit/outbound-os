@@ -1,7 +1,7 @@
 /** The campaign creation modal. Extracted from campaigns.tsx. */
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Check, Send } from 'lucide-react'
+import { AlertCircle, ArrowLeft, Check, FilePlus2 } from 'lucide-react'
 import { campaignsApi } from '@/api/endpoints/campaigns'
 import { emailSendersApi } from '@/api/endpoints/email'
 import { whatsappApi } from '@/api/endpoints/whatsapp'
@@ -17,6 +17,7 @@ import {
   Button,
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -24,22 +25,34 @@ import {
 } from '@/components/ui'
 import { stripMarkup } from '@/lib/email-compose'
 import { cn, formatCount } from '@/lib/utils'
+import { useAuthStore } from '@/stores/auth-store'
 import { toast } from '@/stores/toast-store'
 import { num, Field, Panel, inputClass, textareaClass } from './campaign-shared'
+import { AudienceFilters, parseAudienceFilter } from './audience-filters'
 
-function parseTargetFilter(raw: string) {
-  if (!raw.trim()) return null
-  try {
-    return JSON.parse(raw)
-  } catch {
-    return null
-  }
+const exclusionLabels: Record<string, string> = {
+  customer_replied: 'Already replied',
+  lead_replied: 'Already replied',
+  lead_engaged: 'Engaged lead',
+  lead_paused: 'Paused lead',
+  lead_closed: 'Closed lead',
+  lead_opted_out: 'Opted out',
+  lead_wa_unavailable: 'WhatsApp unavailable',
+  email_opted_out: 'Opted out of email',
+  email_bounced: 'Email bounced',
+  email_complained: 'Spam complaint',
+  email_unsubscribed: 'Unsubscribed',
+  email_suppressed: 'Email suppressed',
+  email_verification_required: 'Email check required',
+  no_email_address: 'No valid email address',
+  whatsapp_unavailable: 'WhatsApp unavailable',
+  no_whatsapp_address: 'No WhatsApp destination',
+  no_phone_number: 'No phone number',
 }
 
-/** Sortable fields, keyed by the table column that offers them. */
-
-export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
+export function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: number) => void }) {
   const queryClient = useQueryClient()
+  const isPreview = useAuthStore((state) => state.dashboardScope === 'demo')
   const [showPreflight, setShowPreflight] = useState(false)
   const [form, setForm] = useState({
     name: '',
@@ -57,17 +70,18 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
   })
 
   const parsedTargetFilter = useMemo(
-    () => parseTargetFilter(form.targetFilter),
+    () => parseAudienceFilter(form.targetFilter),
     [form.targetFilter],
   )
   const filterLooksInvalid = Boolean(form.targetFilter.trim()) && !parsedTargetFilter
   const requiresEmail = form.channel === 'email' || form.channel === 'both'
   const requiresWhatsApp = form.channel === 'whatsapp' || form.channel === 'both'
-  const { data: whatsappAccounts = [] } = useQuery<WhatsAppAccount[]>({
+  const whatsappQuery = useQuery<WhatsAppAccount[]>({
     queryKey: ['campaign-whatsapp-senders'],
     queryFn: async () => (await whatsappApi.list()) || [],
     enabled: requiresWhatsApp,
   })
+  const whatsappAccounts = whatsappQuery.data ?? []
 
   const { data: templates = [] } = useQuery<EmailTemplate[]>({
     queryKey: EMAIL_TEMPLATE_LIST_QUERY_KEY,
@@ -78,7 +92,7 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
     enabled: requiresEmail,
   })
 
-  const { data: senderOptions = [] } = useQuery<SenderOption[]>({
+  const senderQuery = useQuery<SenderOption[]>({
     queryKey: ['campaign-senders'],
     queryFn: async () => {
       const res = await emailSendersApi.list()
@@ -86,34 +100,39 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
     },
     enabled: requiresEmail,
   })
+  const senderOptions = senderQuery.data ?? []
+  const selectedWhatsAppSender = whatsappAccounts.find(account => account.id === form.whatsappSenderAccountId)
+  const whatsappReady = !requiresWhatsApp || (!whatsappQuery.isError && whatsappAccounts.some(account =>
+    account.enabled && (account.sessionReady || account.templatesReady) &&
+    (form.whatsappSenderAccountId == null || account.id === form.whatsappSenderAccountId),
+  ))
 
   const selectedSender = senderOptions.find((sender) => sender.id === form.senderAccountId) ?? null
   const senderReady =
-    !requiresEmail ||
+    (!requiresEmail ||
     Boolean(selectedSender && selectedSender.enabled && selectedSender.status === 'verified')
+    ) && whatsappReady
   const variantBSubjectReady =
     !requiresEmail || !form.variantBTemplate.trim() || Boolean(form.variantBSubject.trim())
 
   const previewMutation = useMutation({
-    mutationFn: ({ filter, channel }: { filter: string; channel: Campaign['channel'] }) =>
-      campaignsApi.previewLeads(parseTargetFilter(filter) || {}, channel),
-    onError: (error: Error) => toast.error(`Audience preview failed: ${error.message}`),
+    mutationFn: ({ filter, channel, whatsappSenderAccountId }: { filter: string; channel: Campaign['channel']; whatsappSenderAccountId: number | null }) =>
+      campaignsApi.previewLeads(parseAudienceFilter(filter) || {}, channel, whatsappSenderAccountId),
   })
   const previewCurrent =
     previewMutation.variables?.filter === form.targetFilter &&
-    previewMutation.variables?.channel === form.channel
-  const previewCount =
-    previewCurrent && previewMutation.data ? num(previewMutation.data.count) : null
+    previewMutation.variables?.channel === form.channel &&
+    previewMutation.variables?.whatsappSenderAccountId === form.whatsappSenderAccountId
+  const preview = previewCurrent ? previewMutation.data : null
+  const previewCount = preview ? num(preview.count) : null
   const previewSample: Lead[] =
-    previewCurrent && Array.isArray(previewMutation.data?.sample) ? previewMutation.data.sample : []
+    Array.isArray(preview?.sample) ? preview.sample : []
+  const exclusions = Object.entries(preview?.exclusionCounts ?? {}).sort(([, a], [, b]) => b - a)
   const audienceReady = previewCount !== null && previewCount > 0
-  const selectedTemplate =
-    templates.find((template) => template.id === form.selectedTemplateId) ?? null
-
   const createMutation = useMutation({
     mutationFn: async () => {
-      if (filterLooksInvalid) throw new Error('Target filter must be valid JSON')
-      return campaignsApi.create({
+      if (filterLooksInvalid) throw new Error('Target filter must be a JSON object')
+      const campaign = await campaignsApi.create({
         name: form.name,
         description: form.description || null,
         channel: form.channel,
@@ -126,11 +145,14 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
         variantBTemplate: form.variantBTemplate || null,
         variantBSubject: form.variantBSubject || null,
       })
+      if (!campaign?.id) throw new Error('Campaign creation returned an incomplete response.')
+      return campaign
     },
-    onSuccess: () => {
+    onSuccess: (campaign) => {
       void queryClient.invalidateQueries({ queryKey: ['campaigns'] })
-      toast.success('Campaign created')
+      toast.success('Draft created')
       onClose()
+      onCreated(campaign.id)
     },
     onError: (error: Error) => toast.error(`Failed to create: ${error.message}`),
   })
@@ -146,7 +168,7 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
 
   const audienceSummary =
     previewCount != null
-      ? `${formatCount(previewCount)} matching lead${previewCount === 1 ? '' : 's'}`
+      ? `${formatCount(previewCount)} eligible lead${previewCount === 1 ? '' : 's'}`
       : form.targetFilter.trim()
         ? 'Run audience preview before creating'
         : 'Preview the audience before creating'
@@ -172,15 +194,15 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
         if (!open) onClose()
       }}
     >
-      <DialogContent size="2xl" className="max-h-[92vh] overflow-y-auto p-0">
-        <DialogHeader className="sticky top-0 z-10 gap-1 border-b border-border bg-surface px-5 py-4 sm:px-6">
-          <DialogTitle className="text-sm font-semibold">New campaign</DialogTitle>
-          <p className="text-[13px] text-text-secondary">
-            Channel, sender, audience and variants — checked before anything sends.
-          </p>
+      <DialogContent size="2xl" className="flex max-h-[92dvh] flex-col overflow-hidden p-0">
+        <DialogHeader className="shrink-0 gap-1 border-b border-border bg-surface px-5 py-4 pr-12 sm:px-6 sm:pr-12">
+          <DialogTitle className="text-base font-semibold">{showPreflight ? 'Review your campaign' : 'New campaign'}</DialogTitle>
+          <DialogDescription>
+            {showPreflight ? 'Save your draft, then review its recipients and choose a launch time.' : 'Choose your audience and write the message you want them to receive.'}
+          </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-5 px-5 py-5 sm:px-6 lg:grid-cols-[minmax(0,1fr)_300px]">
+        {!showPreflight && <div className="grid min-h-0 gap-6 overflow-y-auto px-5 py-5 sm:px-6 lg:grid-cols-[minmax(0,1fr)_280px]">
           <div className="space-y-3">
             <Field label="Campaign name" required>
               <input
@@ -232,13 +254,19 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
                   >
                     <option value="">Use lead assignment or an available sender</option>
                     {whatsappAccounts
-                      .filter((account) => account.enabled && account.sessionReady)
+                      .filter((account) => account.enabled && (account.sessionReady || account.templatesReady))
                       .map((account) => (
                         <option key={account.id} value={account.id}>
                           {account.name} · {account.phone}
                         </option>
                       ))}
                   </select>
+                  {whatsappQuery.isError && (
+                    <Button size="sm" variant="secondary" onClick={() => void whatsappQuery.refetch()}>Retry loading WhatsApp senders</Button>
+                  )}
+                  {!whatsappQuery.isPending && !whatsappQuery.isError && !whatsappReady && (
+                    <p role="status" className="text-xs text-warning">Connect an enabled WhatsApp sender in Integrations to continue.</p>
+                  )}
                 </Field>
                 <Field
                   label="Approved Meta template name"
@@ -264,6 +292,9 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
                     className={cn(inputClass, 'min-h-9')}
                   />
                 </Field>
+                {senderQuery.isError && (
+                  <Button size="sm" variant="secondary" onClick={() => void senderQuery.refetch()}>Retry loading mailboxes</Button>
+                )}
 
                 {selectedSender && (
                   <div className="rounded-md border border-border bg-surface-raised p-3">
@@ -353,23 +384,7 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
               </Field>
             )}
 
-            <Field
-              label="Target filter (JSON)"
-              hint="Keep this valid JSON so the backend targets the right lead slice."
-              error={filterLooksInvalid ? 'Target filter must be valid JSON.' : undefined}
-            >
-              <textarea
-                className={cn(
-                  textareaClass,
-                  'font-mono text-[12px]',
-                  filterLooksInvalid && 'border-danger',
-                )}
-                rows={4}
-                value={form.targetFilter}
-                onChange={(event) => setForm({ ...form, targetFilter: event.target.value })}
-                placeholder='{"status":"new","country":"United States Of America"}'
-              />
-            </Field>
+            <AudienceFilters value={form.targetFilter} onChange={targetFilter => setForm({ ...form, targetFilter })} />
 
             <details className="rounded-md border border-border bg-surface-raised p-3">
               <summary className="cursor-pointer text-[12px] font-medium text-text-secondary transition-colors hover:text-text-primary">
@@ -406,17 +421,17 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
             </details>
           </div>
 
-          <div className="space-y-4">
-            <Panel title="Launch checks">
+          <div className="space-y-4 self-start lg:sticky lg:top-0">
+            <Panel title="Draft checklist">
               <div className="space-y-1.5">
                 <ValidationRow ok={Boolean(form.name.trim())} label="Campaign name" />
                 <ValidationRow ok={Boolean(form.messageTemplate.trim())} label="Message body" />
-                <ValidationRow ok={!filterLooksInvalid} label="Target filter is valid JSON" />
+                <ValidationRow ok={!filterLooksInvalid} label="Audience filters ready" />
                 <ValidationRow
                   ok={!requiresEmail || Boolean(form.emailSubject.trim())}
                   label="Email subject present"
                 />
-                <ValidationRow ok={senderReady} label="Verified sender selected" />
+                <ValidationRow ok={senderReady} label="Sender ready" />
                 <ValidationRow ok={variantBSubjectReady} label="Variant B subject present" />
                 <ValidationRow ok={audienceReady} label="Audience is non-empty" />
               </div>
@@ -429,7 +444,7 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
                   variant="secondary"
                   size="sm"
                   onClick={() =>
-                    previewMutation.mutate({ filter: form.targetFilter, channel: form.channel })
+                    previewMutation.mutate({ filter: form.targetFilter, channel: form.channel, whatsappSenderAccountId: form.whatsappSenderAccountId })
                   }
                   disabled={filterLooksInvalid}
                   pending={previewMutation.isPending}
@@ -441,17 +456,46 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
             >
               {previewMutation.isPending ? (
                 <LoadingState label="Matching leads…" />
-              ) : previewCurrent && previewMutation.data ? (
-                <div className="space-y-2">
-                  <p className="text-[13px] tabular-nums text-text-primary">
-                    {formatCount(num(previewMutation.data.count))} leads match this filter.
+              ) : previewCurrent && previewMutation.isError ? (
+                <p role="alert" className="text-[13px] text-danger">{previewMutation.error.message}</p>
+              ) : preview && previewCount !== null ? (
+                <div className="space-y-3">
+                  <p role="status" className="text-[13px] tabular-nums text-text-primary">
+                    <strong>{formatCount(previewCount)} eligible</strong>
+                    {preview.matchedCount != null && ` of ${formatCount(preview.matchedCount)} matching leads`}
+                    {preview.excludedCount != null && ` · ${formatCount(preview.excludedCount)} excluded`}
                   </p>
-                  {previewMutation.data.emailVerificationRequired && (
+                  {isPreview && <p className="text-[12px] text-text-muted">Sample audience for this channel.</p>}
+                  {exclusions.length > 0 && (
+                    <details open className="rounded-md border border-border bg-surface p-3">
+                      <summary className="cursor-pointer text-[12px] font-medium text-text-primary">
+                        Why leads were excluded
+                      </summary>
+                      <dl className="mt-2 space-y-1">
+                        {exclusions.map(([key, count]) => {
+                          const [channel, reason] = key.split(':')
+                          return (
+                            <div key={key} className="flex justify-between gap-2 text-[12px]">
+                              <dt className="text-text-secondary">
+                                {exclusionLabels[reason] ?? reason?.replace(/_/g, ' ') ?? key}
+                                {form.channel === 'both' && ` · ${formatCampaignChannel(channel as Campaign['channel'])}`}
+                              </dt>
+                              <dd className="tabular-nums text-text-primary">{formatCount(count)}</dd>
+                            </div>
+                          )
+                        })}
+                      </dl>
+                      {form.channel === 'both' && (
+                        <p className="mt-2 text-[11px] text-text-muted">A lead can count under both channels.</p>
+                      )}
+                    </details>
+                  )}
+                  {preview.emailVerificationRequired && (
                     <p className="text-[12px] text-text-muted">
                       Email audiences include only addresses with current checks. Verify recipients in Email integrations.
                     </p>
                   )}
-                  <ul className="divide-y divide-border-subtle rounded-md border border-border bg-surface">
+                  {previewSample.length > 0 && <ul aria-label="Sample eligible recipients" className="divide-y divide-border-subtle rounded-md border border-border bg-surface">
                     {previewSample.slice(0, 5).map((lead) => (
                       <li key={lead.id} className="px-3 py-2">
                         <p className="truncate text-[13px] text-text-primary">{lead.name}</p>
@@ -460,7 +504,7 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
                         </p>
                       </li>
                     ))}
-                  </ul>
+                  </ul>}
                 </div>
               ) : (
                 <p className="text-[13px] text-text-secondary">
@@ -488,32 +532,30 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
               </Panel>
             )}
           </div>
-        </div>
+        </div>}
 
         {showPreflight && (
-          <div className="border-t border-border px-5 py-4 sm:px-6">
-            <Panel title="Preflight">
-              <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
+          <div className="min-h-0 space-y-4 overflow-y-auto px-5 py-5 sm:px-6">
+            <div className="rounded-lg border border-border p-4">
+              <p className="text-lg font-semibold text-text-primary">{form.name}</p>
+              {form.description && <p className="mt-1 text-sm text-text-muted">{form.description}</p>}
+            </div>
+            <Panel title="Audience and delivery">
+              <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 text-[13px]">
                 <dt className="text-text-muted">Channel</dt>
                 <dd className="text-text-primary">{formatCampaignChannel(form.channel)}</dd>
                 <dt className="text-text-muted">Audience</dt>
                 <dd className="text-text-primary">{audienceSummary}</dd>
-                <dt className="text-text-muted">Sender</dt>
-                <dd className="text-text-primary">
-                  {requiresEmail
-                    ? selectedSender?.senderName ||
-                      selectedSender?.name ||
-                      selectedSender?.email ||
-                      'Not selected'
-                    : 'Not required'}
-                </dd>
-                <dt className="text-text-muted">Template</dt>
-                <dd className="text-text-primary">
-                  {selectedTemplate?.name ||
-                    (form.messageTemplate.trim() ? 'Custom campaign copy' : 'Missing')}
-                </dd>
+                {requiresWhatsApp && <>
+                  <dt className="text-text-muted">WhatsApp sender</dt>
+                  <dd className="break-words text-text-primary">{selectedWhatsAppSender?.name || 'Lead assignment or available sender'}</dd>
+                  <dt className="text-text-muted">Meta template</dt>
+                  <dd className="break-words text-text-primary">{form.waCampaignName || 'Free text within an open reply window'}</dd>
+                </>}
                 {requiresEmail && (
                   <>
+                    <dt className="text-text-muted">Email sender</dt>
+                    <dd className="break-words text-text-primary">{selectedSender?.email}</dd>
                     <dt className="text-text-muted">Email subject</dt>
                     <dd className="text-text-primary">{form.emailSubject || 'Missing'}</dd>
                     <dt className="text-text-muted">Variant B subject</dt>
@@ -526,15 +568,23 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
                 )}
               </dl>
             </Panel>
+            <Panel title="Message">
+              <p className="whitespace-pre-wrap break-words text-sm leading-6 text-text-primary">{form.messageTemplate}</p>
+            </Panel>
+            {form.variantBTemplate.trim() && <Panel title="Variant B">
+              {requiresEmail && <p className="mb-2 text-sm font-medium">{form.variantBSubject}</p>}
+              <p className="whitespace-pre-wrap break-words text-sm leading-6 text-text-primary">{form.variantBTemplate}</p>
+            </Panel>}
+            <p className="text-xs leading-5 text-text-muted">The audience preview reflects current eligibility. Populate the draft to save its recipients, then review them before sending.</p>
           </div>
         )}
 
-        <DialogFooter className="sticky bottom-0 border-t border-border bg-surface px-5 py-3 sm:px-6">
-          <Button variant="ghost" onClick={onClose}>
+        <DialogFooter className="shrink-0 flex-row items-center border-t border-border bg-surface px-5 py-3 sm:px-6">
+          <Button variant="ghost" disabled={createMutation.isPending} onClick={onClose}>
             Cancel
           </Button>
           {showPreflight && (
-            <Button variant="secondary" onClick={() => setShowPreflight(false)}>
+            <Button variant="secondary" disabled={createMutation.isPending} leftIcon={<ArrowLeft className="h-4 w-4" />} onClick={() => setShowPreflight(false)}>
               Back
             </Button>
           )}
@@ -549,9 +599,9 @@ export function CreateCampaignModal({ onClose }: { onClose: () => void }) {
             disabled={!launchReady}
             pending={createMutation.isPending}
             pendingLabel="Creating…"
-            leftIcon={<Send className="h-4 w-4" />}
+            leftIcon={showPreflight ? <FilePlus2 className="h-4 w-4" /> : undefined}
           >
-            {showPreflight ? 'Create campaign' : 'Review'}
+            {showPreflight ? 'Create draft' : 'Review'}
           </Button>
         </DialogFooter>
       </DialogContent>

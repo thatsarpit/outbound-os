@@ -1,6 +1,6 @@
 import leadStateService from '../domain/leadStateService.js';
 import { isSendableMobile } from './inboundLead.js';
-import { whatsappAddress } from './whatsappAddress.js';
+import { whatsappAddress, isBsuid } from './whatsappAddress.js';
 
 /** Tags are comma-separated tokens; a multi-tag filter requires every token. */
 export function tokenizeLeadTags(value) {
@@ -37,7 +37,15 @@ export function campaignChannelEligibility(lead, channel) {
     }
   } else if (channel === 'whatsapp') {
     if (lead.isOnWhatsApp === false) return { eligible: false, reason: 'whatsapp_unavailable' };
-    if (!whatsappAddress(lead)) return { eligible: false, reason: 'no_whatsapp_address' };
+    const address = whatsappAddress(lead);
+    if (!address) return { eligible: false, reason: 'no_whatsapp_address' };
+    if (!isBsuid(address)) {
+      const digits = address.replace(/^\+/, '');
+      const country = String(lead.country || '').trim().toLowerCase();
+      const invalidUk = ['united kingdom', 'uk', 'great britain', 'gb'].includes(country) && !/^44\d{10}$/.test(digits);
+      const invalidAu = ['australia', 'au'].includes(country) && !/^61\d{9}$/.test(digits);
+      if (!/^\d{8,15}$/.test(digits) || invalidUk || invalidAu) return { eligible: false, reason: 'whatsapp_invalid_number' };
+    }
   } else if (channel === 'imessage') {
     if (!isSendableMobile(lead.mobile)) return { eligible: false, reason: 'no_phone_number' };
   } else {

@@ -23,6 +23,10 @@ export interface InboxThreadFilters {
 }
 
 export const inboxApi = {
+  react: (leadId: number, messageId: number, emoji: string) =>
+    api.post<{ success: boolean }>(`/inbox/threads/${leadId}/messages/${messageId}/reaction`, {
+      emoji,
+    }),
   channelHealth: () => api.get<InboxChannelHealth>('/inbox/channel-health'),
 
   listThreads: (filters: InboxThreadFilters = {}) => {

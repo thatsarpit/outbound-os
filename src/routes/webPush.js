@@ -2,7 +2,7 @@ import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import prisma from '../utils/prismaClient.js';
 import { inboxViewerKey } from '../utils/inboxState.js';
-import { endpointHash, encryptPushSubscription, validatePushSubscription, publicPushDevice, pushDeviceId } from '../utils/pushSubscription.js';
+import { endpointHash, encryptPushSubscription, validatePushSubscription, publicPushDevice, pushDeviceId, PUSH_PREVIEW_MODES, updatePushSubscriptionPreview } from '../utils/pushSubscription.js';
 import { pushConfig, sendDevicePush } from '../services/webPush.js';
 
 export function createWebPushRouter({ db = prisma, config = pushConfig, send = sendDevicePush } = {}) {
@@ -42,6 +42,17 @@ export function createWebPushRouter({ db = prisma, config = pushConfig, send = s
     await db.webPushSubscription.deleteMany({ where: { id, viewerKey: inboxViewerKey(req.user) } });
     res.json({ removed: true });
   }));
+  router.patch('/push/subscriptions/:id/preview', handle(async (req, res) => {
+    const id = pushDeviceId(req.params.id);
+    if (id === null || !PUSH_PREVIEW_MODES.includes(req.body?.previewMode)) return res.status(400).json({ error: 'Choose a valid notification preview option.' });
+    const viewerKey = inboxViewerKey(req.user);
+    const subscription = await db.webPushSubscription.findFirst({ where: { id, viewerKey } });
+    if (!subscription) return res.status(404).json({ error: 'Notification device not found.' });
+    // Ownership is repeated in the write so a concurrent sign-out cannot retarget another device.
+    const updated = await db.webPushSubscription.updateMany({ where: { id, viewerKey, encryptedData: subscription.encryptedData }, data: { encryptedData: updatePushSubscriptionPreview(subscription.encryptedData, req.body.previewMode) } });
+    if (!updated.count) return res.status(409).json({ error: 'This device changed. Refresh and try again.' });
+    res.json({ previewMode: req.body.previewMode });
+  }));
   router.post('/push/subscriptions', handle(async (req, res) => {
     if (!config().enabled) return res.status(503).json({ error: 'Device notifications are not configured on this server yet.' });
     let subscription;
@@ -52,7 +63,8 @@ export function createWebPushRouter({ db = prisma, config = pushConfig, send = s
     if (existing && existing.viewerKey !== viewerKey) return res.status(409).json({ error: 'This device is registered to another account. Disable its notifications before switching accounts.' });
     if (!existing && await db.webPushSubscription.count({ where: { viewerKey } }) >= 10) return res.status(400).json({ error: 'Remove an old notification device before adding another.' });
     const latest = await db.message.aggregate({ _max: { id: true } });
-    const data = { viewerKey, userId: String(req.user.id ?? req.user.sub), orgId: req.user.orgId || 'local', encryptedData: encryptPushSubscription(subscription, req.body.deviceLabel), lastMessageId: latest._max.id || 0, vapidKey: config().publicKey, enabled: true, createdAt: new Date() };
+    if (req.body.previewMode !== undefined && !PUSH_PREVIEW_MODES.includes(req.body.previewMode)) return res.status(400).json({ error: 'Choose a valid notification preview option.' });
+    const data = { viewerKey, userId: String(req.user.id ?? req.user.sub), orgId: req.user.orgId || 'local', encryptedData: encryptPushSubscription(subscription, req.body.deviceLabel, req.body.previewMode), lastMessageId: latest._max.id || 0, vapidKey: config().publicKey, enabled: true, createdAt: new Date() };
     const saved = await db.webPushSubscription.upsert({ where: { endpointHash: hash }, create: { ...data, endpointHash: hash }, update: data, select: { id: true } });
     res.json({ enabled: true, deviceId: saved.id });
   }));

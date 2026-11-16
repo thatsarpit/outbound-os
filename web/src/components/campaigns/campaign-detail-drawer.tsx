@@ -1,12 +1,13 @@
 /** The campaign detail drawer. Extracted from campaigns.tsx. */
 import { useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { BarChart3, Mail, X } from 'lucide-react'
 import { campaignsApi } from '@/api/endpoints/campaigns'
 import type { Campaign } from '@/api/types'
 import { Button, DrawerShell, LoadingState } from '@/components/ui'
-import { cn, formatCount, formatRelativeTime } from '@/lib/utils'
+import { cn, formatCount, formatDate, formatRelativeTime } from '@/lib/utils'
 import { toast } from '@/stores/toast-store'
+import { CampaignSchedulePanel } from './campaign-schedule-panel'
 import {
   num,
   percent,
@@ -26,13 +27,26 @@ export function CampaignDetailDrawer({
   onClose: () => void
 }) {
   const [page, setPage] = useState(1)
+  const queryClient = useQueryClient()
+  const populate = useMutation({
+    mutationFn: () => campaignsApi.populate(campaign.id),
+    onSuccess: async () => {
+      setPage(1)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['campaigns'] }),
+        queryClient.invalidateQueries({ queryKey: ['campaign-detail'] }),
+        queryClient.invalidateQueries({ queryKey: ['campaign-leads', campaign.id] }),
+      ])
+      toast.success('Recipients added to draft')
+    },
+  })
   const {
     data: response,
     isLoading,
     isError,
     refetch,
   } = useQuery({
-    queryKey: ['campaign-leads', campaign.id, page],
+    queryKey: ['campaign-leads', campaign.id, campaign.updatedAt, page],
     queryFn: async () => {
       const res = await campaignsApi.getLeads(campaign.id, { page, limit: 50 })
       if (!res || !Array.isArray(res.leads)) throw new Error('Could not load campaign recipients.')
@@ -92,18 +106,34 @@ export function CampaignDetailDrawer({
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto p-5 sm:p-6">
+          {campaign.status === 'draft' && campaign.totalLeads === 0 && (
+            <Panel title="Prepare the audience">
+              <p className="mb-3 text-sm text-text-secondary">Add eligible leads from this draft’s filters, then review the recipient list below.</p>
+              <Button pending={populate.isPending} onClick={() => populate.mutate()}>Add eligible recipients</Button>
+              {populate.error && <p role="alert" className="mt-2 text-sm text-danger">{populate.error.message}</p>}
+            </Panel>
+          )}
+          <CampaignSchedulePanel
+            campaign={campaign}
+            reviewedRecipientCount={!isError && response?.campaignUpdatedAt === campaign.updatedAt ? response.total : null}
+          />
           <div className="grid grid-cols-3 gap-px overflow-hidden rounded-md border border-border bg-border">
             <DrawerStat label="Audience" value={formatCount(totalLeads)} />
-            <DrawerStat label="Sent" value={formatCount(sentCount)} />
+            <DrawerStat label="Accepted" value={formatCount(sentCount)} />
             <DrawerStat label="Replies" value={formatCount(replyCount)} />
             <DrawerStat
               label="Failed"
               value={formatCount(failedCount)}
               tone={failedCount > 0 ? 'danger' : undefined}
             />
-            <DrawerStat label="Accepted" value={`${deliveryRate.toFixed(1)}%`} />
+            <DrawerStat label="Acceptance rate" value={`${deliveryRate.toFixed(1)}%`} />
             <DrawerStat label="Reply rate" value={`${replyRate.toFixed(1)}%`} />
+            <DrawerStat label="Delivered (incl. read)" value={campaign.delivery ? formatCount(campaign.delivery.delivered) : '—'} />
+            <DrawerStat label="Read" value={campaign.delivery ? formatCount(campaign.delivery.read) : '—'} />
+            <DrawerStat label="Awaiting delivery" value={campaign.delivery ? formatCount(campaign.delivery.awaitingConfirmation) : '—'} />
           </div>
+
+          <p className="text-xs text-text-muted">Accepted means the provider accepted submission. Check delivery and failure counts to see what reached recipients.</p>
 
           <div>
             <div className="flex items-baseline justify-between text-[11px] text-text-muted">
@@ -130,10 +160,12 @@ export function CampaignDetailDrawer({
 
           <Panel title="Details">
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
-              <dt className="text-text-muted">Scheduled</dt>
-              <dd className="text-text-primary">
-                {campaign.scheduledAt ? formatRelativeTime(campaign.scheduledAt) : 'Not scheduled'}
-              </dd>
+              {campaign.status !== 'scheduled' && campaign.scheduledAt && (
+                <>
+                  <dt className="text-text-muted">Scheduled for</dt>
+                  <dd className="text-text-primary">{formatDate(campaign.scheduledAt, 'long')}</dd>
+                </>
+              )}
               <dt className="text-text-muted">Started</dt>
               <dd className="text-text-primary">
                 {campaign.startedAt ? formatRelativeTime(campaign.startedAt) : 'Not started'}

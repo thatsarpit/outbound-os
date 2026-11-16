@@ -7,8 +7,12 @@ export function leadsToCsv(leads) {
     'Tags', 'Notes', 'Last Activity', 'Created At',
   ];
   const escape = (value) => {
-    const text = String(value ?? '');
-    return /[,"\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    let text = String(value ?? '');
+    // Spreadsheet apps can execute formula-looking text even inside a quoted CSV field.
+    if (typeof value === 'string' && /^[\t\r\n\0]|^\s*[=+\-@＝＋－＠]/u.test(text)) {
+      text = `'${text}`;
+    }
+    return /[,;"\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   };
   const rows = leads.map((lead) => [
     lead.id, lead.name, lead.company || '',

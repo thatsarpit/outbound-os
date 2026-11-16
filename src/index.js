@@ -1,5 +1,7 @@
+import { recoverCampaignRuns, reconcileCampaignCounters } from './services/campaignMetrics.js';
 import { startWebPush, stopWebPush } from './services/webPush.js';
 import cron from 'node-cron';
+import campaignScheduler from './services/campaignScheduler.js';
 import config from './config.js';
 import logger from './utils/logger.js';
 import whatsappManager from './services/whatsapp.js';
@@ -7,6 +9,7 @@ import followupEngine from './services/followup.js';
 import leadScorer from './services/leadScorer.js';
 import emailService from './services/emailService.js';
 import emailVerification from './services/emailVerification.js';
+import indiamartIntake from './services/indiamartIntake.js';
 import orderNotifier from './services/orderNotifier.js';
 import imessageService from './services/imessage.js';
 import telegramService from './services/telegram.js';
@@ -55,6 +58,9 @@ async function main() {
     await whatsappManager.initialize();
 
     // Recover any messages stuck in 'sending' from a prior crash
+    await campaignScheduler.recoverInterrupted();
+    await recoverCampaignRuns(prisma);
+    await reconcileCampaignCounters(prisma);
     await followupEngine.recoverStuckMessages();
 
     // ── Step 2: Reply detection ──
@@ -65,6 +71,8 @@ async function main() {
     logger.info('Step 2/4: Reply detection is webhook-driven (no listener wiring needed)');
 
     logger.info('Step 3/4: Starting schedulers...');
+    indiamartIntake.kick();
+    cron.schedule('* * * * *', () => indiamartIntake.kick());
 
     // Process message queue every 2 minutes (priority sorted: HOT > WARM > COLD)
     cron.schedule('*/2 * * * *', async () => {
@@ -276,6 +284,10 @@ async function main() {
     // timeout. It repairs channel queues left partially created by a crash.
     logger.info('Starting persistent runtime recovery...');
     const recovery = await recoveryCoordinator.start();
+    // Check due campaigns after startup recovery has reconciled inbound replies.
+    const runScheduledCampaigns = () => campaignScheduler.processDue().catch(() => logger.warn('Campaign schedule check failed; retrying next minute.'));
+    await runScheduledCampaigns();
+    cron.schedule('* * * * *', runScheduledCampaigns);
     logger.info(`🔁 Runtime recovery: ${recovery?.lastRecoveryStatus || recovery?.summary?.status || 'ready'}`);
 
     logger.info('='.repeat(50));

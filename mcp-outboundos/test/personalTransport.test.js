@@ -77,7 +77,9 @@ test('personal MCP filters writes and isolates concurrent clients through operat
     assert.deepEqual(results.map(result => JSON.parse(result.content[0].text).fixtureActor), ['a', 'b']);
     assert.deepEqual(new Set(calls), new Set(['Bearer fixture-delegation-a', 'Bearer fixture-delegation-b']));
     const writeTools = await clients[2].listTools();
-    assert.equal(writeTools.tools.length, 41);
+    assert.equal(writeTools.tools.length, 43);
+    assert.ok(writeTools.tools.some(tool => tool.name === 'schedule_campaign'));
+    assert.ok(!catalogue.tools.some(tool => tool.name === 'schedule_campaign'));
     const written = await clients[2].callTool({ name: 'create_campaign', arguments: { name: 'Synthetic write test', messageTemplate: 'Synthetic message' } });
     assert.equal(JSON.parse(written.content[0].text).created, true);
     assert.equal(calls.at(-1), 'Bearer fixture-delegation-w');

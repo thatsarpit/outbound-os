@@ -25,6 +25,19 @@ Add owned-recipient tests and webhook replay tests before enabling a channel in
 production. Secrets belong in the environment or encrypted integration rows,
 never source control.
 
+## Outbound event subscriptions
+
+Use a public HTTPS endpoint. Delivery resolves and connects to a vetted public
+address, and the receiver must accept the POST at the configured URL directly.
+If you intentionally run a private receiver, set
+`OUTBOUND_WEBHOOK_TRUSTED_ORIGINS` in the server environment to a comma-separated
+list of exact origins, such as `https://events.example.test:8443`. This is a
+server operator setting. Include the port for nonstandard ports.
+
+The test action sends a synthetic event to the selected subscription and
+reports the delivery result. Routine delivery can include lead information.
+Subscribe only the receivers you trust with that information.
+
 ## YCloud WhatsApp
 
 YCloud is an alternative official WhatsApp API provider. In WhatsApp settings,

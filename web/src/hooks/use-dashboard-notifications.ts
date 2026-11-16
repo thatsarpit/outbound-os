@@ -17,6 +17,36 @@ function normalizeStreamPayload(raw: string): StreamPayload | null {
   }
 }
 
+async function readDashboardEvents(
+  body: ReadableStream<Uint8Array>,
+  onEvent: (payload: StreamPayload) => void,
+) {
+  const reader = body.getReader()
+  const decoder = new TextDecoder()
+  let pending = ''
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      pending += decoder.decode(value, { stream: true })
+      // Proxies can split events across chunks or combine several in one.
+      const frames = pending.split(/\r?\n\r?\n/)
+      pending = frames.pop() ?? ''
+      for (const frame of frames) {
+        const data = frame
+          .split(/\r?\n/)
+          .filter((line) => line.startsWith('data:'))
+          .map((line) => line.slice(5).replace(/^ /, ''))
+          .join('\n')
+        const payload = normalizeStreamPayload(data)
+        if (payload?.type) onEvent(payload)
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 export function useDashboardNotifications() {
   const { user, dashboardScope } = useAuthStore()
   const queryClient = useQueryClient()
@@ -57,70 +87,50 @@ export function useDashboardNotifications() {
       }
     }
 
-    // EventSource can't carry an Authorization header, so the token still has
-    // to go in the query string — but a Clerk session token is short-lived
-    // (~60s) and fetched fresh per use, unlike the old static JWT, so getting
-    // it is now async and has to happen before the connection opens rather
-    // than as a synchronous read.
-    let source: EventSource | null = null
+    let connection: AbortController | null = null
     let retryTimer: number | undefined
     let retryDelay = 2000
 
     async function connect() {
-      let token: string | null
+      if (!mounted || connection) return
+      connection = new AbortController()
+      const { signal } = connection
       try {
-        token = await getSessionToken()
-      } catch {
-        if (mounted)
-          retryTimer = window.setTimeout(() => {
-            void connect()
-          }, 5000)
-        return
-      }
-      if (!mounted) return
-      if (!token) {
-        notificationActions.setConnectionState(false, 'Reconnecting')
-        retryTimer = window.setTimeout(() => {
-          void connect()
-        }, 5000)
-        return
-      }
+        const token = await getSessionToken()
+        if (signal.aborted) return
+        if (!token) throw new Error('Dashboard session unavailable')
 
-      hydrate()
-
-      source = new EventSource(`/api/events?token=${encodeURIComponent(token)}`)
-      notificationActions.setConnectionState(false, 'Connecting...')
-
-      source.onopen = () => {
-        retryDelay = 2000
-        notificationActions.setConnectionState(true, 'Live updates')
-      }
-
-      source.onmessage = (event) => {
-        const payload = normalizeStreamPayload(event.data)
-        if (!payload?.type) return
-        if (payload.type === 'connected') {
-          notificationActions.setConnectionState(true, 'Live updates')
-          return
+        void hydrate()
+        notificationActions.setConnectionState(false, 'Connecting…')
+        const response = await fetch('/api/events', {
+          headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
+          signal,
+        })
+        if (!response.ok || !response.body || !response.headers.get('content-type')?.startsWith('text/event-stream')) {
+          throw new Error('Dashboard stream unavailable')
         }
 
-        const data = payload.data || {}
-        const leadId = Number.isSafeInteger(data.leadId) ? Number(data.leadId) : null
-        void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
-        if (leadId) void queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
-        // Every notification comes from the durable feed, with the same ID on SSE and reload.
-        // Provider signals may precede persistence; the activity event refreshes again after commit.
-        void hydrate()
-      }
-
-      source.onerror = () => {
-        notificationActions.setConnectionState(false, 'Syncing recent activity')
-        source?.close()
-        if (mounted) {
+        retryDelay = 2000
+        notificationActions.setConnectionState(true, 'Live updates')
+        await readDashboardEvents(response.body, (payload) => {
+          if (signal.aborted || payload.type === 'connected') return
+          const leadId = payload.data?.leadId
+          void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
+          if (Number.isSafeInteger(leadId)) {
+            void queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
+          }
+          // Provider signals may precede persistence. The activity event
+          // refreshes the durable notifications again after commit.
           void hydrate()
-          retryTimer = window.setTimeout(() => {
-            void connect()
-          }, retryDelay)
+        })
+      } catch {
+        if (mounted) void hydrate()
+      } finally {
+        connection?.abort()
+        connection = null
+        if (mounted) {
+          notificationActions.setConnectionState(false, 'Syncing recent activity')
+          retryTimer = window.setTimeout(() => void connect(), retryDelay)
           retryDelay = Math.min(30_000, retryDelay * 2)
         }
       }
@@ -138,7 +148,7 @@ export function useDashboardNotifications() {
       void queryClient.invalidateQueries({ queryKey: ['inbox-thread'] })
       void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
       void hydrate()
-      if (!source || source.readyState === EventSource.CLOSED) {
+      if (!connection) {
         window.clearTimeout(retryTimer)
         void connect()
       }
@@ -147,7 +157,7 @@ export function useDashboardNotifications() {
     document.addEventListener('visibilitychange', resume)
     return () => {
       mounted = false
-      source?.close()
+      connection?.abort()
       window.removeEventListener('online', resume)
       document.removeEventListener('visibilitychange', resume)
       window.clearInterval(refreshInterval)

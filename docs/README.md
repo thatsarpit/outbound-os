@@ -1,5 +1,6 @@
 # Documentation
 
+- [Product readiness priorities and deployment review](product-readiness.md)
 - [Continue development with Hermes](hermes-handoff.md)
 - [Release 0.4.0 and remaining acceptance](releases/0.4.0.md)
 - [Dashboard repair status](dashboard-repair-status.md)

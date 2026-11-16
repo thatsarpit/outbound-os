@@ -202,6 +202,9 @@ function message(
     emailMessageId: thread.channel === 'email' ? `<demo-${nextId}@acme.example>` : null,
     emailInReplyTo: null,
     waAccount: thread.channel === 'whatsapp' ? 1 : null,
+    canReply: thread.channel !== 'imessage',
+    canReact: ['whatsapp', 'telegram'].includes(thread.channel),
+    reactions: [],
     replyToMessageId: null,
     mediaUrl: null,
     mediaType: null,
@@ -585,6 +588,19 @@ export async function handleInboxRequest(
     return json(Object.values(SENDERS))
   }
 
+  const reaction = path.pathname.match(/\/api\/inbox\/threads\/(\d+)\/messages\/(\d+)\/reaction$/)
+  if (reaction && method === 'POST') {
+    const body = await readBody(init)
+    const target = MESSAGES.find(
+      (m) => m.id === Number(reaction[2]) && m.leadId === Number(reaction[1]),
+    )
+    if (!target) return json({ error: 'Message unavailable' }, 404)
+    target.reactions = [
+      ...(target.reactions || []).filter((r) => !r.own),
+      ...(body.emoji ? [{ emoji: String(body.emoji), own: true }] : []),
+    ]
+    return json({ success: true })
+  }
   const detail = path.pathname.match(
     /\/api\/inbox\/threads\/(\d+)(\/(resolve|reopen|assign-self|read))?$/,
   )
@@ -654,6 +670,7 @@ export async function handleInboxRequest(
     if (!thread) return json({ error: 'Conversation not found' }, 404)
     const chosen = body.whatsappTemplate as { name: string; parameters: string[] } | undefined
     const approved = chosen && APPROVED_TEMPLATES.find((row) => row.name === chosen.name)
+    const quotedMessageId = body.replyToMessageId ? Number(body.replyToMessageId) : null
     const text = approved
       ? approved.body.replace(
           /\{\{\s*(\d+)\s*\}\}/g,
@@ -704,7 +721,12 @@ export async function handleInboxRequest(
     })
     if (sent.length === 0) {
       if (!text) return json({ error: 'Reply cannot be empty' }, 400)
-      sent.push(message(thread.leadId, 'outbound', 0, text, { status: 'sent' }))
+      sent.push(
+        message(thread.leadId, 'outbound', 0, text, {
+          status: 'sent',
+          replyToMessageId: quotedMessageId,
+        }),
+      )
     }
 
     MESSAGES.push(...sent)

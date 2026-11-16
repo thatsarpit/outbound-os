@@ -1,3 +1,4 @@
+import { recordReaction } from '../services/messageReactions.js';
 import { recordMetaReceipt } from '../services/whatsappDelivery.js';
 import { Router } from 'express';
 import crypto from 'node:crypto';
@@ -105,6 +106,10 @@ router.post('/webhook/meta', async (req, res) => {
         }
 
         for (const msg of value.messages || []) {
+          if (msg.type === 'reaction') {
+            await recordReaction({ channel: 'whatsapp', accountId, targetId: msg.reaction?.message_id, actorKey: 'customer', emoji: msg.reaction?.emoji ?? '', eventAt: new Date(Number(msg.timestamp) * 1000) });
+            continue;
+          }
           if (msg?.id && await prisma.message.findFirst({ where: { waMessageId: msg.id, direction: 'inbound' }, select: { id: true } })) continue;
           const contact = (msg?.from_user_id && contactsByUserId.get(String(msg.from_user_id)))
             || (msg?.from && contactsByPhone.get(String(msg.from)))
@@ -128,6 +133,7 @@ router.post('/webhook/meta', async (req, res) => {
             waUsername: contact?.profile?.username || undefined,
             senderName: contact?.profile?.name || undefined,
           });
+          if (msg.context?.id) await prisma.message.updateMany({ where: { channel: 'whatsapp', waAccount: accountId, waMessageId: msg.id }, data: { quotedRemoteId: msg.context.id } });
         }
 
         for (const receipt of value.statuses || []) {

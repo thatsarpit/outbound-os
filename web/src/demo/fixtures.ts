@@ -9,7 +9,7 @@ import {
 import { ROLE_PAGE_CAPABILITIES } from '@/lib/role-shell'
 import { useAuthStore } from '@/stores/auth-store'
 import { notificationActions, useNotificationStore } from '@/stores/notification-store'
-import type { ActivityLog } from '@/api/types'
+import type { ActivityLog, Campaign } from '@/api/types'
 import { toast } from '@/stores/toast-store'
 import { handleInboxRequest } from './inbox'
 import { handleDemoMcpRequest } from './mcp'
@@ -1894,6 +1894,26 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
     ],
   ],
   [
+    /\/campaigns\/\d+\/leads/,
+    (url: string) => {
+      const id = Number(new URL(url, location.origin).pathname.match(/\/campaigns\/(\d+)\/leads/)?.[1])
+      return {
+        leads: (fixtureCampaignAudience.get(id) ?? FIXTURE_LEADS.slice(0, 5)).map((lead, index) => ({ id: index + 1, leadId: lead.id, status: 'pending', variant: 'A', lead })),
+        total: (fixtureCampaignAudience.get(id) ?? FIXTURE_LEADS.slice(0, 5)).length,
+        page: 1,
+        pages: 1,
+        campaignUpdatedAt: findFixtureCampaign(id)?.updatedAt ?? null,
+      }
+    },
+  ],
+  [
+    /\/campaigns\/\d+(?:\?|$)/,
+    (url: string) => {
+      const id = Number(new URL(url, location.origin).pathname.match(/\/campaigns\/(\d+)/)?.[1])
+      return findFixtureCampaign(id) || {}
+    },
+  ],
+  [
     /\/campaigns/,
     // Field names must match the Campaign type: sentCount / replyCount /
     // failedCount, and status 'running' (not 'active'). Guessing these renders
@@ -1919,6 +1939,7 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
           variantBReplies: 0,
           totalLeads: 420,
           sentCount: 402,
+          delivery: { accepted: 402, delivered: 386, read: 212, failed: 4, unconfirmed: 0, awaitingConfirmation: 12 },
           failedCount: 4,
           replyCount: 96,
           scheduledAt: null,
@@ -1946,6 +1967,7 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
           variantBReplies: 0,
           totalLeads: 310,
           sentCount: 288,
+          delivery: { accepted: 288, delivered: 270, read: 140, failed: 2, unconfirmed: 0, awaitingConfirmation: 16 },
           failedCount: 2,
           replyCount: 74,
           scheduledAt: null,
@@ -1959,7 +1981,7 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
           name: 'Distributor follow-up',
           description: null,
           channel: 'email',
-          messageTemplate: '',
+          messageTemplate: 'Hi {{name}}, would you like the latest distributor catalogue?',
           emailSubject: 'Following up',
           emailTemplateId: 2,
           senderAccountId: 1,
@@ -1971,11 +1993,14 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
           variantBCount: 0,
           variantAReplies: 0,
           variantBReplies: 0,
-          totalLeads: 205,
+          totalLeads: 5,
           sentCount: 0,
+          delivery: { accepted: 0, delivered: 0, read: 0, failed: 0, unconfirmed: 0, awaitingConfirmation: 0 },
           failedCount: 0,
           replyCount: 0,
           scheduledAt: ago(-3600),
+          scheduleTimezone: 'Europe/London',
+          scheduleError: null,
           startedAt: null,
           completedAt: null,
           createdAt: ago(600),
@@ -1986,7 +2011,7 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
           name: 'New product launch',
           description: null,
           channel: 'whatsapp',
-          messageTemplate: '',
+          messageTemplate: 'Hi {{name}}, our new product catalogue is ready.',
           emailSubject: null,
           emailTemplateId: null,
           senderAccountId: null,
@@ -1998,8 +2023,9 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
           variantBCount: 0,
           variantAReplies: 0,
           variantBReplies: 0,
-          totalLeads: 0,
+          totalLeads: 5,
           sentCount: 0,
+          delivery: { accepted: 0, delivered: 0, read: 0, failed: 0, unconfirmed: 0, awaitingConfirmation: 0 },
           failedCount: 0,
           replyCount: 0,
           scheduledAt: null,
@@ -2169,6 +2195,83 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
     },
   ],
 ]
+
+const fixtureCampaignAudience = new Map<number, typeof FIXTURE_LEADS>()
+
+function fixtureCampaigns() {
+  return (FIXTURE_RESPONSES.find(([pattern]) => pattern.test('/api/campaigns'))?.[1] as {
+    campaigns: Campaign[]
+  }).campaigns
+}
+
+function findFixtureCampaign(id: number) {
+  return fixtureCampaigns().find((campaign) => campaign.id === id)
+}
+
+function previewFixtureAudience(filter: Record<string, unknown>, channel: string) {
+  const requestedTags = String(Array.isArray(filter.tags) ? filter.tags.join(',') : filter.tags ?? '').toLowerCase().split(',').map(tag => tag.trim()).filter(Boolean)
+  const matching = FIXTURE_LEADS.filter(lead =>
+    (!filter.status || (Array.isArray(filter.status) ? filter.status.includes(lead.status) : filter.status === lead.status)) &&
+    (!filter.country || String(lead.country).toLowerCase().includes(String(filter.country).toLowerCase())) &&
+    (!filter.source || lead.source === filter.source) &&
+    (!filter.product || String(lead.product).toLowerCase().includes(String(filter.product).toLowerCase())) &&
+    (filter.minScore == null || lead.score >= Number(filter.minScore)) &&
+    (filter.maxScore == null || lead.score <= Number(filter.maxScore)) &&
+    (filter.olderThanDays == null || Date.parse(lead.createdAt) <= Date.now() - Number(filter.olderThanDays) * 86400000) &&
+    requestedTags.every(tag => String('tags' in lead ? lead.tags : '').toLowerCase().split(',').map(value => value.trim()).includes(tag)),
+  )
+  const exclusions: Record<string, number> = {}
+  const leads = matching.filter(lead => {
+    if (['new', 'contacted'].includes(lead.status)) return true
+    const reason = `${channel === 'both' ? 'whatsapp' : channel}:lead_${lead.status}`
+    exclusions[reason] = (exclusions[reason] ?? 0) + 1
+    return false
+  })
+  return { leads, matchedCount: matching.length, excludedCount: matching.length - leads.length, exclusionCounts: exclusions }
+}
+
+function handleFixtureSchedule(id: number, method: string, body: RequestInit['body']) {
+  const json = (value: unknown, status = 200) =>
+    new Response(JSON.stringify(value), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  const campaign = findFixtureCampaign(id)
+  if (!campaign) return json({ error: 'Sample campaign not found.' }, 404)
+
+  if (method === 'DELETE') {
+    if (campaign.status !== 'scheduled') return json({ error: 'No active schedule.' }, 409)
+    campaign.status = 'draft'
+    campaign.scheduledAt = null
+    campaign.scheduleTimezone = null
+    campaign.scheduleError = null
+    campaign.updatedAt = new Date().toISOString()
+    return json({ status: campaign.status })
+  }
+
+  if (!['draft', 'scheduled'].includes(campaign.status) || campaign.totalLeads === 0) {
+    return json({ error: 'Choose a populated sample campaign that has yet to start.' }, 409)
+  }
+  const { scheduledAt, timezone, review } = JSON.parse(String(body ?? '{}')) as {
+    scheduledAt?: string
+    timezone?: string
+    review?: { updatedAt: string; recipientCount: number }
+  }
+  if (review?.updatedAt !== campaign.updatedAt || review.recipientCount !== campaign.totalLeads) {
+    return json({ error: 'The campaign or audience changed. Review the recipients and schedule again.' }, 409)
+  }
+  const launch = Date.parse(scheduledAt ?? '')
+  if (!Number.isFinite(launch) || launch <= Date.now() || !timezone) {
+    return json({ error: 'Choose a future launch time.' }, 400)
+  }
+  // The preview stores schedules in this page session. It has no sender or launch worker.
+  campaign.status = 'scheduled'
+  campaign.scheduledAt = new Date(launch).toISOString()
+  campaign.scheduleTimezone = timezone
+  campaign.scheduleError = null
+  campaign.updatedAt = new Date().toISOString()
+  return json(campaign)
+}
 
 /* Changes the demo cannot make. Everything else that writes is answered with
    this, so the page shows why nothing happened instead of pretending it
@@ -2361,6 +2464,59 @@ export function installFixtureFetch() {
     if (inbox) return inbox
 
     const method = (init?.method || 'GET').toUpperCase()
+    const pathname = new URL(url, location.origin).pathname
+    if (pathname === '/api/campaigns' && method === 'GET') {
+      const campaigns = fixtureCampaigns()
+      return Response.json({ campaigns, total: campaigns.length, page: 1, pages: 1 })
+    }
+    if (pathname === '/api/campaigns/preview-leads' && method === 'POST') {
+      const { channel = 'whatsapp', filter = {} } = JSON.parse(String(init?.body ?? '{}'))
+      const { leads, ...diagnostics } = previewFixtureAudience(filter, channel)
+      return Response.json({ count: leads.length, sample: leads.slice(0, 10), ...diagnostics })
+    }
+    if (pathname === '/api/campaigns' && method === 'POST') {
+      const input = JSON.parse(String(init?.body ?? '{}')) as Partial<Campaign>
+      if (!input.name?.trim() || !input.messageTemplate?.trim()) {
+        return Response.json({ error: 'Give the sample campaign a name and a message.' }, { status: 400 })
+      }
+      const rows = fixtureCampaigns()
+      const campaign: Campaign = {
+        ...findFixtureCampaign(4)!,
+        ...input,
+        id: Math.max(...rows.map(row => row.id)) + 1,
+        status: 'draft',
+        totalLeads: 0,
+        scheduledAt: null,
+        scheduleTimezone: null,
+        scheduleError: null,
+        targetFilter: typeof input.targetFilter === 'object' && input.targetFilter !== null
+          ? JSON.stringify(input.targetFilter) : input.targetFilter ?? null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      rows.unshift(campaign)
+      fixtureCampaignAudience.set(campaign.id, [])
+      return Response.json(campaign)
+    }
+    const populateId = pathname.match(/^\/api\/campaigns\/(\d+)\/populate$/)?.[1]
+    if (populateId && method === 'POST') {
+      const campaign = findFixtureCampaign(Number(populateId))
+      if (!campaign || campaign.status !== 'draft') {
+        return Response.json({ error: 'Choose a sample draft to prepare its audience.' }, { status: 409 })
+      }
+      const { leads } = previewFixtureAudience(JSON.parse(campaign.targetFilter ?? '{}'), campaign.channel)
+      const previous = fixtureCampaignAudience.get(campaign.id)?.length ?? campaign.totalLeads
+      fixtureCampaignAudience.set(campaign.id, leads)
+      campaign.totalLeads = leads.length
+      campaign.updatedAt = new Date().toISOString()
+      return Response.json({ added: Math.max(0, leads.length - previous), total: leads.length })
+    }
+    const scheduleId = pathname.match(
+      /^\/api\/campaigns\/(\d+)\/schedule$/,
+    )?.[1]
+    if (scheduleId && (method === 'POST' || method === 'DELETE')) {
+      return handleFixtureSchedule(Number(scheduleId), method, init?.body)
+    }
     if (method !== 'GET' && method !== 'HEAD') {
       const quiet = QUIET_WRITES.some((pattern) => pattern.test(url.split('?')[0]))
       // Said here rather than left to each page, because some pages save
