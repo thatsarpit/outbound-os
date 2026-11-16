@@ -31,6 +31,11 @@ app with a SQLite database. AGPL-3.0.
 
 ## Commands
 
+Before resuming development, read `docs/development-state.md` and compare the
+current branch with its recorded release and maintenance revisions. The deployed
+dashboard and API have included changes ahead of `main`. Reconcile that source
+history before implementing features that touch it.
+
 ```bash
 npm ci && npm ci --prefix web     # install
 npx prisma migrate deploy         # create/upgrade data/outboundos.db

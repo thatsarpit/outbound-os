@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createPrismaClient } from '../src/utils/createPrismaClient.js';
-import { IndiamartIntake, INDIAMART_POLICY, INDIAMART_SOURCE } from '../src/services/indiamartIntake.js';
+import { IndiamartIntake, INDIAMART_POLICY, INDIAMART_SOURCE, INDIAMART_PAGE } from '../src/services/indiamartIntake.js';
 async function fixture(run) {
   const dir=mkdtempSync(path.join(tmpdir(),'indiamart-intake-')), filename=path.join(dir,'fixture.db');
   const sql=new DatabaseSync(filename), root=new URL('../prisma/migrations/',import.meta.url);
@@ -26,6 +26,26 @@ async function fixture(run) {
   } finally {await db.$disconnect();sql.close();rmSync(dir,{recursive:true,force:true});}
 }
 const record=(id,extra={})=>({externalId:String(id),name:'Fixture buyer',mobile:`1555500${String(id).padStart(4,'0')}`,email:`buyer${id}@example.test`,acquiredAt:new Date(Date.now()-60_000).toISOString(),...extra});
+
+test('a page-restricted source rejects other pages before storing any lead or receipt', async()=>fixture(async({db,source,service,policy,save})=>{
+  policy.requireExactPage=true;await save();
+  for(const sourceUrl of [undefined, 'https://seller.indiamart.com/', INDIAMART_PAGE+'#other', INDIAMART_PAGE+'&extra=1', INDIAMART_PAGE.replace('disp=D','disp=X')]) {
+    await assert.rejects(service.ingest(source,[record(90)],'live','10001',{sourceUrl}),/consumed-leads page/);
+  }
+  assert.equal(await db.lead.count(),0);assert.equal(await db.connectorReceipt.count(),0);
+  await service.ingest(source,[record(90)],'live','10001',{sourceUrl:INDIAMART_PAGE});
+  assert.equal(await db.connectorReceipt.count(),1);
+}));
+
+test('five-minute intake health exposes exclusions, blocked purchases and stale checks', async()=>fixture(async({db,source,service,policy,save})=>{
+  policy.healthTimeoutSeconds=900;policy.pollIntervalSeconds=300;policy.requireExactPage=true;await save();
+  await db.systemConfig.create({data:{key:'indiamart.liveHealth',value:JSON.stringify({state:'needs_attention',reportedAt:new Date(Date.now()-16*60000).toISOString()})}});
+  const health=await service.health();
+  assert.equal(health.stale,true);assert.equal(health.pollIntervalSeconds,300);assert.equal(health.targetUrl,INDIAMART_PAGE);
+  assert.equal(health.exactPageRequired,true);assert.equal(health.blocked,0);assert.equal(health.existingOrConflict,0);
+  await db.systemConfig.update({where:{key:'indiamart.liveHealth'},data:{value:JSON.stringify({reportedAt:new Date().toISOString()})}});
+  assert.equal((await service.health()).stale,false);
+}));
 
 test('IndiaMART baseline and old purchases stay paused and can never become live through replay',async()=>fixture(async({db,source,service,policy,save,calls})=>{
   policy.armedAt=null;await save();

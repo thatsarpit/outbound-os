@@ -89,12 +89,14 @@ export function Sidebar() {
                 <ul className="space-y-px">
                   {groupItems.map((item) => {
                     const Icon = item.icon
-                    const isActive = location.pathname.startsWith(item.to)
+                    const preview = location.pathname.startsWith('/dev/shell')
+                    const pathname = preview ? location.pathname.replace('/dev/shell', '') || '/overview' : location.pathname
+                    const isActive = pathname.startsWith(item.to)
 
                     return (
                       <li key={item.to}>
                         <NavLink
-                          to={item.to}
+                          to={preview ? `/dev/shell${item.to}` : item.to}
                           onClick={() => {
                             if (isMobileViewport) setSidebarCollapsed(true)
                           }}

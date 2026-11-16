@@ -1898,8 +1898,8 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
     (url: string) => {
       const id = Number(new URL(url, location.origin).pathname.match(/\/campaigns\/(\d+)\/leads/)?.[1])
       return {
-        leads: FIXTURE_LEADS.slice(0, 5).map((lead, index) => ({ id: index + 1, leadId: lead.id, status: 'pending', variant: 'A', lead })),
-        total: 5,
+        leads: (fixtureCampaignAudience.get(id) ?? FIXTURE_LEADS.slice(0, 5)).map((lead, index) => ({ id: index + 1, leadId: lead.id, status: 'pending', variant: 'A', lead })),
+        total: (fixtureCampaignAudience.get(id) ?? FIXTURE_LEADS.slice(0, 5)).length,
         page: 1,
         pages: 1,
         campaignUpdatedAt: findFixtureCampaign(id)?.updatedAt ?? null,
@@ -2196,11 +2196,38 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
   ],
 ]
 
-function findFixtureCampaign(id: number) {
-  const list = FIXTURE_RESPONSES.find(([pattern]) => pattern.test('/api/campaigns'))?.[1] as {
+const fixtureCampaignAudience = new Map<number, typeof FIXTURE_LEADS>()
+
+function fixtureCampaigns() {
+  return (FIXTURE_RESPONSES.find(([pattern]) => pattern.test('/api/campaigns'))?.[1] as {
     campaigns: Campaign[]
-  }
-  return list.campaigns.find((campaign) => campaign.id === id)
+  }).campaigns
+}
+
+function findFixtureCampaign(id: number) {
+  return fixtureCampaigns().find((campaign) => campaign.id === id)
+}
+
+function previewFixtureAudience(filter: Record<string, unknown>, channel: string) {
+  const requestedTags = String(Array.isArray(filter.tags) ? filter.tags.join(',') : filter.tags ?? '').toLowerCase().split(',').map(tag => tag.trim()).filter(Boolean)
+  const matching = FIXTURE_LEADS.filter(lead =>
+    (!filter.status || (Array.isArray(filter.status) ? filter.status.includes(lead.status) : filter.status === lead.status)) &&
+    (!filter.country || String(lead.country).toLowerCase().includes(String(filter.country).toLowerCase())) &&
+    (!filter.source || lead.source === filter.source) &&
+    (!filter.product || String(lead.product).toLowerCase().includes(String(filter.product).toLowerCase())) &&
+    (filter.minScore == null || lead.score >= Number(filter.minScore)) &&
+    (filter.maxScore == null || lead.score <= Number(filter.maxScore)) &&
+    (filter.olderThanDays == null || Date.parse(lead.createdAt) <= Date.now() - Number(filter.olderThanDays) * 86400000) &&
+    requestedTags.every(tag => String('tags' in lead ? lead.tags : '').toLowerCase().split(',').map(value => value.trim()).includes(tag)),
+  )
+  const exclusions: Record<string, number> = {}
+  const leads = matching.filter(lead => {
+    if (['new', 'contacted'].includes(lead.status)) return true
+    const reason = `${channel === 'both' ? 'whatsapp' : channel}:lead_${lead.status}`
+    exclusions[reason] = (exclusions[reason] ?? 0) + 1
+    return false
+  })
+  return { leads, matchedCount: matching.length, excludedCount: matching.length - leads.length, exclusionCounts: exclusions }
 }
 
 function handleFixtureSchedule(id: number, method: string, body: RequestInit['body']) {
@@ -2438,14 +2465,51 @@ export function installFixtureFetch() {
 
     const method = (init?.method || 'GET').toUpperCase()
     const pathname = new URL(url, location.origin).pathname
+    if (pathname === '/api/campaigns' && method === 'GET') {
+      const campaigns = fixtureCampaigns()
+      return Response.json({ campaigns, total: campaigns.length, page: 1, pages: 1 })
+    }
     if (pathname === '/api/campaigns/preview-leads' && method === 'POST') {
-      const { channel = 'whatsapp' } = JSON.parse(String(init?.body ?? '{}'))
-      const sample = FIXTURE_LEADS.filter(lead => lead.status === 'new').slice(0, 5)
-      const exclusionCounts = channel === 'both'
-        ? { 'email:lead_paused': 2, 'whatsapp:lead_paused': 2 }
-        : { [`${channel}:lead_paused`]: 2, [`${channel}:customer_replied`]: 1 }
-      const excludedCount = channel === 'both' ? 2 : 3
-      return Response.json({ count: sample.length, sample, matchedCount: sample.length + excludedCount, excludedCount, exclusionCounts })
+      const { channel = 'whatsapp', filter = {} } = JSON.parse(String(init?.body ?? '{}'))
+      const { leads, ...diagnostics } = previewFixtureAudience(filter, channel)
+      return Response.json({ count: leads.length, sample: leads.slice(0, 10), ...diagnostics })
+    }
+    if (pathname === '/api/campaigns' && method === 'POST') {
+      const input = JSON.parse(String(init?.body ?? '{}')) as Partial<Campaign>
+      if (!input.name?.trim() || !input.messageTemplate?.trim()) {
+        return Response.json({ error: 'Give the sample campaign a name and a message.' }, { status: 400 })
+      }
+      const rows = fixtureCampaigns()
+      const campaign: Campaign = {
+        ...findFixtureCampaign(4)!,
+        ...input,
+        id: Math.max(...rows.map(row => row.id)) + 1,
+        status: 'draft',
+        totalLeads: 0,
+        scheduledAt: null,
+        scheduleTimezone: null,
+        scheduleError: null,
+        targetFilter: typeof input.targetFilter === 'object' && input.targetFilter !== null
+          ? JSON.stringify(input.targetFilter) : input.targetFilter ?? null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      rows.unshift(campaign)
+      fixtureCampaignAudience.set(campaign.id, [])
+      return Response.json(campaign)
+    }
+    const populateId = pathname.match(/^\/api\/campaigns\/(\d+)\/populate$/)?.[1]
+    if (populateId && method === 'POST') {
+      const campaign = findFixtureCampaign(Number(populateId))
+      if (!campaign || campaign.status !== 'draft') {
+        return Response.json({ error: 'Choose a sample draft to prepare its audience.' }, { status: 409 })
+      }
+      const { leads } = previewFixtureAudience(JSON.parse(campaign.targetFilter ?? '{}'), campaign.channel)
+      const previous = fixtureCampaignAudience.get(campaign.id)?.length ?? campaign.totalLeads
+      fixtureCampaignAudience.set(campaign.id, leads)
+      campaign.totalLeads = leads.length
+      campaign.updatedAt = new Date().toISOString()
+      return Response.json({ added: Math.max(0, leads.length - previous), total: leads.length })
     }
     const scheduleId = pathname.match(
       /^\/api\/campaigns\/(\d+)\/schedule$/,

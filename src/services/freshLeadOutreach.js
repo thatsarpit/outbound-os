@@ -4,6 +4,7 @@ import logger from '../utils/logger.js';
 import whatsappManager from './whatsapp.js';
 import emailService from './emailService.js';
 import { buildWhatsAppCtaEmail } from '../templates/emailWhatsappCta.js';
+import { buildIndiaMartFirstTouchEmail } from '../templates/indiamartFirstTouch.js';
 import { buildFreshAutomationKey, FRESH_AUTOMATION_KEY_PREFIX } from '../utils/automationKeys.js';
 import { isSendableMobile } from '../utils/inboundLead.js';
 
@@ -227,7 +228,8 @@ class FreshLeadOutreach {
           ? await prisma.emailAccount.findUnique({ where: { id: preferredId } })
           : await fallbackEmailAccount(liveLead.poolId);
         if (account) {
-          const email = buildWhatsAppCtaEmail(liveLead);
+          const email = liveLead.source === 'indiamart_live'
+            ? buildIndiaMartFirstTouchEmail(liveLead) : buildWhatsAppCtaEmail(liveLead);
           try {
             await emailService.queueEmail({
               leadId: liveLead.id,

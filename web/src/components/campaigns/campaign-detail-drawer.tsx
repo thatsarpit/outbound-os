@@ -1,6 +1,6 @@
 /** The campaign detail drawer. Extracted from campaigns.tsx. */
 import { useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { BarChart3, Mail, X } from 'lucide-react'
 import { campaignsApi } from '@/api/endpoints/campaigns'
 import type { Campaign } from '@/api/types'
@@ -27,6 +27,19 @@ export function CampaignDetailDrawer({
   onClose: () => void
 }) {
   const [page, setPage] = useState(1)
+  const queryClient = useQueryClient()
+  const populate = useMutation({
+    mutationFn: () => campaignsApi.populate(campaign.id),
+    onSuccess: async () => {
+      setPage(1)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['campaigns'] }),
+        queryClient.invalidateQueries({ queryKey: ['campaign-detail'] }),
+        queryClient.invalidateQueries({ queryKey: ['campaign-leads', campaign.id] }),
+      ])
+      toast.success('Recipients added to draft')
+    },
+  })
   const {
     data: response,
     isLoading,
@@ -93,6 +106,13 @@ export function CampaignDetailDrawer({
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto p-5 sm:p-6">
+          {campaign.status === 'draft' && campaign.totalLeads === 0 && (
+            <Panel title="Prepare the audience">
+              <p className="mb-3 text-sm text-text-secondary">Add eligible leads from this draft’s filters, then review the recipient list below.</p>
+              <Button pending={populate.isPending} onClick={() => populate.mutate()}>Add eligible recipients</Button>
+              {populate.error && <p role="alert" className="mt-2 text-sm text-danger">{populate.error.message}</p>}
+            </Panel>
+          )}
           <CampaignSchedulePanel
             campaign={campaign}
             reviewedRecipientCount={!isError && response?.campaignUpdatedAt === campaign.updatedAt ? response.total : null}

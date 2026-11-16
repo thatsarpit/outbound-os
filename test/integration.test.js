@@ -3750,6 +3750,7 @@ describe('YCloud WhatsApp provider', () => {
     const balance = await cloud.sendCampaignTemplate({ phone: '15550100001', campaignName: 'fixture_template', templateParams: ['Taylor'], accountId: account.id });
     assert.equal(balance.reason, 'payment_issue');
     assert.equal(balance.errorCode, 'BALANCE_INSUFFICIENT');
+    sendFailure = true;
     const failure = await cloud.sendTextMessage('15550100001', 'Fixture only', account.id);
     assert.equal(failure.reason, 'payment_issue');
     assert.equal(failure.messageId, 'failed-fixture');
@@ -4036,6 +4037,59 @@ describe('Free bulk email verification and send protection', () => {
 });
 
 describe('IndiaMART signed source boundary', () => {
+  test('source readiness is authenticated, exact-page intake stays non-sending, and fresh enquiry email queues once', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const { default: fresh } = await import('../src/services/freshLeadOutreach.js');
+    const source = await db.webhookSource.create({ data: { source: 'indiamart_live', name: 'Page-restricted fixture', apiKey: 'fixture-page-private-key' } });
+    const supplier = await db.supplier.create({ data: { name: 'Page fixture supplier', matchTag: 'page-fixture' } });
+    const wa = await db.whatsAppAccount.create({ data: { name: 'Page fixture WA', phone: '15555550991', enabled: true } });
+    const email = await db.emailAccount.create({ data: { name: 'Page fixture email', email: 'sender@page.example.test', smtpHost: 'smtp.example.test', smtpUser: 'fixture', smtpPass: 'fixture', whatsappAccountId: wa.id } });
+    const prior = await db.systemConfig.findUnique({ where: { key: 'indiamart.livePolicy' } });
+    const endpoint = '/api/webhooks/indiamart/indiamart_live';
+    const headers = { 'x-api-key': source.apiKey, 'X-Forwarded-For': '192.0.2.218' };
+    const target = 'https://seller.indiamart.com/blproduct/mypurchasedbl?disp=D';
+    const fixtureIds = [];
+    try {
+      await db.webhookSource.update({ where: { id: source.id }, data: { importSupplierId: supplier.id, importTags: 'page-fixture' } });
+      const policy = { sourceId: source.id, sellerId: '10001', enabled: false, armedAt: null, requireExactPage: true,
+        enableAfterBaseline: false, whatsappAccountId: wa.id, emailAccountId: email.id, templateName: 'fixture_approved_template' };
+      await db.systemConfig.upsert({ where: { key: 'indiamart.livePolicy' }, create: { key: 'indiamart.livePolicy', value: JSON.stringify(policy) }, update: { value: JSON.stringify(policy) } });
+      assert.equal((await request('GET', endpoint+'/status', { headers: { 'X-Forwarded-For': '192.0.2.218' } })).status, 401);
+      assert.equal((await request('GET', endpoint+'/status', { headers: { ...headers, 'x-api-key': 'wrong' } })).status, 401);
+      const readiness = await request('GET', endpoint+'/status', { headers });
+      assert.equal(readiness.status, 200); assert.equal(readiness.body.targetUrl, target);
+      assert.equal(readiness.body.senderPairConfigured, true); assert.equal(readiness.body.emailFrom, email.email);
+      assert.equal(readiness.body.enabled, false); assert.ok(!JSON.stringify(readiness.body).includes(source.apiKey));
+      const row = { externalId: '990000001', acquiredAt: new Date().toISOString(), name: 'Page Fixture Buyer', email: 'buyer@page.example.test', product: 'Fixture product', quantity: '2 boxes' };
+      const body = { sourceUrl: target, sellerId: '10001', mode: 'baseline', records: [row] };
+      assert.equal((await request('POST', endpoint, { headers, body: { ...body, sourceUrl: 'https://seller.indiamart.com/' } })).status, 422);
+      assert.equal(await db.connectorReceipt.count({ where: { sourceId: source.id } }), 0);
+      const baseline = await request('POST', endpoint, { headers, body });
+      assert.equal(baseline.status, 200); assert.equal(baseline.body.automationEnabled, false);
+      const baselineLead = await db.lead.findUnique({ where: { id: baseline.body.results[0].leadId } }); fixtureIds.push(baselineLead.id);
+      assert.equal(baselineLead.status, 'paused'); assert.match(baselineLead.mobile, /^no-phone:/);
+      assert.equal(await db.message.count({ where: { leadId: baselineLead.id } }), 0);
+      const lead = await db.lead.create({ data: { name: 'Fresh Fixture Buyer', mobile: 'no-phone:fresh-page-fixture', source: 'indiamart_live', email: 'fresh@page.example.test', product: 'Fixture product', quantity: '2 boxes', country: 'Spain' } });
+      fixtureIds.push(lead.id);
+      await fresh.queue(lead, { channels: ['email'], emailAccountId: email.id });
+      await fresh.queue(lead, { channels: ['email'], emailAccountId: email.id });
+      const messages = await db.message.findMany({ where: { leadId: lead.id } });
+      assert.equal(messages.length, 1); assert.equal(messages[0].status, 'queued');
+      assert.equal(messages[0].emailAccountId, email.id);
+      assert.equal(messages[0].emailSubject, 'Your IndiaMART enquiry: Fixture product');
+      assert.match(messages[0].content, /noted your requested quantity as 2 boxes/);
+      assert.doesNotMatch(messages[0].content, /still need|contacted us earlier/i);
+    } finally {
+      await db.connectorReceipt.deleteMany({ where: { sourceId: source.id } });
+      await db.lead.deleteMany({ where: { id: { in: fixtureIds } } });
+      if (prior) await db.systemConfig.update({ where: { key: prior.key }, data: { value: prior.value } });
+      else await db.systemConfig.deleteMany({ where: { key: 'indiamart.livePolicy' } });
+      await db.webhookSource.delete({ where: { id: source.id } });
+      await db.emailAccount.delete({ where: { id: email.id } });
+      await db.whatsAppAccount.delete({ where: { id: wa.id } });
+      await db.supplier.delete({ where: { id: supplier.id } });
+    }
+  });
   test('source credentials are required for purchases and health reports; status contains no source secret', async () => {
     const { default: db } = await import('../src/utils/prismaClient.js');
     const source = await db.webhookSource.create({ data: { source: 'indiamart_live', name: 'Fixture IndiaMART', apiKey: 'fixture-private-intake-key' } });
@@ -4045,6 +4099,10 @@ describe('IndiaMART signed source boundary', () => {
     assert.equal((await post('', source.apiKey, { records: [] })).status, 422);
     assert.equal((await post('/health', source.apiKey, { state: 'needs_attention', error: 'Sign-in required', lastCheck: null })).status, 200);
     assert.equal((await post('/health', source.apiKey, { state: 'invalid' })).status, 422);
+    assert.equal((await post('/health', source.apiKey, { state: 'ready', localPending: -1 })).status, 422);
+    assert.equal((await post('/health', source.apiKey, { state: 'ready', targetUrl: 'https://seller.indiamart.com/' })).status, 422);
+    assert.equal((await post('/health', source.apiKey, { state: 'ready', mode: 'login', localPending: 0,
+      targetUrl: 'https://seller.indiamart.com/blproduct/mypurchasedbl?disp=D', lastSavedScanAt: null, lastUploadAt: null })).status, 200);
     const response = await request('GET', '/api/system/status', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.219' } });
     assert.equal(response.status, 200);
     assert.ok(!JSON.stringify(response.body).includes(source.apiKey));

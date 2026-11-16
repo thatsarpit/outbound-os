@@ -5,6 +5,7 @@ import logger from '../utils/logger.js';
 
 export const INDIAMART_SOURCE = 'indiamart_live';
 export const INDIAMART_POLICY = 'indiamart.livePolicy';
+export const INDIAMART_PAGE = 'https://seller.indiamart.com/blproduct/mypurchasedbl?disp=D';
 export class IndiamartIntake {
   constructor({ db = prisma, outreach = freshLeadOutreach } = {}) {
     this.db = db; this.outreach = outreach; this.running = false;
@@ -13,9 +14,10 @@ export class IndiamartIntake {
     const row = await this.db.systemConfig.findUnique({ where: { key: INDIAMART_POLICY } });
     return row ? JSON.parse(row.value) : null;
   }
-  async ingest(source, records, mode, sellerId, { confirmSeller = false } = {}) {
+  async ingest(source, records, mode, sellerId, { confirmSeller = false, sourceUrl } = {}) {
     const policy = await this.policy();
     if (!policy || policy.sourceId !== source.id || source.source !== INDIAMART_SOURCE) throw new Error('Seller account is not configured for this source.');
+    if (policy.requireExactPage === true && sourceUrl !== INDIAMART_PAGE) throw Object.assign(new Error('Only the configured consumed-leads page is accepted.'), { code: 'invalid_source_page' });
     if (!['baseline', 'live'].includes(mode)) throw new Error('Choose baseline or live mode.');
     const initialPair = !policy.sellerId && !policy.armedAt && policy.allowInitialPairing === true
       && mode === 'baseline' && confirmSeller === true && /^\d{1,20}$/.test(String(sellerId));
@@ -38,8 +40,14 @@ export class IndiamartIntake {
     const row = await this.db.systemConfig.findUnique({ where: { key: 'indiamart.liveHealth' } });
     const health = row ? JSON.parse(row.value) : {};
     const pending = await this.db.connectorReceipt.count({ where: { sourceId: policy.sourceId, liveState: { in: ['pending', 'queuing'] } } });
+    const blocked = await this.db.connectorReceipt.count({ where: { sourceId: policy.sourceId, liveState: 'blocked' } });
+    const existingOrConflict = await this.db.connectorReceipt.count({ where: { sourceId: policy.sourceId, liveState: 'existing_or_conflict' } });
+    const historical = await this.db.connectorReceipt.count({ where: { sourceId: policy.sourceId, liveState: 'historical' } });
+    const threshold = Math.max(60, Math.min(Number(policy.healthTimeoutSeconds) || 2100, 3600)) * 1000;
     return { configured: true, enabled: policy.enabled === true, baselineComplete: Boolean(policy.armedAt),
-      ...health, stale: !health.reportedAt || Date.now() - Date.parse(health.reportedAt) > 35 * 60_000, pending };
+      ...health, stale: !health.reportedAt || !Number.isFinite(Date.parse(health.reportedAt)) || Date.now() - Date.parse(health.reportedAt) > threshold,
+      pending, blocked, existingOrConflict, historical, targetUrl: INDIAMART_PAGE, exactPageRequired: policy.requireExactPage === true,
+      pollIntervalSeconds: Number(policy.pollIntervalSeconds) || null };
   }
   kick() { void this.drain().catch(() => logger.error('IndiaMART intake queue unavailable; retained purchases will resume.')); }
   async drain() {
