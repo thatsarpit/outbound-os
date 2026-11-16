@@ -1,6 +1,7 @@
 import { campaignFilter } from '../utils/campaignFilter.js';
 import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
 import { contactBudgetGate } from './contactBudget.js';
+import { CAPACITY_REASONS } from '../utils/whatsappCapacity.js';
 import { refreshCampaignMetrics, readCampaignMetrics } from './campaignMetrics.js';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
@@ -228,7 +229,7 @@ export class CampaignEngine {
     const pending = await this.db.campaignLead.findMany({
       where: { campaignId: campaign.id, status: 'pending' }, orderBy: { id: 'asc' },
     });
-    let billingBlocked = false;
+    let billingBlocked = false, capacityBlocked = false;
     let runAccepted = 0, runFailed = 0, canaryTripped = false;
     try {
       for (const recipient of pending) {
@@ -265,7 +266,10 @@ export class CampaignEngine {
             if (context.halt) { halted = true; break; }
             if (!context.lead) { reasons.push(`${channel}:${context.reason}`); continue; }
             const result = await this._sendChannel(campaign, context.lead, channel, body, subject);
-            if (result.halt) { halted = true; break; }
+            if (result.halt) {
+              if (CAPACITY_REASONS.includes(result.reason) || result.reason === 'no_whatsapp_sender') capacityBlocked = true;
+              halted = true; break;
+            }
             if (result.success) {
               accepted++;
               // Publish acceptance before the delay so an immediate reply can
@@ -320,7 +324,8 @@ export class CampaignEngine {
           ...(billingBlocked ? { scheduleError: 'The provider rejected payment. Check the sending account balance before resuming.' }
             // A canary trip on the final recipient leaves nothing pending, so
             // the run completes normally and the note would only mislead.
-            : canaryTripped && unfinished ? { scheduleError: `Paused automatically: ${runFailed} of ${runAccepted + runFailed} sends in this run failed. Review the failed recipients before resuming.` } : {}) },
+            : canaryTripped && unfinished ? { scheduleError: `Paused automatically: ${runFailed} of ${runAccepted + runFailed} sends in this run failed. Review the failed recipients before resuming.` }
+            : capacityBlocked && unfinished ? { scheduleError: 'No WhatsApp sender has capacity left (daily or hourly limit, or none available). Resume when an account has room.' } : {}) },
       });
       await refreshCampaignMetrics(this.db, campaign.id);
     } catch (error) {
@@ -338,7 +343,10 @@ export class CampaignEngine {
     } else if (channel === 'whatsapp') {
       accountId = campaignSenderId(campaign, channel) || lead.assignedAccount
         || await this.whatsapp.getNextAccount({ poolId: lead.poolId, forInitialOutreach: true });
-      if (!accountId) return { skipped: true, reason: 'no_whatsapp_sender' };
+      // Halt, not skip: with rotation skipping at-capacity accounts, "none
+      // available" is usually temporary, and a skipped recipient would be
+      // terminal for the run while a pending one survives to the resume.
+      if (!accountId) return { skipped: true, halt: true, reason: 'no_whatsapp_sender' };
       const account = await this.db.whatsAppAccount.findUnique({ where: { id: accountId } });
       if (!account?.enabled || !credentialState(account).ready) return { skipped: true, reason: 'whatsapp_sender_not_ready' };
       if (!campaign.waCampaignName) {
@@ -399,6 +407,13 @@ export class CampaignEngine {
       result = { success: false, reason: 'confirmation_unknown' };
     }
     const reason = result.reason || result.error || 'send_failed';
+    // Out of capacity is a fact about the sending account, not this recipient.
+    // The staged row is cancelled — a 'failed' row would permanently block
+    // this recipient on resume — and the run halts so the rest stay pending.
+    if (CAPACITY_REASONS.includes(reason)) {
+      await this.db.message.update({ where: { id: message.id }, data: { status: 'cancelled', providerStatusReason: reason } });
+      return { skipped: true, halt: true, reason };
+    }
     const status = result.success ? 'sent' : UNCERTAIN.has(reason) ? 'unconfirmed' : 'failed';
     await this.db.message.update({ where: { id: message.id }, data: {
       content: liveBody,

@@ -150,6 +150,37 @@ class WhatsAppCloudApiService {
   }
 
   /**
+   * Meta's messaging_limit_tier for the account's number — the provider's own
+   * ceiling on business-initiated conversations per rolling 24 hours. Synced
+   * so capacity checks can clamp the configured dailyLimit to reality rather
+   * than a static guess. YCloud exposes no equivalent field, so those
+   * accounts keep their configured limits alone.
+   */
+  async fetchMessagingLimitTier(accountId) {
+    const account = await prisma.whatsAppAccount.findUnique({ where: { id: accountId } });
+    if (!account) return { ok: false, reason: 'account_not_found' };
+    if (providerOf(account) === 'ycloud') return { ok: false, reason: 'unsupported_provider' };
+    const pair = metaCredentialPair(account);
+    const token = pair ? decrypt(pair.token) : '';
+    if (!pair || !token) return { ok: false, reason: 'no_credentials' };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const url = new URL(`${graphBase()}/${encodeURIComponent(pair.phoneNumberId)}`);
+      url.searchParams.set('fields', 'messaging_limit_tier');
+      const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal });
+      let data = {};
+      try { data = await response.json(); } catch { /* non-JSON error body */ }
+      if (!response.ok || data.error) return { ok: false, reason: 'upstream_error' };
+      return { ok: true, tier: typeof data.messaging_limit_tier === 'string' ? data.messaging_limit_tier : null };
+    } catch (error) {
+      return { ok: false, reason: error.name === 'AbortError' ? 'timeout' : 'connection_failed' };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /**
    * The account a send goes out from. Callers that do not name one — sign-in
    * codes, system notices — get the first enabled account with complete
    * credentials of its own; only if there is none does the env fallback apply.

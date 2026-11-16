@@ -1,5 +1,6 @@
 import { whatsappAddressSuppressed } from './whatsappSuppression.js';
 import { credentialState, publicCredentialSummary } from './whatsappProviders.js';
+import { capacityShortfall, tierDailyLimit } from '../utils/whatsappCapacity.js';
 import prisma from '../utils/prismaClient.js';
 import config from '../config.js';
 import logger from '../utils/logger.js';
@@ -123,6 +124,12 @@ class WhatsAppManager {
       logger.warn('⚠️ No WhatsApp account has Cloud API credentials — sending is disabled until one is configured in Settings');
     }
 
+    // Pull each number's real Meta messaging tier in the background: boot
+    // must not wait on the Graph API, and a failed sync just keeps the
+    // previous value until the daily refresh.
+    this.syncMessagingTiers().catch((error) =>
+      logger.warn(`Messaging tier sync skipped: ${error.message}`));
+
     // Reset hourly counters every hour
     if (this._hourlyResetTimer) clearInterval(this._hourlyResetTimer);
     this._hourlyResetTimer = setInterval(() => {
@@ -152,6 +159,24 @@ class WhatsAppManager {
    */
   _isAccountPaused(accountId) {
     return Date.now() < (this.pausedUntil.get(accountId) || 0);
+  }
+
+  /**
+   * Does this account have room for one more OUTREACH send right now?
+   * Returns null when it does, or the shortfall { reason, used, limit }.
+   * Enforced at the dispatch boundary so an explicitly named sender obeys
+   * the same daily/hourly numbers as a rotated one; operator replies and
+   * transactional order updates bypass it at their call sites.
+   */
+  _capacityShortfall(account) {
+    return capacityShortfall(account, {
+      hourlySentCount: this.hourlySent.get(account?.id) || 0,
+      defaults: {
+        maxMessagesPerDay: config.whatsapp.maxMessagesPerDay,
+        hourlyLimit: config.whatsapp.hourlyLimit,
+      },
+      warmup: { enabled: config.whatsapp.warmupMode, limit: config.whatsapp.warmupLimit },
+    });
   }
 
   /**
@@ -198,6 +223,14 @@ class WhatsAppManager {
         continue;
       }
 
+      // Skip accounts with no outreach capacity left, so rotation hands back
+      // an account that can actually send instead of one that will refuse.
+      const shortfall = this._capacityShortfall(account);
+      if (shortfall) {
+        logger.info(`⏸️ Account ${id} at capacity (${shortfall.reason}: ${shortfall.used}/${shortfall.limit})`);
+        continue;
+      }
+
       // ── Minimum gap between any two sends ────────────────────────────────
       // This account is good to go — advance the round-robin index
       this._lastAccountIndex = (idx + 1) % accounts.length;
@@ -224,7 +257,7 @@ class WhatsAppManager {
    * @param {number | null | undefined} accountId
    * @returns {{success: boolean, accountId: number | null, reason: string, error?: string, isNotOnWhatsApp?: boolean, identifiers?: string[], waMessageId?: string}}
    */
-  async sendMessage(phone, message, accountId, { poolId, replyTo } = {}) {
+  async sendMessage(phone, message, accountId, { poolId, replyTo, manual = false } = {}) {
     // PERSONA SAFETY: If a specific account is requested, ONLY use that account.
     // Never silently fall back to a different account — that would cause persona
     // mismatch (content was generated with the requested account's persona).
@@ -244,6 +277,16 @@ class WhatsAppManager {
     if (this._isAccountPaused(selectedAccountId)) {
       logger.warn(`Account ${selectedAccountId} is paused, skipping send`);
       return { success: false, accountId: selectedAccountId, reason: 'account_paused' };
+    }
+
+    // Outreach obeys the account's capacity even when the caller named the
+    // account explicitly. An operator's own reply is judgment, not outreach.
+    if (!manual) {
+      const shortfall = this._capacityShortfall(account);
+      if (shortfall) {
+        logger.info(`⏸️ Account ${selectedAccountId} ${shortfall.reason} (${shortfall.used}/${shortfall.limit}) — holding outreach send`);
+        return { success: false, accountId: selectedAccountId, reason: shortfall.reason };
+      }
     }
 
     const formattedPhone = destinationFor(phone);
@@ -322,10 +365,14 @@ class WhatsAppManager {
     };
   }
 
-  async sendApprovedTemplate(address, name, language, parameters, accountId, { marketing = true } = {}) {
+  async sendApprovedTemplate(address, name, language, parameters, accountId, { marketing = true, manual = false } = {}) {
     const account = await prisma.whatsAppAccount.findUnique({ where: { id: accountId } });
     if (!account?.enabled || !this._hasCredentials(account)) return { success: false, reason: 'account_not_ready' };
     if (this._isAccountPaused(accountId)) return { success: false, reason: 'account_paused' };
+    if (!manual) {
+      const shortfall = this._capacityShortfall(account);
+      if (shortfall) return { success: false, accountId, reason: shortfall.reason };
+    }
     if (marketing && await whatsappAddressSuppressed(prisma, address, accountId)) return { success: false, accountId, reason: 'whatsapp_marketing_opted_out' };
     const result = await whatsappCloudApi.sendTemplate(address, name, language, parameters.map(text => ({ type: 'text', text })), accountId);
     if (result.success) {
@@ -346,6 +393,10 @@ class WhatsAppManager {
     poolId,
     source = 'outboundos',
     userName,
+    // Transactional sends (a buyer's own order updates) are exempt from the
+    // outreach capacity gate: pacing exists to protect outreach volume, not
+    // to keep a customer uninformed about their own shipment.
+    transactional = false,
   } = {}) {
     const selectedAccountId = accountId || await this.getNextAccount({ poolId, forInitialOutreach: true });
     if (!selectedAccountId) {
@@ -358,6 +409,14 @@ class WhatsAppManager {
     }
     if (this._isAccountPaused(selectedAccountId)) {
       return { success: false, accountId: selectedAccountId, reason: 'account_paused' };
+    }
+
+    if (!transactional) {
+      const shortfall = this._capacityShortfall(account);
+      if (shortfall) {
+        logger.info(`⏸️ Account ${selectedAccountId} ${shortfall.reason} (${shortfall.used}/${shortfall.limit}) — holding template send`);
+        return { success: false, accountId: selectedAccountId, reason: shortfall.reason };
+      }
     }
 
     const formattedPhone = destinationFor(phone);
@@ -472,6 +531,35 @@ class WhatsAppManager {
       this.pausedUntil.set(id, 0);
     }
     logger.info('🔄 Daily + hourly counters reset (incl. new-lead budget), pauses cleared');
+  }
+
+  /**
+   * Store Meta's messaging_limit_tier for every configured Meta account.
+   * Runs in the background at boot and after the midnight counter reset. A
+   * failed fetch keeps the previous value — a stale tier beats forgetting
+   * one — and an unrecognised tier is stored for display but never used as
+   * a ceiling (tierDailyLimit returns null for it).
+   */
+  async syncMessagingTiers() {
+    const accounts = await prisma.whatsAppAccount.findMany({ where: { enabled: true }, orderBy: { id: 'asc' } });
+    let synced = 0;
+    for (const account of accounts) {
+      if (!this._hasCredentials(account)) continue;
+      const result = await whatsappCloudApi.fetchMessagingLimitTier(account.id);
+      if (!result.ok || !result.tier) continue;
+      if (tierDailyLimit(result.tier) === null) {
+        logger.warn(`Account ${account.id}: unrecognised Meta messaging tier '${result.tier}' — stored, not enforced`);
+      }
+      await prisma.whatsAppAccount.update({
+        where: { id: account.id },
+        data: { metaMessagingTier: result.tier, metaTierSyncedAt: new Date() },
+      });
+      if (account.metaMessagingTier !== result.tier) {
+        logger.info(`📶 Account ${account.id} messaging tier: ${account.metaMessagingTier || 'unknown'} → ${result.tier}`);
+      }
+      synced++;
+    }
+    return { checked: accounts.length, synced };
   }
 
   /**

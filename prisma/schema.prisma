@@ -483,6 +483,13 @@ model WhatsAppAccount {
   maxFollowups   Int    @default(5)
   followupDelays String @default("[0,240,1440,2880,4320]") // JSON array in minutes
 
+  // ── Meta messaging tier (synced from the Graph API) ──
+  // Meta's messaging_limit_tier for the number (e.g. TIER_250): the provider's
+  // own ceiling on business-initiated conversations per rolling 24 hours.
+  // Synced at boot and daily; capacity checks clamp dailyLimit to it.
+  metaMessagingTier String?
+  metaTierSyncedAt  DateTime?
+
   // ── Counters (reset at midnight IST by resetDailyCounters) ──
   messagesSentToday      Int      @default(0)
   newLeadsContactedToday Int      @default(0)
