@@ -12,8 +12,8 @@ import { MobileShowcase } from '@/components/mobile-showcase'
 import { site } from '@/lib/site-content'
 
 export const metadata = buildMetadata(
-  'WhatsApp CRM — open source & self-hosted',
-  'An open-source WhatsApp CRM with a shared inbox, follow-ups and mobile sales workspace. Connect Meta directly. Self-host free or get expert setup.',
+  'Open-source WhatsApp CRM',
+  'Self-host Outbound OS for a shared WhatsApp inbox, lead ownership and follow-ups. Connect directly to Meta’s Cloud API using your business number.',
   '/whatsapp-crm',
 )
 
@@ -57,7 +57,7 @@ export default function WhatsAppCrmPage() {
           <div className="crm-hero__intro">
             <div>
               <p className="eyebrow">WhatsApp CRM · official Cloud API</p>
-              <h1>Your WhatsApp CRM. The whole customer story.</h1>
+              <h1>Open-source WhatsApp CRM for sales teams</h1>
             </div>
             <div className="crm-hero__copy">
               <p className="lede">Connect your WhatsApp Business number directly to Meta.
