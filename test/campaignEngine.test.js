@@ -9,7 +9,8 @@ import { CampaignEngine } from '../src/services/campaignEngine.js';
 import { CampaignScheduler, validateSchedule } from '../src/services/campaignScheduler.js';
 import { campaignChannelEligibility, campaignSenderId, hasAllLeadTags } from '../src/utils/campaignAudience.js';
 import { suppressedWhatsAppLeads } from '../src/services/whatsappSuppression.js';
-import { classifyDeliveryFailure, retryDelayMs } from '../src/services/deliveryFailure.js';
+import { classifyDeliveryFailure, retryDelayMs, statusForClass, FAILURE_CLASS } from '../src/services/deliveryFailure.js';
+import { classifyError } from '../src/services/whatsappCloudApi.js';
 import { recoverCampaignRuns } from '../src/services/campaignMetrics.js';
 
 async function fixture(run, hooks = {}) {
@@ -537,6 +538,37 @@ test('pair throttling is temporary, explicit marketing opt-outs are not, and mar
   assert.equal(classifyDeliveryFailure({ errorCode: '131056' }).retryable, true);
   assert.equal(classifyDeliveryFailure({ errorCode: '131050' }).retryable, false);
   for (let i = 0; i < 100; i++) assert.ok(retryDelayMs(1, '131049') >= 24 * 3600000);
+});
+
+test('an unpaid balance is billing, never authentication, and never the recipient\'s fault', () => {
+  // Meta can deliver the payment-issue code over HTTP 403; reading the status
+  // first used to report it as auth_failed and skip the campaign billing pause.
+  assert.equal(classifyError(403, 131042, 'Business eligibility payment issue'), 'payment_issue');
+  assert.equal(classifyError(403, undefined, 'Forbidden'), 'auth_failed');
+  assert.equal(classifyError(400, 190, 'Access token has expired'), 'auth_failed');
+
+  const billing = classifyDeliveryFailure({ errorCode: '131042' });
+  assert.equal(billing.cls, FAILURE_CLASS.BILLING);
+  assert.equal(billing.retryable, false);
+  assert.equal(statusForClass(billing.cls), 'failed');
+});
+
+test('a country marketing pause is policy, a per-recipient limit stays retryable', () => {
+  const pausePraise = 'Marketing messages to United States phone numbers are currently paused';
+  assert.equal(classifyError(400, 131049, pausePraise), 'marketing_country_restricted');
+  assert.equal(classifyError(400, 131049, 'not delivered to maintain healthy ecosystem engagement'), 'marketing_limit');
+
+  const paused = classifyDeliveryFailure({ errorCode: '131049', detail: pausePraise });
+  assert.equal(paused.cls, FAILURE_CLASS.POLICY);
+  assert.equal(paused.retryable, false);
+  assert.equal(statusForClass(paused.cls), 'failed');
+  // The sync path's stored reason token alone is enough to re-classify.
+  assert.equal(classifyDeliveryFailure({ reason: 'marketing_country_restricted' }).cls, FAILURE_CLASS.POLICY);
+
+  assert.equal(classifyDeliveryFailure({ errorCode: '131049' }).retryable, true);
+  const experiment = classifyDeliveryFailure({ errorCode: '130472' });
+  assert.equal(experiment.retryable, true);
+  for (let i = 0; i < 100; i++) assert.ok(retryDelayMs(1, '130472') >= 24 * 3600000);
 });
 
 test('a temporary pair limit cannot become durable campaign suppression', async () => fixture(async ({ db, engine, createLead }) => {
