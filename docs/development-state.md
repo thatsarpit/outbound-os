@@ -24,8 +24,8 @@ recorded maintenance revision before further edits.
 
 The November 15 deployment notes record the API image
 `outbound-os:indiamart-bridge-20261115-r2`. Its source changes are reconciled
-from the retained deployment patch. A fresh VM container/source inspection
-still requires successful Tailscale SSH authorization.
+from the retained deployment patch. A fresh VM inspection on November 16 confirmed this running API image and
+healthy API, MCP and private watcher containers.
 
 All preview records are synthetic. Runtime settings, private watcher state,
 customer databases and deployment credentials remain operator-owned artifacts.
@@ -67,3 +67,10 @@ Browser checks covered the recovered overview labels and stacked bar chart,
 active navigation, campaign audience preview, editing/review/back navigation,
 draft creation, population, scheduling, rescheduling and cancellation at
 desktop and phone widths. Test records and provider responses were synthetic.
+
+The production-backup rehearsal exposed legacy installation defaults on
+WhatsApp accounts. The November 16 normalization migration preserves every
+configured account value and changes only defaults for future rows. Its target
+table exactly matches SQL generated solely from the public schema, without
+production mounts or credentials. A regression checks account values and pool
+references survive the migration and new accounts receive neutral defaults.
