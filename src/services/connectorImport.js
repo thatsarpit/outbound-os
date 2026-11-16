@@ -136,6 +136,13 @@ export async function importConnectorRecords(db, source, records, { intakeMode, 
           for (const key of ['email', 'company', 'country', 'product', 'quantity', 'notes']) if (!existing[key] && row[key]) fill[key] = row[key];
           if (!phoneKey(existing.mobile) && phone) fill.mobile = phone;
           lead = await tx.lead.update({ where: { id: existing.id }, data: { ...fill, tags, originSupplierId: supplier.id }, select: leadFields });
+          // Connector-owned enrichment must not invalidate its own pending
+          // hand-off. An operator edit leaves a different version and cannot
+          // be refreshed by this comparison.
+          await tx.connectorReceipt.updateMany({
+            where: { sourceId: source.id, leadId: lead.id, liveState: 'pending', liveLeadVersion: existing.updatedAt },
+            data: { liveLeadVersion: lead.updatedAt },
+          });
           leads.set(lead.id, lead);
           state = 'matched';
         } else {

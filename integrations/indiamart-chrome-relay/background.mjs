@@ -37,7 +37,7 @@ async function withPage(operation) {
     }
     const current=await chrome.tabs.get(tab.id);
     const url=new URL(current.url||'');
-    if(url.origin!=='https://seller.indiamart.com'||url.pathname!=='/blproduct/mypurchasedbl')throw new Error('Sign in to IndiaMART and open the purchased-leads page.');
+    if(url.href!==PAGE)throw new Error('Sign in to IndiaMART and open the purchased-leads page.');
     await chrome.scripting.executeScript({target:{tabId:tab.id},files:['content.js']});
     return await operation(tab.id);
   } finally {
@@ -75,7 +75,7 @@ async function tick() {
           const batch=nextBatch(ledger);if(!batch.length)break;
           const live=await chrome.storage.local.get('config');
           if(!live.config?.enabled)throw new Error('Relay paused. Purchases remain saved.');
-          const reply=await crm(c,{sellerId:current.config.sellerId,mode:batch[0].mode,
+          const reply=await crm(c,{sellerId:current.config.sellerId,sourceUrl:PAGE,mode:batch[0].mode,
             confirmSeller:batch[0].mode==='baseline',records:batch.map(row=>row.record)});
           ledger=acknowledge(ledger,batch,reply);
           await chrome.storage.local.set({ledger});imported+=batch.length;
@@ -105,7 +105,7 @@ async function tick() {
 }
 async function start(message){
   const {inspectedSellerId,config}=await chrome.storage.local.get(['inspectedSellerId','config']);
-  if(message.confirm!==true||!inspectedSellerId||inspectedSellerId!==message.sellerId)throw new Error('Inspect and confirm the Panchsheel account first.');
+  if(message.confirm!==true||!inspectedSellerId||inspectedSellerId!==message.sellerId)throw new Error('Inspect and confirm the configured seller account first.');
   if(config?.sellerId&&config.sellerId!==message.sellerId)throw new Error('A different seller is already pinned. Contact the CRM administrator.');
   await connection();
   await chrome.storage.local.set({config:{enabled:true,sellerId:message.sellerId}});

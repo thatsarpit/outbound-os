@@ -44,6 +44,7 @@ test('the Chrome relay remains off until its own UI confirms the inspected selle
   if(url===own+'connection-private.json')return Response.json({url:'https://api.outboundos.space/api/webhooks/indiamart/indiamart_live',key:'f'.repeat(64)});
   assert.equal(init.headers['X-API-Key'],'f'.repeat(64));
   const body=JSON.parse(init.body);crmCalls++;
+  if(!url.endsWith('/health'))assert.equal(body.sourceUrl,'https://seller.indiamart.com/blproduct/mypurchasedbl?disp=D');
   return Response.json(url.endsWith('/health')?{ok:true}:{results:body.records.map(r=>({externalId:r.externalId}))});
  };
  try{

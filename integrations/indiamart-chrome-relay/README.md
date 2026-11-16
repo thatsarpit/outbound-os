@@ -8,7 +8,7 @@ files are present.
 
 ## One-time setup
 
-1. In your **Arpit** Chrome profile, open `chrome://extensions`, turn on Developer
+1. In the Chrome profile you use for IndiaMART, open `chrome://extensions`, turn on Developer
    mode, choose **Load unpacked**, and select this entire folder. Keep the folder
    in place. The extension requests access only to seller.indiamart.com and
    api.outboundos.space, plus local storage, alarms, site-script execution and
@@ -16,14 +16,13 @@ files are present.
 2. Open **Outbound OS · IndiaMART Relay** from Chrome's extensions menu. Choose
    **Check signed-in account**. It reuses that profile's normal IndiaMART login.
    If the login expired, use **Open IndiaMART login** and sign in yourself.
-3. Confirm that the page/account is Panchsheel Medicals, tick the confirmation
+3. Confirm that the page/account is the configured seller, tick the confirmation
    box, then choose **Confirm account and start**. The first scan imports a
    non-sending baseline and pins that seller ID. Subsequent new purchases can
-   queue the approved liveleadloutreach WhatsApp template on account 1 and email
-   on Panchsheel sender 1. Sales email passes the free verifier before sending.
+   queue the configured approved WhatsApp template and email sender. Sales email passes the free verifier before sending.
    No historical/duplicate contact is automatically resumed.
 4. For automatic Chrome startup, double-click **Enable startup.command**. Read
-   the last folder of **Profile Path** in `chrome://version` from the same Arpit
+   the last folder of **Profile Path** in `chrome://version` from the same
    profile and enter it when prompted (for example `Default` or `Profile 1`).
    This installs a user LaunchAgent that opens that profile quietly at login
    and every 15 minutes while awake. **Disable startup.command** removes it.

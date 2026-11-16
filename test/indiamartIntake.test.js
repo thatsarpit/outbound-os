@@ -27,6 +27,21 @@ async function fixture(run) {
 }
 const record=(id,extra={})=>({externalId:String(id),name:'Fixture buyer',mobile:`1555500${String(id).padStart(4,'0')}`,email:`buyer${id}@example.test`,acquiredAt:new Date(Date.now()-60_000).toISOString(),...extra});
 
+test('connector enrichment preserves pending first touch for repeated purchases without overriding operator edits', async()=>fixture(async({db,source,service,calls})=>{
+  const first=record(70);
+  await service.ingest(source,[first,record(71,{mobile:first.mobile,email:first.email,company:'Fixture company'})],'live','10001');
+  await service.drain();
+  assert.equal(calls.length,1);
+  assert.deepEqual((await db.connectorReceipt.findMany({orderBy:{id:'asc'}})).map(r=>r.liveState),['queued','existing_or_conflict']);
+  const other=record(72);
+  const imported=await service.ingest(source,[other],'live','10001');
+  await db.lead.update({where:{id:imported.results[0].leadId},data:{notes:'Operator hold',updatedAt:new Date(Date.now()+1000)}});
+  await service.ingest(source,[record(73,{mobile:other.mobile,email:other.email,company:'More fixture data'})],'live','10001');
+  await service.drain();
+  assert.equal(calls.length,1);
+  assert.equal((await db.connectorReceipt.findFirst({where:{externalId:'72'}})).liveState,'blocked');
+}));
+
 test('a page-restricted source rejects other pages before storing any lead or receipt', async()=>fixture(async({db,source,service,policy,save})=>{
   policy.requireExactPage=true;await save();
   for(const sourceUrl of [undefined, 'https://seller.indiamart.com/', INDIAMART_PAGE+'#other', INDIAMART_PAGE+'&extra=1', INDIAMART_PAGE.replace('disp=D','disp=X')]) {

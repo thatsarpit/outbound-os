@@ -56,7 +56,7 @@ async function sendOutbox() {
   if (!['https:','http:'].includes(url.protocol) || url.username || url.password)throw new Error('Invalid intake URL.');
   const response=await fetch(url,{method:'POST',redirect:'error',signal:AbortSignal.timeout(45000),
     headers:{'Content-Type':'application/json','X-API-Key':process.env.SOURCE_KEY},
-    body:JSON.stringify({sellerId:process.env.EXPECTED_SELLER_ID,mode,records:batch.map(row=>JSON.parse(row.record))})});
+    body:JSON.stringify({sellerId:process.env.EXPECTED_SELLER_ID,sourceUrl:pageUrl,mode,records:batch.map(row=>JSON.parse(row.record))})});
   if (!response.ok)throw new Error(`CRM intake failed (${response.status}); purchase IDs retained for retry.`);
   const result=await response.json();
   if (!Array.isArray(result.results) || result.results.length!==batch.length
@@ -76,7 +76,7 @@ async function poll() {
     const p=await browserPage();
     const navigation=await p.goto(pageUrl,{waitUntil:'domcontentloaded',timeout:45000});
     if(navigation?.status()===403)throw new Error('IndiaMART refused access from this host (HTTP 403). Use official access or an authorized browser.');
-    if(new URL(p.url()).hostname!=='seller.indiamart.com')throw new Error('Sign in to IndiaMART in the private browser.');
+    if(p.url()!==pageUrl)throw new Error('Sign in to IndiaMART in the private browser.');
     const sellerId=await p.evaluate(()=>{
       const html=document.documentElement.innerHTML;
       return (document.cookie.match(/(?:^|;\s*)glid=(\d+)/)||[])[1]

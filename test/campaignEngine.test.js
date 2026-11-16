@@ -216,6 +216,19 @@ test('audience caps apply after exclusions and repeated population cannot expand
   assert.equal((await db.campaignLead.findFirst({ where: { campaignId: campaign.id } })).leadId, 2);
 }));
 
+test('default-sender audience suppression follows each lead assignment', async () => fixture(async ({ db, engine, createLead, createCampaign, createWa }) => {
+  await createWa(8); await createWa(9);
+  await createLead(1, { assignedAccount: 9 });
+  await createLead(2, { assignedAccount: 8 });
+  for (const leadId of [1,2]) await db.message.create({ data: { leadId, direction: 'outbound', channel: 'whatsapp', waAccount: 8,
+    content: 'Fixture opt-out', status: 'failed', providerErrorCode: '131050' } });
+  const preview=await engine.getAudience({},null,'whatsapp');
+  assert.deepEqual(preview.leads.map(row=>row.id),[1]);
+  const campaign=await createCampaign({channel:'whatsapp',waCampaignName:'fixture_approved'});
+  await engine.populateCampaign(campaign.id);
+  assert.deepEqual((await db.campaignLead.findMany({where:{campaignId:campaign.id}})).map(row=>row.leadId),[1]);
+}));
+
 test('receipt opt-outs suppress previews and live dispatch only for the affected WhatsApp sender', async () => fixture(async ({ db, engine, calls, createLead, createCampaign, createWa, running }) => {
   await createWa(8); await createWa(9);
   await createLead(1);

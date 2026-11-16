@@ -71,7 +71,21 @@ export class CampaignEngine {
     // A DB substring predicate is not a tag match: "uk" must not select "bulk".
     const matching = leads.filter(lead => hasAllLeadTags(lead.tags, filter.tags));
     const ready = channels.includes('email') ? await this.verification.readyEmails(matching.map(lead => lead.email)) : null;
-    const suppressed = channels.includes('whatsapp') ? await suppressedWhatsAppLeads(this.db, matching.map(lead => lead.id), whatsappSenderId) : new Set();
+    const suppressed = new Set();
+    if (channels.includes('whatsapp')) {
+      const groups = new Map();
+      for (const lead of matching) {
+        const senderId = whatsappSenderId || lead.assignedAccount;
+        // Unassigned leads get a sender at dispatch. Do not treat another
+        // business's refusal as global while that sender is still unknown.
+        if (!senderId) continue;
+        if (!groups.has(senderId)) groups.set(senderId, []);
+        groups.get(senderId).push(lead.id);
+      }
+      for (const [senderId, ids] of groups) {
+        for (const id of await suppressedWhatsAppLeads(this.db, ids, senderId)) suppressed.add(id);
+      }
+    }
     const eligible = [], excludedSample = [], exclusionCounts = {};
     let excludedCount = 0;
     for (const lead of matching) {

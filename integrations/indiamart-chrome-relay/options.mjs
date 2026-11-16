@@ -13,6 +13,6 @@ async function refresh(){try{
 function ready(){$('start').disabled=!sellerId||!$('confirm').checked;}
 $('confirm').addEventListener('change',ready);
 for(const [id,type]of [['login','OPEN_LOGIN'],['run','RUN'],['pause','PAUSE']])$(id).addEventListener('click',async()=>{try{await call(type);await refresh();}catch(error){$('status').textContent=error.message;}});
-$('inspect').addEventListener('click',async()=>{try{const result=await call('INSPECT');sellerId=result.sellerId;$('account').textContent=`Signed-in seller ID: ${sellerId}. Confirm this is Panchsheel Medicals.`;ready();}catch(error){$('account').textContent=error.message;}});
+$('inspect').addEventListener('click',async()=>{try{const result=await call('INSPECT');sellerId=result.sellerId;$('account').textContent=`Signed-in seller ID: ${sellerId}. Confirm this is the configured seller.`;ready();}catch(error){$('account').textContent=error.message;}});
 $('start').addEventListener('click',async()=>{try{await call('START',{sellerId,confirm:$('confirm').checked});await refresh();}catch(error){$('status').textContent=error.message;}});
 void refresh();setInterval(()=>void refresh(),3000);
