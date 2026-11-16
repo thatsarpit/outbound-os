@@ -4,6 +4,7 @@ import { mkdtempSync, readdirSync, readFileSync, existsSync, rmSync, statSync, o
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { fileURLToPath } from 'node:url';
 import { createPrismaClient } from '../src/utils/createPrismaClient.js';
 import { InboundEmailIngestion, sanitizeReceivedEmailHtml } from '../src/services/inboundEmailIngestion.js';
 import { InboundEmailSpool } from '../src/utils/inboundEmailSpool.js';
@@ -93,7 +94,7 @@ test('hot backups retain immutable encrypted originals needed by the receipt sna
   assert.equal((await spool.read(first, key)).toString(), 'Fixture partial MIME');
   await db.$queryRawUnsafe('PRAGMA wal_checkpoint(FULL)');
   const backupDirectory = path.join(directory, 'backups');
-  execFileSync('bash', [new URL('../scripts/backup.sh', import.meta.url).pathname], { env: {
+  execFileSync('bash', [fileURLToPath(new URL('../scripts/backup.sh', import.meta.url))], { env: {
     ...process.env, OUTBOUNDOS_DB_FILE: path.join(directory, 'fixture.db'), OUTBOUNDOS_BACKUP_DIR: backupDirectory,
   }, stdio: 'pipe' });
   const files = readdirSync(backupDirectory);
@@ -191,8 +192,8 @@ test('ambiguous human replies hold all duplicate contacts without assigning a co
 }));
 
 test('backup follows a relative DATABASE_URL and refuses a receipt snapshot whose originals are missing', () => fixture(async ({ db, directory }) => {
-  const script = new URL('../scripts/backup.sh', import.meta.url).pathname;
-  const schema = new URL('../prisma/', import.meta.url).pathname;
+  const script = fileURLToPath(new URL('../scripts/backup.sh', import.meta.url));
+  const schema = fileURLToPath(new URL('../prisma/', import.meta.url));
   const env = { ...process.env, OUTBOUNDOS_DB_FILE: '', DATABASE_URL: `file:${path.relative(schema, path.join(directory, 'fixture.db'))}`,
     OUTBOUNDOS_BACKUP_DIR: path.join(directory, 'relative-backup') };
   execFileSync('bash', [script], { env, stdio: 'pipe' });
