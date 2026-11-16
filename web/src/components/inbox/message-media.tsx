@@ -43,6 +43,7 @@ export function MessageMedia({
   }, [blob])
 
   const name = filename || 'Attachment'
+  const rasterImage = blob && ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(blob.type)
 
   if (isLoading) {
     return (
@@ -60,7 +61,7 @@ export function MessageMedia({
     return <p className={cn('mt-2 text-[11px] text-text-muted', className)}>File unavailable</p>
   }
 
-  if (mediaType === 'image') {
+  if (mediaType === 'image' && rasterImage) {
     return (
       <a href={url} target="_blank" rel="noreferrer" className={cn('mt-2 block', className)}>
         <img

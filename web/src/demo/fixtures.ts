@@ -9,7 +9,7 @@ import {
 import { ROLE_PAGE_CAPABILITIES } from '@/lib/role-shell'
 import { useAuthStore } from '@/stores/auth-store'
 import { notificationActions, useNotificationStore } from '@/stores/notification-store'
-import type { ActivityLog } from '@/api/types'
+import type { ActivityLog, Campaign } from '@/api/types'
 import { toast } from '@/stores/toast-store'
 import { handleInboxRequest } from './inbox'
 import { handleDemoMcpRequest } from './mcp'
@@ -1895,14 +1895,22 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
   ],
   [
     /\/campaigns\/\d+\/leads/,
-    { leads: FIXTURE_LEADS.slice(0, 5).map((lead, index) => ({ id: index + 1, leadId: lead.id, status: 'pending', variant: 'A', lead })), total: 5, page: 1, pages: 1 },
+    (url: string) => {
+      const id = Number(new URL(url, location.origin).pathname.match(/\/campaigns\/(\d+)\/leads/)?.[1])
+      return {
+        leads: FIXTURE_LEADS.slice(0, 5).map((lead, index) => ({ id: index + 1, leadId: lead.id, status: 'pending', variant: 'A', lead })),
+        total: 5,
+        page: 1,
+        pages: 1,
+        campaignUpdatedAt: findFixtureCampaign(id)?.updatedAt ?? null,
+      }
+    },
   ],
   [
     /\/campaigns\/\d+(?:\?|$)/,
     (url: string) => {
       const id = Number(new URL(url, location.origin).pathname.match(/\/campaigns\/(\d+)/)?.[1])
-      const data = FIXTURE_RESPONSES.find(([pattern]) => pattern.source === /\/campaigns/.source)?.[1] as { campaigns: Array<Record<string, unknown>> }
-      return data.campaigns.find(campaign => campaign.id === id) || {}
+      return findFixtureCampaign(id) || {}
     },
   ],
   [
@@ -1971,7 +1979,7 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
           name: 'Distributor follow-up',
           description: null,
           channel: 'email',
-          messageTemplate: '',
+          messageTemplate: 'Hi {{name}}, would you like the latest distributor catalogue?',
           emailSubject: 'Following up',
           emailTemplateId: 2,
           senderAccountId: 1,
@@ -1983,7 +1991,7 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
           variantBCount: 0,
           variantAReplies: 0,
           variantBReplies: 0,
-          totalLeads: 205,
+          totalLeads: 5,
           sentCount: 0,
           failedCount: 0,
           replyCount: 0,
@@ -2000,7 +2008,7 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
           name: 'New product launch',
           description: null,
           channel: 'whatsapp',
-          messageTemplate: '',
+          messageTemplate: 'Hi {{name}}, our new product catalogue is ready.',
           emailSubject: null,
           emailTemplateId: null,
           senderAccountId: null,
@@ -2183,6 +2191,56 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
     },
   ],
 ]
+
+function findFixtureCampaign(id: number) {
+  const list = FIXTURE_RESPONSES.find(([pattern]) => pattern.test('/api/campaigns'))?.[1] as {
+    campaigns: Campaign[]
+  }
+  return list.campaigns.find((campaign) => campaign.id === id)
+}
+
+function handleFixtureSchedule(id: number, method: string, body: RequestInit['body']) {
+  const json = (value: unknown, status = 200) =>
+    new Response(JSON.stringify(value), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  const campaign = findFixtureCampaign(id)
+  if (!campaign) return json({ error: 'Sample campaign not found.' }, 404)
+
+  if (method === 'DELETE') {
+    if (campaign.status !== 'scheduled') return json({ error: 'No active schedule.' }, 409)
+    campaign.status = 'draft'
+    campaign.scheduledAt = null
+    campaign.scheduleTimezone = null
+    campaign.scheduleError = null
+    campaign.updatedAt = new Date().toISOString()
+    return json({ status: campaign.status })
+  }
+
+  if (!['draft', 'scheduled'].includes(campaign.status) || campaign.totalLeads === 0) {
+    return json({ error: 'Choose a populated sample campaign that has yet to start.' }, 409)
+  }
+  const { scheduledAt, timezone, review } = JSON.parse(String(body ?? '{}')) as {
+    scheduledAt?: string
+    timezone?: string
+    review?: { updatedAt: string; recipientCount: number }
+  }
+  if (review?.updatedAt !== campaign.updatedAt || review.recipientCount !== campaign.totalLeads) {
+    return json({ error: 'The campaign or audience changed. Review the recipients and schedule again.' }, 409)
+  }
+  const launch = Date.parse(scheduledAt ?? '')
+  if (!Number.isFinite(launch) || launch <= Date.now() || !timezone) {
+    return json({ error: 'Choose a future launch time.' }, 400)
+  }
+  // The preview stores schedules in this page session. It has no sender or launch worker.
+  campaign.status = 'scheduled'
+  campaign.scheduledAt = new Date(launch).toISOString()
+  campaign.scheduleTimezone = timezone
+  campaign.scheduleError = null
+  campaign.updatedAt = new Date().toISOString()
+  return json(campaign)
+}
 
 /* Changes the demo cannot make. Everything else that writes is answered with
    this, so the page shows why nothing happened instead of pretending it
@@ -2375,6 +2433,22 @@ export function installFixtureFetch() {
     if (inbox) return inbox
 
     const method = (init?.method || 'GET').toUpperCase()
+    const pathname = new URL(url, location.origin).pathname
+    if (pathname === '/api/campaigns/preview-leads' && method === 'POST') {
+      const { channel = 'whatsapp' } = JSON.parse(String(init?.body ?? '{}'))
+      const sample = FIXTURE_LEADS.filter(lead => lead.status === 'new').slice(0, 5)
+      const exclusionCounts = channel === 'both'
+        ? { 'email:lead_paused': 2, 'whatsapp:lead_paused': 2 }
+        : { [`${channel}:lead_paused`]: 2, [`${channel}:customer_replied`]: 1 }
+      const excludedCount = channel === 'both' ? 2 : 3
+      return Response.json({ count: sample.length, sample, matchedCount: sample.length + excludedCount, excludedCount, exclusionCounts })
+    }
+    const scheduleId = pathname.match(
+      /^\/api\/campaigns\/(\d+)\/schedule$/,
+    )?.[1]
+    if (scheduleId && (method === 'POST' || method === 'DELETE')) {
+      return handleFixtureSchedule(Number(scheduleId), method, init?.body)
+    }
     if (method !== 'GET' && method !== 'HEAD') {
       const quiet = QUIET_WRITES.some((pattern) => pattern.test(url.split('?')[0]))
       // Said here rather than left to each page, because some pages save

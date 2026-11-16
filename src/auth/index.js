@@ -24,7 +24,7 @@ const impl = AUTH_PROVIDER === 'clerk'
 
 export const authMiddleware = AUTH_PROVIDER === 'clerk' ? impl.clerkMiddleware : impl.authMiddleware;
 export const requireRole = impl.requireRole;
-export const verifyQueryToken = impl.verifyQueryToken;
+export const verifyStreamSession = impl.verifyStreamSession;
 export const currentUserPayload = impl.currentUserPayload;
 /** Clerk's backend client, or null on local auth. */
 export const clerkClient = AUTH_PROVIDER === 'clerk' ? impl.clerkClient : null;

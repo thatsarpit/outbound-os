@@ -4,7 +4,39 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { metaInboundMedia, mediaKind, baseMime, cloudApiType } from '../src/services/whatsappMedia.js';
+import { baseMime, cloudApiType, downloadInboundMedia, MAX_MEDIA_BYTES, mediaKind, metaInboundMedia } from '../src/services/whatsappMedia.js';
+import whatsappCloudApi from '../src/services/whatsappCloudApi.js';
+
+test('Meta media credentials stay on approved origins and oversized or active payloads are rejected', async t => {
+  t.mock.method(whatsappCloudApi, 'getTransport', async () => ({ provider: 'meta', token: 'fixture-only' }));
+  const media = { id: 'fixture', type: 'image', mimeType: 'image/jpeg' };
+  const requests = [];
+  let destination = 'https://untrusted.example.test/resource';
+  let mime = 'image/jpeg';
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    requests.push({ origin: new URL(url).origin, redirect: options.redirect });
+    if (requests.length === 1) return Response.json({ url: destination, mime_type: mime });
+    return new Response(new ReadableStream({
+      start(controller) {
+        const chunk = new Uint8Array(MAX_MEDIA_BYTES / 2);
+        controller.enqueue(chunk);
+        controller.enqueue(chunk);
+        controller.enqueue(new Uint8Array(1));
+        controller.close();
+      },
+    }));
+  });
+  await assert.rejects(downloadInboundMedia(media, 1), /untrusted download URL/);
+  assert.equal(requests.length, 1);
+  destination = 'https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=fixture';
+  mime = 'image/svg+xml';
+  requests.length = 0;
+  await assert.rejects(downloadInboundMedia(media, 1), /Unsupported Meta media content type/);
+  assert.deepEqual(requests[1], { origin: 'https://lookaside.fbsbx.com', redirect: 'error' });
+  mime = 'image/jpeg';
+  requests.length = 0;
+  await assert.rejects(downloadInboundMedia(media, 1), { code: 'too_large' });
+});
 
 describe('Media in Meta webhooks', () => {
   test('a voice note', () => {

@@ -92,6 +92,29 @@ test('schedule requires a reviewed audience and cancel returns to editable draft
   await assert.rejects(scheduler.cancel(campaign.id), /Schedule changed/);
 }));
 
+test('schedule rejects changed drafts and removed recipients after a review', async () => fixture(async ({ db, engine, createLead, createCampaign }) => {
+  const now = new Date();
+  const scheduler = new CampaignScheduler({ db, engine, now: () => now, hours: () => ({ start: 0, end: 24, timezone: 'UTC' }) });
+  const first = await createLead(1);
+  await createLead(2);
+  const campaign = await createCampaign();
+  await engine.populateCampaign(campaign.id);
+  const before = await db.campaign.findUnique({ where: { id: campaign.id } });
+  const after = await db.campaign.update({ where: { id: campaign.id }, data: { messageTemplate: 'Fixture edit', updatedAt: new Date(+before.updatedAt + 1) } });
+  const input = { scheduledAt: new Date(+now + 3600000).toISOString(), timezone: 'UTC' };
+  await assert.rejects(scheduler.schedule(campaign.id, {
+    ...input, review: { updatedAt: before.updatedAt.toISOString(), recipientCount: 2 },
+  }), { statusCode: 409 });
+  await db.campaignLead.deleteMany({ where: { campaignId: campaign.id, leadId: first.id } });
+  await assert.rejects(scheduler.schedule(campaign.id, {
+    ...input, review: { updatedAt: after.updatedAt.toISOString(), recipientCount: 2 },
+  }), { statusCode: 409 });
+  const scheduled = await scheduler.schedule(campaign.id, {
+    ...input, review: { updatedAt: after.updatedAt.toISOString(), recipientCount: 1 },
+  });
+  assert.equal(scheduled.status, 'scheduled');
+}));
+
 test('two due workers claim a scheduled campaign only once; stale reschedule cannot launch', async () => fixture(async ({ db, engine, createLead, createCampaign }) => {
   const now = new Date();
   const scheduler = new CampaignScheduler({ db, engine, now: () => new Date(+now - 3600000), hours: () => ({ start: 0, end: 24, timezone: 'UTC' }) });
@@ -211,7 +234,15 @@ test('audience preview and population include email-only contacts and remain ide
   await createLead(4, { tags: 'uk', emailOptOut: true });
   await createLead(5, { tags: 'UK', status: 'paused' });
   const filter = { tags: ' UK ' };
-  assert.deepEqual((await engine.getMatchingLeads(filter, null, 'email')).map((lead) => lead.id), [emailOnly.id]);
+  const preview = await engine.getAudience(filter, null, 'email');
+  assert.deepEqual(preview.leads.map((lead) => lead.id), [emailOnly.id]);
+  assert.equal(preview.matchedCount, 3);
+  assert.equal(preview.excludedCount, 2);
+  assert.deepEqual(preview.exclusionCounts, { 'email:email_opted_out': 1, 'email:lead_paused': 1 });
+  const both = await engine.getAudience(filter, null, 'both');
+  assert.equal(both.leads.length, 2);
+  assert.equal(both.excludedCount, 1);
+  assert.deepEqual(both.exclusionCounts, { 'email:lead_paused': 1, 'whatsapp:lead_paused': 1 });
   assert.equal((await engine.getMatchingLeads(filter, null, 'whatsapp')).length, 1, 'email opt-out alone does not suppress WhatsApp');
   const campaign = await createCampaign({ targetFilter: filter });
   assert.deepEqual(await engine.populateCampaign(campaign.id), { added: 1, total: 1 });

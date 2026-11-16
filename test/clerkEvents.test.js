@@ -7,7 +7,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-test('the real Clerk API route authenticates EventSource query sessions without granting query auth elsewhere', async t => {
+test('the Clerk event stream accepts bearer sessions and rejects query credentials', async t => {
   const directory = await mkdtemp(path.join(tmpdir(), 'outbound-clerk-events-'));
   const originalDirectory = process.cwd();
   process.chdir(directory);
@@ -47,7 +47,7 @@ test('the real Clerk API route authenticates EventSource query sessions without 
   const { default: prisma } = await import('../src/utils/prismaClient.js');
   const server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
-  const request = (route, { method = 'GET', bearer } = {}) => new Promise((resolve, reject) => {
+  const request = (route, { method = 'GET', bearer, waitForEnd = false } = {}) => new Promise((resolve, reject) => {
     const call = http.request({
       hostname: '127.0.0.1', port: server.address().port, path: route, method,
       headers: { Accept: 'text/event-stream', ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) },
@@ -55,7 +55,7 @@ test('the real Clerk API route authenticates EventSource query sessions without 
       let body = '';
       response.on('data', chunk => {
         body += chunk;
-        if (response.headers['content-type']?.startsWith('text/event-stream') && body.includes('\n\n')) {
+        if (!waitForEnd && response.headers['content-type']?.startsWith('text/event-stream') && body.includes('\n\n')) {
           resolve({ status: response.statusCode, headers: response.headers, body });
           response.destroy();
         }
@@ -66,12 +66,13 @@ test('the real Clerk API route authenticates EventSource query sessions without 
     call.on('error', reject);
     call.end();
   });
-  const stream = value => request(`/api/events?token=${encodeURIComponent(value)}`);
+  const stream = bearer => request('/api/events', { bearer });
   try {
     const owner = token();
     const allowed = await stream(owner);
-    assert.equal(allowed.status, 200, 'query sessions reach SSE without the header-only API guard rejecting them first');
+    assert.equal(allowed.status, 200);
     assert.match(allowed.headers['content-type'], /^text\/event-stream/);
+    assert.equal(allowed.headers['cache-control'], 'no-store');
     assert.equal(JSON.parse(allowed.body.slice(6)).type, 'connected');
     for (const role of ['member', 'viewer']) {
       assert.equal((await stream(token({ o: { id: config.CLERK_ORGANIZATION_ID, rol: role } }))).status, 200);
@@ -84,8 +85,8 @@ test('the real Clerk API route authenticates EventSource query sessions without 
       token({ o: null }), token({ sts: 'pending' }),
     ]) assert.equal((await stream(rejected)).status, 401);
     assert.equal((await request('/api/events')).status, 401);
-    for (const query of [`token=${encodeURIComponent(owner)}&token=${encodeURIComponent(owner)}`, `token[]=${encodeURIComponent(owner)}`]) {
-      assert.equal((await request(`/api/events?${query}`)).status, 401, 'ambiguous query parameters are not scalar credentials');
+    for (const query of [`token=${encodeURIComponent(owner)}`, `token=${encodeURIComponent(owner)}&token=${encodeURIComponent(owner)}`, `token[]=${encodeURIComponent(owner)}`]) {
+      assert.equal((await request(`/api/events?${query}`)).status, 401, 'URLs cannot authenticate a stream');
     }
     assert.equal((await request(`/api/events?token=${encodeURIComponent(owner)}`, { method: 'HEAD' })).status, 405);
     assert.equal((await request(`/api/events?token=${encodeURIComponent(owner)}`, { method: 'POST' })).status, 401);
@@ -93,6 +94,10 @@ test('the real Clerk API route authenticates EventSource query sessions without 
       assert.equal((await request(`${route}?token=${encodeURIComponent(owner)}`)).status, 401);
     }
     assert.equal((await request('/api/auth/me', { bearer: owner })).status, 200, 'ordinary authenticated API requests retain their header contract');
+    const expiring = token({ exp: Math.floor(Date.now() / 1000) + 3 });
+    const ended = await request('/api/events', { bearer: expiring, waitForEnd: true });
+    assert.equal(ended.status, 200, 'stream opens before the session expires and closes at expiry');
+    assert.equal(JSON.parse(ended.body.slice(6)).type, 'connected');
     const pinned = process.env.CLERK_ORGANIZATION_ID;
     delete process.env.CLERK_ORGANIZATION_ID;
     assert.equal((await stream(owner)).status, 401, 'production identities require the workspace pin');

@@ -544,7 +544,7 @@ export default function CampaignsPage() {
         </nav>
       )}
 
-      {showCreate && <CreateCampaignModal onClose={() => setShowCreate(false)} />}
+      {showCreate && <CreateCampaignModal onClose={() => setShowCreate(false)} onCreated={id => setDetailId(id)} />}
       {detailId && detailResult.isError && (
         <ErrorState
           title="Could not open this campaign"

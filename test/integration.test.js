@@ -262,6 +262,37 @@ describe('POST /webhook/imessage', () => {
   });
 });
 
+test('iMessage bridge updates are admin-only and require a credential for a new origin', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const users = await Promise.all(['manager', 'admin'].map(role => prisma.user.create({
+    data: { name: 'Bridge Fixture', email: `bridge-${role}@example.test`, passwordHash: 'fixture-only', role },
+  })));
+  const account = await prisma.iMessageAccount.create({
+    data: { name: 'Bridge Fixture', serverUrl: 'https://bridge.example.test', password: 'fixture-only' },
+  });
+  const headers = index => ({
+    Authorization: `Bearer ${signToken(users[index])}`,
+    'X-Forwarded-For': `198.51.100.${210 + index}`,
+  });
+  const path = `/api/imessage/accounts/${account.id}`;
+  try {
+    const body = { serverUrl: 'https://other-bridge.example.test' };
+    assert.equal((await request('POST', '/api/imessage/accounts', { headers: headers(0), body })).status, 403);
+    assert.equal((await request('PUT', path, { headers: headers(0), body })).status, 403);
+    assert.equal((await request('PUT', path, { headers: headers(1), body })).status, 400);
+    assert.equal((await prisma.iMessageAccount.findUnique({ where: { id: account.id } })).serverUrl, account.serverUrl);
+    assert.equal((await request('PUT', path, { headers: headers(1), body: { serverUrl: account.serverUrl + '/' } })).status, 200);
+    const updated = await request('PUT', path, { headers: headers(1), body: { ...body, password: 'new-fixture-password' } });
+    assert.equal(updated.status, 200);
+    assert.equal(updated.body.serverUrl, body.serverUrl);
+    assert.equal(Object.hasOwn(updated.body, 'password'), false);
+  } finally {
+    await prisma.iMessageAccount.delete({ where: { id: account.id } });
+    await prisma.user.deleteMany({ where: { id: { in: users.map(user => user.id) } } });
+  }
+});
+
 describe('POST /api/leads', () => {
   test('creates a lead with required fields', async () => {
     const res = await request('POST', '/api/leads', {
@@ -1194,19 +1225,22 @@ describe('Built-in email and password sign-in', () => {
     assert.equal(relogin.status, 200);
   });
 
-  test('the live-updates stream accepts the token in its URL, and only that route does', async () => {
-    const ok = await request('POST', '/api/auth/login', { body: { email, password: 'a much longer new password' } });
-    const token = encodeURIComponent(ok.body.token);
+  test('the live-updates stream accepts a session header and rejects URL credentials', async () => {
+    const headers = { 'X-Forwarded-For': '198.51.100.212' };
+    const ok = await request('POST', '/api/auth/login', { headers, body: { email, password: 'a much longer new password' } });
+    const token = ok.body.token;
     const stream = await new Promise((resolve, reject) => {
-      const req = http.get(new URL(`/api/events?token=${token}`, baseUrl), (res) => {
+      const req = http.get(new URL('/api/events', baseUrl), { headers: { ...headers, Authorization: `Bearer ${token}` } }, (res) => {
         resolve(res.statusCode);
         res.destroy();
       });
       req.on('error', reject);
     });
     assert.equal(stream, 200);
-    const elsewhere = await request('GET', `/api/leads?token=${token}`);
-    assert.equal(elsewhere.status, 401);
+    for (const path of ['/api/events', '/api/leads']) {
+      const query = await request('GET', `${path}?token=${encodeURIComponent(token)}`, { headers });
+      assert.equal(query.status, 401);
+    }
   });
 
   test('rejects requests with no session', async () => {
@@ -1292,6 +1326,49 @@ describe('Workspace profile and onboarding', () => {
     });
     assert.equal(res.status, 403);
     assert.match(res.body.error, /trusted origin/);
+  });
+  test('an outbound webhook test checks one destination and does not follow a redirect', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const calls = [];
+    const receiver = http.createServer((req, res) => {
+      calls.push(req.url);
+      req.resume();
+      if (req.url === '/redirect') res.writeHead(307, { Location: '/unexpected' });
+      else res.writeHead(204);
+      res.end();
+    });
+    await new Promise(resolve => receiver.listen(0, '127.0.0.1', resolve));
+    const origin = `http://127.0.0.1:${receiver.address().port}`;
+    const previous = process.env.OUTBOUND_WEBHOOK_TRUSTED_ORIGINS;
+    delete process.env.OUTBOUND_WEBHOOK_TRUSTED_ORIGINS;
+    const headers = { ...authHeader(), 'X-Forwarded-For': '198.51.100.227' };
+    const root = '/api/webhooks/subscriptions';
+    try {
+      const blocked = await request('POST', root, { headers, body: { name: 'Blocked fixture', url: origin + '/unexpected' } });
+      assert.equal(blocked.status, 400);
+      const legacy = await db.webhookSubscription.create({ data: { name: 'Legacy fixture', url: origin + '/unexpected', enabled: false } });
+      const blockedTest = await request('POST', `${root}/${legacy.id}/test`, { headers });
+      assert.equal(blockedTest.status, 422);
+      assert.deepEqual(calls, []);
+      process.env.OUTBOUND_WEBHOOK_TRUSTED_ORIGINS = origin;
+      const other = await request('POST', root, { headers, body: { name: 'Other fixture', url: origin + '/other' } });
+      const selected = await request('POST', root, { headers, body: { name: 'Selected fixture', url: origin + '/redirect', events: ['lead.replied'] } });
+      assert.equal(other.status, 200);
+      assert.equal(selected.status, 200);
+      const testId = `${root}/${selected.body.id}`;
+      const failure = await request('POST', `${testId}/test`, { headers });
+      assert.equal(failure.status, 422);
+      assert.equal(failure.body.status, 307);
+      assert.equal((await request('PATCH', testId, { headers, body: { url: origin + '/selected' } })).status, 200);
+      const success = await request('POST', `${testId}/test`, { headers });
+      assert.equal(success.status, 200);
+      assert.deepEqual(calls, ['/redirect', '/selected']);
+    } finally {
+      if (previous === undefined) delete process.env.OUTBOUND_WEBHOOK_TRUSTED_ORIGINS;
+      else process.env.OUTBOUND_WEBHOOK_TRUSTED_ORIGINS = previous;
+      await db.webhookSubscription.deleteMany({ where: { url: { startsWith: origin } } });
+      await new Promise(resolve => receiver.close(resolve));
+    }
   });
   test('a new workspace reports what is left to set up', async () => {
     const res = await request('GET', '/api/onboarding/status', { headers: authHeader() });
@@ -3243,6 +3320,8 @@ describe('Audit workflow repairs', () => {
       const preview = await request('POST', '/api/campaigns/preview-leads', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.211' }, body: { filter: { status: 'new' }, channel: 'whatsapp' } });
       assert.equal(preview.status, 200);
       assert.equal(typeof preview.body.count, 'number');
+      assert.equal(preview.body.matchedCount, preview.body.count + preview.body.excludedCount);
+      assert.equal(typeof preview.body.exclusionCounts, 'object');
     } finally {
       await db.lead.deleteMany({ where: { name } });
       await db.importBatch.deleteMany({ where: { filename: 'audit-fixture.csv' } });
@@ -3617,6 +3696,7 @@ describe('YCloud WhatsApp provider', () => {
     const old = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Old followup', status: 'queued' } });
     const body = { type: 'whatsapp.inbound_message.received', whatsappInboundMessage: { id: 'yc-retry-media', wamid: 'wamid.yc-retry-media', from: '+15550100005', to: phone, wabaId: waba, sendTime: new Date().toISOString(), type: 'image', image: { id: 'retry', mime_type: 'image/png', link: `${process.env.YCLOUD_API_BASE}/whatsapp/media/download/retry?sig=fixture` } } };
     const previousFetch = global.fetch;
+    const { MEDIA_DIR } = await import('../src/services/whatsappMedia.js');
     let downloads = 0;
     global.fetch = async () => ++downloads === 1 ? new Response('', { status: 503 }) : new Response('fixture-image', { headers: { 'Content-Type': 'image/png' } });
     try {
@@ -3625,6 +3705,16 @@ describe('YCloud WhatsApp provider', () => {
       const inbound = await prisma.message.findFirst({ where: { waMessageId: 'wamid.yc-retry-media' } });
       assert.equal(inbound.providerStatusReason, 'media_pending_retry');
       const later = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'New reminder', status: 'queued' } });
+      const existingFiles = fs.readdirSync(MEDIA_DIR).sort();
+      await prisma.$executeRaw`CREATE TRIGGER fixture_block_attachment
+        BEFORE UPDATE OF mediaUrl ON Message WHEN NEW.mediaUrl IS NOT NULL
+        BEGIN SELECT RAISE(ABORT, 'Synthetic database write failure'); END`;
+      try {
+        assert.equal((await postEvent(body)).status, 503);
+        assert.deepEqual(fs.readdirSync(MEDIA_DIR).sort(), existingFiles, 'a failed database update discards its downloaded file');
+      } finally {
+        await prisma.$executeRaw`DROP TRIGGER fixture_block_attachment`;
+      }
       assert.equal((await postEvent(body)).status, 200);
       const completed = await prisma.message.findUnique({ where: { id: inbound.id } });
       assert.ok(completed.mediaUrl);
@@ -3632,6 +3722,50 @@ describe('YCloud WhatsApp provider', () => {
       assert.equal((await prisma.message.findUnique({ where: { id: later.id } })).status, 'queued');
       fs.unlinkSync(path.join(__dirname, '..', completed.mediaUrl));
     } finally { global.fetch = previousFetch; }
+  });
+
+  test('concurrent signed replays keep one attached file and remove losing downloads', async () => {
+    const { MEDIA_DIR } = await import('../src/services/whatsappMedia.js');
+    const lead = await prisma.lead.create({ data: {
+      name: 'Concurrent attachment fixture', mobile: '15550100007', status: 'replied',
+    } });
+    const messageId = 'wamid.yc-media-race';
+    const inbound = await prisma.message.create({ data: {
+      leadId: lead.id, direction: 'inbound', channel: 'whatsapp', status: 'received',
+      waAccount: account.id, waMessageId: messageId, idempotencyKey: `ycloud-inbound:${messageId}`,
+      content: 'Concurrent attachment fixture',
+    } });
+    const event = { type: 'whatsapp.inbound_message.received', whatsappInboundMessage: {
+      wamid: messageId, from: '+15550100007', to: phone, wabaId: waba,
+      sendTime: new Date().toISOString(), type: 'image', image: {
+        id: 'fixture-race', mime_type: 'image/png',
+        link: `${process.env.YCLOUD_API_BASE}/whatsapp/media/download/fixture-race?sig=fixture`,
+      },
+    } };
+    const initialFiles = new Set(fs.readdirSync(MEDIA_DIR));
+    const newFiles = () => fs.readdirSync(MEDIA_DIR).filter(file => !initialFiles.has(file));
+    const previousFetch = global.fetch;
+    const gate = Promise.withResolvers();
+    const timeout = setTimeout(gate.resolve, 5_000);
+    let downloads = 0;
+    global.fetch = async () => {
+      if (++downloads === 2) gate.resolve();
+      await gate.promise;
+      return new Response('Concurrent synthetic attachment');
+    };
+    try {
+      const results = await Promise.all([postEvent(event), postEvent(event)]);
+      assert.equal(downloads, 2, 'both requests overlapped while the attachment was missing');
+      assert.deepEqual(results.map(result => result.status), [200, 200]);
+      const saved = await prisma.message.findUnique({ where: { id: inbound.id } });
+      assert.ok(saved.mediaUrl);
+      assert.equal(saved.providerStatusReason, null);
+      assert.deepEqual(newFiles(), [path.basename(saved.mediaUrl)]);
+    } finally {
+      clearTimeout(timeout);
+      global.fetch = previousFetch;
+      for (const file of newFiles()) fs.unlinkSync(path.join(MEDIA_DIR, file));
+    }
   });
 
   test('retains early receipts, deduplicates replays and never downgrades read delivery', async () => {

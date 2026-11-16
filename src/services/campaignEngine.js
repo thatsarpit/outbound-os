@@ -49,8 +49,16 @@ export class CampaignEngine {
     return campaign;
   }
 
-  async getMatchingLeads(filterJson, poolId = null, channel = 'whatsapp') {
-    const filter = typeof filterJson === 'string' ? JSON.parse(filterJson) : (filterJson || {});
+  async getAudience(filterJson, poolId = null, channel = 'whatsapp') {
+    let filter = filterJson ?? {};
+    if (typeof filter === 'string') {
+      try { filter = JSON.parse(filter); }
+      catch { throw Object.assign(new Error('Target filter must be valid JSON.'), { statusCode: 400 }); }
+    }
+    filter ??= {};
+    if (typeof filter !== 'object' || Array.isArray(filter)) {
+      throw Object.assign(new Error('Target filter must be a JSON object.'), { statusCode: 400 });
+    }
     const channels = campaignChannels(channel);
     const where = {};
     if (poolId) where.poolId = poolId;
@@ -63,11 +71,35 @@ export class CampaignEngine {
     }
     if (filter.product) where.product = { contains: filter.product };
     if (filter.country) where.country = { contains: filter.country };
-    const leads = await this.db.lead.findMany({ where, orderBy: [{ score: 'desc' }, { id: 'asc' }] });
-    const ready = channels.includes('email') ? await this.verification.readyEmails(leads.map(lead => lead.email)) : null;
+    const candidates = await this.db.lead.findMany({ where, orderBy: [{ score: 'desc' }, { id: 'asc' }] });
     // A DB substring predicate is not a tag match: "uk" must not select "bulk".
-    return leads.filter((lead) => hasAllLeadTags(lead.tags, filter.tags)
-      && channels.some((item) => campaignChannelEligibility(lead, item).eligible && (item !== 'email' || !ready || ready.has(emailIdentity(lead.email)))));
+    const matching = candidates.filter(lead => hasAllLeadTags(lead.tags, filter.tags));
+    const ready = channels.includes('email') ? await this.verification.readyEmails(matching.map(lead => lead.email)) : null;
+    const leads = [], excludedSample = [], exclusionCounts = {};
+    for (const lead of matching) {
+      const reasons = [];
+      for (const item of channels) {
+        const decision = campaignChannelEligibility(lead, item);
+        if (!decision.eligible) reasons.push({ channel: item, reason: decision.reason });
+        else if (item === 'email' && ready && !ready.has(emailIdentity(lead.email))) {
+          reasons.push({ channel: item, reason: 'email_verification_required' });
+        }
+      }
+      if (reasons.length < channels.length) {
+        leads.push(lead);
+        continue;
+      }
+      for (const { channel: item, reason } of reasons) {
+        const key = `${item}:${reason}`;
+        exclusionCounts[key] = (exclusionCounts[key] || 0) + 1;
+      }
+      if (excludedSample.length < 10) excludedSample.push({ id: lead.id, reasons });
+    }
+    return { leads, matchedCount: matching.length, excludedCount: matching.length - leads.length, exclusionCounts, excludedSample };
+  }
+
+  async getMatchingLeads(filterJson, poolId = null, channel = 'whatsapp') {
+    return (await this.getAudience(filterJson, poolId, channel)).leads;
   }
 
   async populateCampaign(campaignId) {

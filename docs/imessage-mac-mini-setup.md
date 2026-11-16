@@ -64,7 +64,7 @@ sudo pmset -c sleep 0 displaysleep 10 disksleep 0
 ## Step 6 — Set Up a Fixed Cloudflare Tunnel URL
 
 Instead of a random URL that changes, we'll give it a permanent subdomain:
-`imessage.outboundos.space`
+`bluebubbles.example.com`
 
 ### Install cloudflared on Mac Mini
 
@@ -100,7 +100,7 @@ tunnel: TUNNEL_ID
 credentials-file: /Users/YOUR_USERNAME/.cloudflared/TUNNEL_ID.json
 
 ingress:
-  - hostname: imessage.outboundos.space
+  - hostname: bluebubbles.example.com
     service: http://localhost:1234
     # 1234 is the default BlueBubbles server port — check yours in BB settings
   - service: http_status:404
@@ -109,7 +109,7 @@ ingress:
 ### Add DNS record in Cloudflare
 
 ```bash
-cloudflared tunnel route dns imessage-mac imessage.outboundos.space
+cloudflared tunnel route dns imessage-mac bluebubbles.example.com
 ```
 
 ### Run the tunnel (test first)
@@ -118,7 +118,7 @@ cloudflared tunnel route dns imessage-mac imessage.outboundos.space
 cloudflared tunnel --config ~/.cloudflared/imessage.yml run imessage-mac
 ```
 
-Visit `https://imessage.outboundos.space/api/v1/ping` — you should see a JSON response.
+Visit `https://bluebubbles.example.com/api/v1/ping` — you should see a JSON response.
 
 ### Run as a background service (auto-start on boot)
 
@@ -137,7 +137,7 @@ sudo launchctl start com.cloudflare.cloudflared
 3. Click **"Add Account"**
 4. Fill in:
    - **Name**: `Mac Mini`
-   - **Server URL**: `https://imessage.outboundos.space`
+   - **Server URL**: `https://bluebubbles.example.com`
    - **Password**: (the one you set in BlueBubbles)
    - **Apple ID**: (your Apple ID email, for reference)
 5. Click **Save** → it will ping the server immediately and show **"Online"** ✓
@@ -148,7 +148,7 @@ sudo launchctl start com.cloudflare.cloudflared
 
 ```bash
 # From your VPS or locally — should return {"status":"ok",...}
-curl https://imessage.outboundos.space/api/v1/ping \
+curl https://bluebubbles.example.com/api/v1/ping \
   -H "Authorization: Basic $(echo -n 'YOUR_BLUEBUBBLES_PASSWORD' | base64)"
 ```
 

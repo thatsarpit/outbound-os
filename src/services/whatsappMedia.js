@@ -100,14 +100,23 @@ function safeName(name, fallbackExt) {
   return `file${fallbackExt}`;
 }
 
-async function fetchWithTimeout(url, options = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
+function fetchWithTimeout(url, options = {}) {
+  return fetch(url, { ...options, redirect: 'error', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+}
+
+async function readLimitedMedia(response, tooLarge) {
+  if (Number(response.headers.get('content-length')) > MAX_MEDIA_BYTES) {
+    if (response.body) await response.body.cancel().catch(() => {});
+    throw tooLarge();
   }
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of response.body) {
+    size += chunk.length;
+    if (size > MAX_MEDIA_BYTES) throw tooLarge();
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks, size);
 }
 
 async function metaTransport(accountId) {
@@ -140,20 +149,28 @@ export async function downloadInboundMedia(media, accountId) {
     throw error;
   }
 
-  const fileRes = await fetchWithTimeout(info.url, { headers: auth });
-  if (!fileRes.ok) throw new Error(`Meta media download failed (HTTP ${fileRes.status})`);
-  const buffer = Buffer.from(await fileRes.arrayBuffer());
-  if (buffer.length > MAX_MEDIA_BYTES) {
-    const error = new Error('File is larger than the limit');
-    error.code = 'too_large';
-    throw error;
+  let download;
+  try { download = new URL(info.url); } catch {}
+  // Send the bearer only to Meta's media host or the configured Graph origin, which already receives it.
+  if (!download || download.username || download.password
+    || !['https://lookaside.fbsbx.com', new URL(graphBase()).origin].includes(download.origin)) {
+    throw new Error('Meta media lookup returned an untrusted download URL.');
   }
-
-  const mime = baseMime(info.mime_type || media.mimeType);
-  const ext = EXTENSIONS[mime] || path.extname(media.filename || '') || '';
+  const fileRes = await fetchWithTimeout(download, { headers: auth });
+  if (!fileRes.ok) throw new Error(`Meta media download failed (HTTP ${fileRes.status})`);
+  const declaredMime = baseMime(info.mime_type || media.mimeType);
+  const mime = declaredMime === 'application/octet-stream'
+    ? baseMime(fileRes.headers.get('content-type')) : declaredMime;
+  if (!Object.hasOwn(EXTENSIONS, mime)) {
+    if (fileRes.body) await fileRes.body.cancel().catch(() => {});
+    throw new Error('Unsupported Meta media content type.');
+  }
+  const buffer = await readLimitedMedia(fileRes,
+    () => Object.assign(new Error('File is larger than the limit'), { code: 'too_large' }));
+  const ext = EXTENSIONS[mime];
   const storedName = `${randomUUID()}${ext}`;
   fs.mkdirSync(MEDIA_DIR, { recursive: true });
-  await fs.promises.writeFile(path.join(MEDIA_DIR, storedName), buffer);
+  await fs.promises.writeFile(path.join(MEDIA_DIR, storedName), buffer, { flag: 'wx', mode: 0o600 });
 
   const kind = media.type === 'sticker' ? 'image' : mediaKind(mime);
   const fallback = media.voice ? `voice-message${ext}` : `${kind}${ext}`;
@@ -236,18 +253,8 @@ export async function downloadYCloudInboundMedia(message, accountId = null) {
   const headers = accountId ? (await whatsappCloudApi.getTransport(accountId)).headers : {};
   const response = await fetch(download, { headers, redirect: 'error', signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`YCloud media download failed (HTTP ${response.status}).`);
-  if (Number(response.headers.get('content-length')) > MAX_MEDIA_BYTES) {
-    if (response.body) await response.body.cancel().catch(() => {});
-    throw ycloudMediaError('media_too_large', 'YCloud media exceeds the file limit.');
-  }
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of response.body) {
-    size += chunk.length;
-    if (size > MAX_MEDIA_BYTES) throw ycloudMediaError('media_too_large', 'YCloud media exceeds the file limit.');
-    chunks.push(Buffer.from(chunk));
-  }
-  const buffer = Buffer.concat(chunks);
+  const buffer = await readLimitedMedia(response,
+    () => ycloudMediaError('media_too_large', 'YCloud media exceeds the file limit.'));
   const digest = message[message.type]?.sha256;
   if (digest && createHash('sha256').update(buffer).digest('base64') !== digest) {
     throw ycloudMediaError('media_checksum_mismatch', 'YCloud media checksum did not match the signed webhook.');
@@ -262,7 +269,7 @@ export async function downloadYCloudInboundMedia(message, accountId = null) {
   await fs.promises.writeFile(path.join(MEDIA_DIR, name), buffer, { flag: 'wx', mode: 0o600 });
   const kind = media.type === 'sticker' ? 'image' : mediaKind(mime);
   return { mediaUrl: `data/media/${name}`, mediaType: kind,
-    mediaFilename: safeName(media.filename || `${kind}${ext}`, ext), size };
+    mediaFilename: safeName(media.filename || `${kind}${ext}`, ext), size: buffer.length };
 }
 
 export default { metaInboundMedia, downloadInboundMedia, sendMediaFile, mediaKind, baseMime };

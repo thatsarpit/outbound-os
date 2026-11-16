@@ -125,7 +125,13 @@ export function registerCampaignTools(server) {
 
   server.tool('schedule_campaign',
     'Authorize a reviewed populated draft to send automatically at a future absolute time, inside workspace sending hours. Does not populate or expand the audience. Missed launches pause for review.',
-    { campaign_id: CampaignId, scheduledAt: z.string().describe('Future ISO timestamp including Z or UTC offset'), timezone: z.string().describe('IANA time zone used to display the scheduled instant') },
+    {
+      campaign_id: CampaignId,
+      scheduledAt: z.string().describe('Future ISO timestamp including Z or UTC offset'),
+      timezone: z.string().describe('IANA time zone used to display the scheduled instant'),
+      review: z.object({ updatedAt: z.string(), recipientCount: z.number().int().positive() }).optional()
+        .describe('Supply the campaignUpdatedAt and total from campaign_leads to reject changes since review.'),
+    },
     async ({ campaign_id, ...body }) => {
       try { const { data } = await post(`/api/campaigns/${campaign_id}/schedule`, body); return ok(data); }
       catch (e) { return err(e.message); }

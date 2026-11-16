@@ -5,7 +5,7 @@ import { BarChart3, Mail, X } from 'lucide-react'
 import { campaignsApi } from '@/api/endpoints/campaigns'
 import type { Campaign } from '@/api/types'
 import { Button, DrawerShell, LoadingState } from '@/components/ui'
-import { cn, formatCount, formatRelativeTime } from '@/lib/utils'
+import { cn, formatCount, formatDate, formatRelativeTime } from '@/lib/utils'
 import { toast } from '@/stores/toast-store'
 import { CampaignSchedulePanel } from './campaign-schedule-panel'
 import {
@@ -33,7 +33,7 @@ export function CampaignDetailDrawer({
     isError,
     refetch,
   } = useQuery({
-    queryKey: ['campaign-leads', campaign.id, page],
+    queryKey: ['campaign-leads', campaign.id, campaign.updatedAt, page],
     queryFn: async () => {
       const res = await campaignsApi.getLeads(campaign.id, { page, limit: 50 })
       if (!res || !Array.isArray(res.leads)) throw new Error('Could not load campaign recipients.')
@@ -93,7 +93,10 @@ export function CampaignDetailDrawer({
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto p-5 sm:p-6">
-          <CampaignSchedulePanel campaign={campaign} />
+          <CampaignSchedulePanel
+            campaign={campaign}
+            reviewedRecipientCount={!isError && response?.campaignUpdatedAt === campaign.updatedAt ? response.total : null}
+          />
           <div className="grid grid-cols-3 gap-px overflow-hidden rounded-md border border-border bg-border">
             <DrawerStat label="Audience" value={formatCount(totalLeads)} />
             <DrawerStat label="Accepted" value={formatCount(sentCount)} />
@@ -132,10 +135,12 @@ export function CampaignDetailDrawer({
 
           <Panel title="Details">
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
-              <dt className="text-text-muted">Scheduled</dt>
-              <dd className="text-text-primary">
-                {campaign.scheduledAt ? formatRelativeTime(campaign.scheduledAt) : 'Not scheduled'}
-              </dd>
+              {campaign.status !== 'scheduled' && campaign.scheduledAt && (
+                <>
+                  <dt className="text-text-muted">Scheduled for</dt>
+                  <dd className="text-text-primary">{formatDate(campaign.scheduledAt, 'long')}</dd>
+                </>
+              )}
               <dt className="text-text-muted">Started</dt>
               <dd className="text-text-primary">
                 {campaign.startedAt ? formatRelativeTime(campaign.startedAt) : 'Not started'}

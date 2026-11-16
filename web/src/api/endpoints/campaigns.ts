@@ -31,14 +31,13 @@ export interface CampaignMutationPayload {
   variantBSubject?: string | null
 }
 
-export interface CampaignPreviewLeadsPayload {
-  filter?: Record<string, unknown>
-}
-
 export interface CampaignPreviewLeadsResponse {
   emailVerificationRequired?: boolean
   count: number
   sample: Lead[]
+  matchedCount?: number
+  excludedCount?: number
+  exclusionCounts?: Record<string, number>
 }
 
 export interface CampaignLeadsResponse {
@@ -50,6 +49,7 @@ export interface CampaignLeadsResponse {
   total: number
   page: number
   pages: number
+  campaignUpdatedAt: string | null
 }
 
 export const campaignsApi = {
@@ -87,8 +87,8 @@ export const campaignsApi = {
 
   pause: (id: number) => api.post(`/campaigns/${id}/pause`),
 
-  schedule: (id: number, scheduledAt: string, timezone: string) =>
-    api.post<Campaign>(`/campaigns/${id}/schedule`, { scheduledAt, timezone }),
+  schedule: (id: number, scheduledAt: string, timezone: string, review: { updatedAt: string; recipientCount: number }) =>
+    api.post<Campaign>(`/campaigns/${id}/schedule`, { scheduledAt, timezone, review }),
 
   cancelSchedule: (id: number) => api.delete(`/campaigns/${id}/schedule`),
 

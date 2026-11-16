@@ -32,13 +32,22 @@ export class CampaignScheduler {
 
   async schedule(id, input) {
     const date = validateSchedule(input, this.now(), this.hours());
+    const review = input.review;
+    if (review !== undefined && (typeof review?.updatedAt !== 'string'
+      || !Number.isFinite(Date.parse(review.updatedAt))
+      || !Number.isSafeInteger(review.recipientCount) || review.recipientCount < 1)) {
+      throw fail('Provide the campaign revision and recipient count from your review.');
+    }
     return this.db.$transaction(async (tx) => {
       const campaign = await tx.campaign.findUnique({ where: { id } });
       if (!campaign) throw fail('Campaign not found.', 404);
+      const staleReview = () => fail('The campaign or audience changed. Review the recipients and schedule again.', 409);
+      if (review && Date.parse(review.updatedAt) !== campaign.updatedAt.getTime()) throw staleReview();
       const missed = campaign.status === 'paused' && campaign.scheduleTimezone && campaign.scheduleError;
       if (!['draft', 'scheduled'].includes(campaign.status) && !missed) throw fail('Only an unstarted campaign can be scheduled.', 409);
       if (campaign.startedAt || await tx.message.count({ where: { campaignId: id } })) throw fail('This campaign already has send attempts. Review it before sending again.', 409);
       const recipients = await tx.campaignLead.count({ where: { campaignId: id } });
+      if (review && recipients !== review.recipientCount) throw staleReview();
       const pending = await tx.campaignLead.count({ where: { campaignId: id, status: 'pending' } });
       if (!pending || pending !== recipients) throw fail('Populate and review an unstarted audience before scheduling.', 409);
       const updated = await tx.campaign.updateMany({ where: { id, status: campaign.status, updatedAt: campaign.updatedAt }, data: {

@@ -212,6 +212,7 @@ class IMessageService {
         url.searchParams.set('offset', '0');
         const response = await fetch(url, {
           method: 'GET',
+          redirect: 'error',
           signal: AbortSignal.timeout(8000),
         });
         if (!response.ok) continue;
@@ -266,6 +267,7 @@ class IMessageService {
 
       const res = await fetch(url, {
         method: 'GET',
+        redirect: 'error',
         signal: AbortSignal.timeout(8000),
       });
 
@@ -348,6 +350,7 @@ class IMessageService {
       sendStartedAt = new Date();
       const res = await fetch(url, {
         method: 'POST',
+        redirect: 'error',
         headers: {
           'Content-Type': 'application/json',
         },

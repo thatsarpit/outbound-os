@@ -211,7 +211,7 @@ export default function IMessageSettingsPage() {
               label="Apple ID (reference only)"
               value={imessageForm.appleId}
               onChange={(v) => setIMessageForm({ ...imessageForm, appleId: v })}
-              placeholder="apple-id@icloud.com"
+              placeholder="relay@example.com"
             />
             <SettingsField
               label="Hourly limit"

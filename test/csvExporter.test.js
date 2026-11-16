@@ -26,3 +26,17 @@ test('CSV escapes identity fields and exports headers even with no leads', () =>
   assert.equal(row['WhatsApp User ID'], 'TEST\nID');
   assert.ok(leadsToCsv([]).includes('WhatsApp User ID'));
 });
+
+test('CSV neutralizes formula-looking text and encloses alternate separators', () => {
+  const csv = leadsToCsv([{
+    id: 1, name: '=1+1', company: 'Fixture;=1+1', notes: '  ＋1+1', product: '\tExample',
+    mobile: '+15550100123', score: -2, createdAt: new Date('2026-01-01T00:00:00Z'),
+  }]);
+  const [row] = parse(csv, { columns: true });
+  assert.equal(row.Name, "'=1+1");
+  assert.equal(row.Notes, "'  ＋1+1");
+  assert.equal(row.Product, "'\tExample");
+  assert.equal(row.Mobile, "'+15550100123");
+  assert.equal(row.Score, '-2');
+  assert.ok(csv.includes(',"Fixture;=1+1",'));
+});

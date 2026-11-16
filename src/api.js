@@ -74,6 +74,7 @@ import reportingService from './services/reportingService.js';
 import recoveryCoordinator from './services/recoveryCoordinator.js';
 import resourceMonitor from './utils/resourceMonitor.js';
 import webhookDispatcher from './services/webhookDispatcher.js';
+import { OutboundWebhookTargetError, parseOutboundWebhookTarget } from './utils/outboundWebhookTarget.js';
 import { workspaceTimezone, zonedParts, zonedTimeToUtc } from './utils/workspaceTime.js';
 import { MEDIA_DIR as WHATSAPP_MEDIA_DIR } from './services/whatsappMedia.js';
 import { whatsappAddress } from './utils/whatsappAddress.js';
@@ -104,7 +105,7 @@ import {
 // removing lead pools; kept only for call-site compatibility.
 import { hashPassword, requirePoolAccess, requireLeadAccess, getAccessiblePoolIds, userCanAccessPool } from './auth/rbac.js';
 import {
-  AUTH_PROVIDER, authMiddleware, requireRole, verifyQueryToken, clerkClient,
+  AUTH_PROVIDER, authMiddleware, requireRole, verifyStreamSession, clerkClient,
   localLogin, localChangePassword, publicAuthConfig,
 } from './auth/index.js';
 
@@ -820,22 +821,30 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
 // captured above. They must not require a dashboard session.
 app.use(providerWebhookRoutes);
 
-// EventSource cannot send an Authorization header. Authenticate its signed
-// query token before the ordinary API guard, which accepts header sessions.
+// Authenticate user sessions before the API guard that also admits MCP service credentials.
 app.get('/api/events', async (req, res) => {
   if (req.method !== 'GET') return res.status(405).set('Allow', 'GET').end();
-  const auth = await verifyQueryToken(req.query.token);
-  if (!auth?.role) return res.status(401).end();
+  const token = req.get('Authorization')?.match(/^Bearer (\S+)$/i)?.[1];
+  const session = await verifyStreamSession(token);
+  const remaining = session?.expiresAt - Date.now();
+  if (!Number.isFinite(remaining) || remaining <= 0) return res.status(401).end();
 
   res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
   res.write(`data: ${JSON.stringify({ type: 'connected', ts: Date.now() })}
 
 `);
   sseClients.add(res);
-  req.on('close', () => sseClients.delete(res));
+  // Bound the lifetime even for long-lived local tokens so the next connection
+  // verifies the user's current access. A stream also ends at token expiry.
+  const renew = setTimeout(() => res.end(), Math.min(remaining, 60_000));
+  renew.unref();
+  res.once('close', () => {
+    clearTimeout(renew);
+    sseClients.delete(res);
+  });
 });
 
 app.use('/api', requireRole('viewer'));
@@ -2443,7 +2452,8 @@ app.get('/api/campaigns/:id/leads', requireRole('manager'), async (req, res) => 
     const where = { campaignId: parseInt(req.params.id) };
     if (status) where.status = status;
 
-    const [campaignLeads, total] = await Promise.all([
+    const [campaign, campaignLeads, total] = await prisma.$transaction([
+      prisma.campaign.findUnique({ where: { id: where.campaignId }, select: { updatedAt: true } }),
       prisma.campaignLead.findMany({
         where,
         // The private sales approval snapshot must cover actual destinations,
@@ -2455,13 +2465,13 @@ app.get('/api/campaigns/:id/leads', requireRole('manager'), async (req, res) => 
           emailOptOut: true, emailStatus: true, isOnWhatsApp: true,
           assignedAccount: true, assignedEmailAccountId: true,
         } } },
-        orderBy: { sentAt: 'desc' },
+        orderBy: [{ sentAt: 'desc' }, { id: 'asc' }],
         skip: (page - 1) * limit,
         take: limit,
       }),
       prisma.campaignLead.count({ where }),
     ]);
-    res.json({ leads: campaignLeads, total, page, pages: Math.ceil(total / limit) });
+    res.json({ leads: campaignLeads, total, page, pages: Math.ceil(total / limit), campaignUpdatedAt: campaign?.updatedAt ?? null });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -2473,7 +2483,13 @@ app.post('/api/campaigns/preview-leads', requireRole('manager'), async (req, res
     // poolId when supplied (membership already checked by requirePoolAccess
     // when the caller passes one in the body), else any single pool the user
     // has access to.
-    let previewPoolId = req.body.poolId ? parseInt(req.body.poolId) : null;
+    let previewPoolId = req.body.poolId == null ? null : Number(req.body.poolId);
+    if (previewPoolId !== null && (!Number.isSafeInteger(previewPoolId) || previewPoolId < 1)) {
+      return res.status(400).json({ error: 'Invalid lead pool.' });
+    }
+    if (req.body.filter && Object.hasOwn(req.body.filter, 'poolId')) {
+      return res.status(400).json({ error: 'Pass poolId alongside the lead filter.' });
+    }
     if (previewPoolId && !(await userCanAccessPool(req, previewPoolId))) {
       return res.status(403).json({ error: 'You do not have access to this lead pool.' });
     }
@@ -2483,10 +2499,10 @@ app.post('/api/campaigns/preview-leads', requireRole('manager'), async (req, res
     }
     const channel = req.body.channel || 'whatsapp';
     if (!VALID_CHANNELS.includes(channel)) return res.status(400).json({ error: 'Invalid campaign channel.' });
-    const leads = await campaignEngine.getMatchingLeads(req.body.filter || {}, previewPoolId, channel);
-    res.json({ count: leads.length, sample: leads.slice(0, 10), poolId: previewPoolId, emailVerificationRequired: verificationEnabled() && ['email', 'both'].includes(channel) });
+    const { leads, ...diagnostics } = await campaignEngine.getAudience(req.body.filter, previewPoolId, channel);
+    res.json({ count: leads.length, sample: leads.slice(0, 10), ...diagnostics, poolId: previewPoolId, emailVerificationRequired: verificationEnabled() && ['email', 'both'].includes(channel) });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -4654,13 +4670,13 @@ app.post('/api/webhooks/subscriptions', requireRole('admin'), async (req, res) =
   try {
     const { name, url, events = [], secret = '' } = req.body;
     if (!name || !url) return res.status(400).json({ error: 'name and url required' });
-    new URL(url); // validate URL format
+    parseOutboundWebhookTarget(url);
     const sub = await prisma.webhookSubscription.create({
       data: { name, url, events: JSON.stringify(events), secret },
     });
     res.json(sub);
   } catch (e) {
-    if (e instanceof TypeError) return res.status(400).json({ error: 'Invalid URL' });
+    if (e instanceof OutboundWebhookTargetError) return res.status(400).json({ error: e.message });
     res.status(500).json({ error: e.message });
   }
 });
@@ -4670,13 +4686,16 @@ app.patch('/api/webhooks/subscriptions/:id', requireRole('admin'), async (req, r
     const { name, url, events, secret, enabled } = req.body;
     const data = {};
     if (name !== undefined) data.name = name;
-    if (url !== undefined) { new URL(url); data.url = url; }
+    if (url !== undefined) { parseOutboundWebhookTarget(url); data.url = url; }
     if (events !== undefined) data.events = JSON.stringify(events);
     if (secret !== undefined) data.secret = secret;
     if (enabled !== undefined) data.enabled = Boolean(enabled);
     const sub = await prisma.webhookSubscription.update({ where: { id: parseInt(req.params.id) }, data });
     res.json({ ...sub, secret: sub.secret ? '••••••••' : '' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) {
+    if (e instanceof OutboundWebhookTargetError) return res.status(400).json({ error: e.message });
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.delete('/api/webhooks/subscriptions/:id', requireRole('admin'), async (req, res) => {
@@ -4691,8 +4710,9 @@ app.post('/api/webhooks/subscriptions/:id/test', requireRole('admin'), async (re
   try {
     const sub = await prisma.webhookSubscription.findUnique({ where: { id: parseInt(req.params.id) } });
     if (!sub) return res.status(404).json({ error: 'Subscription not found' });
-    await webhookDispatcher.dispatch('webhook.test', { message: 'This is a test event from Outbound OS', subscriptionId: sub.id });
-    res.json({ ok: true, message: 'Test event dispatched' });
+    const result = await webhookDispatcher.test(sub);
+    if (!result.ok) return res.status(422).json(result);
+    res.json({ ...result, message: 'Test event delivered' });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -5062,7 +5082,7 @@ app.get('/api/imessage/accounts', requireRole('manager'), async (req, res) => {
 });
 
 // POST /api/imessage/accounts — add a new BlueBubbles server account
-app.post('/api/imessage/accounts', requireRole('manager'), async (req, res) => {
+app.post('/api/imessage/accounts', requireRole('admin'), async (req, res) => {
   try {
     const { name, serverUrl, password, appleId, hourlyLimit, dailyLimit, enabled } = req.body;
     if (!name || !serverUrl || !password) {
@@ -5091,7 +5111,7 @@ app.post('/api/imessage/accounts', requireRole('manager'), async (req, res) => {
 });
 
 // PUT /api/imessage/accounts/:id — update account settings
-app.put('/api/imessage/accounts/:id', requireRole('manager'), async (req, res) => {
+app.put('/api/imessage/accounts/:id', requireRole('admin'), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (!Number.isInteger(id) || id < 1) return res.status(400).json({ error: 'Invalid account ID' });
@@ -5099,9 +5119,18 @@ app.put('/api/imessage/accounts/:id', requireRole('manager'), async (req, res) =
 
     const updateData = {};
     if (name !== undefined) updateData.name = String(name);
-    if (serverUrl !== undefined) updateData.serverUrl = normalizeIMessageServerUrl(serverUrl);
-    if (password !== undefined && password !== '') {
-      updateData.password = imessageService.encryptPassword(String(password));
+    const hasPassword = typeof password === 'string' && password.trim().length > 0;
+    if (hasPassword) updateData.password = imessageService.encryptPassword(password);
+    const where = { id };
+    if (serverUrl !== undefined) {
+      updateData.serverUrl = normalizeIMessageServerUrl(serverUrl);
+      const existing = await prisma.iMessageAccount.findUnique({ where: { id }, select: { serverUrl: true } });
+      if (!existing) return res.status(404).json({ error: 'iMessage account not found.' });
+      if (!hasPassword && new URL(existing.serverUrl).origin !== new URL(updateData.serverUrl).origin) {
+        return res.status(400).json({ error: 'Enter the bridge password for the new server address.' });
+      }
+      // Bind the update to the address just checked so a concurrent edit cannot move another server's password.
+      where.serverUrl = existing.serverUrl;
     }
     if (appleId !== undefined) updateData.appleId = String(appleId);
     if (hourlyLimit !== undefined) updateData.hourlyLimit = parseInt(hourlyLimit);
@@ -5115,6 +5144,7 @@ app.put('/api/imessage/accounts/:id', requireRole('manager'), async (req, res) =
 
     res.json({ ...account, password: undefined });
   } catch (err) {
+    if (err.code === 'P2025') return res.status(409).json({ error: 'The iMessage account changed. Reload it and try again.' });
     res.status(500).json({ error: err.message });
   }
 });

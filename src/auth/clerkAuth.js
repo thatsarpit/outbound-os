@@ -80,19 +80,12 @@ export function requireRole(minRole) {
   };
 }
 
-/**
- * Verify a Clerk session token passed as a query string parameter, for the
- * one connection type that cannot carry an Authorization header: EventSource
- * (SSE). Everything else goes through requireRole()/requireAuth() instead.
- *
- * @param {string} token
- * @returns {Promise<{userId: string, orgId: string|null, role: string|null}|null>}
- */
-export async function verifyQueryToken(token) {
+/** Verify the dashboard session and apply the same workspace gate as the HTTP API. */
+export async function verifyStreamSession(token) {
   if (typeof token !== 'string' || !token) return null;
   try {
     const claims = await verifyToken(token, { secretKey: process.env.CLERK_SECRET_KEY });
-    return clerkSessionIdentity(claims);
+    return clerkSessionIdentity(claims) ? { expiresAt: claims.exp * 1000 } : null;
   } catch (error) {
     logger.warn(`SSE token verification failed: ${error.message}`);
     return null;
@@ -114,4 +107,4 @@ export async function currentUserPayload(req) {
 }
 
 export { clerkClient };
-export default { clerkMiddleware, requireRole, currentUserPayload, verifyQueryToken, clerkClient };
+export default { clerkMiddleware, requireRole, currentUserPayload, verifyStreamSession, clerkClient };

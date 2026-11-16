@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appRoleFromOrgRole, clerkInvitationRole } from '../shared/clerkRoles.js';
 import { clerkWorkspaceIdentity, clerkSessionIdentity } from '../src/auth/clerkIdentity.js';
-import { requireRole, verifyQueryToken } from '../src/auth/clerkAuth.js';
+import { requireRole, verifyStreamSession } from '../src/auth/clerkAuth.js';
 
 const identity = { userId: 'user_fixture', orgId: 'org_fixture', orgRole: 'org:member', tokenType: 'session_token' };
 const env = { CLERK_SECRET_KEY: 'sk_live_fixture', CLERK_ORGANIZATION_ID: 'org_fixture' };
@@ -108,6 +108,6 @@ test('preflight accepts the shipped local config and rejects incomplete Clerk se
 });
 
 test('SSE rejects missing and malformed tokens before authorizing a live-update stream', async () => {
-  assert.equal(await verifyQueryToken(null), null);
-  assert.equal(await verifyQueryToken('not-a-signed-session'), null);
+  assert.equal(await verifyStreamSession(null), null);
+  assert.equal(await verifyStreamSession('not-a-signed-session'), null);
 });

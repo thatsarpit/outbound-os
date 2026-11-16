@@ -7,6 +7,34 @@ import { tmpdir } from 'node:os';
 import csvImporter from '../src/services/csvImporter.js';
 import { trackingUrlFor } from '../src/routes/sales.js';
 import { browserMutationGuard } from '../src/utils/browserMutation.js';
+import { parseOutboundWebhookTarget, postOutboundWebhook, OutboundWebhookTargetError } from '../src/utils/outboundWebhookTarget.js';
+
+test('outbound webhook targets block nonpublic and insecure URLs unless the exact origin is trusted', () => {
+  for (const url of [
+    'https://127.1/', 'https://0x7f000001/', 'https://169.254.169.254/',
+    'https://100.100.100.200/', 'https://[::ffff:7f00:1]/', 'https://[fd00::1]/',
+    'https://[2002:7f00:1::]/', 'https://metadata.google.internal/',
+    'https://localhost./', 'https://webhook.example.test/#fragment',
+    'https://user:password@webhook.example.test/', 'http://webhook.example.test/', 'file:///fixture',
+  ]) assert.throws(() => parseOutboundWebhookTarget(url, ''), OutboundWebhookTargetError);
+  assert.equal(parseOutboundWebhookTarget('https://webhook.example.test/path', '').trusted, false);
+  assert.equal(parseOutboundWebhookTarget('https://[2606:4700::1111]/', '').trusted, false);
+  const allowed = 'http://receiver.local:8080';
+  assert.equal(parseOutboundWebhookTarget(allowed + '/event', allowed).trusted, true);
+  assert.throws(() => parseOutboundWebhookTarget('http://receiver.local:8081/event', allowed), OutboundWebhookTargetError);
+});
+
+test('outbound webhook rejects mixed DNS answers before making any connection', async () => {
+  const addresses = [{ address: '1.1.1.1', family: 4 }, { address: '127.0.0.1', family: 4 }];
+  await assert.rejects(postOutboundWebhook('https://receiver.example.test', {}, '{}', {
+    allowed: '',
+    lookupHost(host, options, callback) {
+      assert.equal(host, 'receiver.example.test');
+      assert.equal(options.all, true);
+      callback(null, addresses);
+    },
+  }), OutboundWebhookTargetError);
+});
 
 test('cookie mutations require a trusted origin while bearer clients remain supported', () => {
   const guard = browserMutationGuard(['https://app.example.test']);
