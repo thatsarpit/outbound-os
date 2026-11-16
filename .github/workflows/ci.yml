@@ -112,6 +112,30 @@ jobs:
           test "$pages" -eq "$urls"
           test "$cards" -eq "$urls"
 
+  mcp-image:
+    name: MCP image boots from private archive
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build with restrictive release-file permissions
+        run: |
+          mkdir -p "$RUNNER_TEMP/mcp-context"
+          (umask 077; git archive HEAD | tar -x -C "$RUNNER_TEMP/mcp-context")
+          docker build -f "$RUNNER_TEMP/mcp-context/mcp-outboundos/Dockerfile" -t outbound-os-mcp:ci "$RUNNER_TEMP/mcp-context"
+      - name: Non-root modules, service health and authentication guard
+        run: |
+          docker run --rm --network none outbound-os-mcp:ci node --input-type=module -e 'await import("/shared/mcpOperations.js")'
+          docker run -d --name obos-mcp --network none -e MCP_BEARER_TOKEN=fixture-only -e BACKEND_URL=http://127.0.0.1:3001 outbound-os-mcp:ci
+          for i in $(seq 1 30); do
+            docker exec obos-mcp curl -sf http://127.0.0.1:3010/healthz && break
+            sleep 1
+          done
+          docker exec obos-mcp curl -sf http://127.0.0.1:3010/healthz
+          test "$(docker exec obos-mcp curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3010/mcp)" = 401
+      - name: Clean up isolated MCP boot test
+        if: always()
+        run: docker rm -f obos-mcp || true
+
   docker:
     name: Docker image boots
     runs-on: ubuntu-latest
