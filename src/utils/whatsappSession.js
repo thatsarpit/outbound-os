@@ -1,3 +1,5 @@
+import { isCountryPolicyRestriction } from './whatsappProviderError.js';
+
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 /** Import time never opens a reply window: use the customer's provider timestamp. */
 export function whatsappSession(messages, accountId, now = Date.now()) {
@@ -27,6 +29,12 @@ export function whatsappSession(messages, accountId, now = Date.now()) {
   };
 }
 export function whatsappFailureReason(code, detail) {
+  // A country-wide marketing pause shares code 131049 with the per-recipient
+  // marketing limit; the receipt's prose is the only thing that separates a
+  // restriction no retry can clear from one that clears in a day.
+  if (Number(code) === 131049 && isCountryPolicyRestriction(detail)) {
+    return 'marketing_country_restricted';
+  }
   const reasons = {
     131047: 're_engagement_required',
     131026: 'message_undeliverable',
@@ -36,6 +44,7 @@ export function whatsappFailureReason(code, detail) {
     131048: 'spam_limit',
     131042: 'payment_issue',
     131070: 'thread_not_owned',
+    130472: 'marketing_experiment',
     190: 'authentication_failed',
   };
   return (

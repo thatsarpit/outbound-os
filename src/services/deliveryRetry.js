@@ -60,6 +60,7 @@ export async function findRetryable({ channel = 'whatsapp', limit = 200, now = n
       retryCount: true,
       providerStatusReason: true,
       providerErrorCode: true,
+      providerErrorMessage: true,
       ackUpdatedAt: true,
       updatedAt: true,
     },
@@ -76,7 +77,13 @@ export async function findRetryable({ channel = 'whatsapp', limit = 200, now = n
   const due = [];
   for (const msg of candidates) {
     if (suppressions.get(msg.waAccount)?.has(msg.leadId)) continue;
-    const { retryable } = classifyDeliveryFailure({ reason: msg.providerStatusReason, errorCode: msg.providerErrorCode });
+    const { retryable } = classifyDeliveryFailure({
+      reason: msg.providerStatusReason,
+      errorCode: msg.providerErrorCode,
+      // The provider's prose: it separates a country-wide marketing pause
+      // from the per-recipient limit that shares error code 131049.
+      detail: msg.providerErrorMessage,
+    });
     if (!retryable) continue;
 
     const attempt = msg.retryCount || 0;

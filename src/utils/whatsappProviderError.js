@@ -1,3 +1,21 @@
+/**
+ * Meta reuses error 131049 for two different situations: a per-recipient
+ * marketing limit, which clears on its own and is worth retrying after 24h,
+ * and a marketing pause for a whole country (the US pause from April 2025),
+ * which no amount of per-recipient retrying can get past. Only the prose
+ * distinguishes them, so this inspects it: a country-level restriction talks
+ * about marketing being paused/unsupported for a country or region. The three
+ * separate tests keep the match conservative — unrelated throttle prose
+ * ("healthy ecosystem engagement") names neither a pause nor a country.
+ */
+export function isCountryPolicyRestriction(text) {
+  const value = String(text || '');
+  if (!/marketing/i.test(value)) return false;
+  if (!/paus|suspend|unavailable|restrict|not (currently )?(available|supported|allowed|permitted)/i.test(value)) return false;
+  // "US" is matched case-sensitively: lowercase "us" is an ordinary pronoun.
+  return /countr|region|united states|\+1\b/i.test(value) || /\bU\.?S\.?\b/.test(value);
+}
+
 /** Retain actionable provider facts without storing bodies, keys or headers. */
 export function whatsappProviderError(data, httpStatus, secret = '') {
   const upstream = data?.error?.whatsappApiError || data?.whatsappApiError || {};

@@ -13,7 +13,7 @@ import { createDecipheriv, createCipheriv, randomBytes, createHash } from 'crypt
 
 import { credentialState, metaCredentialPair, providerOf } from './whatsappProviders.js';
 import { ycloudSendPayload } from '../utils/ycloudWebhook.js';
-import { whatsappProviderError } from '../utils/whatsappProviderError.js';
+import { whatsappProviderError, isCountryPolicyRestriction } from '../utils/whatsappProviderError.js';
 
 // Read per call so tests (and self-hosters pinning an API version) can set it
 // after this module has loaded.
@@ -68,10 +68,12 @@ function decrypt(stored) {
  * stable, and keep 'not_on_whatsapp' distinct from transport faults so a bad
  * lead number never counts against account health.
  */
-function classifyError(httpStatus, errCode, message = '') {
-  if (httpStatus === 401 || httpStatus === 403) return 'auth_failed';
-  if (httpStatus === 429) return 'rate_limited';
-
+export function classifyError(httpStatus, errCode, message = '') {
+  // The numeric code is inspected before the HTTP status: Meta delivers some
+  // account-state errors over 401/403, and reading the status first reported
+  // an unpaid balance (131042 under 403) as an authentication failure — the
+  // operator went looking for a token problem while sends kept failing for
+  // money, and the campaign engine's billing pause never fired.
   switch (errCode) {
     case 190:               // Meta: access token expired or invalid (sent as HTTP 400)
       return 'auth_failed';
@@ -81,7 +83,11 @@ function classifyError(httpStatus, errCode, message = '') {
     case 131030: return 'invalid_phone';
     case 131042: return 'payment_issue';
     case 131070: return 'thread_not_owned';
-    case 131049: return 'marketing_limit';
+    // One code, two meanings: a per-recipient marketing limit that clears on
+    // its own, or a marketing pause for a whole country. Only the prose says
+    // which, and the distinction decides whether retrying is worthwhile.
+    case 131049: return isCountryPolicyRestriction(message) ? 'marketing_country_restricted' : 'marketing_limit';
+    case 130472: return 'marketing_experiment';  // recipient in Meta's experiment group
     case 131008: return 'quota_exceeded';
     case 131050: return 'whatsapp_marketing_opted_out';
     case 131056: return 'rate_limited';
@@ -91,6 +97,9 @@ function classifyError(httpStatus, errCode, message = '') {
     case 100: return 'bad_request';
     default: break;
   }
+
+  if (httpStatus === 401 || httpStatus === 403) return 'auth_failed';
+  if (httpStatus === 429) return 'rate_limited';
 
   // Keep useful classification for upstream errors without a numeric code.
   const m = String(message).toLowerCase();
