@@ -1,0 +1,41 @@
+name: indiamart-live
+services:
+  poller:
+    build: .
+    image: outboundos-indiamart-live:local
+    container_name: outboundos-indiamart-live
+    restart: unless-stopped
+    user: '1001:1001'
+    mem_limit: 640m
+    cpus: 0.35
+    pids_limit: 160
+    shm_size: 128m
+    read_only: true
+    tmpfs:
+      - /tmp:size=192m,mode=1777
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    env_file: private.env
+    environment:
+      XDG_CONFIG_HOME: /state/config
+      XDG_CACHE_HOME: /state/cache
+    ports:
+      - '127.0.0.1:6081:6080'
+      - '127.0.0.1:9185:8085'
+    volumes:
+      - browser-state:/state
+    networks:
+      - outbound
+    logging:
+      options: {max-size: 2m, max-file: '2'}
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:8085/healthz').then(r=>{if(!r.ok)process.exit(1)})"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+networks:
+  outbound:
+    external: true
+    name: outbound-os_internal
+volumes:
+  browser-state:

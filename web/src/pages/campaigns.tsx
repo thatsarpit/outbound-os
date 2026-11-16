@@ -320,7 +320,7 @@ export default function CampaignsPage() {
     },
     {
       accessorKey: 'sentCount',
-      header: 'Sent',
+      header: 'Accepted',
       cell: ({ row }) => {
         const sent = num(row.original.sentCount)
         const total = num(row.original.totalLeads)
@@ -428,7 +428,7 @@ export default function CampaignsPage() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard
               icon={Users}
-              label="Leads in play"
+              label="Audience memberships"
               value={formatCount(totalLeads)}
               hint={`across ${formatCount(response?.total ?? campaigns.length)} ${
                 response?.total === 1 ? 'campaign' : 'campaigns'
@@ -436,7 +436,7 @@ export default function CampaignsPage() {
             />
             <MetricCard
               icon={Send}
-              label="Messages sent"
+              label="Accepted messages"
               value={formatCount(totalSent)}
               hint={
                 totalFailed > 0 ? `${formatCount(totalFailed)} failed` : 'No failed sends recorded'

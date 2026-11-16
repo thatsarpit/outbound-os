@@ -2,7 +2,8 @@ import webpush from 'web-push';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
 import { HUMAN_REPLY_WHERE } from '../utils/emailInbound.js';
-import { decryptPushSubscription } from '../utils/pushSubscription.js';
+import { decryptPushSubscription, pushSubscriptionPreview } from '../utils/pushSubscription.js';
+import { buildMessagePush } from '../utils/pushMessage.js';
 import { AUTH_PROVIDER, clerkClient } from '../auth/index.js';
 import { clerkWorkspaceIdentity } from '../auth/clerkIdentity.js';
 
@@ -37,15 +38,14 @@ export async function deliverDeviceReplies(subscription, send = sendDevicePush) 
   const messages = await prisma.message.findMany({
     where: { id: { gt: subscription.lastMessageId }, createdAt: { gte: subscription.createdAt }, ...HUMAN_REPLY_WHERE },
     orderBy: { id: 'asc' }, take: 25,
-    select: { id: true, leadId: true, channel: true },
+    select: { id: true, leadId: true, channel: true, content: true, mediaType: true, mediaCaption: true, createdAt: true, sentAt: true, providerCreatedAt: true, lead: { select: { name: true } } },
   });
   for (const message of messages) {
     // Reading in the foreground satisfies this alert; it does not resolve the reply.
     const readState = await prisma.inboxReadState.findUnique({ where: { leadId_viewerKey: { leadId: message.leadId, viewerKey: subscription.viewerKey } } });
     if (!readState || readState.lastReadMessageId < message.id) {
-      const label = { whatsapp: 'WhatsApp', email: 'email', imessage: 'iMessage', telegram: 'Telegram' }[message.channel] || 'customer';
       try {
-        await send(subscription, { title: `New ${label} message`, body: 'Open Outbound OS to read and reply.', tag: `message-${message.id}`, url: `/m/inbox?leadId=${message.leadId}&channel=${encodeURIComponent(message.channel)}` });
+        await send(subscription, buildMessagePush(message, pushSubscriptionPreview(subscription.encryptedData)));
       } catch (error) {
         if ([404, 410].includes(error.statusCode)) {
           await prisma.webPushSubscription.deleteMany({ where: { id: subscription.id } });

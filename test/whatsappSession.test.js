@@ -45,4 +45,5 @@ test('WhatsApp window uses provider time and sending number, never import time o
     whatsappFailureReason(131047, 'Re-engagement message'),
     're_engagement_required',
   );
+  assert.equal(whatsappFailureReason(131070, 'Caller is not thread owner'), 'thread_not_owned');
 });

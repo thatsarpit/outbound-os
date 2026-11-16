@@ -4,6 +4,8 @@ import express from 'express';
 import { once } from 'node:events';
 import { createWebPushRouter } from '../src/routes/webPush.js';
 import { inboxViewerKey } from '../src/utils/inboxState.js';
+import { createECDH } from 'node:crypto';
+import { encryptPushSubscription, pushSubscriptionPreview, decryptPushSubscription } from '../src/utils/pushSubscription.js';
 
 const key = { publicKey: 'fixture-public-key', enabled: true };
 const alice = { id: 7 };
@@ -13,6 +15,12 @@ async function withServer(user, rows, run) {
   const db = {
     webPushSubscription: {
       findMany: async ({ where }) => rows.filter(row => row.viewerKey === where.viewerKey),
+      findFirst: async ({ where }) => rows.find(row => row.id === where.id && row.viewerKey === where.viewerKey),
+      updateMany: async ({ where, data }) => {
+        const matched = rows.filter(row => row.id === where.id && row.viewerKey === where.viewerKey && row.encryptedData === where.encryptedData);
+        matched.forEach(row => Object.assign(row, data));
+        return { count: matched.length };
+      },
       deleteMany: async ({ where }) => {
         const matches = row => row.id === where.id && row.viewerKey === where.viewerKey;
         const count = rows.filter(matches).length;
@@ -43,7 +51,7 @@ test('notification device inventory is personal and never exposes endpoint crede
     const response = await fetch(`${base}/push/subscriptions`);
     assert.equal(response.status, 200);
     const payload = await response.json();
-    assert.deepEqual(payload, { devices: [{ id: 1, label: 'Notification device', registeredAt: '2026-10-23T10:00:00Z', enabled: true, needsReconnect: false }], limit: 10 });
+    assert.deepEqual(payload, { devices: [{ id: 1, label: 'Notification device', registeredAt: '2026-10-23T10:00:00Z', enabled: true, needsReconnect: false, previewMode: 'private' }], limit: 10 });
     assert.doesNotMatch(JSON.stringify(payload), /private-hash|encryptedData|endpoint|viewerKey|vapidKey|other-person-secret/);
   });
 });
@@ -69,5 +77,37 @@ test('shared service callers cannot enumerate or revoke personal push devices', 
   await withServer({ id: 'mcp-service', orgId: 'service' }, [], async base => {
     assert.equal((await fetch(`${base}/push/subscriptions`)).status, 403);
     assert.equal((await fetch(`${base}/push/subscriptions/1`, { method: 'DELETE' })).status, 403);
+    assert.equal((await fetch(`${base}/push/subscriptions/1/preview`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ previewMode: 'message' }) })).status, 403);
   });
+});
+
+test('preview changes require device ownership and preserve the encrypted destination and device label', async () => {
+  const old = process.env.LEAD_SYNC_ENCRYPTION_KEY;
+  process.env.LEAD_SYNC_ENCRYPTION_KEY = 'fixture-encryption-key-with-32-characters';
+  const ecdh = createECDH('prime256v1'); ecdh.generateKeys();
+  const subscription = { endpoint: 'https://web.push.apple.com/fixture-preview', keys: { p256dh: ecdh.getPublicKey().toString('base64url'), auth: Buffer.alloc(16, 4).toString('base64url') } };
+  try {
+    const rows = [
+      { id: 1, viewerKey: inboxViewerKey(alice), encryptedData: encryptPushSubscription(subscription, 'Fixture phone') },
+      { id: 2, viewerKey: inboxViewerKey(bob), encryptedData: encryptPushSubscription(subscription, 'Other device') },
+    ];
+    await withServer(alice, rows, async base => {
+      const patch = (id, previewMode) => fetch(`${base}/push/subscriptions/${id}/preview`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ previewMode }) });
+      assert.equal((await patch(2, 'message')).status, 404);
+      assert.equal((await patch(999, 'message')).status, 404);
+      for (const mode of ['full', null, true, {}]) assert.equal((await patch(1, mode)).status, 400);
+      assert.equal((await patch('1junk', 'message')).status, 400);
+      const response = await patch(1, 'message');
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), { previewMode: 'message' });
+      assert.equal(pushSubscriptionPreview(rows[0].encryptedData), 'message');
+      assert.equal(pushSubscriptionPreview(rows[1].encryptedData), 'private');
+      assert.deepEqual(decryptPushSubscription(rows[0].encryptedData), subscription);
+      assert.equal((await patch(1, 'private')).status, 200);
+      assert.equal(pushSubscriptionPreview(rows[0].encryptedData), 'private');
+    });
+  } finally {
+    if (old === undefined) delete process.env.LEAD_SYNC_ENCRYPTION_KEY;
+    else process.env.LEAD_SYNC_ENCRYPTION_KEY = old;
+  }
 });

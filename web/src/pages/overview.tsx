@@ -3,7 +3,6 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
-  Area,
   CartesianGrid,
   ComposedChart,
   Line,
@@ -49,7 +48,10 @@ import { LoadingState } from '@/components/ui/loading-state'
 const CHANNEL_KEYS = [...CHANNEL_ORDER, 'other'] as const
 const STAGES = ['new', 'contacted', 'replied', 'engaged', 'closed']
 function labelFor(status: string) {
-  return status.replace(/_/g, ' ').replace(/^./, (s) => s.toUpperCase())
+  return status
+    .replace(/^wa_/, 'WhatsApp ')
+    .replace(/_/g, ' ')
+    .replace(/^./, (s) => s.toUpperCase())
 }
 function change(current: number, previous: number) {
   return previous === 0 ? undefined : ((current - previous) / previous) * 100
@@ -91,26 +93,25 @@ export default function OverviewPage() {
   const statsQuery = useQuery({
     queryKey: ['overview-stats', days],
     queryFn: () => overviewApi.getStats(days),
-    placeholderData: (previous) => previous,
     refetchInterval: 30_000,
   })
   const chartsQuery = useQuery({
     queryKey: ['overview-charts', days],
     queryFn: () => overviewApi.getCharts(days),
-    placeholderData: (previous) => previous,
-    refetchInterval: 60_000,
+    refetchInterval: 30_000,
   })
   const emailQuery = useQuery({
     queryKey: ['email-performance', days],
     queryFn: () => overviewApi.getEmailPerformance(`${days}d`),
-    placeholderData: (previous) => previous,
     refetchInterval: 120_000,
   })
   const stats = statsQuery.data
   const charts = chartsQuery.data
   const email = emailQuery.data
   const hasOtherMessages = (charts?.msgsByDay ?? []).some((day) => day.other > 0)
-  const visibleChannels = hasOtherMessages ? CHANNEL_KEYS : CHANNEL_ORDER
+  const visibleChannels = CHANNEL_KEYS.filter((channel) =>
+    (charts?.msgsByDay ?? []).some((day) => day[channel] > 0),
+  )
   const seriesOrder = [...visibleChannels, 'count', 'previousTotal']
   const current = stats?.period?.current
   const previous = stats?.period?.previous
@@ -181,9 +182,9 @@ export default function OverviewPage() {
     },
     {
       icon: Send,
-      label: 'Messages sent',
-      now: current?.messagesSent,
-      before: previous?.messagesSent,
+      label: 'Confirmed messages',
+      now: charts?.msgsByDay.reduce((sum, day) => sum + day.count, 0),
+      before: charts?.msgsByDay.reduce((sum, day) => sum + day.previousTotal, 0),
       trend: (charts?.msgsByDay ?? []).map((day) => day.count),
     },
     {
@@ -204,8 +205,8 @@ export default function OverviewPage() {
   const widgets = {
     messages: (
       <WidgetCard
-        title="Messages sent"
-        description={`Daily by channel, with the previous ${days} days aligned by day.`}
+        title="Confirmed messages"
+        description={`Daily confirmed messages by channel, with the previous ${days} days aligned by day.`}
         rows={messageRows}
         loading={chartsQuery.isLoading}
         error={chartsQuery.isError}
@@ -252,17 +253,16 @@ export default function OverviewPage() {
               content={<ChartLegendContent />}
             />
             {visibleChannels.map((channel) => (
-              <Area
+              <Bar
                 key={channel}
                 name={channel === 'other' ? 'Other' : CHANNEL_META[channel].label}
-                type="monotone"
                 dataKey={channel}
                 stackId="sent"
                 fill={theme.channel[channel]}
-                fillOpacity={0.1}
-                stroke={theme.channel[channel]}
+                fillOpacity={0.9}
+                stroke="none"
                 strokeWidth={2}
-                activeDot={{ r: 4, stroke: theme.tooltipSurface, strokeWidth: 2 }}
+                maxBarSize={36}
               />
             ))}
             <Line
@@ -305,13 +305,13 @@ export default function OverviewPage() {
                 label="Queued to send"
                 count={stats!.pending}
                 tone="info"
-                to="/leads?status=contacted"
+                to="/leads?hasQueuedMessages=true"
               />
             )}
             {(stats?.waUnavailable ?? 0) > 0 && (
               <AttentionRow
                 icon={PhoneOff}
-                label="No WhatsApp number"
+                label="WhatsApp unavailable"
                 count={stats!.waUnavailable}
                 tone="warning"
                 to="/leads?status=wa_unavailable"
@@ -321,7 +321,7 @@ export default function OverviewPage() {
         )}
         {stats ? (
           <div className="mt-5 border-t border-border pt-4">
-            <p className="text-xs font-semibold text-text-muted">Lead tiers</p>
+            <p className="text-xs font-semibold text-text-secondary">Scored leads · all time</p>
             <div className="mt-3 grid grid-cols-3 gap-2">
               {(['hot', 'warm', 'cold'] as const).map((tier) => (
                 <div key={tier} className="rounded-md border border-border px-2 py-2">
@@ -339,7 +339,7 @@ export default function OverviewPage() {
     pipeline: (
       <WidgetCard
         title="Pipeline"
-        description="Lead share by stage. Select a stage to open its leads."
+        description="Current pipeline · all leads. The bar shows shares within the active path."
         rows={stageRows.map((s) => ({ stage: labelFor(s.status), leads: s._count.id }))}
         loading={chartsQuery.isLoading}
         error={chartsQuery.isError}
@@ -351,120 +351,131 @@ export default function OverviewPage() {
     email: (
       <WidgetCard
         title="Email template reply rates"
-        description={`Replies per recipient, last ${days} days.`}
+        description={`Replies per recipient, last ${days} days. Small samples are not reliable performance estimates.`}
         rows={emailRows}
         loading={emailQuery.isLoading}
         error={emailQuery.isError}
         onRetry={() => emailQuery.refetch()}
       >
-        <div className="grid min-w-0 grid-cols-[minmax(0,94px)_minmax(0,1fr)_110px] gap-1 sm:grid-cols-[minmax(0,136px)_minmax(0,1fr)_120px]">
-          <div className="flex flex-col pb-[34px] pt-[26px]" style={{ height: emailChartHeight }}>
-            {emailRows.map((row) => (
-              <div key={row.variant} className="flex min-h-0 flex-1 items-center">
-                <span
-                  className="block w-full truncate text-[11px] text-text-secondary"
-                  title={row.variant}
-                >
-                  {row.variant}
-                </span>
-              </div>
-            ))}
+        {(email?.totals.sent ?? 0) < 10 ? (
+          <div className="rounded-xl bg-surface-raised p-5">
+            <p className="font-medium">Not enough data to compare templates</p>
+            <p className="mt-2 text-sm text-text-secondary">
+              {formatCount(email?.totals.replied ?? 0)} replies from{' '}
+              {formatCount(email?.totals.sent ?? 0)} recipients in this period. Rates become more
+              useful with a larger sample.
+            </p>
           </div>
-          <ChartContainer
-            config={{ rate: { label: 'Reply rate', color: theme.channel.email } }}
-            className="min-w-0 w-full"
-            style={{ height: emailChartHeight }}
-            role="img"
-            aria-label={`Email reply rates by template on a zero to ${emailScale} percent scale`}
-          >
-            <BarChart
-              data={emailRows}
-              layout="vertical"
-              // Room on the right for the last tick label ("40%"), which
-              // is centred on the plot edge and was clipped at 8px.
-              margin={{ top: 26, right: 18, bottom: 4, left: 14 }}
-              accessibilityLayer
+        ) : (
+          <div className="grid min-w-0 grid-cols-[minmax(0,94px)_minmax(0,1fr)_110px] gap-1 sm:grid-cols-[minmax(0,136px)_minmax(0,1fr)_120px]">
+            <div className="flex flex-col pb-[34px] pt-[26px]" style={{ height: emailChartHeight }}>
+              {emailRows.map((row) => (
+                <div key={row.variant} className="flex min-h-0 flex-1 items-center">
+                  <span
+                    className="block w-full truncate text-[11px] text-text-secondary"
+                    title={row.variant}
+                  >
+                    {row.variant}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <ChartContainer
+              config={{ rate: { label: 'Reply rate', color: theme.channel.email } }}
+              className="min-w-0 w-full"
+              style={{ height: emailChartHeight }}
+              role="img"
+              aria-label={`Email reply rates by template on a zero to ${emailScale} percent scale`}
             >
-              <CartesianGrid stroke={theme.grid} horizontal={false} />
-              <XAxis
-                type="number"
-                domain={[0, emailScale]}
-                ticks={emailTicks}
-                interval={0}
-                tickFormatter={(v: number) => `${v}%`}
-                tickLine={false}
-                axisLine={false}
-                tick={{ fontSize: 10 }}
-              />
-              <YAxis type="category" dataKey="variant" hide width={0} />
-              <ReferenceLine
-                x={average}
-                stroke={theme.axis}
-                strokeDasharray="3 3"
-                label={{
-                  value: `Avg ${chartNumbers.percent(average)}`,
-                  position: 'top',
-                  fill: theme.axis,
-                  fontSize: 10,
-                }}
-              />
-              <ChartTooltip
-                cursor={false}
-                content={
-                  <ChartTooltipContent
-                    labelFormatter={(_, payload) => String(payload?.[0]?.payload?.variant ?? '')}
-                  />
-                }
-              />
-              <Bar
-                dataKey="rate"
-                name="Reply rate"
-                fill={theme.channel.email}
-                barSize={20}
-                shape={(raw: unknown) => {
-                  const mark = raw as {
-                    x: number
-                    y: number
-                    width: number
-                    height: number
-                    fill: string
-                  }
-                  const middle = mark.y + mark.height / 2
-                  return (
-                    <g>
-                      <line
-                        x1={mark.x}
-                        x2={mark.x + mark.width}
-                        y1={middle}
-                        y2={middle}
-                        stroke={mark.fill}
-                        strokeWidth={2}
-                      />
-                      <circle
-                        cx={mark.x + mark.width}
-                        cy={middle}
-                        r={5}
-                        fill={mark.fill}
-                        stroke={theme.tooltipSurface}
-                        strokeWidth={2}
-                      />
-                    </g>
-                  )
-                }}
-              />
-            </BarChart>
-          </ChartContainer>
-          <div className="flex flex-col pb-[34px] pt-[26px]" style={{ height: emailChartHeight }}>
-            {emailRows.map((row) => (
-              <div
-                key={row.variant}
-                className="flex min-h-0 flex-1 items-center justify-end whitespace-nowrap text-right text-[11px] tabular-nums text-text-secondary"
+              <BarChart
+                data={emailRows}
+                layout="vertical"
+                // Room on the right for the last tick label ("40%"), which
+                // is centred on the plot edge and was clipped at 8px.
+                margin={{ top: 26, right: 18, bottom: 4, left: 14 }}
+                accessibilityLayer
               >
-                {chartNumbers.percent(row.rate)} · {row.replied}/{row.sent}
-              </div>
-            ))}
+                <CartesianGrid stroke={theme.grid} horizontal={false} />
+                <XAxis
+                  type="number"
+                  domain={[0, emailScale]}
+                  ticks={emailTicks}
+                  interval={0}
+                  tickFormatter={(v: number) => `${v}%`}
+                  tickLine={false}
+                  axisLine={false}
+                  tick={{ fontSize: 10 }}
+                />
+                <YAxis type="category" dataKey="variant" hide width={0} />
+                <ReferenceLine
+                  x={average}
+                  stroke={theme.axis}
+                  strokeDasharray="3 3"
+                  label={{
+                    value: `Avg ${chartNumbers.percent(average)}`,
+                    position: 'top',
+                    fill: theme.axis,
+                    fontSize: 10,
+                  }}
+                />
+                <ChartTooltip
+                  cursor={false}
+                  content={
+                    <ChartTooltipContent
+                      labelFormatter={(_, payload) => String(payload?.[0]?.payload?.variant ?? '')}
+                    />
+                  }
+                />
+                <Bar
+                  dataKey="rate"
+                  name="Reply rate"
+                  fill={theme.channel.email}
+                  barSize={20}
+                  shape={(raw: unknown) => {
+                    const mark = raw as {
+                      x: number
+                      y: number
+                      width: number
+                      height: number
+                      fill: string
+                    }
+                    const middle = mark.y + mark.height / 2
+                    return (
+                      <g>
+                        <line
+                          x1={mark.x}
+                          x2={mark.x + mark.width}
+                          y1={middle}
+                          y2={middle}
+                          stroke={mark.fill}
+                          strokeWidth={2}
+                        />
+                        <circle
+                          cx={mark.x + mark.width}
+                          cy={middle}
+                          r={5}
+                          fill={mark.fill}
+                          stroke={theme.tooltipSurface}
+                          strokeWidth={2}
+                        />
+                      </g>
+                    )
+                  }}
+                />
+              </BarChart>
+            </ChartContainer>
+            <div className="flex flex-col pb-[34px] pt-[26px]" style={{ height: emailChartHeight }}>
+              {emailRows.map((row) => (
+                <div
+                  key={row.variant}
+                  className="flex min-h-0 flex-1 items-center justify-end whitespace-nowrap text-right text-[11px] tabular-nums text-text-secondary"
+                >
+                  {chartNumbers.percent(row.rate)} · {row.replied}/{row.sent}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </WidgetCard>
     ),
   }
@@ -473,7 +484,7 @@ export default function OverviewPage() {
     <div className="animate-fade-in space-y-5">
       <PageHeader
         title="Overview"
-        description="Live pipeline health across every connected channel."
+        description="Activity in the selected period, including today so far. Pipeline and scored-lead counts show current all-time state."
         actions={
           <div className="flex flex-wrap items-center gap-2" aria-label="Reporting period">
             <span className="mr-1 text-sm text-text-secondary">Last</span>
@@ -517,7 +528,11 @@ export default function OverviewPage() {
                 icon={item.icon}
                 label={item.label}
                 value={item.now ?? 0}
-                delta={delta === undefined ? undefined : { value: delta, label: deltaLabel }}
+                delta={
+                  delta === undefined
+                    ? undefined
+                    : { value: delta, label: deltaLabel, neutral: true }
+                }
                 hint={item.before === 0 ? 'No activity in previous period' : undefined}
                 trend={item.trend}
               />
@@ -525,6 +540,12 @@ export default function OverviewPage() {
           })}
         </div>
       )}
+      <p className="text-xs text-text-secondary">
+        Activity refreshed{' '}
+        {chartsQuery.dataUpdatedAt ? new Date(chartsQuery.dataUpdatedAt).toLocaleTimeString() : '—'}{' '}
+        · {Intl.DateTimeFormat().resolvedOptions().timeZone}. Confirmed messages currently have
+        sent, delivered or read status; delivery failures are separate.
+      </p>
       <DashboardLayout page="overview" widgets={widgets} />
     </div>
   )

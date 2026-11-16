@@ -1,3 +1,4 @@
+import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
 /**
  * Redelivery of transiently-failed outbound messages.
  *
@@ -54,8 +55,11 @@ export async function findRetryable({ channel = 'whatsapp', limit = 200, now = n
     select: {
       id: true,
       leadId: true,
+      waAccount: true,
+      campaignId: true,
       retryCount: true,
       providerStatusReason: true,
+      providerErrorCode: true,
       ackUpdatedAt: true,
       updatedAt: true,
     },
@@ -63,20 +67,28 @@ export async function findRetryable({ channel = 'whatsapp', limit = 200, now = n
     take: limit * 3, // over-fetch: classification filters most of these out
   });
 
+  const suppressions = new Map();
+  if (channel === 'whatsapp') {
+    for (const accountId of new Set(candidates.map(row => row.waAccount))) {
+      suppressions.set(accountId, await suppressedWhatsAppLeads(prisma, candidates.filter(row => row.waAccount === accountId).map(row => row.leadId), accountId || null));
+    }
+  }
   const due = [];
   for (const msg of candidates) {
-    const { retryable } = classifyDeliveryFailure({ reason: msg.providerStatusReason });
+    if (suppressions.get(msg.waAccount)?.has(msg.leadId)) continue;
+    const { retryable } = classifyDeliveryFailure({ reason: msg.providerStatusReason, errorCode: msg.providerErrorCode });
     if (!retryable) continue;
 
     const attempt = msg.retryCount || 0;
     const lastAttemptAt = msg.ackUpdatedAt || msg.updatedAt;
     const waitedEnough =
-      now.getTime() - new Date(lastAttemptAt).getTime() >= retryDelayMs(attempt + 1);
+      now.getTime() - new Date(lastAttemptAt).getTime() >= retryDelayMs(attempt + 1, msg.providerErrorCode);
     if (!waitedEnough) continue;
 
     due.push({
       id: msg.id,
       leadId: msg.leadId,
+      campaignId: msg.campaignId,
       attempt: attempt + 1,
       reason: msg.providerStatusReason || '',
     });
@@ -98,8 +110,11 @@ export async function sweep({ channel = 'whatsapp', limit = 200, dryRun = true }
     return { due: due.length, queued: 0, dryRun: true, sample: due.slice(0, 5) };
   }
 
-  let queued = 0;
+  let queued = 0, reviewRequired = 0;
   for (const item of due) {
+    // Campaign retries need a newly reviewed audience; do not turn a durable
+    // campaign attempt into ordinary automation or replace its template.
+    if (item.campaignId != null) { reviewRequired++; continue; }
     try {
       await prisma.message.update({
         where: { id: item.id },
@@ -116,7 +131,7 @@ export async function sweep({ channel = 'whatsapp', limit = 200, dryRun = true }
   }
 
   logger.info(`🔁 Delivery retry: ${queued} of ${due.length} due ${channel} messages re-queued`);
-  return { due: due.length, queued, dryRun: false };
+  return { due: due.length, queued, reviewRequired, dryRun: false };
 }
 
 export default { findRetryable, sweep };

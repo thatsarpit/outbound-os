@@ -182,6 +182,14 @@ export interface Campaign {
   variantBReplies: number
   totalLeads: number
   sentCount: number
+  delivery?: {
+    accepted: number
+    delivered: number
+    read: number
+    failed: number
+    unconfirmed: number
+    awaitingConfirmation: number
+  }
   failedCount: number
   replyCount: number
   scheduledAt: string | null
@@ -570,6 +578,9 @@ export interface InboxMessage {
   status: InboxMessageStatus
   providerDeliveryStatus?: string | null
   providerDeliveryAt?: string | null
+  providerErrorCode?: string | null
+  providerErrorMessage?: string | null
+  providerRequestId?: string | null
   providerStatusReason?: string | null
   emailInboundKind?: 'human' | 'delivery_report' | 'automatic_reply' | 'pending' | null
   pricingCategory?: string | null
@@ -584,6 +595,9 @@ export interface InboxMessage {
   emailInReplyTo: string | null
   waAccount: number | null
   providerMessageId?: string | null
+  canReply?: boolean
+  canReact?: boolean
+  reactions?: Array<{ emoji: string; own: boolean }>
   replyToMessageId: number | null
   mediaUrl: string | null
   mediaType: string | null

@@ -13,6 +13,7 @@ import { createDecipheriv, createCipheriv, randomBytes, createHash } from 'crypt
 
 import { credentialState, metaCredentialPair, providerOf } from './whatsappProviders.js';
 import { ycloudSendPayload } from '../utils/ycloudWebhook.js';
+import { whatsappProviderError } from '../utils/whatsappProviderError.js';
 
 // Read per call so tests (and self-hosters pinning an API version) can set it
 // after this module has loaded.
@@ -79,9 +80,11 @@ function classifyError(httpStatus, errCode, message = '') {
       return errCode === 131047 ? 're_engagement_required' : 'not_on_whatsapp';
     case 131030: return 'invalid_phone';
     case 131042: return 'payment_issue';
+    case 131070: return 'thread_not_owned';
     case 131049: return 'marketing_limit';
     case 131008: return 'quota_exceeded';
-    case 131056: return 'blocked_by_user';
+    case 131050: return 'whatsapp_marketing_opted_out';
+    case 131056: return 'rate_limited';
     case 132000:            // template param count mismatch
     case 132001:            // template does not exist
     case 132005: return 'template_invalid';
@@ -237,13 +240,12 @@ class WhatsAppCloudApiService {
       try { data = text ? JSON.parse(text) : {}; } catch { /* non-JSON error body */ }
 
       if (!res.ok || (provider === 'ycloud' && data.status === 'failed')) {
-        const errMsg = data?.error?.whatsappApiError?.error_data?.details || data?.error?.message || data?.errorMessage || data?.message || `HTTP ${res.status}`;
-        const errCode = data?.error?.whatsappApiError?.code || data?.whatsappApiError?.code || data?.errorCode || data?.error?.code || data?.code;
-        const reason = provider === 'ycloud' && errCode === 'BALANCE_INSUFFICIENT'
-          ? 'payment_issue'
-          : classifyError(res.status, Number(errCode), errMsg);
-        logger.error(`${tag} ${label} failed [HTTP ${res.status}${errCode ? `/${errCode}` : ''}] ${reason}: ${errMsg}`);
-        return { success: false, reason, rawError: errMsg, errorCode: errCode ?? null };
+        const failure = whatsappProviderError(data, res.status, transport.token);
+        const reason = provider === 'ycloud' && failure.errorCode === 'BALANCE_INSUFFICIENT'
+          ? 'payment_issue' : classifyError(res.status, Number(failure.errorCode), failure.rawError);
+        logger.error(`${tag} ${label} failed [HTTP ${res.status}${failure.errorCode ? `/${failure.errorCode}` : ''}] ${reason}: ${failure.rawError}`);
+        return { success: false, reason, ...failure, provider,
+          ...(provider === 'ycloud' && typeof data.id === 'string' ? { messageId: data.id } : {}) };
       }
 
       const messageId = provider === 'ycloud' ? data?.id : data?.messages?.[0]?.id;
@@ -280,7 +282,7 @@ class WhatsAppCloudApiService {
    * @param {string} text — message body
    * @param {number|null} accountId — WhatsAppAccount.id
    */
-  async sendTextMessage(phone, text, accountId = null) {
+  async sendTextMessage(phone, text, accountId = null, replyTo = null) {
     const addressee = cloudApiAddressee(phone, (value) => this.normalizePhone(value));
     if (!addressee) return { success: false, reason: 'invalid_phone', rawError: 'Empty phone number' };
     const to = addressee.to || addressee.recipient;
@@ -290,11 +292,18 @@ class WhatsAppCloudApiService {
       recipient_type: 'individual',
       ...addressee,
       type: 'text',
+      ...(replyTo ? { context: { message_id: replyTo } } : {}),
       text: { preview_url: false, body: text },
     }, accountId, `text → *${to.slice(-4)}`);
 
     if (result.success) logger.info(`WhatsApp ✅ text sent to *${to.slice(-4)} — ${result.messageId}`);
     return result;
+  }
+
+  async sendReaction(phone, messageId, emoji, accountId) {
+    const addressee = cloudApiAddressee(phone, (value) => this.normalizePhone(value));
+    if (!addressee) return { success: false, reason: 'invalid_phone' };
+    return this._postMessage({ messaging_product: 'whatsapp', ...addressee, type: 'reaction', reaction: { message_id: messageId, emoji } }, accountId, 'reaction');
   }
 
   /** Send an approved Meta template using the campaign's ordered body variables. */

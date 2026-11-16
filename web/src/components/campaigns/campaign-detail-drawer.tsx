@@ -108,7 +108,12 @@ export function CampaignDetailDrawer({
             />
             <DrawerStat label="Acceptance rate" value={`${deliveryRate.toFixed(1)}%`} />
             <DrawerStat label="Reply rate" value={`${replyRate.toFixed(1)}%`} />
+            <DrawerStat label="Delivered (incl. read)" value={campaign.delivery ? formatCount(campaign.delivery.delivered) : '—'} />
+            <DrawerStat label="Read" value={campaign.delivery ? formatCount(campaign.delivery.read) : '—'} />
+            <DrawerStat label="Awaiting delivery" value={campaign.delivery ? formatCount(campaign.delivery.awaitingConfirmation) : '—'} />
           </div>
+
+          <p className="text-xs text-text-muted">Accepted means the provider accepted submission. Check delivery and failure counts to see what reached recipients.</p>
 
           <div>
             <div className="flex items-baseline justify-between text-[11px] text-text-muted">

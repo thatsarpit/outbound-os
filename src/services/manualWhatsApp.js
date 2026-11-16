@@ -1,3 +1,5 @@
+import { assertReplyTarget } from '../utils/messageActions.js';
+import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
 import { sendMediaFile, mediaKind } from './whatsappMedia.js';
 import { randomUUID } from 'node:crypto';
 import { reconcileMetaReceipts } from './whatsappDelivery.js';
@@ -69,6 +71,7 @@ export async function sendManualWhatsApp(
   {
     leadId,
     text,
+    replyToMessageId,
     template,
     media,
     clientMessageId,
@@ -106,6 +109,10 @@ export async function sendManualWhatsApp(
         duplicate: true,
       };
   }
+  const replyTarget = replyToMessageId ? await prisma.message.findUnique({ where: { id: Number(replyToMessageId) || -1 } }) : null;
+  const replyTo = replyToMessageId ? assertReplyTarget(replyTarget, leadId, 'whatsapp', accountId) : null;
+  if (replyTo && (media || template)) throw fail('Quoted replies currently support text. Remove the quote to send a file or template.');
+  let marketingTemplate = false;
   let body = String(text || '').trim();
   let templateName = null,
     language = null,
@@ -139,6 +146,10 @@ export async function sendManualWhatsApp(
       throw fail(
         'This template uses named parameters and needs a compatible template editor.',
       );
+    marketingTemplate = approved.category === 'MARKETING';
+    if (marketingTemplate && (await suppressedWhatsAppLeads(prisma, [lead.id], accountId)).has(lead.id)) {
+      throw fail('This recipient has stopped marketing messages from this business.', 409, 'whatsapp_marketing_opted_out');
+    }
     templateName = approved.name;
     language = approved.language;
     body = approved.body.replace(
@@ -164,6 +175,8 @@ export async function sendManualWhatsApp(
         content: body,
         waAccount: accountId,
         status: 'sending',
+        quotedMessageId: replyTarget?.id || null,
+        quotedRemoteId: replyTo,
         idempotencyKey,
         manualSendKey: idempotencyKey,
         ...(media
@@ -216,8 +229,9 @@ export async function sendManualWhatsApp(
             language,
             parameters,
             accountId,
+            { marketing: marketingTemplate },
           )
-        : await manager.sendMessage(address, body, accountId);
+        : await manager.sendMessage(address, body, accountId, { replyTo });
   } catch {
     result = { success: false, reason: 'confirmation_unknown' };
   }
@@ -231,6 +245,9 @@ export async function sendManualWhatsApp(
     where: { id: message.id },
     data: {
       waMessageId: result.waMessageId || result.messageId || null,
+      providerErrorCode: result.success ? null : result.errorCode || null,
+      providerErrorMessage: result.success ? null : String(result.rawError || result.error || '').slice(0, 500) || null,
+      providerRequestId: result.success ? null : result.requestId || null,
       status: result.success ? 'sent' : uncertain ? 'unconfirmed' : 'failed',
       sentAt: result.success ? new Date() : null,
       providerStatusReason: result.success
@@ -238,8 +255,9 @@ export async function sendManualWhatsApp(
         : result.reason || 'send_failed',
     },
   });
-  if (result.success) {
-    await reconcileMetaReceipts(saved.waMessageId, accountId);
+  if (saved.waMessageId) await reconcileMetaReceipts(saved.waMessageId, accountId);
+  const confirmed = await prisma.message.findUnique({ where: { id: saved.id } });
+  if (['sent', 'delivered', 'read'].includes(confirmed.status)) {
     await prisma.message.updateMany({
       where: { leadId, direction: 'outbound', status: 'queued' },
       data: { status: 'cancelled' },

@@ -247,9 +247,14 @@ model Message {
   emailReplyProcessedAt DateTime? // Human-reply side effects committed once, including after body recovery
   imessageMessageId    String? // BlueBubbles GUID for webhook deduplication
   telegramMessageId    String? // Telegram message ID scoped to telegramAccountId
+  quotedMessageId      Int?
+  quotedRemoteId       String?
   providerMessageId    String? // Remote message ID assigned by the sending provider
   providerCampaignId   String? // Historical provider campaign identity retained for reconciliation
   providerCreatedAt    DateTime? // Original provider timestamp when it differs from ingestion time
+  providerErrorCode String?
+  providerErrorMessage String?
+  providerRequestId String?
   providerStatusReason String? // Stable failure/status reason retained for diagnostics
   providerDeliveryStatus String? // Accepted, temporary failure, delivery or tracked engagement; separate from send acceptance
   providerDeliveryAt   DateTime? // UTC occurrence time of the last applied delivery event
@@ -586,6 +591,9 @@ model ConnectorReceipt {
   state String
   reason String?
   recordJson String
+  liveState String @default("none")
+  liveLeadVersion DateTime?
+  liveError String?
   createdAt DateTime @default(now())
   @@unique([sourceId, externalId])
   @@index([leadId])
@@ -1426,6 +1434,7 @@ model WhatsAppReceipt {
   eventKey      String   @unique
   accountId     Int
   waMessageId   String
+  nativeMessageId String?
   status        String
   failureCode   Int?
   failureReason String?
@@ -1438,3 +1447,14 @@ model WhatsAppReceipt {
 }
 
 // Durable, private inbound MIME receipt ledger.
+
+model MessageReaction {
+  id Int @id @default(autoincrement())
+  channel String
+  accountId Int
+  targetId String
+  actorKey String
+  emoji String
+  eventAt DateTime
+  @@unique([channel, accountId, targetId, actorKey])
+}

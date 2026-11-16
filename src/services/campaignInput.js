@@ -1,3 +1,4 @@
+import { campaignFilter } from '../utils/campaignFilter.js';
 import { credentialState } from './whatsappProviders.js';
 
 const channels = new Set(['whatsapp', 'email', 'both', 'imessage']);
@@ -24,6 +25,7 @@ export async function campaignInput(body, { db, existing = null } = {}) {
     try { filter = JSON.parse(filter); } catch { invalid('Target filter must be valid JSON.'); }
   }
   if (filter != null && (typeof filter !== 'object' || Array.isArray(filter))) invalid('Target filter must be a JSON object.');
+  filter = campaignFilter(filter);
   const changingChannel = existing && channel !== existing.channel;
   let legacy = changingChannel && !Object.hasOwn(body, 'senderAccountId') ? null : input.senderAccountId;
   // An explicit typed clear must not revive the legacy value on the next dispatch.

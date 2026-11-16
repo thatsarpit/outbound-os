@@ -21,7 +21,9 @@ function WidgetTable({ rows }: { rows: WidgetRow[] }) {
     () =>
       Object.keys(rows[0] ?? {}).map((key) => ({
         accessorKey: key,
-        header: key.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase()),
+        header: ['WhatsApp', 'iMessage', 'Email', 'Telegram'].includes(key)
+          ? key
+          : key.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase()),
       })),
     [rows],
   )
@@ -129,12 +131,17 @@ export function WidgetCard({
         {content}
       </SectionCard>
       <Dialog open={expanded} onOpenChange={setExpanded}>
-        <DialogContent size="lg">
+        <DialogContent
+          size="2xl"
+          className="flex max-h-[92dvh] max-w-[min(94vw,90rem)] flex-col overflow-hidden"
+        >
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-text-secondary">{description}</p>
-          <div className="mt-4">{content}</div>
+          <div className="min-h-0 overflow-auto p-4 sm:p-6">
+            <p className="mb-4 text-sm text-text-secondary">{description}</p>
+            <div className="[&_[data-chart]]:min-h-[min(55dvh,32rem)]">{content}</div>
+          </div>
         </DialogContent>
       </Dialog>
     </>

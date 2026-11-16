@@ -116,12 +116,13 @@ export function CreateCampaignModal({ onClose, onCreated }: { onClose: () => voi
     !requiresEmail || !form.variantBTemplate.trim() || Boolean(form.variantBSubject.trim())
 
   const previewMutation = useMutation({
-    mutationFn: ({ filter, channel }: { filter: string; channel: Campaign['channel'] }) =>
-      campaignsApi.previewLeads(parseAudienceFilter(filter) || {}, channel),
+    mutationFn: ({ filter, channel, whatsappSenderAccountId }: { filter: string; channel: Campaign['channel']; whatsappSenderAccountId: number | null }) =>
+      campaignsApi.previewLeads(parseAudienceFilter(filter) || {}, channel, whatsappSenderAccountId),
   })
   const previewCurrent =
     previewMutation.variables?.filter === form.targetFilter &&
-    previewMutation.variables?.channel === form.channel
+    previewMutation.variables?.channel === form.channel &&
+    previewMutation.variables?.whatsappSenderAccountId === form.whatsappSenderAccountId
   const preview = previewCurrent ? previewMutation.data : null
   const previewCount = preview ? num(preview.count) : null
   const previewSample: Lead[] =
@@ -443,7 +444,7 @@ export function CreateCampaignModal({ onClose, onCreated }: { onClose: () => voi
                   variant="secondary"
                   size="sm"
                   onClick={() =>
-                    previewMutation.mutate({ filter: form.targetFilter, channel: form.channel })
+                    previewMutation.mutate({ filter: form.targetFilter, channel: form.channel, whatsappSenderAccountId: form.whatsappSenderAccountId })
                   }
                   disabled={filterLooksInvalid}
                   pending={previewMutation.isPending}

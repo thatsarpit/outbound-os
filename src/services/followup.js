@@ -1,5 +1,7 @@
+import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
 import prisma from '../utils/prismaClient.js';
 import deliveryRetry from './deliveryRetry.js';
+import { reapStaleWhatsAppMessages } from './undeliveredReaper.js';
 import config from '../config.js';
 import logger from '../utils/logger.js';
 import { getMessage } from '../templates/messages.js';
@@ -41,6 +43,10 @@ class FollowupEngine {
         where: { status: 'sending', direction: 'outbound', channel: 'whatsapp', idempotencyKey: { startsWith: 'manual-wa:' }, updatedAt: { lt: fiveMinAgo } },
         data: { status: 'unconfirmed', providerStatusReason: 'confirmation_unknown' },
       });
+      const campaign = await prisma.message.updateMany({
+        where: { status: 'sending', direction: 'outbound', campaignId: { not: null }, channel: { not: 'imessage' }, updatedAt: { lt: fiveMinAgo } },
+        data: { status: 'unconfirmed', providerStatusReason: 'confirmation_unknown' },
+      });
       const result = await prisma.message.updateMany({
         where: {
           status: 'sending',
@@ -51,11 +57,11 @@ class FollowupEngine {
         },
         data: { status: 'queued' },
       });
-      const count = result.count + imessage.count + manual.count;
+      const count = result.count + imessage.count + manual.count + campaign.count;
       if (count > 0) {
         logger.info(`🔧 Recovered ${count} stuck 'sending' message(s) (${imessage.confirmed} iMessage confirmed, ${result.count + imessage.requeued} requeued)`);
       }
-      return { count, requeued: result.count + imessage.requeued, unconfirmed: manual.count, imessage };
+      return { count, requeued: result.count + imessage.requeued, unconfirmed: manual.count + campaign.count, imessage };
     } catch (e) {
       logger.warn(`Failed to recover stuck messages: ${e.message}`);
       return { count: 0, error: e.message };
@@ -172,6 +178,9 @@ class FollowupEngine {
     const currentLead = await prisma.lead.findUnique({ where: { id: lead.id } });
     if (!currentLead?.email) return { skipped: true, reason: 'no_email' };
     lead = currentLead;
+    if (leadStateService.shouldBlockAutomation(lead.status, { channel: 'email' }) || lead.repliedAt) {
+      return { skipped: true, reason: 'lead_automation_stopped' };
+    }
 
     const automationKey = `email:fallback:initial:lead:${lead.id}`;
     const existing = await prisma.message.findFirst({
@@ -306,71 +315,13 @@ class FollowupEngine {
    * Runs every 15 minutes from src/index.js.
    */
   async reapUndeliveredFirstMessages() {
-    // Tightened from 24h → 4h. Users complained that the engine kept queueing
-    // follow-ups into conversations where the very first message never reached
-    // the device (single tick). 4h is long enough that genuine "phone off"
-    // recipients still catch up; beyond that we assume the message will never
-    // be delivered and switch the lead to email.
-    const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000);
-    let stuck;
     try {
-      stuck = await prisma.message.findMany({
-        where: {
-          direction: 'outbound',
-          channel: 'whatsapp',
-          ackStatus: { in: [0, 1] },          // never reached the device
-          sentAt: { lte: cutoff, not: null },
-          lead: {
-            status: { notIn: ['wa_undelivered', 'wa_unavailable', 'closed', 'replied', 'engaged'] },
-            followupCount: 0,                  // only first messages count as "undelivered" — followups imply prior delivery
-          },
-        },
-        include: { lead: true },
-        take: 200,
-      });
-    } catch (e) {
-      logger.error(`reapUndeliveredFirstMessages query failed: ${e.message}`);
-      return;
-    }
-
-    if (!stuck || stuck.length === 0) return;
-    logger.info(`📵 Reaper: found ${stuck.length} undelivered first-message lead(s) — halting WA follow-ups, switching to email where possible`);
-
-    for (const m of stuck) {
-      try {
-        // Cancel every queued WA follow-up for this lead so the engine doesn't keep firing
-        const cancelled = await prisma.message.updateMany({
-          where: {
-            leadId: m.leadId,
-            status: 'queued',
-            channel: 'whatsapp',
-            direction: 'outbound',
-          },
-          data: { status: 'cancelled' },
-        });
-
-        // Flip the lead to wa_undelivered — distinct from wa_unavailable (which means
-        // we KNOW the number isn't on WhatsApp); wa_undelivered means it might be,
-        // but our message just isn't getting through.
-        await prisma.lead.update({
-          where: { id: m.leadId },
-          data: { status: 'wa_undelivered', isOnWhatsApp: false },
-        });
-
-        // Email fallback — re-use the existing initial-email path
-        if (m.lead.email) {
-          try {
-            await this._queueInitialEmailOutreach(m.lead);
-            logger.warn(`📵→📧 Lead ${m.leadId} undelivered (single tick 24h+) — cancelled ${cancelled.count} queued WA msg(s), switched to email`);
-          } catch (emailErr) {
-            logger.warn(`📵→📧 Email fallback FAILED for Lead ${m.leadId}: ${emailErr.message} (queued WA cancelled, no recovery channel)`);
-          }
-        } else {
-          logger.warn(`📵 Lead ${m.leadId} undelivered (single tick 24h+) — cancelled ${cancelled.count} queued WA msg(s), no email on file`);
-        }
-      } catch (e) {
-        logger.error(`Reaper failed for Lead ${m.leadId}: ${e.message}`);
+      const leads = await reapStaleWhatsAppMessages(prisma);
+      for (const lead of leads) {
+        if (lead.email) await this._queueInitialEmailOutreach(lead);
       }
+    } catch (error) {
+      logger.error(`Undelivered-message cleanup failed: ${error.message}`);
     }
   }
 
@@ -390,6 +341,11 @@ class FollowupEngine {
     let processedAny = false;
 
     try {
+      // Old retry/recovery paths may have queued campaign rows without the
+      // approved send envelope. They cannot enter the free-form queue.
+      await prisma.message.updateMany({ where: { status: 'queued', direction: 'outbound', campaignId: { not: null },
+        ...(Array.isArray(messageIds) ? { id: { in: messageIds } } : {}) },
+        data: { status: 'unconfirmed', providerStatusReason: 'campaign_retry_review_required' } });
       // Fetch pending messages that are due, JOIN with lead to get tier
       const pendingMessages = await prisma.message.findMany({
         where: {
@@ -506,6 +462,11 @@ class FollowupEngine {
               });
               continue;
             }
+          }
+
+          if ((await suppressedWhatsAppLeads(prisma, [liveLead.id], sendAccountId || null)).has(liveLead.id)) {
+            await prisma.message.updateMany({ where: { id: claimedMsg.id, status: 'sending' }, data: { status: 'cancelled', providerStatusReason: 'whatsapp_marketing_opted_out' } });
+            continue;
           }
 
           const isInitialOutreach = liveLead.followupCount === 0;

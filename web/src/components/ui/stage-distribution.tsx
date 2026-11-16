@@ -25,10 +25,13 @@ export function StageDistribution({
   const pathTotal = path.reduce((sum, stage) => sum + Math.max(0, stage.value), 0)
   return (
     <div className={cn('space-y-4', className)}>
+      <p className="text-xs text-text-secondary">
+        {formatValue(pathTotal)} active leads · {formatValue(total)} total
+      </p>
       <div
         className="flex h-5 overflow-hidden rounded-sm bg-surface-raised"
         role="img"
-        aria-label="Pipeline stage shares"
+        aria-label={`Shares of ${formatValue(pathTotal)} active leads`}
       >
         {path
           .filter((stage) => stage.value > 0)
@@ -56,8 +59,8 @@ export function StageDistribution({
             />
             <span className="min-w-0 flex-1 text-text-secondary">{stage.label}</span>
             <span className="tabular-nums text-text-primary">{formatValue(stage.value)}</span>
-            <span className="w-10 text-right tabular-nums text-text-muted">
-              {total ? `${Math.round((stage.value / total) * 100)}%` : '0%'}
+            <span className="min-w-16 text-right tabular-nums text-text-secondary">
+              {pathTotal ? `${((stage.value / pathTotal) * 100).toFixed(1)}%` : '—'}
             </span>
           </Link>
         ))}
@@ -73,8 +76,8 @@ export function StageDistribution({
             >
               <span className="min-w-0 flex-1 text-text-secondary">{stage.label}</span>
               <span className="tabular-nums text-text-primary">{formatValue(stage.value)}</span>
-              <span className="w-10 text-right tabular-nums text-text-muted">
-                {total ? `${Math.round((stage.value / total) * 100)}%` : '0%'}
+              <span className="min-w-16 text-right tabular-nums text-text-secondary">
+                {total ? `${((stage.value / total) * 100).toFixed(1)}% of all` : '—'}
               </span>
             </Link>
           ))}

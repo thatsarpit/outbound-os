@@ -49,7 +49,8 @@ const CODE_CLASS = Object.freeze({
   132001: FAILURE_CLASS.PERMANENT,   // template does not exist
   132005: FAILURE_CLASS.PERMANENT,   // template format mismatch
 
-  131056: FAILURE_CLASS.COMPLIANCE,  // recipient blocked the business
+  131050: FAILURE_CLASS.COMPLIANCE,  // recipient stopped business marketing
+  131056: FAILURE_CLASS.RETRYABLE,   // sender-recipient pair rate limit, not an opt-out
 });
 
 /**
@@ -120,11 +121,13 @@ export function statusForClass(cls) {
  * @param {number} attempt 1-based attempt number that just failed
  * @returns {number} milliseconds to wait before the next attempt
  */
-export function retryDelayMs(attempt) {
+export function retryDelayMs(attempt, errorCode = null) {
   const hours = [6, 24, 72][Math.max(0, Math.min(attempt - 1, 2))];
   const base = hours * 60 * 60 * 1000;
   // Jitter so a batch that failed together does not retry in lockstep.
-  return Math.round(base * (0.85 + Math.random() * 0.3));
+  const jittered = Math.round(base * (0.85 + Math.random() * 0.3));
+  // YCloud specifies at least 24 hours for recipient marketing limits.
+  return Number(errorCode) === 131049 ? Math.max(24 * 60 * 60 * 1000, jittered) : jittered;
 }
 
 export const MAX_RETRY_ATTEMPTS = 3;

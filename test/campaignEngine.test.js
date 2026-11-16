@@ -8,6 +8,9 @@ import { createPrismaClient } from '../src/utils/createPrismaClient.js';
 import { CampaignEngine } from '../src/services/campaignEngine.js';
 import { CampaignScheduler, validateSchedule } from '../src/services/campaignScheduler.js';
 import { campaignChannelEligibility, campaignSenderId, hasAllLeadTags } from '../src/utils/campaignAudience.js';
+import { suppressedWhatsAppLeads } from '../src/services/whatsappSuppression.js';
+import { classifyDeliveryFailure, retryDelayMs } from '../src/services/deliveryFailure.js';
+import { recoverCampaignRuns } from '../src/services/campaignMetrics.js';
 
 async function fixture(run, hooks = {}) {
   const directory = mkdtempSync(path.join(tmpdir(), 'outbound-campaign-'));
@@ -165,9 +168,9 @@ test('a stale population request cannot add recipients to a reviewed schedule', 
   const campaign = await createCampaign();
   await engine.populateCampaign(campaign.id);
   const later = await createLead(2);
-  engine.getMatchingLeads = async () => {
+  engine.getAudience = async () => {
     await scheduler.schedule(campaign.id, { scheduledAt: new Date(+now + 3600000).toISOString(), timezone: 'UTC' });
-    return [first, later];
+    return { leads: [first, later], excludedCount: 0, exclusionCounts: {} };
   };
   await assert.rejects(engine.populateCampaign(campaign.id), /Campaign changed/);
   assert.equal(await db.campaignLead.count({ where: { campaignId: campaign.id } }), 1);
@@ -196,6 +199,103 @@ test('provider payment refusal pauses the run and leaves later recipients pendin
   const attempt = await db.message.findFirst({ where: { campaignId: campaign.id } });
   assert.equal(attempt.providerStatusReason, 'payment_issue');
 }, { whatsapp: () => ({ success: false, reason: 'payment_issue', errorCode: 'BALANCE_INSUFFICIENT' }) }));
+
+test('audience caps apply after exclusions and repeated population cannot expand the approved cap', async () => fixture(async ({ db, engine, createLead, createCampaign }) => {
+  await createLead(1, { status: 'paused', score: 100 });
+  await createLead(2, { score: 90 });
+  await createLead(3, { score: 80 });
+  const filter = { limit: 1 };
+  const preview = await engine.getAudience(filter, null, 'email');
+  assert.deepEqual(preview.leads.map(row => row.id), [2]);
+  assert.equal(preview.limitExcludedCount, 1);
+  const campaign = await createCampaign({ targetFilter: filter });
+  await engine.populateCampaign(campaign.id);
+  await db.lead.update({ where: { id: 2 }, data: { status: 'paused' } });
+  await engine.populateCampaign(campaign.id);
+  assert.equal(await db.campaignLead.count({ where: { campaignId: campaign.id } }), 1);
+  assert.equal((await db.campaignLead.findFirst({ where: { campaignId: campaign.id } })).leadId, 2);
+}));
+
+test('receipt opt-outs suppress previews and live dispatch only for the affected WhatsApp sender', async () => fixture(async ({ db, engine, calls, createLead, createCampaign, createWa, running }) => {
+  await createWa(8); await createWa(9);
+  await createLead(1);
+  const campaign = await createCampaign({ channel: 'whatsapp', waCampaignName: 'fixture_approved', whatsappSenderAccountId: 8 });
+  await engine.populateCampaign(campaign.id);
+  const message = await db.message.create({ data: { leadId: 1, direction: 'outbound', channel: 'whatsapp', waAccount: 8,
+    waMessageId: 'fixture-optout', content: 'Fixture only', status: 'failed' } });
+  await db.whatsAppReceipt.create({ data: { eventKey: 'fixture-optout', accountId: 8, waMessageId: message.waMessageId, status: 'failed', failureCode: 131050 } });
+  // Even a later read must not erase the immutable opt-out evidence.
+  await db.message.update({ where: { id: message.id }, data: { status: 'read', providerErrorCode: null } });
+  assert.deepEqual([...(await suppressedWhatsAppLeads(db, [1], 8))], [1]);
+  assert.equal((await suppressedWhatsAppLeads(db, [1], 9)).size, 0);
+  const preview = await engine.getAudience({}, null, 'whatsapp', 8);
+  assert.equal(preview.leads.length, 0);
+  assert.equal(preview.exclusionCounts['whatsapp:whatsapp_marketing_opted_out'], 1);
+  assert.equal((await engine.getAudience({}, null, 'email')).leads.length, 1);
+  await running(campaign.id); await engine._executeCampaign(campaign);
+  assert.equal(calls.whatsapp.length, 0);
+  assert.equal((await db.campaignLead.findFirst({ where: { campaignId: campaign.id } })).skipReason, 'whatsapp:whatsapp_marketing_opted_out');
+}));
+
+test('campaign persists template parameters before provider I/O and advances outbound activity', async () => fixture(async ({ db, engine, createLead, createCampaign, createWa, running }) => {
+  await createWa(8); await createLead(1, { name: 'Fixture Person', country: 'Australia', mobile: '61400000001' });
+  const campaign = await createCampaign({ channel: 'whatsapp', waCampaignName: 'fixture_approved', whatsappSenderAccountId: 8 });
+  engine.whatsapp.sendCampaignTemplate = async () => {
+    const staged = await db.message.findFirst({ where: { campaignId: campaign.id } });
+    assert.equal(staged.status, 'sending');
+    assert.equal(staged.waCampaignName, 'fixture_approved');
+    assert.deepEqual(JSON.parse(staged.waTemplateParams), ['Fixture', 'Australia']);
+    return { success: true, accountId: 8, messageId: 'fixture-envelope' };
+  };
+  await engine.populateCampaign(campaign.id); await running(campaign.id); await engine._executeCampaign(campaign);
+  const row = await db.message.findFirst({ where: { campaignId: campaign.id } });
+  assert.equal(row.waCampaignName, 'fixture_approved');
+  assert.deepEqual(JSON.parse(row.waTemplateParams), ['Fixture', 'Australia']);
+  const lead = await db.lead.findUnique({ where: { id: 1 } });
+  assert.ok(lead.lastMessageAt >= row.sentAt);
+}));
+
+test('campaign metrics keep replies in accepted totals and surface asynchronous delivery failures', async () => fixture(async ({ db, engine, createLead, createCampaign }) => {
+  await createLead(1); await createLead(2);
+  const campaign = await createCampaign(); await engine.populateCampaign(campaign.id);
+  await db.campaignLead.updateMany({ where: { campaignId: campaign.id }, data: { status: 'replied', sentAt: new Date() } });
+  await db.message.create({ data: { leadId: 1, campaignId: campaign.id, direction: 'outbound', channel: 'whatsapp', content: 'Fixture', status: 'failed', sentAt: new Date() } });
+  await db.message.create({ data: { leadId: 2, campaignId: campaign.id, direction: 'outbound', channel: 'whatsapp', content: 'Fixture', status: 'read', sentAt: new Date() } });
+  const result = await engine.getCampaign(campaign.id);
+  assert.equal(result.sentCount, 2); assert.equal(result.failedCount, 1);
+  assert.equal(result.delivery.delivered, 1); assert.equal(result.delivery.read, 1);
+  assert.equal(result.variantACount, 2);
+}));
+
+test('launch outside sending hours fails before changing campaign state', async () => fixture(async ({ db, engine, createLead, createCampaign, calls }) => {
+  await createLead(1); const campaign = await createCampaign(); await engine.populateCampaign(campaign.id);
+  await assert.rejects(engine.startCampaign(campaign.id), error => error.statusCode === 409 && error.reason === 'outside_business_hours');
+  assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'draft');
+  assert.equal(calls.email.length, 0);
+}, { businessHours: false }));
+
+test('restart pauses claimed campaign work and an explicit resume never redispatches uncertain attempts', async () => fixture(async ({ db, engine, createLead, createCampaign, createWa, calls, running }) => {
+  await createWa(8); await createLead(1);
+  const campaign = await createCampaign({ channel: 'whatsapp', waCampaignName: 'fixture_approved', whatsappSenderAccountId: 8 });
+  await engine.populateCampaign(campaign.id); await running(campaign.id);
+  await db.campaignLead.updateMany({ where: { campaignId: campaign.id }, data: { status: 'sending' } });
+  const message = await db.message.create({ data: { leadId: 1, campaignId: campaign.id, direction: 'outbound', channel: 'whatsapp', content: 'Fixture', status: 'sending' } });
+  assert.deepEqual(await recoverCampaignRuns(db), { paused: 1 });
+  assert.equal((await db.message.findUnique({ where: { id: message.id } })).status, 'unconfirmed');
+  assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'paused');
+  await running(campaign.id); await engine._executeCampaign(campaign);
+  assert.equal(calls.whatsapp.length, 0);
+}));
+
+test('campaign phone validation rejects structural country mismatches without breaking BSUID recipients', () => {
+  for (const [country, mobile] of [['United Kingdom', '123456'], ['UK', '44123456789012'], ['Australia', '6161000000000']]) {
+    assert.equal(campaignChannelEligibility({ status: 'new', country, mobile }, 'whatsapp').reason, 'whatsapp_invalid_number');
+  }
+  for (const [country, mobile] of [['United Kingdom', '447000000001'], ['Australia', '61400000001']]) {
+    assert.equal(campaignChannelEligibility({ status: 'new', country, mobile }, 'whatsapp').eligible, true);
+  }
+  assert.equal(campaignChannelEligibility({ status: 'new', country: 'Australia', mobile: 'no-phone:fixture', waUserId: 'AU.fixture123' }, 'whatsapp').eligible, true);
+});
 
 test('campaign tags use case-insensitive whole tokens and all requested tags', () => {
   assert.equal(hasAllLeadTags(' bulk, UK-Retail ', 'uk'), false);
@@ -245,8 +345,8 @@ test('audience preview and population include email-only contacts and remain ide
   assert.deepEqual(both.exclusionCounts, { 'email:lead_paused': 1, 'whatsapp:lead_paused': 1 });
   assert.equal((await engine.getMatchingLeads(filter, null, 'whatsapp')).length, 1, 'email opt-out alone does not suppress WhatsApp');
   const campaign = await createCampaign({ targetFilter: filter });
-  assert.deepEqual(await engine.populateCampaign(campaign.id), { added: 1, total: 1 });
-  assert.deepEqual(await engine.populateCampaign(campaign.id), { added: 0, total: 1 });
+  assert.deepEqual(await engine.populateCampaign(campaign.id), { added: 1, total: 1, excludedCount: 2, exclusionCounts: { 'email:email_opted_out': 1, 'email:lead_paused': 1 } });
+  assert.deepEqual(await engine.populateCampaign(campaign.id), { added: 0, total: 1, excludedCount: 2, exclusionCounts: { 'email:email_opted_out': 1, 'email:lead_paused': 1 } });
   assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).totalLeads, 1);
   assert.equal(await db.campaignLead.count({ where: { campaignId: campaign.id } }), 1);
 }));
@@ -371,3 +471,133 @@ test('closed business hours release the pending recipient without a provider req
   assert.equal((await db.campaignLead.findFirst({ where: { campaignId: campaign.id } })).status, 'pending');
   assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'paused');
 }, { businessHours: false }));
+
+
+test('preview explains replied-owner exclusion without altering campaign protections', async () => fixture(async ({ engine, createLead, createCampaign }) => {
+  const lead = await createLead(1, { status: 'new', repliedAt: new Date(), tags: 'owner_qa', maxFollowups: 0, emailMarketingConsent: false });
+  const result = await engine.getAudience({ tags: 'owner_qa' }, null, 'whatsapp');
+  assert.equal(result.matchedCount, 1);
+  assert.equal(result.leads.length, 0);
+  assert.deepEqual(result.exclusionCounts, { 'whatsapp:customer_replied': 1 });
+  assert.equal(result.excludedSample[0].id, lead.id);
+  const campaign = await createCampaign({ channel: 'whatsapp', targetFilter: { tags: 'owner_qa' } });
+  assert.equal((await engine.populateCampaign(campaign.id)).total, 0);
+  await assert.rejects(engine.getAudience({ poolId: 1 }, null, 'whatsapp'), error => error.statusCode === 400);
+}));
+
+test('stale receipt cleanup preserves pauses, disabled followups, replies and newer delivery evidence', async () => fixture(async ({ db, createLead }) => {
+  const { reapStaleWhatsAppMessages } = await import('../src/services/undeliveredReaper.js');
+  const old = new Date(Date.now() - 5 * 3600000);
+  const cases = [{ status: 'paused' }, { maxFollowups: 0 }, {}, {}, {}, {}, { repliedAt: new Date() }];
+  for (let i = 0; i < cases.length; i++) {
+    await createLead(i + 1, { status: 'contacted', isOnWhatsApp: true, maxFollowups: 3, ...cases[i] });
+    await db.message.create({ data: { leadId: i + 1, direction: 'outbound', channel: 'whatsapp', content: 'Fixture initial', status: i === 2 ? 'failed' : 'sent', sentAt: old, createdAt: old } });
+  }
+  await db.message.create({ data: { leadId: 4, direction: 'outbound', content: 'Fixture delivered', status: 'read', ackStatus: 3 } });
+  await db.message.create({ data: { leadId: 5, direction: 'inbound', content: 'Fixture reply', status: 'delivered' } });
+  const queued = await db.message.create({ data: { leadId: 6, direction: 'outbound', channel: 'whatsapp', content: 'Fixture followup', status: 'queued', createdAt: old } });
+  const changed = await reapStaleWhatsAppMessages(db);
+  assert.deepEqual(changed.map(lead => lead.id), [6]);
+  assert.equal((await db.message.findUnique({ where: { id: queued.id } })).status, 'cancelled');
+  assert.equal(changed[0].isOnWhatsApp, true, 'missing receipt must not mark a number unavailable');
+  assert.equal((await db.lead.findUnique({ where: { id: 1 } })).status, 'paused');
+  assert.equal((await db.lead.findUnique({ where: { id: 2 } })).maxFollowups, 0);
+  await db.lead.update({ where: { id: 6 }, data: { status: 'paused' } });
+  assert.deepEqual(await reapStaleWhatsAppMessages(db), []);
+}));
+
+test('stale receipt cleanup cannot overwrite a pause made after selection', async () => fixture(async ({ db, createLead }) => {
+  const { reapStaleWhatsAppMessages } = await import('../src/services/undeliveredReaper.js');
+  await createLead(1, { status: 'contacted', maxFollowups: 3 });
+  await db.message.create({ data: { leadId: 1, direction: 'outbound', content: 'Fixture initial', status: 'sent', sentAt: new Date(Date.now() - 5 * 3600000) } });
+  const raced = { $transaction: (...args) => db.$transaction(...args), message: { findMany: async args => {
+    const candidates = await db.message.findMany(args);
+    await db.lead.update({ where: { id: 1 }, data: { status: 'paused' } });
+    return candidates;
+  } } };
+  assert.deepEqual(await reapStaleWhatsAppMessages(raced), []);
+  assert.equal((await db.lead.findUnique({ where: { id: 1 } })).status, 'paused');
+}));
+
+
+test('pair throttling is temporary, explicit marketing opt-outs are not, and marketing retry backoff cannot undershoot 24h', () => {
+  assert.equal(classifyDeliveryFailure({ errorCode: '131056' }).retryable, true);
+  assert.equal(classifyDeliveryFailure({ errorCode: '131050' }).retryable, false);
+  for (let i = 0; i < 100; i++) assert.ok(retryDelayMs(1, '131049') >= 24 * 3600000);
+});
+
+test('a temporary pair limit cannot become durable campaign suppression', async () => fixture(async ({ db, engine, createLead }) => {
+  await createLead(1);
+  await db.message.create({ data: { leadId: 1, direction: 'outbound', channel: 'whatsapp', waAccount: 8,
+    waMessageId: 'fixture-pair-limit', content: 'Fixture only', status: 'failed', providerErrorCode: '131056' } });
+  await db.whatsAppReceipt.create({ data: { eventKey: 'fixture-pair-limit', accountId: 8, waMessageId: 'fixture-pair-limit', status: 'failed', failureCode: 131056 } });
+  assert.equal((await suppressedWhatsAppLeads(db, [1], 8)).size, 0);
+  assert.equal((await engine.getAudience({}, null, 'whatsapp', 8)).leads.length, 1);
+}));
+
+test('synchronous template rejection retains provider diagnostics and explicit opt-outs block the next campaign', async () => fixture(async ({ db, engine, createLead, createCampaign, createWa, running }) => {
+  await createWa(8); await createLead(1);
+  const campaign = await createCampaign({ channel: 'whatsapp', waCampaignName: 'fixture_approved', whatsappSenderAccountId: 8 });
+  await engine.populateCampaign(campaign.id); await running(campaign.id); await engine._executeCampaign(campaign);
+  const message = await db.message.findFirst({ where: { campaignId: campaign.id } });
+  assert.equal(message.providerErrorCode, '131050'); assert.equal(message.providerRequestId, 'fixture-request');
+  assert.equal((await engine.getAudience({}, null, 'whatsapp', 8)).leads.length, 0);
+}, { whatsapp: () => ({ success: false, reason: 'whatsapp_marketing_opted_out', errorCode: '131050', error: 'Synthetic opt-out', requestId: 'fixture-request' }) }));
+
+test('reply received during the send delay retains attribution and cannot be overwritten by completion', async () => fixture(async ({ db, engine, createLead, createCampaign, running }) => {
+  await createLead(1);
+  const campaign = await createCampaign(); await engine.populateCampaign(campaign.id); await running(campaign.id);
+  await engine._executeCampaign(campaign);
+  const recipient = await db.campaignLead.findFirst({ where: { campaignId: campaign.id } });
+  assert.equal(recipient.status, 'replied');
+  assert.ok(recipient.sentAt);
+  const result = await engine.getCampaign(campaign.id);
+  assert.equal(result.sentCount, 1); assert.equal(result.replyCount, 1);
+}, { delay: async ({ db }) => {
+  const recipient = await db.campaignLead.findFirst();
+  assert.equal(recipient.status, 'sent', 'acceptance must be visible before waiting');
+  await db.campaignLead.update({ where: { id: recipient.id }, data: { status: 'replied' } });
+  await db.campaign.update({ where: { id: recipient.campaignId }, data: { replyCount: { increment: 1 } } });
+} }));
+
+test('restart recovers a claimed recipient even when the operator paused its campaign before the crash', async () => fixture(async ({ db, createLead, createCampaign, engine }) => {
+  await createLead(1); const campaign = await createCampaign(); await engine.populateCampaign(campaign.id);
+  await db.campaign.update({ where: { id: campaign.id }, data: { status: 'paused' } });
+  await db.campaignLead.updateMany({ where: { campaignId: campaign.id }, data: { status: 'sending' } });
+  const message = await db.message.create({ data: { leadId: 1, campaignId: campaign.id, direction: 'outbound', channel: 'email', content: 'Synthetic', status: 'sending' } });
+  await recoverCampaignRuns(db);
+  assert.equal((await db.campaignLead.findFirst({ where: { campaignId: campaign.id } })).status, 'pending');
+  assert.equal((await db.message.findUnique({ where: { id: message.id } })).status, 'unconfirmed');
+  assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'paused');
+}));
+
+test('legacy overpopulated drafts cannot bypass the launch cap', async () => fixture(async ({ db, createLead, createCampaign, engine, calls }) => {
+  await createLead(1); await createLead(2);
+  const campaign = await createCampaign({ targetFilter: { limit: 1 } });
+  for (const leadId of [1, 2]) await db.campaignLead.create({ data: { campaignId: campaign.id, leadId } });
+  await assert.rejects(engine.startCampaign(campaign.id), error => error.reason === 'audience_limit_exceeded');
+  assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'draft');
+  assert.equal(calls.email.length, 0);
+}));
+
+test('audience edits made during population cannot silently select a stale country', async () => fixture(async ({ db, createLead, createCampaign, engine }) => {
+  await createLead(1, { country: 'Australia' });
+  const campaign = await createCampaign({ targetFilter: { country: 'Australia' } });
+  const original = engine.getAudience.bind(engine);
+  engine.getAudience = async (...args) => {
+    const result = await original(...args);
+    await db.campaign.update({ where: { id: campaign.id }, data: { targetFilter: JSON.stringify({ country: 'United Kingdom' }) } });
+    return result;
+  };
+  await assert.rejects(engine.populateCampaign(campaign.id), error => error.statusCode === 409);
+  assert.equal(await db.campaignLead.count({ where: { campaignId: campaign.id } }), 0);
+}));
+
+
+test('completion preserves the original acceptance time rather than the end of the send delay', async () => fixture(async ({ db, engine, createLead, createCampaign, running }) => {
+  await createLead(1); const campaign = await createCampaign(); await engine.populateCampaign(campaign.id); await running(campaign.id);
+  let acceptedAt;
+  engine.delay = async () => { acceptedAt = (await db.campaignLead.findFirst()).sentAt; await new Promise(resolve => setTimeout(resolve, 15)); };
+  await engine._executeCampaign(campaign);
+  assert.equal((await db.campaignLead.findFirst()).sentAt.getTime(), acceptedAt.getTime());
+}));

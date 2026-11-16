@@ -1,3 +1,4 @@
+import { recoverCampaignRuns, reconcileCampaignCounters } from './services/campaignMetrics.js';
 import { startWebPush, stopWebPush } from './services/webPush.js';
 import cron from 'node-cron';
 import campaignScheduler from './services/campaignScheduler.js';
@@ -8,6 +9,7 @@ import followupEngine from './services/followup.js';
 import leadScorer from './services/leadScorer.js';
 import emailService from './services/emailService.js';
 import emailVerification from './services/emailVerification.js';
+import indiamartIntake from './services/indiamartIntake.js';
 import orderNotifier from './services/orderNotifier.js';
 import imessageService from './services/imessage.js';
 import telegramService from './services/telegram.js';
@@ -57,6 +59,8 @@ async function main() {
 
     // Recover any messages stuck in 'sending' from a prior crash
     await campaignScheduler.recoverInterrupted();
+    await recoverCampaignRuns(prisma);
+    await reconcileCampaignCounters(prisma);
     await followupEngine.recoverStuckMessages();
 
     // ── Step 2: Reply detection ──
@@ -67,6 +71,8 @@ async function main() {
     logger.info('Step 2/4: Reply detection is webhook-driven (no listener wiring needed)');
 
     logger.info('Step 3/4: Starting schedulers...');
+    indiamartIntake.kick();
+    cron.schedule('* * * * *', () => indiamartIntake.kick());
 
     // Process message queue every 2 minutes (priority sorted: HOT > WARM > COLD)
     cron.schedule('*/2 * * * *', async () => {

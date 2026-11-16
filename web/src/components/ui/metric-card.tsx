@@ -18,6 +18,7 @@ type Delta = {
   label?: string
   /** Set when a decrease is the good outcome (response time, bounce rate). */
   inverted?: boolean
+  neutral?: boolean
 }
 
 /**
@@ -130,7 +131,10 @@ export function MetricCard({
           )}
         </p>
         {trend && trend.length > 1 && (
-          <Sparkline points={trend} tone={delta ? (improving ? 'success' : 'danger') : 'accent'} />
+          <Sparkline
+            points={trend}
+            tone={delta && !delta.neutral ? (improving ? 'success' : 'danger') : 'accent'}
+          />
         )}
       </div>
 
@@ -153,7 +157,7 @@ export function MetricCard({
             <span
               className={cn(
                 'inline-flex items-center gap-0.5 font-medium tabular-nums',
-                improving ? 'text-success' : 'text-danger',
+                delta.neutral ? 'text-text-secondary' : improving ? 'text-success' : 'text-danger',
               )}
             >
               <DeltaIcon aria-hidden="true" className="h-3 w-3" />
