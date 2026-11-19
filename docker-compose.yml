@@ -8,10 +8,9 @@
 # ADMIN_PASSWORD; if no password is set, `docker compose logs app` shows a
 # generated one once).
 #
-# Everything the app stores lives in the `outboundos-data` volume. Back it up
-# with:  docker compose exec app bash scripts/backup.sh
-# (writes to /app/data/backups inside the same volume; copy it off the host
-# with `docker compose cp app:/app/data/backups ./backups`).
+# Back up the app volume with docker compose exec -T app npm run backup:instance.
+# See setup/backups.md for off-host storage, host configuration and the separate
+# MCP volume.
 #
 # Optional MCP server, so Claude or another AI client can work your CRM:
 #   docker compose --profile mcp up -d

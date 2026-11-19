@@ -52,19 +52,10 @@ docker compose up -d --build --pull never
 ```
 
 For a published release, pin `OUTBOUNDOS_VERSION` in `.env` to the release tag
-without the leading `v`. Before upgrading, create a backup:
-
-```bash
-docker compose exec app bash scripts/backup.sh
-docker compose cp app:/app/data/backups ./backups
-docker compose cp app:/app/data/instance-secrets.json ./instance-secrets.json
-```
-
-Keep both copies private and move them off the host. If you explicitly supplied
-`JWT_SECRET` and `LEAD_SYNC_ENCRYPTION_KEY`, preserve those in a separate secret
-backup instead; a generated secrets file may not exist. Retain the old image
-version and rehearse restoring into an isolated volume before a live upgrade.
-An older application image may be incompatible with an upgraded database.
+without the leading `v`. Before upgrading, verify a recovery set using the
+[backup and restore guide](backups.md). Retain the old image version alongside
+the recovery set. An older application image may be incompatible with an
+upgraded database.
 
 ```bash
 docker compose pull

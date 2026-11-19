@@ -26,9 +26,12 @@
 
 ## Saved channel credentials stopped working after a restore
 
-The database was restored without its `instance-secrets.json` (or with a
-different `LEAD_SYNC_ENCRYPTION_KEY`). Restore the matching secrets file, or
-re-enter the credentials in Settings.
+Restore the matching `instance-secrets.json` or supply the original
+`LEAD_SYNC_ENCRYPTION_KEY` and `JWT_SECRET` through the runtime environment.
+If startup reports a missing, unreadable or invalid key file for an existing
+instance, preserve the database and current file while recovering the original
+keys from your [recovery set](backups.md). Generated replacements cannot decrypt
+the old data.
 
 ## WhatsApp replies do not arrive
 

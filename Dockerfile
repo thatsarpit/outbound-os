@@ -78,4 +78,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
 # pull the new image, restart, and the schema follows. `migrate deploy` only
 # applies migrations already committed in prisma/migrations, never generates
 # new ones, and is a no-op when the database is current.
-CMD ["sh", "-c", "npx prisma migrate deploy && exec node src/index.js"]
+CMD ["sh", "-c", "node src/bootstrapEnv.js && npx prisma migrate deploy && exec node src/index.js"]

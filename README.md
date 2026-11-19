@@ -176,6 +176,9 @@ Then connect channels in **Settings → WhatsApp**, **Settings → Email** and
 Put it behind HTTPS (Caddy, Nginx, Cloudflare Tunnel) before connecting
 WhatsApp: Meta only delivers webhooks to a public HTTPS address.
 
+Before upgrading, follow the [backup and restore guide](setup/backups.md) and
+keep a verified copy outside the host.
+
 ### Deploy on Render
 
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https%3A%2F%2Fgithub.com%2Fthatsarpit%2Foutbound-os)
