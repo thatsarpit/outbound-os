@@ -470,11 +470,8 @@ model WhatsAppAccount {
   companyUSP      String @default("")
 
   // ── Per-Account Rate Limits ──
-  // Conservative defaults — looks human, protects account warmth.
-  // hourlyLimit:    2/hour (hard cap 3) so 5 sends spread across the day
-  // dailyLimit:     20/day total ceiling (initial + follow-ups + replies)
-  // newLeadsPerDay: 5 NEW leads contacted per account per day (initial outreach budget;
-  //                 follow-ups to existing leads do NOT count against this)
+  // Hourly and daily limits apply to customer message attempts.
+  // New-lead counts remain separate routing statistics.
   hourlyLimit    Int @default(2)
   dailyLimit     Int @default(20)
   newLeadsPerDay Int @default(5)
@@ -483,7 +480,7 @@ model WhatsAppAccount {
   maxFollowups   Int    @default(5)
   followupDelays String @default("[0,240,1440,2880,4320]") // JSON array in minutes
 
-  // ── Counters (reset at midnight IST by resetDailyCounters) ──
+  // Legacy reporting counters. Dispatch limits use WhatsAppDispatch.
   messagesSentToday      Int      @default(0)
   newLeadsContactedToday Int      @default(0)
   lastResetAt            DateTime @default(now())
@@ -494,6 +491,17 @@ model WhatsAppAccount {
 
   // Lead pool connections (many-to-many)
   leadPools LeadPoolWhatsApp[]
+  dispatches WhatsAppDispatch[]
+}
+
+model WhatsAppDispatch {
+  id          Int             @id @default(autoincrement())
+  accountId   Int
+  attemptedAt DateTime
+  account     WhatsAppAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, attemptedAt])
+  @@index([attemptedAt])
 }
 
 model SystemConfig {

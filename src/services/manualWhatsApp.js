@@ -1,3 +1,4 @@
+import { whatsappQuotaMessage } from './whatsappDispatch.js';
 import { assertReplyTarget } from '../utils/messageActions.js';
 import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
 import { sendMediaFile, mediaKind } from './whatsappMedia.js';
@@ -241,9 +242,13 @@ export async function sendManualWhatsApp(
     'no_message_id',
     'confirmation_unknown',
   ].includes(result.reason);
+  const quotaHeld = Boolean(whatsappQuotaMessage(result.reason));
   const saved = await prisma.message.update({
     where: { id: message.id },
     data: {
+      // The provider received nothing for this file or reply. Release the key
+      // so the same batch can resume without resending its accepted files.
+      ...(quotaHeld ? { manualSendKey: null, idempotencyKey: null } : {}),
       waMessageId: result.waMessageId || result.messageId || null,
       providerErrorCode: result.success ? null : result.errorCode || null,
       providerErrorMessage: result.success ? null : String(result.rawError || result.error || '').slice(0, 500) || null,

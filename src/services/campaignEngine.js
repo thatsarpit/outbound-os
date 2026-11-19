@@ -1,3 +1,4 @@
+import { whatsappQuotaMessage } from './whatsappDispatch.js';
 import { campaignFilter } from '../utils/campaignFilter.js';
 import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
 import { refreshCampaignMetrics, readCampaignMetrics } from './campaignMetrics.js';
@@ -209,6 +210,7 @@ export class CampaignEngine {
       where: { campaignId: campaign.id, status: 'pending' }, orderBy: { id: 'asc' },
     });
     let billingBlocked = false;
+    let quotaBlocked = null;
     try {
       for (const recipient of pending) {
         const claim = await this.db.campaignLead.updateMany({
@@ -244,7 +246,11 @@ export class CampaignEngine {
             if (context.halt) { halted = true; break; }
             if (!context.lead) { reasons.push(`${channel}:${context.reason}`); continue; }
             const result = await this._sendChannel(campaign, context.lead, channel, body, subject);
-            if (result.halt) { halted = true; break; }
+            if (result.halt) {
+              halted = true;
+              if (whatsappQuotaMessage(result.reason)) quotaBlocked = result;
+              break;
+            }
             if (result.success) {
               accepted++;
               // Publish acceptance before the delay so an immediate reply can
@@ -287,7 +293,8 @@ export class CampaignEngine {
         where: { id: campaign.id },
         data: { status: unfinished || billingBlocked ? 'paused' : 'completed',
           completedAt: unfinished || billingBlocked ? null : new Date(),
-          ...(billingBlocked ? { scheduleError: 'The provider rejected payment. Check the sending account balance before resuming.' } : {}) },
+          ...(billingBlocked ? { scheduleError: 'The provider rejected payment. Check the sending account balance before resuming.' } : {}),
+          ...(quotaBlocked ? { scheduleError: `${whatsappQuotaMessage(quotaBlocked.reason)} Resume the campaign when capacity is available.` } : {}) },
       });
       await refreshCampaignMetrics(this.db, campaign.id);
     } catch (error) {
@@ -366,6 +373,13 @@ export class CampaignEngine {
       result = { success: false, reason: 'confirmation_unknown' };
     }
     const reason = result.reason || result.error || 'send_failed';
+    if (whatsappQuotaMessage(reason)) {
+      // A local denial made no provider request. Resume can try this channel
+      // again without replaying any other channel already accepted.
+      await this.db.message.updateMany({ where: { id: message.id, status: 'sending' },
+        data: { status: 'cancelled', providerStatusReason: reason } });
+      return { halt: true, reason };
+    }
     const status = result.success ? 'sent' : UNCERTAIN.has(reason) ? 'unconfirmed' : 'failed';
     await this.db.message.update({ where: { id: message.id }, data: {
       content: liveBody,

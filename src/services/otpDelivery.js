@@ -39,7 +39,7 @@ async function viaWhatsApp(phone, code) {
   // Body variable {{1}} is the code. Authentication templates also require the
   // code as the URL button parameter when the template uses one-tap copy;
   // a plain body-only template is the simpler path and what this assumes.
-  const res = await whatsappCloudApi.sendTemplate(phone, TEMPLATE_NAME, TEMPLATE_LANG, [
+  const res = await whatsappCloudApi.sendAuthenticationTemplate(phone, TEMPLATE_NAME, TEMPLATE_LANG, [
     { type: 'text', text: code },
   ]);
   if (!res?.success) {

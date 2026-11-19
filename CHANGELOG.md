@@ -6,6 +6,10 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+- Enforce the WhatsApp sender's rolling hourly and workspace-day limits for
+  customer message attempts. Local quota holds defer follow-ups, pause
+  campaigns with pending recipients, and preserve attachment batch identity.
+
 - Set the first local admin password in deployment configuration or through the
   server's reset command. Startup no longer generates a password for the logs.
 - Changing or resetting a local password ends older API and live-update

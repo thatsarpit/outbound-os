@@ -14,6 +14,7 @@ import { createDecipheriv, createCipheriv, randomBytes, createHash } from 'crypt
 import { credentialState, metaCredentialPair, providerOf } from './whatsappProviders.js';
 import { ycloudSendPayload } from '../utils/ycloudWebhook.js';
 import { whatsappProviderError } from '../utils/whatsappProviderError.js';
+import { reserveWhatsAppDispatch, whatsappQuotaMessage } from './whatsappDispatch.js';
 
 // Read per call so tests (and self-hosters pinning an API version) can set it
 // after this module has loaded.
@@ -205,7 +206,7 @@ class WhatsAppCloudApiService {
    *
    * @returns {{success: boolean, messageId?: string, waId?: string, accountId?: number|null, reason?: string, rawError?: string}}
    */
-  async _postMessage(payload, accountId, label) {
+  async _postMessage(payload, accountId, label, { customerMessage = true, prepare } = {}) {
     let transport;
     try {
       transport = await this.getTransport(accountId);
@@ -214,6 +215,24 @@ class WhatsAppCloudApiService {
       return { success: false, reason: 'no_credentials', rawError: err.message };
     }
 
+    const resolvedId = transport.account?.id ?? null;
+    if ((transport.account && !transport.account.enabled) || (customerMessage && !resolvedId)) {
+      return { success: false, reason: 'account_not_ready', accountId: resolvedId };
+    }
+    if (customerMessage) {
+      const reservation = await reserveWhatsAppDispatch(resolvedId);
+      if (!reservation.reserved) {
+        const { reason, retryAt } = reservation;
+        return { success: false, reason, retryAt, accountId: resolvedId, rawError: whatsappQuotaMessage(reason) };
+      }
+    }
+    if (prepare) {
+      try {
+        payload = await prepare(transport);
+      } catch {
+        return { success: false, reason: 'media_upload_failed', rawError: 'The media upload failed before WhatsApp could send your message.' };
+      }
+    }
     const { url, headers: authHeaders, provider } = transport;
     const tag = `WhatsApp[${provider}]`;
 
@@ -257,7 +276,7 @@ class WhatsAppCloudApiService {
         return { success: false, reason: 'no_message_id', rawError: 'Provider response did not include a message ID.' };
       }
 
-      return { success: true, messageId, waId, accountId: accountId ?? null, provider };
+      return { success: true, messageId, waId, accountId: resolvedId, provider };
 
     } catch (err) {
       const aborted = err.name === 'AbortError';
@@ -303,7 +322,7 @@ class WhatsAppCloudApiService {
   async sendReaction(phone, messageId, emoji, accountId) {
     const addressee = cloudApiAddressee(phone, (value) => this.normalizePhone(value));
     if (!addressee) return { success: false, reason: 'invalid_phone' };
-    return this._postMessage({ messaging_product: 'whatsapp', ...addressee, type: 'reaction', reaction: { message_id: messageId, emoji } }, accountId, 'reaction');
+    return this._postMessage({ messaging_product: 'whatsapp', ...addressee, type: 'reaction', reaction: { message_id: messageId, emoji } }, accountId, 'reaction', { customerMessage: false });
   }
 
   /** Send an approved Meta template using the campaign's ordered body variables. */
@@ -328,6 +347,14 @@ class WhatsAppCloudApiService {
    * @param {number|null} accountId
    */
   async sendTemplate(phone, templateName, languageCode = 'en', components = [], accountId = null) {
+    return this._sendTemplate(phone, templateName, languageCode, components, accountId, true);
+  }
+
+  async sendAuthenticationTemplate(phone, templateName, languageCode, components) {
+    return this._sendTemplate(phone, templateName, languageCode, components, null, false);
+  }
+
+  async _sendTemplate(phone, templateName, languageCode, components, accountId, customerMessage) {
     const addressee = cloudApiAddressee(phone, (value) => this.normalizePhone(value));
     if (!addressee) return { success: false, reason: 'invalid_phone', rawError: 'Empty phone number' };
     const to = addressee.to || addressee.recipient;
@@ -343,7 +370,7 @@ class WhatsAppCloudApiService {
         language: { code: languageCode },
         ...(components.length > 0 ? { components: [{ type: 'body', parameters: components }] } : {}),
       },
-    }, accountId, `template '${templateName}' → *${to.slice(-4)}`);
+    }, accountId, `template '${templateName}' → *${to.slice(-4)}`, { customerMessage });
 
     if (result.success) logger.info(`WhatsApp ✅ template '${templateName}' sent to *${to.slice(-4)} — ${result.messageId}`);
     return result;
@@ -364,17 +391,17 @@ class WhatsAppCloudApiService {
     if (!addressee) return { success: false, reason: 'invalid_phone', rawError: 'Empty phone number' };
     const to = addressee.to || addressee.recipient;
 
-    const mediaPayload = { id: String(mediaId) };
-    if (caption && mediaType !== 'audio') mediaPayload.caption = String(caption).slice(0, 1024);
-    if (filename && mediaType === 'document') mediaPayload.filename = String(filename).slice(0, 240);
-
-    return this._postMessage({
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      ...addressee,
-      type: mediaType,
-      [mediaType]: mediaPayload,
-    }, accountId, `${mediaType} (uploaded) → *${to.slice(-4)}`);
+    const buildPayload = (id) => {
+      const mediaPayload = { id: String(id) };
+      if (caption && mediaType !== 'audio') mediaPayload.caption = String(caption).slice(0, 1024);
+      if (filename && mediaType === 'document') mediaPayload.filename = String(filename).slice(0, 240);
+      return { messaging_product: 'whatsapp', recipient_type: 'individual', ...addressee,
+        type: mediaType, [mediaType]: mediaPayload };
+    };
+    const label = `${mediaType} (uploaded) → *${to.slice(-4)}`;
+    return typeof mediaId === 'function'
+      ? this._postMessage(null, accountId, label, { prepare: async transport => buildPayload(await mediaId(transport)) })
+      : this._postMessage(buildPayload(mediaId), accountId, label);
   }
 
   /**

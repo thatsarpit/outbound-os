@@ -1,3 +1,4 @@
+import { whatsappQuotaMessage } from './whatsappDispatch.js';
 import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
 import prisma from '../utils/prismaClient.js';
 import deliveryRetry from './deliveryRetry.js';
@@ -513,8 +514,8 @@ class FollowupEngine {
 
             // Burn one slot from the account's new-lead budget. The
             // messagesSentToday counter is already incremented inside
-            // whatsappManager.sendMessage(); this counter tracks the *initial
-            // outreach* subset that gates getNextAccount({forInitialOutreach}).
+            // whatsappManager.sendMessage(); this counter tracks the initial
+            // outreach subset for sender reporting and selection.
             if (isInitialOutreach) {
               const acctId = sendResult.accountId || sendAccountId;
               if (acctId) {
@@ -537,6 +538,7 @@ class FollowupEngine {
               where: { id: claimedMsg.id, status: 'sending' },
               data: {
                 status: 'sent',
+                providerStatusReason: 'provider_accepted',
                 sentAt: new Date(),
                 ...(sendResult.waMessageId ? { waMessageId: sendResult.waMessageId } : {}),
               },
@@ -602,6 +604,22 @@ class FollowupEngine {
             }
 
             await randomDelay(config.whatsapp.minDelay, config.whatsapp.maxDelay);
+            continue;
+          }
+
+          if (whatsappQuotaMessage(sendResult.reason)) {
+            await prisma.message.updateMany({
+              where: { id: claimedMsg.id, status: 'sending' },
+              data: { status: 'queued', scheduledAt: sendResult.retryAt, providerStatusReason: sendResult.reason },
+            });
+            continue;
+          }
+
+          if (['timeout', 'exception', 'no_message_id', 'confirmation_unknown'].includes(sendResult.reason)) {
+            await prisma.message.updateMany({
+              where: { id: claimedMsg.id, status: 'sending' },
+              data: { status: 'unconfirmed', providerStatusReason: sendResult.reason },
+            });
             continue;
           }
 

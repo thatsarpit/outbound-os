@@ -8,7 +8,8 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { execFileSync, execSync } from 'node:child_process';
+import { execFile, execFileSync, execSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -1127,7 +1128,23 @@ describe('Meta WhatsApp webhook', () => {
       assert.equal(outbound.mediaType, 'pdf');
       assert.ok(outbound.manualSendKey, 'files use the same durable manual attempt path');
 
-      // 4. Outside the 24-hour window the error says what to do.
+      // 4. The first file reaches the provider and the second waits for capacity.
+      const second = await prisma.mediaFile.create({
+        data: { filename: `second-${storedName}`, originalName: 'second-list.pdf', mimeType: 'application/pdf', size: 13, path: `data/media/${storedName}` },
+      });
+      const batch = { mediaFileIds: [library.id, second.id], clientMessageId: 'fixture-media-quota-batch-01' };
+      const sendBatch = () => request('POST', `/api/leads/${lead.id}/send-media`, {
+        body: batch, headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.243' },
+      });
+      const held = await sendBatch();
+      assert.equal(held.status, 429, JSON.stringify(held.body));
+      assert.equal(held.body.code, 'manual_send_quota');
+      assert.equal(seen.uploads, 2);
+      await prisma.whatsAppAccount.update({ where: { id: account.id }, data: { hourlyLimit: 4 } });
+      assert.equal((await sendBatch()).status, 200);
+      assert.equal(seen.uploads, 3, 'retry sends only the file that did not reach the provider');
+
+      // 5. Outside the 24-hour window the error says what to do.
       windowClosed = true;
       const late = await request('POST', `/api/leads/${lead.id}/send-media`, {
         body: { mediaFileId: library.id },
@@ -2860,7 +2877,7 @@ describe('Direct Meta transport', () => {
     const previous = process.env.META_GRAPH_API_BASE;
     process.env.META_GRAPH_API_BASE = `http://127.0.0.1:${graph.address().port}`;
     const account = await prisma.whatsAppAccount.create({ data: {
-      name: 'Direct transport fixture', provider: 'meta', cloudApiPhoneId: 'phone-fixture',
+      name: 'Direct transport fixture', provider: 'meta', enabled: true, cloudApiPhoneId: 'phone-fixture',
       cloudApiToken: cloud.encryptToken('fixture-token'), templateLanguage: 'en_US',
     } });
     try {
@@ -3226,6 +3243,48 @@ test('Web Push enforces personal device ownership and retries durable reply curs
     if (lead) await prisma.lead.delete({ where: { id: lead.id } });
     await prisma.user.deleteMany({ where: { id: { in: users.map(user => user.id) } } });
     for (const [key, value] of Object.entries(env)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  }
+});
+
+test('WhatsApp follow-up quota waits without using a retry and uncertain sends stay held', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { default: manager } = await import('../src/services/whatsapp.js');
+  const { default: followup } = await import('../src/services/followup.js');
+  const sender = await prisma.whatsAppAccount.create({ data: { name: 'Follow-up quota fixture' } });
+  const lead = await prisma.lead.create({ data: {
+    name: 'Follow-up quota fixture', mobile: '15550104997', assignedAccount: sender.id, status: 'new', leadTier: 'HOT',
+  } });
+  const queued = await prisma.message.create({ data: {
+    leadId: lead.id, direction: 'outbound', channel: 'whatsapp', status: 'queued', content: 'Synthetic follow-up',
+    scheduledAt: new Date(Date.now() - 60_000), waAccount: sender.id, waCampaignName: 'fixture_template',
+  } });
+  const original = manager.sendCampaignTemplate;
+  const retryAt = new Date(Date.now() + 30 * 60_000);
+  let attempts = 0;
+  manager.sendCampaignTemplate = async () => {
+    attempts++;
+    return attempts === 1 ? { success: false, reason: 'whatsapp_hourly_limit', retryAt }
+      : { success: false, reason: 'timeout' };
+  };
+  try {
+    const run = () => followup.processQueue({ messageIds: [queued.id] });
+    const row = () => prisma.message.findUnique({ where: { id: queued.id } });
+    await run();
+    const held = await row();
+    assert.equal(held.status, 'queued');
+    assert.equal(held.retryCount, 0);
+    assert.equal(+held.scheduledAt, +retryAt);
+    await run();
+    assert.equal(attempts, 1);
+    await prisma.message.update({ where: { id: queued.id }, data: { scheduledAt: new Date(Date.now() - 1_000) } });
+    await run();
+    assert.equal((await row()).status, 'unconfirmed');
+    await run();
+    assert.equal(attempts, 2);
+  } finally {
+    manager.sendCampaignTemplate = original;
+    await prisma.lead.delete({ where: { id: lead.id } });
+    await prisma.whatsAppAccount.delete({ where: { id: sender.id } });
   }
 });
 
@@ -3738,7 +3797,7 @@ describe('YCloud WhatsApp provider', () => {
     await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
     previousBase = process.env.YCLOUD_API_BASE;
     process.env.YCLOUD_API_BASE = `http://127.0.0.1:${upstream.address().port}/v2`;
-    account = await prisma.whatsAppAccount.create({ data: { name: 'YCloud fixture', provider: 'ycloud', enabled: true } });
+    account = await prisma.whatsAppAccount.create({ data: { name: 'YCloud fixture', provider: 'ycloud', enabled: true, hourlyLimit: 100, dailyLimit: 100 } });
   });
   after(async () => {
     if (previousBase === undefined) delete process.env.YCLOUD_API_BASE; else process.env.YCLOUD_API_BASE = previousBase;
@@ -3813,6 +3872,72 @@ describe('YCloud WhatsApp provider', () => {
     assert.equal(failure.errorCode, '131042');
     assert.equal(failure.rawError, 'Payment fixture');
     sendFailure = false;
+  });
+
+  test('one shared quota gates concurrent text, template and media sends before provider calls', async () => {
+    calls = [];
+    const source = await prisma.whatsAppAccount.findUnique({ where: { id: account.id } });
+    const first = await prisma.whatsAppAccount.create({ data: {
+      name: 'Limited YCloud fixture', provider: 'ycloud', enabled: true,
+      ycloudApiKey: source.ycloudApiKey, ycloudWabaId: waba, ycloudPhoneNumber: phone,
+      hourlyLimit: 1, dailyLimit: 9,
+    } });
+    const attempts = await Promise.all([1, 2, 3, 4].map(() =>
+      cloud.sendTextMessage('15550100001', 'Synthetic quota fixture', first.id)));
+    assert.equal(attempts.filter(result => result.success).length, 1);
+    assert.equal(attempts.filter(result => result.reason === 'whatsapp_hourly_limit').length, 3);
+    assert.equal(calls.length, 1);
+
+    const template = await cloud.sendCampaignTemplate({ phone: '15550100001', campaignName: 'fixture_template', accountId: first.id });
+    assert.equal(template.reason, 'whatsapp_hourly_limit');
+    const { sendMediaFile } = await import('../src/services/whatsappMedia.js');
+    const file = path.join(__dirname, '..', 'data', 'quota-media-fixture.txt');
+    fs.writeFileSync(file, 'Fixture only');
+    try {
+      const media = await sendMediaFile({ address: '15550100001', filePath: file, mimeType: 'text/plain', filename: 'fixture.txt', accountId: first.id });
+      assert.equal(media.reason, 'whatsapp_hourly_limit');
+    } finally {
+      fs.unlinkSync(file);
+    }
+    assert.equal(calls.length, 1, 'quota denial even skips provider media upload');
+
+    const pool = await prisma.leadPool.create({ data: { name: 'Quota fixture', slug: 'quota-fixture' } });
+    await prisma.leadPoolWhatsApp.createMany({ data: [first.id, account.id].map(whatsappAccountId => ({ poolId: pool.id, whatsappAccountId })) });
+    const { default: manager } = await import('../src/services/whatsapp.js');
+    assert.equal(await manager.getNextAccount({ poolId: pool.id }), account.id);
+    assert.equal(await manager.getNextAccount({ poolId: pool.id }), account.id);
+    const later = await manager.sendMessage('15550100001', 'Synthetic quota fixture', first.id);
+    assert.equal(later.reason, 'whatsapp_hourly_limit');
+    assert.equal(calls.length, 1, 'explicit sender cannot switch accounts');
+  });
+
+  test('quota survives new processes and observes both midnight and rolling-hour boundaries', async () => {
+    const sender = await prisma.whatsAppAccount.create({ data: {
+      name: 'Persistent quota fixture', hourlyLimit: 1, dailyLimit: 1, enabled: true,
+    } });
+    const worker = new URL('../src/services/whatsappDispatch.js', import.meta.url).href;
+    const dbModule = new URL('../src/utils/prismaClient.js', import.meta.url).href;
+    const run = promisify(execFile);
+    const attempt = async (time) => {
+      const { stdout } = await run(process.execPath, ['--input-type=module', '-e', `
+        import { reserveWhatsAppDispatch } from ${JSON.stringify(worker)};
+        import db from ${JSON.stringify(dbModule)};
+        const result = await reserveWhatsAppDispatch(Number(process.argv[1]), new Date(process.argv[2]));
+        console.log(JSON.stringify(result));
+        await db.$disconnect();
+      `, String(sender.id), time], { env: { ...process.env, BUSINESS_TIMEZONE: 'Asia/Kolkata' } });
+      return JSON.parse(stdout.trim().split('\n').at(-1));
+    };
+    const initial = '2026-11-18T17:45:00.000Z';
+    const contenders = await Promise.all([attempt(initial), attempt(initial)]);
+    assert.equal(contenders.filter(result => result.reserved).length, 1);
+    const sameDay = await attempt('2026-11-18T18:25:00.000Z');
+    assert.equal(sameDay.reason, 'whatsapp_daily_limit');
+    assert.equal(sameDay.retryAt, '2026-11-18T18:30:00.000Z');
+    const midnight = await attempt('2026-11-18T18:30:00.000Z');
+    assert.equal(midnight.reason, 'whatsapp_hourly_limit', 'midnight cannot clear the rolling hour');
+    assert.equal(midnight.retryAt, '2026-11-18T18:45:00.000Z');
+    assert.equal((await attempt('2026-11-18T18:45:00.000Z')).reserved, true);
   });
 
   test('thread ownership rejection is actionable and never retried by the transport', async () => {

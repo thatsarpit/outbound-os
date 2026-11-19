@@ -232,6 +232,8 @@ export interface WhatsAppAccount {
   maxFollowups: number
   followupDelays: string
   messagesSentToday: number
+  hourlyUsed?: number
+  dailyUsed?: number
   /** Who delivers this account's messages. */
   provider: WhatsAppProvider
   providerLabel?: string

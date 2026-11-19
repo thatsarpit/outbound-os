@@ -89,6 +89,7 @@ import sheetsSync from './services/sheetsSync.js';
 import { sheetsWebhookUrl } from './utils/sheetsWebhook.js';
 import { browserMutationGuard } from './utils/browserMutation.js';
 import whatsappCloudApi from './services/whatsappCloudApi.js';
+import { whatsappQuotaMessage } from './services/whatsappDispatch.js';
 import { WHATSAPP_PROVIDERS, credentialState, publicCredentialSummary, publicWhatsAppAccount } from './services/whatsappProviders.js';
 import {
   getWorkspaceProfile, saveWorkspaceProfile, isOnboardingDismissed, setOnboardingDismissed,
@@ -379,11 +380,12 @@ async function sendManualWhatsAppMessage(payload) {
   const result = await sendManualWhatsApp(payload);
   if (!result.success) {
     const rejected = ['failed', 'permanently_failed'].includes(result.message?.status);
-    const error = new Error(result.reason === 're_engagement_required' ? 'The WhatsApp reply window is closed. Use an approved template.'
+    const quotaError = whatsappQuotaMessage(result.reason);
+    const error = new Error(quotaError || (result.reason === 're_engagement_required' ? 'The WhatsApp reply window is closed. Use an approved template.'
       : result.reason === 'thread_not_owned' ? 'Another app controls this WhatsApp conversation. Set the connected provider as the primary responder in Meta conversation routing before retrying.'
       : rejected && result.message?.providerErrorMessage ? `WhatsApp rejected this message: ${result.message.providerErrorMessage}`
-      : 'This message was not confirmed sent. Review its status in the conversation before retrying.');
-    Object.assign(error, { statusCode: 409, reason: result.reason, code: ['failed', 'permanently_failed'].includes(result.message?.status) ? 'manual_send_failed' : 'manual_send_unconfirmed' });
+      : 'This message was not confirmed sent. Review its status in the conversation before retrying.'));
+    Object.assign(error, { statusCode: quotaError ? 429 : 409, reason: result.reason, code: quotaError ? 'manual_send_quota' : rejected ? 'manual_send_failed' : 'manual_send_unconfirmed' });
     throw error;
   }
   return result;
@@ -417,7 +419,16 @@ async function sendWhatsAppFiles({ leadId, mediaFileIds, caption = '', accountId
       clientMessageId: createHash('sha256').update(`${batchKey}:${file.id}`).digest('hex'),
       media: { absolutePath: path.resolve(__dirname, '..', file.path), path: file.path, filename: file.originalName, mimeType: file.mimeType },
     });
-    if (!result.success) throw Object.assign(new Error(result.reason === 're_engagement_required' ? 'WhatsApp only delivers files within 24 hours of the customer’s last message. Send an approved template, then wait for their reply.' : 'This file was not confirmed sent. Review its status before retrying.'), { statusCode: 502, reason: result.reason, code: ['failed', 'permanently_failed'].includes(result.message?.status) ? 'manual_send_failed' : 'manual_send_unconfirmed' });
+    if (!result.success) {
+      const quotaError = whatsappQuotaMessage(result.reason);
+      const message = quotaError || (result.reason === 're_engagement_required'
+        ? 'WhatsApp only delivers files within 24 hours of the customer’s last message. Send an approved template, then wait for their reply.'
+        : 'This file was not confirmed sent. Review its status before retrying.');
+      const rejected = ['failed', 'permanently_failed'].includes(result.message?.status);
+      throw Object.assign(new Error(message), {
+        statusCode: quotaError ? 429 : 502, reason: result.reason, code: quotaError ? 'manual_send_quota' : rejected ? 'manual_send_failed' : 'manual_send_unconfirmed',
+      });
+    }
     messages.push(result.message);
   }
   return { lead: result.lead, accountId: result.accountId, messages };
@@ -2627,6 +2638,7 @@ app.get('/api/whatsapp/status', async (req, res) => {
           status,
           isReady: isReady ?? null,
           messagesSentToday: sentTodayByAccount.get(account.id) || 0,
+          ...(live ? { hourlyUsed: live.hourlyUsed, dailyUsed: live.dailyUsed } : {}),
         };
       }));
     } catch (error) {
@@ -4886,7 +4898,7 @@ app.post('/api/leads/:id/send-media', requireRole('agent'), async (req, res) => 
     broadcastEvent('manual_reply', { leadId: sent.lead.id, accountId: sent.accountId, channel: 'whatsapp', threadKey: `whatsapp:${sent.lead.id}` });
     res.json({ success: true, messages: sent.messages });
   } catch (e) {
-    res.status(e.statusCode || 500).json({ error: e.message, reason: e.reason });
+    res.status(e.statusCode || 500).json({ error: e.message, reason: e.reason, code: e.code });
   }
 });
 

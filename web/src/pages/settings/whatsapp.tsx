@@ -244,8 +244,14 @@ export default function WhatsAppSettingsPage() {
             <SettingsPanel
               icon={Settings2}
               title="Delivery Rules"
-              description="Sending limits and follow-up pacing apply to this account only, so different numbers can run with different risk profiles."
+              description="Customer message attempts count toward the last 60 minutes and the current workspace day. This includes manual replies and media."
             >
+              {selectedAccount.hourlyUsed !== undefined && selectedAccount.dailyUsed !== undefined && (
+                <p className="text-sm text-text-secondary">
+                  Last 60 minutes: {selectedAccount.hourlyUsed} of {selectedAccount.hourlyLimit} used.
+                  Workspace day: {selectedAccount.dailyUsed} of {selectedAccount.dailyLimit} used.
+                </p>
+              )}
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <SettingsField
                   label="Hourly Limit"

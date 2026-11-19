@@ -1,4 +1,5 @@
 import { whatsappAddressSuppressed } from './whatsappSuppression.js';
+import { pruneWhatsAppDispatches, whatsappDispatchUsage, whatsappQuotaMessage } from './whatsappDispatch.js';
 import { credentialState, publicCredentialSummary } from './whatsappProviders.js';
 import prisma from '../utils/prismaClient.js';
 import config from '../config.js';
@@ -16,7 +17,7 @@ import whatsappCloudApi from './whatsappCloudApi.js';
  *
  * This module is the *account brain*, not a transport. It owns:
  *  - Round-robin routing across enabled accounts (pool- and role-aware)
- *  - Per-account hourly / daily / new-lead budgets read from the DB
+ *  - Per-account hourly and daily dispatch usage
  *  - Per-account persona, consumed by messageComposer.js and emailService.js
  *    persona injection — which is why this file survives the web_js removal
  *  - Error-spike detection and auto-pause
@@ -33,13 +34,6 @@ import whatsappCloudApi from './whatsappCloudApi.js';
 class WhatsAppManager {
   constructor() {
     this._lastAccountIndex = 0;      // for round-robin cycling
-
-    // ── Per-account rate tracking (Maps) ──
-    this.hourlySent = new Map();          // accountId → number
-    this._hourlyResetTimer = null;
-    // Wall-clock of last successful send per account — enforces a hard minimum
-    // gap between any two sends.
-    this.lastSendAt = new Map();          // accountId → ms timestamp
 
     // ── Error spike detection ──
     this.consecutiveErrors = new Map();   // accountId → number
@@ -122,15 +116,6 @@ class WhatsAppManager {
     if (readyCount === 0) {
       logger.warn('⚠️ No WhatsApp account has Cloud API credentials — sending is disabled until one is configured in Settings');
     }
-
-    // Reset hourly counters every hour
-    if (this._hourlyResetTimer) clearInterval(this._hourlyResetTimer);
-    this._hourlyResetTimer = setInterval(() => {
-      for (const [id] of this.hourlySent) {
-        this.hourlySent.set(id, 0);
-      }
-      logger.info('⏰ Hourly message counters reset');
-    }, 60 * 60 * 1000);
   }
 
   /**
@@ -182,6 +167,7 @@ class WhatsAppManager {
     }
 
     // Round-robin: start from the next index after the last used
+    let cappedAccount = null;
     for (let i = 0; i < accounts.length; i++) {
       const idx = (this._lastAccountIndex + i) % accounts.length;
       const account = accounts[idx];
@@ -198,12 +184,19 @@ class WhatsAppManager {
         continue;
       }
 
-      // ── Minimum gap between any two sends ────────────────────────────────
-      // This account is good to go — advance the round-robin index
+      const usage = await whatsappDispatchUsage(account);
+      if (usage.hourlyUsed >= usage.hourlyLimit || usage.dailyUsed >= usage.dailyLimit) {
+        cappedAccount ??= id;
+        continue;
+      }
+      // A capacity check helps selection. Only the transport can reserve.
       this._lastAccountIndex = (idx + 1) % accounts.length;
       return id;
     }
 
+    // If every sender is capped, report a quota rejection at dispatch rather
+    // than reporting that the workspace has no connected sender.
+    if (cappedAccount) return cappedAccount;
     logger.warn(`⚠️ No WhatsApp accounts available${forInitialOutreach ? ' for new-lead outreach' : ''} (paused or unconfigured)`);
     return null;
   }
@@ -235,7 +228,7 @@ class WhatsAppManager {
     }
 
     const account = await prisma.whatsAppAccount.findUnique({ where: { id: selectedAccountId } });
-    if (!account || !this._hasCredentials(account)) {
+    if (!account?.enabled || !this._hasCredentials(account)) {
       logger.error(`Account ${selectedAccountId} has no Cloud API credentials`);
       return { success: false, accountId: selectedAccountId, reason: 'account_not_ready' };
     }
@@ -257,16 +250,13 @@ class WhatsAppManager {
     if (result.success) {
       // ── Success — reset error count, increment counters ──
       this.consecutiveErrors.set(selectedAccountId, 0);
-      this.hourlySent.set(selectedAccountId, (this.hourlySent.get(selectedAccountId) || 0) + 1);
-      this.lastSendAt.set(selectedAccountId, Date.now());
 
       await prisma.whatsAppAccount.update({
         where: { id: selectedAccountId },
         data: { messagesSentToday: { increment: 1 } },
       });
 
-      const hrLimit = account.hourlyLimit || config.whatsapp.hourlyLimit || 8;
-      logger.info(`📤 Sent via Acct ${selectedAccountId} to *${formattedPhone.slice(-4)} [hr:${this.hourlySent.get(selectedAccountId)}/${hrLimit}]`);
+      logger.info(`📤 Sent via Acct ${selectedAccountId} to *${formattedPhone.slice(-4)}`);
       return {
         success: true,
         accountId: selectedAccountId,
@@ -277,6 +267,9 @@ class WhatsAppManager {
         waMessageId: result.messageId || null,
       };
     }
+
+    // Quota exhaustion is a local hold and must never trip the error pause.
+    if (whatsappQuotaMessage(result.reason)) return result;
 
     // ── Failure ──
     const errorMessage = result.rawError || result.reason || 'Unknown WhatsApp send error';
@@ -330,8 +323,6 @@ class WhatsAppManager {
     const result = await whatsappCloudApi.sendTemplate(address, name, language, parameters.map(text => ({ type: 'text', text })), accountId);
     if (result.success) {
       this.consecutiveErrors.set(accountId, 0);
-      this.hourlySent.set(accountId, (this.hourlySent.get(accountId) || 0) + 1);
-      this.lastSendAt.set(accountId, Date.now());
       await prisma.whatsAppAccount.update({ where: { id: accountId }, data: { messagesSentToday: { increment: 1 } } });
     }
     return { ...result, waMessageId: result.messageId || null, accountId };
@@ -353,7 +344,7 @@ class WhatsAppManager {
     }
 
     const account = await prisma.whatsAppAccount.findUnique({ where: { id: selectedAccountId } });
-    if (!account || !this._hasCredentials(account)) {
+    if (!account?.enabled || !this._hasCredentials(account)) {
       return { success: false, accountId: selectedAccountId, reason: 'account_not_ready' };
     }
     if (this._isAccountPaused(selectedAccountId)) {
@@ -383,6 +374,7 @@ class WhatsAppManager {
         success: false,
         accountId: selectedAccountId,
         reason: result.reason || 'send_failed',
+        retryAt: result.retryAt,
         error: result.rawError || result.reason || 'WhatsApp template send failed',
         errorCode: result.errorCode || null,
         requestId: result.requestId || null,
@@ -391,8 +383,6 @@ class WhatsAppManager {
     }
 
     this.consecutiveErrors.set(selectedAccountId, 0);
-    this.hourlySent.set(selectedAccountId, (this.hourlySent.get(selectedAccountId) || 0) + 1);
-    this.lastSendAt.set(selectedAccountId, Date.now());
     await prisma.whatsAppAccount.update({
       where: { id: selectedAccountId },
       data: { messagesSentToday: { increment: 1 } },
@@ -425,12 +415,14 @@ class WhatsAppManager {
     if (!selectedAccountId) return { success: false, reason: 'no_account' };
 
     const account = await prisma.whatsAppAccount.findUnique({ where: { id: selectedAccountId } });
-    if (!account || !this._hasCredentials(account)) {
+    if (!account?.enabled || !this._hasCredentials(account)) {
       return { success: false, accountId: selectedAccountId, reason: 'account_not_ready' };
     }
 
     const formattedPhone = destinationFor(phone);
     if (!formattedPhone) return { success: false, accountId: selectedAccountId, reason: 'invalid_phone' };
+
+    if (this._isAccountPaused(selectedAccountId)) return { success: false, accountId: selectedAccountId, reason: 'account_paused' };
 
     // Infer the Cloud API media type from the file extension.
     const ext = String(filename || mediaUrl || '').split('.').pop()?.toLowerCase();
@@ -445,11 +437,9 @@ class WhatsAppManager {
 
     if (!result.success) {
       logger.error(`Media send failed for *${formattedPhone.slice(-4)}: ${result.rawError || result.reason}`);
-      return { success: false, accountId: selectedAccountId, reason: result.reason || 'send_error', error: result.rawError };
+      return { success: false, accountId: selectedAccountId, reason: result.reason || 'send_error', error: result.rawError, retryAt: result.retryAt };
     }
 
-    this.hourlySent.set(selectedAccountId, (this.hourlySent.get(selectedAccountId) || 0) + 1);
-    this.lastSendAt.set(selectedAccountId, Date.now());
     logger.info(`📎 Media sent to *${formattedPhone.slice(-4)} via Acct ${selectedAccountId}`);
     return { success: true, accountId: selectedAccountId, msgId: result.messageId };
   }
@@ -466,12 +456,7 @@ class WhatsAppManager {
         lastResetAt: new Date(),
       },
     });
-    for (const [id] of this.hourlySent) {
-      this.hourlySent.set(id, 0);
-      this.consecutiveErrors.set(id, 0);
-      this.pausedUntil.set(id, 0);
-    }
-    logger.info('🔄 Daily + hourly counters reset (incl. new-lead budget), pauses cleared');
+    await pruneWhatsAppDispatches().catch(error => logger.warn(`Could not prune WhatsApp dispatch history: ${error.message}`));
   }
 
   /**
@@ -485,33 +470,29 @@ class WhatsAppManager {
   }
 
   async destroy() {
-    if (this._hourlyResetTimer) {
-      clearInterval(this._hourlyResetTimer);
-      this._hourlyResetTimer = null;
-    }
     logger.info('🔌 WhatsApp manager stopped');
   }
 
   async getStatus() {
     const accounts = await prisma.whatsAppAccount.findMany({ orderBy: { id: 'asc' } });
-    return accounts.map(a => {
+    return Promise.all(accounts.map(async a => {
       const {
         cloudApiToken,
         ycloudApiKey,
         ycloudWebhookSecret,
         ...safe
       } = a;
+      const usage = await whatsappDispatchUsage(a);
       return {
         ...safe,
         ...publicCredentialSummary(a),
         isReady: a.enabled && this._hasCredentials(a),
-        hourlySent: this.hourlySent.get(a.id) || 0,
-        hourlyLimit: a.hourlyLimit || config.whatsapp.hourlyLimit || 8,
-        dailyLimit: a.dailyLimit || config.whatsapp.maxMessagesPerDay || 50,
+        ...usage,
+        hourlySent: usage.hourlyUsed,
         isPaused: this._isAccountPaused(a.id),
         pausedUntil: this.pausedUntil.get(a.id) || 0,
       };
-    });
+    }));
   }
 
   // ════════════════════════════════════════

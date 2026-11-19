@@ -109,6 +109,26 @@ never simulated success.
   Facebook Lead Ads, external marketplaces, TradeIndia, JustDial, Engyne Cloud) or map
   your own fields.
 
+## WhatsApp sending limits
+
+Review both limits for each enabled WhatsApp sender before upgrading. The
+hourly limit covers the last 60 minutes. The daily limit follows the
+workspace time zone. A provider submission attempt consumes a slot even when
+the provider rejects it or the outcome is uncertain. Attempts include
+manual replies, templates, and attachments. Reactions and sign-in codes
+use their own controls. Restarting the app or resetting the old reporting
+counters does not clear the limits.
+
+A follow-up waits until a slot may be available. A campaign pauses with the
+remaining recipients pending. Resume it after checking sender capacity.
+Retry a quota-held attachment batch with the same request ID so files
+already accepted are not submitted again.
+
+The migration carries forward recent attempts with a sender and send
+evidence in Message history. Older submissions absent from that history
+cannot be counted. A backup taken before the migration can restore the
+old schema if you need to revert the release.
+
 ## Check an install
 
 ```bash
