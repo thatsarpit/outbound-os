@@ -15,7 +15,7 @@ const groups: { id: string; heading: string; intro?: string; rows: Row[] }[] = [
       [
         'ADMIN_PASSWORD',
         'generated',
-        'Their password. Left empty, a random one is printed once in the log.',
+        'Their password. If this is blank, set a password from the server terminal before signing in.',
       ],
       [
         'AUTH_PROVIDER',

@@ -107,6 +107,7 @@ import {
 // the note above those routes. requirePoolAccess/requireLeadAccess/
 // getAccessiblePoolIds/userCanAccessPool are already no-op stubs from
 // removing lead pools; kept only for call-site compatibility.
+import { localPasswordError } from '../shared/localPassword.js';
 import { hashPassword, requirePoolAccess, requireLeadAccess, getAccessiblePoolIds, userCanAccessPool } from './auth/rbac.js';
 import {
   AUTH_PROVIDER, authMiddleware, requireRole, verifyStreamSession, clerkClient,
@@ -423,12 +424,35 @@ async function sendWhatsAppFiles({ leadId, mediaFileIds, caption = '', accountId
 }
 
 /** SSE clients for real-time activity feed */
-const sseClients = new Set();
+const sseClients = new Map();
+
+function checkLocalStream(res, stream) {
+  if (!stream.check) {
+    stream.check = verifyStreamSession(stream.token).then(session => {
+      if (!session) res.end();
+      return Boolean(session);
+    }).catch(() => {
+      res.end();
+      return false;
+    }).finally(() => { stream.check = null; });
+  }
+  return stream.check;
+}
 export function broadcastEvent(type, data) {
   const payload = `data: ${JSON.stringify({ type, data, ts: Date.now() })}
 
 `;
-  sseClients.forEach((res) => { try { res.write(payload); } catch(e) { sseClients.delete(res); } });
+  for (const [res, stream] of sseClients) {
+    const write = () => {
+      if (res.destroyed || res.writableEnded) return;
+      try { res.write(payload); } catch { res.destroy(); }
+    };
+    if (stream) {
+      void checkLocalStream(res, stream).then(valid => { if (valid) write(); });
+    } else {
+      write();
+    }
+  }
 }
 
 activityLog.subscribe((event) => {
@@ -845,13 +869,19 @@ app.get('/api/events', async (req, res) => {
   res.write(`data: ${JSON.stringify({ type: 'connected', ts: Date.now() })}
 
 `);
-  sseClients.add(res);
+  const local = AUTH_PROVIDER === 'local' ? { token, check: null } : null;
+  sseClients.set(res, local);
+  // Check before each local event and periodically close idle streams after
+  // a reset, including when an operator resets the password from another process.
+  const recheck = local ? setInterval(() => { void checkLocalStream(res, local); }, 5_000) : null;
+  recheck?.unref();
   // Bound the lifetime even for long-lived local tokens so the next connection
   // verifies the user's current access. A stream also ends at token expiry.
   const renew = setTimeout(() => res.end(), Math.min(remaining, 60_000));
   renew.unref();
   res.once('close', () => {
     clearTimeout(renew);
+    clearInterval(recheck);
     sseClients.delete(res);
   });
 });
@@ -912,7 +942,9 @@ app.post('/api/users', requireRole('admin'), async (req, res) => {
   if (clerkClient) return res.status(409).json({ error: 'This workspace uses Clerk. Manage members through Team invitations and the Clerk dashboard.' });
   try {
     const { name, email, password, role = 'agent', phone } = req.body;
-    if (!name || !email || !password) return res.status(400).json({ error: 'name, email, password required' });
+    if (!name || !email) return res.status(400).json({ error: 'Name and email are required.' });
+    const passwordError = localPasswordError(password);
+    if (passwordError) return res.status(400).json({ error: passwordError });
     const VALID_ROLES = ['admin', 'manager', 'agent', 'viewer'];
     if (!VALID_ROLES.includes(role)) return res.status(400).json({ error: `role must be one of: ${VALID_ROLES.join(', ')}` });
 
@@ -949,7 +981,11 @@ app.patch('/api/users/:id', requireRole('admin'), async (req, res) => {
     if (name !== undefined) data.name = name;
     if (role !== undefined) data.role = role;
     if (enabled !== undefined) data.enabled = Boolean(enabled);
-    if (password) data.passwordHash = hashPassword(password);
+    if (password !== undefined && password !== '') {
+      const passwordError = localPasswordError(password);
+      if (passwordError) return res.status(400).json({ error: passwordError });
+      data.passwordHash = hashPassword(password);
+    }
     if (phone !== undefined) {
       // Empty string clears the number (disabling phone login for this user);
       // anything else must normalize to real digits.

@@ -27,6 +27,7 @@ import { SectionCard } from '@/components/ui/section-card'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { localPasswordError, MIN_PASSWORD_LENGTH } from '../../../shared/localPassword.js'
 
 /**
  * Your own account.
@@ -471,16 +472,22 @@ function ChangePasswordForm() {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [pending, setPending] = useState(false)
-  const tooShort = newPassword.length > 0 && newPassword.length < 10
+  const setFromLocal = useAuthStore((state) => state.setFromLocal)
+  const passwordError = localPasswordError(newPassword)
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
     setPending(true)
     try {
-      await api.post('/auth/change-password', { currentPassword, newPassword })
+      const session = await api.post<{
+        token: string
+        user: { id: number; name: string; email: string; role: string }
+      }>('/auth/change-password', { currentPassword, newPassword })
+      if (!session?.token || !session.user) throw new Error('Could not refresh your session. Sign in again.')
+      setFromLocal(session)
       setCurrentPassword('')
       setNewPassword('')
-      toast.success('Password changed')
+      toast.success('Password changed. Other sessions were signed out.')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not change the password')
     } finally {
@@ -501,7 +508,7 @@ function ChangePasswordForm() {
       </Field>
       <Field
         label="New password"
-        hint={tooShort ? 'Use at least 10 characters.' : 'At least 10 characters.'}
+        hint={newPassword && passwordError ? passwordError : `At least ${MIN_PASSWORD_LENGTH} characters.`}
       >
         <input
           className={inputClass}
@@ -517,7 +524,7 @@ function ChangePasswordForm() {
           size="sm"
           pending={pending}
           pendingLabel="Saving…"
-          disabled={!currentPassword || newPassword.length < 10}
+          disabled={!currentPassword || Boolean(passwordError)}
         >
           Change password
         </Button>

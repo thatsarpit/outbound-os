@@ -5,8 +5,8 @@
 #   open http://localhost:3001
 #
 # The first boot creates the database and the first admin (ADMIN_EMAIL /
-# ADMIN_PASSWORD; if no password is set, `docker compose logs app` shows a
-# generated one once).
+# ADMIN_PASSWORD). If the password is blank, run:
+#   docker compose exec app npm run reset-password -- YOUR_ADMIN_EMAIL
 #
 # Back up the app volume with docker compose exec -T app npm run backup:instance.
 # See setup/backups.md for off-host storage, host configuration and the separate

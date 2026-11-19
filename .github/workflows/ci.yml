@@ -154,7 +154,14 @@ jobs:
           done
           curl -sf http://localhost:3001/healthz
           test "$(curl -s http://localhost:3001/api/auth/config)" = '{"provider":"local"}'
-          docker logs obos 2>&1 | grep -q "First admin created"
+          docker logs obos 2>&1 | grep -q "Set its password with npm run reset-password"
+          printf '%s\n' 'ci-only-operator-password' | docker exec -i obos npm run reset-password -- admin@example.com
+          curl -fsS -o /dev/null -H 'Content-Type: application/json' \
+            -d '{"email":"admin@example.com","password":"ci-only-operator-password"}' http://localhost:3001/api/auth/login
+          if docker logs obos 2>&1 | grep -q 'ci-only-operator-password'; then
+            echo "First admin password was written to the application logs"
+            exit 1
+          fi
       - uses: actions/setup-node@v5
         with:
           node-version: 24

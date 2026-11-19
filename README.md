@@ -163,11 +163,12 @@ cp .env.example .env          # set ADMIN_EMAIL; everything else can wait
 docker compose up -d          # pulls the published image; nothing to build
 ```
 
-Open <http://localhost:3001> and sign in as `ADMIN_EMAIL`. If you did not set
-`ADMIN_PASSWORD`, the first boot prints a generated one:
+Open <http://localhost:3001> and sign in as `ADMIN_EMAIL`. If you left
+`ADMIN_PASSWORD` blank, set it from a private terminal first. Replace the
+example address with your admin email.
 
 ```bash
-docker compose logs app | grep "First admin"
+docker compose exec app npm run reset-password -- admin@example.com
 ```
 
 Then connect channels in **Settings → WhatsApp**, **Settings → Email** and
@@ -185,10 +186,9 @@ keep a verified copy outside the host.
 
 The included `render.yaml` pulls the published image and mounts a persistent
 disk at `/app/data`. This requires a **paid service and disk**. Enter
-`ADMIN_EMAIL` when Render prompts, then open the service's HTTPS URL. In
-Render's **Logs**, search for `First admin created` to find the generated
-password; change it after signing in. Keep the disk attached when redeploying:
-both the SQLite database and generated credential keys live there. Pin a
+`ADMIN_EMAIL` and `ADMIN_PASSWORD` when Render prompts, then sign in at the
+service's HTTPS URL. Keep the disk attached when redeploying because it
+contains the database and instance keys. Pin a
 released image tag in your fork's Blueprint when you want controlled upgrades.
 The [install guide](https://outboundos.space/docs/install#render) has the steps.
 
@@ -248,7 +248,7 @@ list, with explanations, is in [`.env.example`](.env.example).
 
 | Setting | Default | What it does |
 |---|---|---|
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | generated | The first admin, created on first boot |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `admin@example.com` / blank | First admin sign-in. With a blank password, set it from the server terminal. |
 | `AUTH_PROVIDER` | `local` | `local` = email + password; `clerk` = Clerk-hosted sign-in |
 | `BUSINESS_NAME`, `BUSINESS_WEBSITE`, … | — | Your identity in outgoing messages and emails |
 | `BUSINESS_TIMEZONE` | `UTC` | When "today" starts; daily limits and reports use it |

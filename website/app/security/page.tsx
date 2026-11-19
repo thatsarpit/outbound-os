@@ -57,8 +57,8 @@ export default function SecurityPage() {
             <div>
               <dt>No default password</dt>
               <dd>
-                The first admin gets the password you set, or a random one printed once. There is no
-                built-in login that works on every install.
+                Set the first admin password through deployment configuration or from a private
+                server terminal. Password changes end previous local sessions.
               </dd>
             </div>
             <div>

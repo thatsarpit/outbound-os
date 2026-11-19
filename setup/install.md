@@ -27,11 +27,19 @@ Edit `.env` and set at least `ADMIN_EMAIL` (and `BUSINESS_NAME`,
 ```bash
 docker compose up -d
 docker compose ps
-docker compose logs app | grep "First admin"   # generated password, if you set none
 ```
 
-Open <http://localhost:3001> and sign in. Change the password under
-**Account**.
+If you left `ADMIN_PASSWORD` blank, set it from a private terminal before
+trying to sign in. Replace the example address with your admin email.
+
+```bash
+docker compose exec app npm run reset-password -- admin@example.com
+```
+
+Open <http://localhost:3001> and sign in. You can change the password under
+**Account**. Password changes and terminal resets end older local sessions.
+When upgrading from a release that predates this change, local users need to
+sign in again.
 
 Before connecting WhatsApp, put the app behind HTTPS on a public hostname
 (Caddy, Nginx or a Cloudflare Tunnel all work). Meta will not deliver webhooks

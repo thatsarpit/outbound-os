@@ -8,7 +8,7 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -1210,17 +1210,23 @@ describe('Built-in email and password sign-in', () => {
     await prisma.user.update({ where: { email }, data: { enabled: true } });
   });
 
-  test('changing a password needs the current one', async () => {
+  test('password change requires the current password and replaces the local session', async () => {
     const ok = await request('POST', '/api/auth/login', { body: { email, password } });
     const headers = { Authorization: `Bearer ${ok.body.token}` };
     const bad = await request('POST', '/api/auth/change-password', {
       headers, body: { currentPassword: 'nope', newPassword: 'a much longer new password' },
     });
-    assert.equal(bad.status, 401);
+    assert.equal(bad.status, 403);
     const good = await request('POST', '/api/auth/change-password', {
       headers, body: { currentPassword: password, newPassword: 'a much longer new password' },
     });
     assert.equal(good.status, 200);
+    assert.notEqual(good.body.token, ok.body.token);
+    assert.equal((await request('GET', '/api/auth/me', { headers })).status, 401);
+    assert.equal((await request('GET', '/api/events', { headers })).status, 401);
+    assert.equal((await request('GET', '/api/auth/me', {
+      headers: { Authorization: `Bearer ${good.body.token}` },
+    })).status, 200);
     const relogin = await request('POST', '/api/auth/login', { body: { email, password: 'a much longer new password' } });
     assert.equal(relogin.status, 200);
   });
@@ -1240,6 +1246,56 @@ describe('Built-in email and password sign-in', () => {
     for (const path of ['/api/events', '/api/leads']) {
       const query = await request('GET', `${path}?token=${encodeURIComponent(token)}`, { headers });
       assert.equal(query.status, 401);
+    }
+  });
+
+  test('terminal reset revokes an already-open stream before the next event', async () => {
+    const source = { 'X-Forwarded-For': '192.0.2.218' };
+    const old = await request('POST', '/api/auth/login', {
+      headers: source, body: { email, password: 'a much longer new password' },
+    });
+    assert.equal(old.status, 200);
+    const oldHeaders = { ...source, Authorization: `Bearer ${old.body.token}` };
+
+    let connection;
+    let received = '';
+    let streamEnded;
+    try {
+      await new Promise((resolve, reject) => {
+        connection = http.get(new URL('/api/events', baseUrl), { headers: oldHeaders }, res => {
+          if (res.statusCode !== 200) return reject(new Error(`Stream returned ${res.statusCode}`));
+          streamEnded = new Promise((done, fail) => {
+            res.on('end', done);
+            res.on('error', fail);
+          });
+          res.setEncoding('utf8').on('data', chunk => { received += chunk; });
+          resolve();
+        });
+        connection.setTimeout(8000, () => connection.destroy(new Error('Stream reset timed out')));
+        connection.on('error', reject);
+      });
+
+      const reset = path.join(__dirname, '..', 'scripts', 'reset-password.mjs');
+      const replacement = '  CLI fixture password  ';
+      assert.throws(() => execFileSync(process.execPath, [reset, email], {
+        env: process.env, input: 'short\n', stdio: ['pipe', 'pipe', 'pipe'],
+      }), error => String(error.stderr).includes('Use at least 10 characters.'));
+      assert.equal((await request('GET', '/api/auth/me', { headers: oldHeaders })).status, 200);
+      const output = execFileSync(process.execPath, [reset, email.toUpperCase()], {
+        env: process.env, input: `${replacement}\n`, encoding: 'utf8',
+      });
+      assert.ok(!output.includes(replacement));
+      const { broadcastEvent } = await import('../src/api.js');
+      broadcastEvent('credential-reset-fixture', {});
+      await streamEnded;
+      assert.ok(!received.includes('credential-reset-fixture'));
+      assert.equal((await request('GET', '/api/auth/me', { headers: oldHeaders })).status, 401);
+      const current = await request('POST', '/api/auth/login', {
+        headers: source, body: { email, password: replacement },
+      });
+      assert.equal(current.status, 200);
+    } finally {
+      connection?.destroy();
     }
   });
 

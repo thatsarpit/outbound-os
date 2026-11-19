@@ -53,11 +53,10 @@ export default function InstallDoc() {
       <p>
         Open <code>http://localhost:3001</code> (or your server&rsquo;s address
         on port 3001) and sign in with <code>ADMIN_EMAIL</code>. If you did not
-        set <code>ADMIN_PASSWORD</code>, a generated password was printed once
-        in the log:
+        set <code>ADMIN_PASSWORD</code>, choose it in a private terminal before
+        signing in. Replace the example address with your admin email.
       </p>
-      <Code label="Terminal">{'docker compose logs app | grep "First admin"'}</Code>
-      <p>Change it from your account page after signing in.</p>
+      <Code label="Terminal">{'docker compose exec app npm run reset-password -- admin@example.com'}</Code>
 
       <h2 id="render">Hosted alternative: Render Blueprint</h2>
       <p>
@@ -67,9 +66,9 @@ export default function InstallDoc() {
       </p>
       <ol>
         <li>Sign in to Render and open the deploy button. Review the service and disk charges before creating the Blueprint.</li>
-        <li>Enter <code>ADMIN_EMAIL</code> when prompted. The Blueprint uses the published image, built-in sign-in and a persistent disk mounted at <code>/app/data</code>.</li>
+        <li>Enter <code>ADMIN_EMAIL</code> and <code>ADMIN_PASSWORD</code> when prompted. The Blueprint uses the published image, built-in sign-in and a persistent disk mounted at <code>/app/data</code>.</li>
         <li>Wait for the <code>/healthz</code> check to pass, then open the service&rsquo;s HTTPS URL.</li>
-        <li>Open the service&rsquo;s <strong>Logs</strong> and search for <code>First admin created</code>. Sign in with the generated password and change it from your account page.</li>
+        <li>Sign in with the email and password you configured.</li>
         <li>Run the setup wizard. Configure channel credentials and webhook secrets only when you are ready to connect those providers.</li>
       </ol>
       <p>

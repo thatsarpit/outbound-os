@@ -6,6 +6,12 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+- Set the first local admin password in deployment configuration or through the
+  server's reset command. Startup no longer generates a password for the logs.
+- Changing or resetting a local password ends older API and live-update
+  sessions. The dashboard keeps the new session after a password change.
+  Local users sign in again the first time they upgrade to this release.
+
 ## [0.4.0] — 25 October 2026
 
 Dashboard workflows, retained email and production sign-in repairs from #53,

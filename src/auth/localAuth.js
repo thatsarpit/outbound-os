@@ -11,10 +11,10 @@ import { resolveMcpDelegation } from './mcpPersonal.js';
 import { timingSafeEqual } from 'crypto';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
-import { hashPassword, signToken, verifyPassword, verifyToken } from './rbac.js';
+import { hashPassword, matchesSessionPassword, signToken, verifyPassword, verifyToken } from './rbac.js';
+import { localPasswordError } from '../../shared/localPassword.js';
 
 const ROLE_LEVELS = { viewer: 0, agent: 1, manager: 2, admin: 3 };
-const MIN_PASSWORD_LENGTH = 10;
 
 const MCP_SERVICE_TOKEN = process.env.MCP_SERVICE_TOKEN || '';
 
@@ -52,6 +52,7 @@ async function sessionForToken(token) {
   }
   const user = await prisma.user.findUnique({ where: { id: Number(payload.sub) } }).catch(() => null);
   if (!user || user.enabled === false || !ROLE_LEVELS.hasOwnProperty(user.role)) return null;
+  if (!matchesSessionPassword(payload, user)) return null;
   return { user, expiresAt: payload.exp * 1000 };
 }
 
@@ -112,16 +113,22 @@ export async function login(req, res) {
 /** POST /api/auth/change-password — the signed-in user changes their own password. */
 export async function changePassword(req, res) {
   const currentPassword = String(req.body?.currentPassword || '');
-  const newPassword = String(req.body?.newPassword || '');
-  if (newPassword.length < MIN_PASSWORD_LENGTH) {
-    return res.status(400).json({ error: `Use at least ${MIN_PASSWORD_LENGTH} characters.` });
-  }
+  const newPassword = req.body?.newPassword;
+  const policyError = localPasswordError(newPassword);
+  if (policyError) return res.status(400).json({ error: policyError });
   const user = await prisma.user.findUnique({ where: { id: Number(req.user?.id) } }).catch(() => null);
   if (!user || !verifyPassword(currentPassword, user.passwordHash)) {
-    return res.status(401).json({ error: 'Current password is incorrect.' });
+    return res.status(403).json({ error: 'Current password is incorrect.' });
   }
-  await prisma.user.update({ where: { id: user.id }, data: { passwordHash: hashPassword(newPassword) } });
-  res.json({ ok: true });
+  const passwordHash = hashPassword(newPassword);
+  const updated = await prisma.user.updateMany({
+    where: { id: user.id, passwordHash: user.passwordHash, enabled: true },
+    data: { passwordHash },
+  });
+  if (updated.count !== 1) {
+    return res.status(409).json({ error: 'The account changed while saving. Sign in again and retry.' });
+  }
+  res.json({ ok: true, token: signToken({ ...user, passwordHash }), user: toSessionUser(user) });
 }
 
 export default { authMiddleware, requireRole, verifyStreamSession, currentUserPayload, login, changePassword };

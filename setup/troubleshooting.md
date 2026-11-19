@@ -10,8 +10,8 @@
 
 ## I don't know the admin password
 
-- If you never set `ADMIN_PASSWORD`, the first boot printed one:
-  `docker compose logs app | grep "First admin"`.
+- If you left `ADMIN_PASSWORD` blank on first start, set a password using the
+  same reset command below. The app logs show the account email and command.
 - Otherwise reset it on the server (it asks for the new password, so it never
   lands in shell history):
 

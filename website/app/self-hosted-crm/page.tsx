@@ -91,8 +91,8 @@ export default function SelfHostedCrmPage() {
             </Code>
             <p className="landing-note">
               Open http://localhost:3001 and sign in with the ADMIN_EMAIL you
-              set in .env. If you left ADMIN_PASSWORD empty, a generated one is
-              printed once in the logs.
+              set in .env. If you left ADMIN_PASSWORD empty, choose a password
+              from the server terminal before signing in.
             </p>
           </div>
         </div>
