@@ -405,6 +405,7 @@ export interface ApiError {
   error: string
   code?: string
   details?: string
+  fields?: Record<string, string>
 }
 
 export interface AuthResponse {

@@ -1,3 +1,4 @@
+import { queryOptions } from '@tanstack/react-query'
 import { api } from '../client'
 
 export type WorkspaceProfile = Record<string, string>
@@ -18,6 +19,7 @@ export interface CreatedLeadSource {
   source: string
   apiKey: string
   webhookUrl: string
+  webhookOrigin?: string
 }
 
 export const onboardingApi = {
@@ -28,3 +30,15 @@ export const onboardingApi = {
   createSource: (presetId: string, name?: string) =>
     api.post<CreatedLeadSource>('/webhooks/sources/from-preset', { presetId, name }),
 }
+
+export const onboardingStatusQuery = queryOptions({
+  queryKey: ['onboarding-status'],
+  queryFn: async () => {
+    const status = await onboardingApi.status()
+    if (!status?.steps || !status.channels || !status.counts) {
+      throw new Error('Setup status is unavailable. Check that the dashboard and API versions match.')
+    }
+    return status
+  },
+  meta: { silent: true },
+})

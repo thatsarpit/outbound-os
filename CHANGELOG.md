@@ -6,6 +6,12 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+- Resume workspace setup on desktop and mobile, including after opening
+  integrations, CSV import or Team. Preserve the checklist when an admin
+  skips a core step and show profile validation beside the affected input.
+- Give compiled dashboard files a separate request budget and cache
+  fingerprinted files to keep refreshes from interrupting setup.
+
 - Gate Docker release tags on fresh install, upgrade, rollback and MCP checks
   on Linux amd64 and arm64. The release workflow records a matching app and
   MCP digest pair for Compose upgrades.

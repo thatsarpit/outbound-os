@@ -108,17 +108,19 @@ after(async () => {
 
 // ── Leads Tests ──────────────────────────────────────────────────────────────
 
-test('dashboard assets and SPA routes share one limit while API, health and webhooks stay independent', async () => {
+test('compiled assets, dashboard navigation and service endpoints keep separate budgets', async () => {
   const directory = path.join(__dirname, '..', 'web', 'dist');
   const index = path.join(directory, 'index.html');
   const asset = path.join(directory, '__rate-limit-fixture.svg');
+  const bundle = path.join(directory, 'assets', '__rate-limit-fixture-a12b34c5.js');
   let temporaryIndex = false;
-  fs.mkdirSync(directory, { recursive: true });
+  fs.mkdirSync(path.dirname(bundle), { recursive: true });
   try {
     fs.writeFileSync(index, '<!doctype html><title>Isolated dashboard fixture</title>', { flag: 'wx' });
     temporaryIndex = true;
   } catch (error) { if (error.code !== 'EEXIST') throw error; }
   fs.writeFileSync(asset, '<svg xmlns="http://www.w3.org/2000/svg"/>', { flag: 'wx' });
+  fs.writeFileSync(bundle, 'export {};', { flag: 'wx' });
   const headers = { 'X-Forwarded-For': '192.0.2.199' };
   try {
     for (let count = 0; count < 300; count++) {
@@ -134,6 +136,13 @@ test('dashboard assets and SPA routes share one limit while API, health and webh
       assert.ok(Number(blocked.headers['retry-after']) > 0);
       assert.equal(blocked.headers['x-ratelimit-limit'], undefined);
     }
+    const compiled = await request('GET', '/assets/__rate-limit-fixture-a12b34c5.js', { headers });
+    assert.equal(compiled.status, 200, 'compiled files still load after the navigation budget is used');
+    assert.equal(compiled.headers['ratelimit-limit'], '1200');
+    assert.equal(compiled.headers['cache-control'], 'public, max-age=31536000, immutable');
+    const missingAsset = await request('GET', '/assets/__rate-limit-missing-fixture.js', { headers });
+    assert.equal(missingAsset.status, 404, 'missing bundles never serve dashboard HTML');
+    assert.equal(missingAsset.headers['ratelimit-remaining'], '1198');
     const api = await request('GET', '/api/auth/config', { headers });
     assert.equal(api.status, 200);
     assert.equal(api.headers['ratelimit-limit'], '100', 'existing API budget is unchanged');
@@ -153,6 +162,7 @@ test('dashboard assets and SPA routes share one limit while API, health and webh
       assert.equal(missing.headers['ratelimit-limit'], undefined);
     }
   } finally {
+    fs.unlinkSync(bundle);
     fs.unlinkSync(asset);
     if (temporaryIndex) fs.unlinkSync(index);
   }
@@ -1352,12 +1362,21 @@ describe('Built-in email and password sign-in', () => {
 // ── Website form submissions ─────────────────────────────────────────────────
 
 describe('Lead webhook from a plain HTML form', () => {
-  test('accepts a form-encoded post and creates the lead', async () => {
-    const source = await request('POST', '/api/webhooks/sources/from-preset', {
-      headers: authHeader(),
-      body: { presetId: 'website', name: 'Contact form' },
-    });
+  test('returns the configured public origin and accepts a form-encoded lead', async () => {
+    const previous = process.env.PUBLIC_URL;
+    process.env.PUBLIC_URL = 'https://crm.example.test';
+    let source;
+    try {
+      source = await request('POST', '/api/webhooks/sources/from-preset', {
+        headers: authHeader(),
+        body: { presetId: 'website', name: 'Contact form' },
+      });
+    } finally {
+      if (previous === undefined) delete process.env.PUBLIC_URL;
+      else process.env.PUBLIC_URL = previous;
+    }
     assert.equal(source.status, 200);
+    assert.equal(source.body.webhookOrigin, 'https://crm.example.test');
     const { webhookUrl, apiKey } = source.body;
 
     const form = new URLSearchParams({

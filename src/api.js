@@ -584,9 +584,27 @@ app.get('/health', async (req, res) => {
 
 // Serve the React dashboard from web/dist (built into the Docker image)
 const WEB_DIST = path.join(__dirname, '..', 'web', 'dist');
-// Assets and client-side routes share one generous file-serving budget. Mount
-// this once so a static miss followed by the SPA fallback costs one request.
-// API, provider callbacks and health probes retain their own independent rules.
+// Loading the dashboard can require dozens of compiled files. Give those
+// files a separate budget so a page refresh can still load its JavaScript.
+app.use('/assets', rateLimit({
+  windowMs: 60 * 1000,
+  max: 1200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many dashboard asset requests. Please try again shortly.' },
+}), express.static(path.join(WEB_DIST, 'assets'), {
+  fallthrough: false,
+  index: false,
+  redirect: false,
+  setHeaders(res, file) {
+    if (/-[A-Za-z0-9_-]{8}\.[A-Za-z0-9]+$/.test(path.basename(file))) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    }
+  },
+}));
+
+// SPA routes and files at the web root share a budget. A static miss followed
+// by the SPA fallback costs one request. API and callbacks have their own rules.
 const dashboardLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 300,
@@ -5505,10 +5523,13 @@ app.post('/api/webhooks/sources/from-preset', requireRole('admin'), async (req, 
       },
     });
 
+    const publicUrl = URL.parse(process.env.PUBLIC_URL || process.env.APP_PUBLIC_URL || '');
+    const webhookOrigin = publicUrl?.protocol === 'https:' ? publicUrl.origin : undefined;
     res.json({
       ...ws,
       apiKey, // return full key once
       webhookUrl: `/api/webhooks/inbound/${slug}`,
+      webhookOrigin,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

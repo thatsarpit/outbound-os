@@ -1,4 +1,5 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
+import { useAuthStore } from '@/stores/auth-store'
 import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/ui/page-header'
 import { Button } from '@/components/ui/button'
@@ -7,6 +8,7 @@ import { SETTINGS_SECTIONS } from './settings-nav'
 
 export default function SettingsLayout() {
   const location = useLocation()
+  const isAdmin = useAuthStore((state) => state.user?.role === 'admin')
   const canonicalPath = location.pathname.replace(/^\/dev\/shell/, '')
   const active =
     SETTINGS_SECTIONS.find((section) => canonicalPath.startsWith(section.to)) ??
@@ -20,6 +22,11 @@ export default function SettingsLayout() {
         breadcrumbs={[{ label: 'Settings', href: '/settings' }, { label: active.label }]}
         actions={
           <>
+            {isAdmin && (
+              <Button asChild size="sm" variant="secondary">
+                <Link to="/setup">Setup guide</Link>
+              </Button>
+            )}
             <Button asChild size="sm" variant="secondary">
               <Link to="/integrations">Integrations</Link>
             </Button>

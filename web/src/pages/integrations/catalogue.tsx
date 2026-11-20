@@ -16,7 +16,7 @@ import {
   Webhook,
   Workflow,
 } from 'lucide-react'
-import { onboardingApi, type OnboardingStatus } from '@/api/endpoints/onboarding'
+import { onboardingStatusQuery, type OnboardingStatus } from '@/api/endpoints/onboarding'
 import { inboxApi } from '@/api/endpoints/inbox'
 import type { InboxChannelHealth, InboxChannel } from '@/api/types'
 import { CHANNEL_ORDER, formatChannelHealthDetail } from '@/lib/channels'
@@ -153,11 +153,7 @@ const GROUPS: Group[] = [
 ]
 
 export default function IntegrationCatalogue() {
-  const { data: status } = useQuery({
-    queryKey: ['onboarding-status'],
-    queryFn: () => onboardingApi.status(),
-    meta: { silent: true },
-  })
+  const { data: status } = useQuery(onboardingStatusQuery)
 
   const { data: health, isError: healthError } = useQuery({
     queryKey: ['inbox-channel-health'],
