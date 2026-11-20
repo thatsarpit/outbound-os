@@ -206,7 +206,7 @@ class WhatsAppCloudApiService {
    *
    * @returns {{success: boolean, messageId?: string, waId?: string, accountId?: number|null, reason?: string, rawError?: string}}
    */
-  async _postMessage(payload, accountId, label, { customerMessage = true, prepare } = {}) {
+  async _postMessage(payload, accountId, label, { customerMessage = true, prepare, beforeSubmit } = {}) {
     let transport;
     try {
       transport = await this.getTransport(accountId);
@@ -233,6 +233,10 @@ class WhatsAppCloudApiService {
         return { success: false, reason: 'media_upload_failed', rawError: 'The media upload failed before WhatsApp could send your message.' };
       }
     }
+    if (beforeSubmit && !await beforeSubmit(resolvedId)) {
+      return { success: false, reason: 'dispatch_cancelled', accountId: resolvedId };
+    }
+
     const { url, headers: authHeaders, provider } = transport;
     const tag = `WhatsApp[${provider}]`;
 
@@ -260,8 +264,9 @@ class WhatsAppCloudApiService {
 
       if (!res.ok || (provider === 'ycloud' && data.status === 'failed')) {
         const failure = whatsappProviderError(data, res.status, transport.token);
-        const reason = provider === 'ycloud' && failure.errorCode === 'BALANCE_INSUFFICIENT'
-          ? 'payment_issue' : classifyError(res.status, Number(failure.errorCode), failure.rawError);
+        const reason = res.status >= 500 ? 'confirmation_unknown'
+          : provider === 'ycloud' && failure.errorCode === 'BALANCE_INSUFFICIENT'
+            ? 'payment_issue' : classifyError(res.status, Number(failure.errorCode), failure.rawError);
         logger.error(`${tag} ${label} failed [HTTP ${res.status}${failure.errorCode ? `/${failure.errorCode}` : ''}] ${reason}: ${failure.rawError}`);
         return { success: false, reason, ...failure, provider,
           ...(provider === 'ycloud' && typeof data.id === 'string' ? { messageId: data.id } : {}) };
@@ -301,7 +306,7 @@ class WhatsAppCloudApiService {
    * @param {string} text — message body
    * @param {number|null} accountId — WhatsAppAccount.id
    */
-  async sendTextMessage(phone, text, accountId = null, replyTo = null) {
+  async sendTextMessage(phone, text, accountId = null, replyTo = null, { beforeSubmit } = {}) {
     const addressee = cloudApiAddressee(phone, (value) => this.normalizePhone(value));
     if (!addressee) return { success: false, reason: 'invalid_phone', rawError: 'Empty phone number' };
     const to = addressee.to || addressee.recipient;
@@ -313,7 +318,7 @@ class WhatsAppCloudApiService {
       type: 'text',
       ...(replyTo ? { context: { message_id: replyTo } } : {}),
       text: { preview_url: false, body: text },
-    }, accountId, `text → *${to.slice(-4)}`);
+    }, accountId, `text → *${to.slice(-4)}`, { beforeSubmit });
 
     if (result.success) logger.info(`WhatsApp ✅ text sent to *${to.slice(-4)} — ${result.messageId}`);
     return result;
@@ -326,13 +331,14 @@ class WhatsAppCloudApiService {
   }
 
   /** Send an approved Meta template using the campaign's ordered body variables. */
-  async sendCampaignTemplate({ phone, campaignName, templateParams = [], accountId = null }) {
+  async sendCampaignTemplate({ phone, campaignName, templateParams = [], accountId = null, beforeSubmit }) {
     return this.sendTemplate(
       phone,
       String(campaignName || '').trim(),
       (await this._loadAccount(accountId))?.templateLanguage || process.env.META_TEMPLATE_LANGUAGE || 'en',
       templateParams.map((value) => ({ type: 'text', text: String(value ?? '') })),
       accountId,
+      { beforeSubmit },
     );
   }
 
@@ -346,15 +352,15 @@ class WhatsAppCloudApiService {
    * @param {Array<{type:'text', text:string}>} components — ordered body variables ({{1}}, {{2}}, …)
    * @param {number|null} accountId
    */
-  async sendTemplate(phone, templateName, languageCode = 'en', components = [], accountId = null) {
-    return this._sendTemplate(phone, templateName, languageCode, components, accountId, true);
+  async sendTemplate(phone, templateName, languageCode = 'en', components = [], accountId = null, { beforeSubmit } = {}) {
+    return this._sendTemplate(phone, templateName, languageCode, components, accountId, { beforeSubmit });
   }
 
   async sendAuthenticationTemplate(phone, templateName, languageCode, components) {
-    return this._sendTemplate(phone, templateName, languageCode, components, null, false);
+    return this._sendTemplate(phone, templateName, languageCode, components, null, { customerMessage: false });
   }
 
-  async _sendTemplate(phone, templateName, languageCode, components, accountId, customerMessage) {
+  async _sendTemplate(phone, templateName, languageCode, components, accountId, options) {
     const addressee = cloudApiAddressee(phone, (value) => this.normalizePhone(value));
     if (!addressee) return { success: false, reason: 'invalid_phone', rawError: 'Empty phone number' };
     const to = addressee.to || addressee.recipient;
@@ -370,7 +376,7 @@ class WhatsAppCloudApiService {
         language: { code: languageCode },
         ...(components.length > 0 ? { components: [{ type: 'body', parameters: components }] } : {}),
       },
-    }, accountId, `template '${templateName}' → *${to.slice(-4)}`, { customerMessage });
+    }, accountId, `template '${templateName}' → *${to.slice(-4)}`, options);
 
     if (result.success) logger.info(`WhatsApp ✅ template '${templateName}' sent to *${to.slice(-4)} — ${result.messageId}`);
     return result;

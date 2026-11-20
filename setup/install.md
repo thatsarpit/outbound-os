@@ -129,6 +129,16 @@ evidence in Message history. Older submissions absent from that history
 cannot be counted. A backup taken before the migration can restore the
 old schema if you need to revert the release.
 
+## Review interrupted WhatsApp messages
+
+An interrupted follow-up that stopped during preparation can return to the
+queue. If submission may have started, Outbound OS holds the message as
+**Confirmation unknown**. Older interrupted messages without a recorded
+submission state are also held. Check the provider's message history before
+sending anything again. A later receipt can update the conversation when its
+provider message ID was saved. When periodic recovery is enabled, it checks active attempts once they have
+been idle for five minutes.
+
 ## Check an install
 
 ```bash

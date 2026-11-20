@@ -6,6 +6,10 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+- Recover interrupted WhatsApp follow-ups using the saved submission state.
+  Preparation can return to the queue. Submission without a confirmed outcome
+  stays available for review in the conversation.
+
 - Enforce the WhatsApp sender's rolling hourly and workspace-day limits for
   customer message attempts. Local quota holds defer follow-ups, pause
   campaigns with pending recipients, and preserve attachment batch identity.

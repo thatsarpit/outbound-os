@@ -8,7 +8,7 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { execFile, execFileSync, execSync } from 'node:child_process';
+import { execFile, execFileSync, execSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -3288,6 +3288,79 @@ test('WhatsApp follow-up quota waits without using a retry and uncertain sends s
   }
 });
 
+test('a worker killed during provider submission leaves one held WhatsApp attempt', { timeout: 15_000 }, async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { default: followup } = await import('../src/services/followup.js');
+  const { default: imessage } = await import('../src/services/imessage.js');
+  const sender = await prisma.whatsAppAccount.create({ data: {
+    name: 'Crash recovery fixture', enabled: true, cloudApiPhoneId: 'fixture-crash-recovery',
+    cloudApiToken: 'synthetic-fixture-only', dailyLimit: 20, hourlyLimit: 10,
+  } });
+  const lead = await prisma.lead.create({ data: {
+    name: 'Crash recovery fixture', mobile: '15550104998', assignedAccount: sender.id, status: 'new', leadTier: 'HOT',
+  } });
+  const message = await prisma.message.create({ data: {
+    leadId: lead.id, direction: 'outbound', channel: 'whatsapp', status: 'queued', content: 'Synthetic follow-up',
+    scheduledAt: new Date(Date.now() - 60_000), waAccount: sender.id, waCampaignName: 'fixture_template',
+  } });
+  let submissions = 0;
+  let received;
+  const requestReceived = new Promise(resolve => { received = resolve; });
+  const graph = http.createServer((req) => {
+    submissions++;
+    req.resume();
+    req.on('end', received);
+    // Keep the response open so the worker cannot record a provider outcome.
+  });
+  const recoverImessage = imessage.recoverStuckMessages;
+  let child;
+  let timer;
+  try {
+    await new Promise(resolve => graph.listen(0, '127.0.0.1', resolve));
+    const { href } = new URL('../src/services/followup.js', import.meta.url);
+    child = spawn(process.execPath, ['--input-type=module', '-e', `
+      import worker from ${JSON.stringify(href)};
+      await worker.processQueue({ messageIds: [Number(process.argv[1])] });
+      process.exit(0);
+    `, String(message.id)], { env: {
+      ...process.env, META_GRAPH_API_BASE: `http://127.0.0.1:${graph.address().port}`,
+    }, stdio: 'ignore' });
+    const exited = new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('exit', (_code, signal) => resolve(signal));
+    });
+    await Promise.race([
+      requestReceived,
+      exited.then(() => { throw new Error('Worker exited before provider submission.'); }),
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('No provider submission received.')), 7000);
+      }),
+    ]);
+    const row = () => prisma.message.findUnique({ where: { id: message.id } });
+    assert.equal((await row()).providerStatusReason, 'provider_pending');
+    child.kill('SIGKILL');
+    assert.equal(await exited, 'SIGKILL');
+
+    await prisma.message.update({ where: { id: message.id }, data: { updatedAt: new Date(Date.now() - 6 * 60_000) } });
+    imessage.recoverStuckMessages = async () => ({ count: 0, confirmed: 0, requeued: 0 });
+    await followup.recoverStuckMessages();
+    const held = await row();
+    assert.equal(held.status, 'unconfirmed');
+    assert.equal(held.providerStatusReason, 'confirmation_unknown');
+    assert.equal(held.retryCount, 0);
+    await followup.processQueue({ messageIds: [message.id] });
+    assert.equal(submissions, 1);
+  } finally {
+    clearTimeout(timer);
+    child?.kill('SIGKILL');
+    imessage.recoverStuckMessages = recoverImessage;
+    graph.closeAllConnections();
+    if (graph.listening) await new Promise(resolve => graph.close(resolve));
+    await prisma.lead.delete({ where: { id: lead.id } });
+    await prisma.whatsAppAccount.delete({ where: { id: sender.id } });
+  }
+});
+
 test('WhatsApp manual replies enforce the window, persist failures, retain reply ownership and deduplicate attempts', async () => {
   const { default: prisma } = await import('../src/utils/prismaClient.js');
   const { default: manager } = await import('../src/services/whatsapp.js');
@@ -3378,13 +3451,15 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
     const manual = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Interrupted manual attempt', status: 'sending', idempotencyKey: `manual-wa:${lead.id}:fixture-interrupted-0001`, updatedAt: stale } });
     const automated = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Interrupted queue attempt', status: 'sending', updatedAt: stale } });
     const interruptedCampaign = await prisma.message.create({ data: { leadId: lead.id, campaignId: 987654, channel: 'whatsapp', direction: 'outbound', content: 'Synthetic interrupted campaign attempt', status: 'sending', updatedAt: stale } });
+    const preparing = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Stopped before submission', status: 'sending', providerStatusReason: 'whatsapp_preparing', updatedAt: stale } });
     imessage.recoverStuckMessages = async () => ({ count: 0, confirmed: 0, requeued: 0 });
     try {
       const recovered = await followup.recoverStuckMessages();
       assert.ok(recovered.unconfirmed >= 1);
       assert.equal((await prisma.message.findUnique({ where: { id: manual.id } })).status, 'unconfirmed');
-      assert.equal((await prisma.message.findUnique({ where: { id: automated.id } })).status, 'queued');
+      assert.equal((await prisma.message.findUnique({ where: { id: automated.id } })).status, 'unconfirmed');
       assert.equal((await prisma.message.findUnique({ where: { id: interruptedCampaign.id } })).status, 'unconfirmed');
+      assert.equal((await prisma.message.findUnique({ where: { id: preparing.id } })).status, 'queued');
     } finally { imessage.recoverStuckMessages = previousRecovery; }
 
   } finally {
@@ -3783,6 +3858,10 @@ describe('YCloud WhatsApp provider', () => {
       } else if (req.url.includes('/upload')) res.end(JSON.stringify({ id: 'media-fixture' }));
       else if (req.url.includes('/download/')) { res.setHeader('Content-Type', 'image/png'); res.end(Buffer.from('fixture-image')); }
       else if (req.url === '/v2/whatsapp/messages/sendDirectly') {
+        if (sendFailure === 'gateway') {
+          res.statusCode = 502;
+          return res.end('{}');
+        }
         if (sendFailure === 'balance') {
           res.statusCode = 403;
           return res.end(JSON.stringify({ code: 'BALANCE_INSUFFICIENT', message: 'Payment fixture' }));
@@ -3938,6 +4017,19 @@ describe('YCloud WhatsApp provider', () => {
     assert.equal(midnight.reason, 'whatsapp_hourly_limit', 'midnight cannot clear the rolling hour');
     assert.equal(midnight.retryAt, '2026-11-18T18:45:00.000Z');
     assert.equal((await attempt('2026-11-18T18:45:00.000Z')).reserved, true);
+  });
+
+  test('a gateway error leaves the provider outcome uncertain', async () => {
+    calls = [];
+    sendFailure = 'gateway';
+    try {
+      const result = await cloud.sendTextMessage('15550100001', 'Synthetic gateway fixture', account.id);
+      assert.equal(result.success, false);
+      assert.equal(result.reason, 'confirmation_unknown');
+      assert.equal(calls.length, 1);
+    } finally {
+      sendFailure = false;
+    }
   });
 
   test('thread ownership rejection is actionable and never retried by the transport', async () => {

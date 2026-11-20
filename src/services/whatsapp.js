@@ -217,7 +217,7 @@ class WhatsAppManager {
    * @param {number | null | undefined} accountId
    * @returns {{success: boolean, accountId: number | null, reason: string, error?: string, isNotOnWhatsApp?: boolean, identifiers?: string[], waMessageId?: string}}
    */
-  async sendMessage(phone, message, accountId, { poolId, replyTo } = {}) {
+  async sendMessage(phone, message, accountId, { poolId, replyTo, beforeSubmit } = {}) {
     // PERSONA SAFETY: If a specific account is requested, ONLY use that account.
     // Never silently fall back to a different account — that would cause persona
     // mismatch (content was generated with the requested account's persona).
@@ -245,7 +245,7 @@ class WhatsAppManager {
       return { success: false, accountId: selectedAccountId, reason: 'invalid_phone' };
     }
 
-    const result = await whatsappCloudApi.sendTextMessage(formattedPhone, message, selectedAccountId, replyTo);
+    const result = await whatsappCloudApi.sendTextMessage(formattedPhone, message, selectedAccountId, replyTo, { beforeSubmit });
 
     if (result.success) {
       // ── Success — reset error count, increment counters ──
@@ -254,7 +254,7 @@ class WhatsAppManager {
       await prisma.whatsAppAccount.update({
         where: { id: selectedAccountId },
         data: { messagesSentToday: { increment: 1 } },
-      });
+      }).catch(() => logger.warn('Could not update WhatsApp reporting counters.'));
 
       logger.info(`📤 Sent via Acct ${selectedAccountId} to *${formattedPhone.slice(-4)}`);
       return {
@@ -269,7 +269,7 @@ class WhatsAppManager {
     }
 
     // Quota exhaustion is a local hold and must never trip the error pause.
-    if (whatsappQuotaMessage(result.reason)) return result;
+    if (result.reason === 'dispatch_cancelled' || whatsappQuotaMessage(result.reason)) return result;
 
     // ── Failure ──
     const errorMessage = result.rawError || result.reason || 'Unknown WhatsApp send error';
@@ -337,6 +337,7 @@ class WhatsAppManager {
     poolId,
     source = 'outboundos',
     userName,
+    beforeSubmit,
   } = {}) {
     const selectedAccountId = accountId || await this.getNextAccount({ poolId, forInitialOutreach: true });
     if (!selectedAccountId) {
@@ -367,6 +368,7 @@ class WhatsAppManager {
       userName: userName || account.name || config.business.name || 'Outbound OS',
       source,
       accountId: selectedAccountId,
+      beforeSubmit,
     });
 
     if (!result.success) {
@@ -386,7 +388,7 @@ class WhatsAppManager {
     await prisma.whatsAppAccount.update({
       where: { id: selectedAccountId },
       data: { messagesSentToday: { increment: 1 } },
-    });
+    }).catch(() => logger.warn('Could not update WhatsApp reporting counters.'));
 
     return {
       success: true,
