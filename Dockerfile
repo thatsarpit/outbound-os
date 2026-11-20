@@ -23,7 +23,8 @@ LABEL org.opencontainers.image.title="Outbound OS" \
       org.opencontainers.image.source="https://github.com/thatsarpit/outbound-os" \
       org.opencontainers.image.url="https://outboundos.space" \
       org.opencontainers.image.documentation="https://outboundos.space/docs/install" \
-      org.opencontainers.image.licenses="AGPL-3.0-only"
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      space.outboundos.guided-install="1"
 
 # SQLite for the database, curl for the healthcheck, openssl for Prisma.
 RUN apt-get update && apt-get install -y \

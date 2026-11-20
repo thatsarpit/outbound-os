@@ -155,7 +155,13 @@ jobs:
           curl -sf http://localhost:3001/healthz
           test "$(curl -s http://localhost:3001/api/auth/config)" = '{"provider":"local"}'
           docker logs obos 2>&1 | grep -q "Set its password with npm run reset-password"
-          printf '%s\n' 'ci-only-operator-password' | docker exec -i obos npm run reset-password -- admin@example.com
+          test "$(docker exec obos node scripts/reset-password.mjs admin@example.com --status)" = needs-password
+          printf '%s\n' 'ci-only-operator-password' | docker exec -i obos node scripts/reset-password.mjs admin@example.com --initial
+          test "$(docker exec obos node scripts/reset-password.mjs admin@example.com --status)" = configured
+          if printf '%s\n' 'ci-only-replacement-password' | docker exec -i obos node scripts/reset-password.mjs admin@example.com --initial; then
+            echo "First password setup could overwrite an initialized account"
+            exit 1
+          fi
           curl -fsS -o /dev/null -H 'Content-Type: application/json' \
             -d '{"email":"admin@example.com","password":"ci-only-operator-password"}' http://localhost:3001/api/auth/login
           if docker logs obos 2>&1 | grep -q 'ci-only-operator-password'; then
@@ -165,6 +171,27 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 24
+      - name: Guided Compose first boot and resume
+        run: |
+          install_dir=$(mktemp -d "$RUNNER_TEMP/guided-outboundos.XXXXXX")
+          git archive HEAD | tar -x -C "$install_dir"
+          cd "$install_dir"
+          setup_log="$install_dir.setup.log"
+          trap 'if test -f .env; then docker compose down --volumes; fi' EXIT
+          if bash setup/install.sh --email guided-admin@example.test --business "Owner's \$HOME" --port 33001 > "$setup_log" 2>&1; then
+            echo "Setup claimed readiness before setting the first password"
+            exit 1
+          fi
+          cat "$setup_log"
+          grep -q 'Set the first password in a private terminal' "$setup_log"
+          test "$(stat -c '%a' .env)" = 600
+          test "$(docker compose port app 3001)" = 127.0.0.1:33001
+          test "$(docker compose exec -T app printenv BUSINESS_NAME)" = "Owner's \$HOME"
+          printf '%s\n' 'ci-only-guided-password' | docker compose exec -T app node scripts/reset-password.mjs guided-admin@example.test --initial
+          bash setup/install.sh
+          bash setup/install.sh --check
+          curl -fsS -o /dev/null -H 'Content-Type: application/json' \
+            -d '{"email":"guided-admin@example.test","password":"ci-only-guided-password"}' http://127.0.0.1:33001/api/auth/login
       - name: Documented Nginx proxy, forwarded headers and authenticated SSE
         run: node scripts/verify-nginx.mjs
       - name: Logs on failure

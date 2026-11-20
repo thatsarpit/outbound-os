@@ -6,6 +6,10 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+- Add guided Docker setup with a private first-password prompt and resumable
+  configuration. App and MCP ports default to loopback. Existing proxies
+  that depend on another bind address can set it explicitly.
+
 - Recover interrupted WhatsApp follow-ups using the saved submission state.
   Preparation can return to the queue. Submission without a confirmed outcome
   stays available for review in the conversation.

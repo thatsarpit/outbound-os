@@ -1,8 +1,6 @@
 # Outbound OS — self-hosted
 #
-#   cp .env.example .env        # then fill in the values it asks for
-#   docker compose up -d
-#   open http://localhost:3001
+#   bash setup/install.sh
 #
 # The first boot creates the database and the first admin (ADMIN_EMAIL /
 # ADMIN_PASSWORD). If the password is blank, run:
@@ -24,10 +22,11 @@
 
 services:
   app:
-    image: ghcr.io/thatsarpit/outbound-os:${OUTBOUNDOS_VERSION:-latest}
+    image: "${OUTBOUNDOS_APP_IMAGE:-ghcr.io/thatsarpit/outbound-os:${OUTBOUNDOS_VERSION:-latest}}"
     build: .
     pull_policy: missing
     restart: unless-stopped
+    stop_grace_period: 25s
     env_file: .env
     environment:
       # Inside the container the database is always in the mounted folder.
@@ -35,7 +34,7 @@ services:
       API_PORT: "3001"
       NODE_ENV: production
     ports:
-      - "${OUTBOUNDOS_PORT:-3001}:3001"
+      - "${OUTBOUNDOS_BIND_ADDRESS:-127.0.0.1}:${OUTBOUNDOS_PORT:-3001}:3001"
     volumes:
       # A named volume keeps the image's file ownership, so the non-root app
       # user can always write its database. A bind mount (./data) often
@@ -56,11 +55,12 @@ services:
       PORT: "3010"
       OAUTH_STORE_PATH: /app/data/mcp-oauth.json
     ports:
-      - "${OUTBOUNDOS_MCP_PORT:-3010}:3010"
+      - "${OUTBOUNDOS_MCP_BIND_ADDRESS:-127.0.0.1}:${OUTBOUNDOS_MCP_PORT:-3010}:3010"
     volumes:
       - outboundos-mcp:/app/data
     depends_on:
-      - app
+      app:
+        condition: service_healthy
 
 volumes:
   outboundos-data:

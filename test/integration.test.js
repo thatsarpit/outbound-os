@@ -1218,6 +1218,33 @@ describe('Built-in email and password sign-in', () => {
     assert.equal(me.body.user.email, email);
   });
 
+  test('initializes a blank admin password once from a trusted terminal', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const email = 'initial-admin@example.test';
+    const password = 'first admin fixture password';
+    const reset = path.join(__dirname, '..', 'scripts', 'reset-password.mjs');
+    await prisma.user.create({
+      data: { name: 'Initial admin', email, passwordHash: '', role: 'admin' },
+    });
+    const command = (mode, input) => execFileSync(process.execPath, [reset, email, mode], {
+      input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    try {
+      assert.equal(command('--status'), 'needs-password');
+      assert.ok(!command('--initial', `${password}\n`).includes(password));
+      assert.equal(command('--status'), 'configured');
+      assert.throws(() => command('--initial', 'replacement fixture password\n'),
+        error => error.stderr.includes('The first password is already set'));
+      const result = await request('POST', '/api/auth/login', {
+        headers: { 'X-Forwarded-For': '198.51.100.215' }, body: { email, password },
+      });
+      assert.equal(result.status, 200);
+    } finally {
+      await prisma.user.delete({ where: { email } });
+    }
+  });
+
   test('a disabled user is locked out even with a valid token', async () => {
     const { default: prisma } = await import('../src/utils/prismaClient.js');
     const ok = await request('POST', '/api/auth/login', { body: { email, password } });

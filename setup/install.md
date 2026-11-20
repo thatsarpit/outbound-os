@@ -8,69 +8,76 @@ or a backup.
 
 ## Docker (recommended)
 
-Needs Docker with Compose v2.
+Use Docker with the Compose v2 plugin. Run the command on the machine hosting
+Docker. On Windows, use WSL2 with Docker Desktop integration enabled.
 
-The published image supports Linux amd64 and arm64, including Docker Desktop
-on Apple Silicon. A Docker install does not need Node.js on the host. Windows
-users should run the commands in WSL2 with Docker Desktop integration enabled.
+    git clone https://github.com/thatsarpit/outbound-os.git
+    cd outbound-os
+    bash setup/install.sh
 
-```bash
-git clone https://github.com/thatsarpit/outbound-os.git
-cd outbound-os
-cp .env.example .env
-```
+The installer asks for your admin email, builds the current checkout, starts
+it on loopback, and opens a hidden password prompt. Node.js runs in Docker.
+When it finishes, open the printed sign-in address and follow the app's
+setup wizard. Use the same command again to resume after a failed build or
+interrupted password setup. On a VPS, open the sign-in address through an SSH
+port forward or the HTTPS proxy below.
 
-Edit `.env` and set at least `ADMIN_EMAIL` (and `BUSINESS_NAME`,
-`BUSINESS_TIMEZONE` while you are there). Leave `JWT_SECRET` and
-`LEAD_SYNC_ENCRYPTION_KEY` blank: they are generated on first boot.
+Optional settings for a new install:
 
-```bash
-docker compose up -d
-docker compose ps
-```
+    bash setup/install.sh --email admin@example.com --business "Your business" --timezone Asia/Kolkata --port 3001
 
-If you left `ADMIN_PASSWORD` blank, set it from a private terminal before
-trying to sign in. Replace the example address with your admin email.
+A release that supports guided setup can be selected with
+`--version RELEASE` (omit the leading v). The installer saves its image
+digest in `.env`. New flags are only accepted before the settings are saved.
+In a noninteractive terminal, the installer prints the command for setting
+the first password and exits until that step is complete. Enter the password
+at the private server terminal. Keep credentials out of arguments and chats.
 
-```bash
-docker compose exec app npm run reset-password -- admin@example.com
-```
+### Publish through HTTPS
 
-Open <http://localhost:3001> and sign in. You can change the password under
-**Account**. Password changes and terminal resets end older local sessions.
-When upgrading from a release that predates this change, local users need to
-sign in again.
+On a VPS you can pass `--public-url https://crm.example.com` on first setup.
+Point a host reverse proxy or tunnel at the printed loopback port. Configure
+DNS, a trusted certificate and the correct `TRUST_PROXY` for your topology.
+Then run `bash setup/install.sh --check` to verify health over HTTPS. That
+check covers reachability. Confirm sign-in and provider webhook validation
+before enabling channels. A proxy running in Docker can reach the app over
+a shared Docker network. Its own loopback points at the proxy container.
 
-Before connecting WhatsApp, put the app behind HTTPS on a public hostname
-(Caddy, Nginx or a Cloudflare Tunnel all work). Meta will not deliver webhooks
-to `http://` or `localhost`.
+### Existing and manual Docker setups
 
-Compose publishes the app port on all host interfaces. On a public server,
-restrict that port in the host/cloud firewall and expose HTTPS through your
-proxy. Configure `TRUST_PROXY` for that proxy's actual topology. Do not expose
-an unencrypted sign-in endpoint to the internet.
+Keep the existing `.env` and named volumes. The guided installer declines
+existing configurations it did not create. For manual setup, copy
+`.env.example` to `.env`, set `ADMIN_EMAIL`, then run
+`docker compose up -d`. Supply the first password privately through the
+deployment environment or set it from a private terminal:
+
+    docker compose exec app npm run reset-password -- admin@example.com
+
+You can change your password under **Account**. Password changes and terminal
+resets end older local sessions.
+
+When upgrading to this Compose file, the app and optional MCP ports default
+to loopback. A reverse proxy on the host can keep using those ports. For an
+existing protected network topology that requires another bind address, set
+`OUTBOUNDOS_BIND_ADDRESS` or `OUTBOUNDOS_MCP_BIND_ADDRESS` deliberately.
+Keep unencrypted sign-in off public interfaces.
 
 ## Build from source and upgrade
 
-Compose normally uses the published image; a source checkout alone does not
-mean you are running that checkout. For a deliberate local source build:
+Before upgrading, verify a recovery set using the [backup and restore
+guide](backups.md). Retain the old image alongside the recovery set.
+Restore the pre-upgrade recovery set before starting an older image.
 
-```bash
-docker compose up -d --build --pull never
-```
+- **Guided source build.** Save the current image under a separate local tag,
+  update the checkout and run `docker compose up -d --build --pull never app`.
+- **Guided registry install.** Pull the chosen release tag, verify its digest
+  and update `OUTBOUNDOS_APP_IMAGE` in `.env` to that digest. Run
+  `docker compose up -d --no-build app` to apply it.
+- **Manual registry install.** Set `OUTBOUNDOS_VERSION` in `.env` to the release
+  tag without the leading v, then run `docker compose pull && docker compose up -d`.
 
-For a published release, pin `OUTBOUNDOS_VERSION` in `.env` to the release tag
-without the leading `v`. Before upgrading, verify a recovery set using the
-[backup and restore guide](backups.md). Retain the old image version alongside
-the recovery set. An older application image may be incompatible with an
-upgraded database.
-
-```bash
-docker compose pull
-docker compose up -d
-docker compose ps
-curl --fail http://localhost:3001/healthz
-```
+Confirm the selected app image is healthy with `docker compose ps`. Guided
+installs can also run `bash setup/install.sh --check`.
 
 Health verifies process/database readiness. Also sign in and check channel
 readiness and webhook verification before sending. Do not use customer

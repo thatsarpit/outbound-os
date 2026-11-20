@@ -153,32 +153,16 @@ one — and it works like a hosted form backend:
 
 ## Quick start (Docker)
 
-You need a machine with Docker. Start with 2 GB of memory for a small deployment and monitor usage.
-Intel and ARM images are published.
+Use Docker Engine with Compose v2. On Windows, run the installer in WSL2.
 
-```bash
-git clone https://github.com/thatsarpit/outbound-os.git
-cd outbound-os
-cp .env.example .env          # set ADMIN_EMAIL; everything else can wait
-docker compose up -d          # pulls the published image; nothing to build
-```
+    git clone https://github.com/thatsarpit/outbound-os.git
+    cd outbound-os
+    bash setup/install.sh
 
-Open <http://localhost:3001> and sign in as `ADMIN_EMAIL`. If you left
-`ADMIN_PASSWORD` blank, set it from a private terminal first. Replace the
-example address with your admin email.
-
-```bash
-docker compose exec app npm run reset-password -- admin@example.com
-```
-
-Then connect channels in **Settings → WhatsApp**, **Settings → Email** and
-**Integrations**. Nothing sends until you do.
-
-Put it behind HTTPS (Caddy, Nginx, Cloudflare Tunnel) before connecting
-WhatsApp: Meta only delivers webhooks to a public HTTPS address.
-
-Before upgrading, follow the [backup and restore guide](setup/backups.md) and
-keep a verified copy outside the host.
+The installer builds the checkout, asks for the first admin password without
+echoing it, and prints the sign-in address. Run the same command to resume.
+The [installation guide](setup/install.md) covers published images, HTTPS,
+existing installs and verified backups.
 
 ### Deploy on Render
 
@@ -206,16 +190,9 @@ docker compose cp app:/app/data/backups ./backups
 
 ### Updating
 
-```bash
-git pull
-docker compose pull && docker compose up -d
-```
-
-Compose runs the published images from GitHub Container Registry
-(`ghcr.io/thatsarpit/outbound-os`, amd64 and arm64). Pin a version with
-`OUTBOUNDOS_VERSION=0.3.0` in `.env`. Database migrations run automatically
-on start. Running your own changes? `docker compose up -d --build` builds
-from this folder instead.
+Verify a recovery set before updating. Use the [upgrade steps for your
+installation](setup/install.md#build-from-source-and-upgrade). The app applies
+database migrations when it starts.
 
 ---
 
