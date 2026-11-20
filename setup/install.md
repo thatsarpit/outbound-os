@@ -66,18 +66,32 @@ Keep unencrypted sign-in off public interfaces.
 
 Before upgrading, verify a recovery set using the [backup and restore
 guide](backups.md). Retain the old image alongside the recovery set.
-Restore the pre-upgrade recovery set before starting an older image.
+Restore the pre-upgrade recovery set before starting an older image. Save
+any records you need from after the upgrade before rolling back.
 
 - **Guided source build.** Save the current image under a separate local tag,
   update the checkout and run `docker compose up -d --build --pull never app`.
-- **Guided registry install.** Pull the chosen release tag, verify its digest
-  and update `OUTBOUNDOS_APP_IMAGE` in `.env` to that digest. Run
-  `docker compose up -d --no-build app` to apply it.
+- **Guided registry install.** Get `compose-images.env` from the successful
+  [Docker images workflow](https://github.com/thatsarpit/outbound-os/actions/workflows/docker-publish.yml)
+  for the release. Copy `OUTBOUNDOS_APP_IMAGE` into
+  the existing `.env`. If MCP is enabled, copy `OUTBOUNDOS_MCP_IMAGE` as well
+  and include `--profile mcp` in the Compose commands. Keep your existing
+  configuration and save the previous image references with the recovery set.
 - **Manual registry install.** Set `OUTBOUNDOS_VERSION` in `.env` to the release
   tag without the leading v, then run `docker compose pull && docker compose up -d`.
 
-Confirm the selected app image is healthy with `docker compose ps`. Guided
-installs can also run `bash setup/install.sh --check`.
+For a digest-based upgrade, pull the selected images before switching
+containers.
+
+```bash
+docker compose pull
+docker compose up -d --no-build --pull never --wait --wait-timeout 150
+```
+
+Check the app with `docker compose ps`. Guided installs can also run
+`bash setup/install.sh --check`. The Docker images workflow tests the exact
+app and MCP digests on Linux amd64 and arm64 before applying release tags.
+Its rollback check uses an isolated copy of the pre-upgrade data.
 
 Health verifies process/database readiness. Also sign in and check channel
 readiness and webhook verification before sending. Do not use customer

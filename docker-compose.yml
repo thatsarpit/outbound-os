@@ -16,7 +16,9 @@
 #
 # Images: Compose pulls the published image from GitHub Container Registry
 # and only builds from this folder if it cannot. Pin a version with
-# OUTBOUNDOS_VERSION=0.2.0 in .env (default: latest release). To update:
+# OUTBOUNDOS_VERSION=0.2.0 in .env (default: latest release). To pin the
+# tested app and MCP pair by digest, use the release workflow artifact.
+# To update a tag-based install:
 #   docker compose pull && docker compose up -d
 # To run your own changes instead:  docker compose up -d --build
 
@@ -43,7 +45,7 @@ services:
 
   mcp:
     profiles: ["mcp"]
-    image: ghcr.io/thatsarpit/outbound-os-mcp:${OUTBOUNDOS_VERSION:-latest}
+    image: "${OUTBOUNDOS_MCP_IMAGE:-ghcr.io/thatsarpit/outbound-os-mcp:${OUTBOUNDOS_VERSION:-latest}}"
     build:
       context: .
       dockerfile: mcp-outboundos/Dockerfile

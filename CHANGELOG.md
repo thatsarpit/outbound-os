@@ -6,6 +6,10 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+- Gate Docker release tags on fresh install, upgrade, rollback and MCP checks
+  on Linux amd64 and arm64. The release workflow records a matching app and
+  MCP digest pair for Compose upgrades.
+
 - Add guided Docker setup with a private first-password prompt and resumable
   configuration. App and MCP ports default to loopback. Existing proxies
   that depend on another bind address can set it explicitly.

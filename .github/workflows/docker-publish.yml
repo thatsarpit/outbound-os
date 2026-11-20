@@ -1,13 +1,7 @@
 name: Docker images
 
-# Publishes ready-to-run images to GitHub Container Registry, so an install
-# pulls a finished image in seconds instead of building it on the server.
-#
-#   ghcr.io/thatsarpit/outbound-os       the app and dashboard
-#   ghcr.io/thatsarpit/outbound-os-mcp   the MCP server for AI agents
-#
-# Tags: a release v1.2.3 publishes 1.2.3, 1.2 and latest; every push to main
-# publishes edge and sha-<commit>. Both amd64 and arm64.
+# Stage the app and MCP by digest. Move release tags only after both native
+# architectures complete fresh install, upgrade, rollback and MCP startup.
 
 on:
   push:
@@ -17,16 +11,23 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 concurrency:
   group: docker-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
+
+env:
+  # Published Linux amd64/arm64 index for the 5f56b12 release baseline.
+  BASELINE_APP: ghcr.io/thatsarpit/outbound-os@sha256:5deb7ea1c9ff61159d91233df1964abdaf2dfe594694b707cad0cd7f6c9cb738
 
 jobs:
-  publish:
-    name: ${{ matrix.image }}
+  build:
+    name: Stage ${{ matrix.image }}
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -37,6 +38,8 @@ jobs:
             dockerfile: mcp-outboundos/Dockerfile
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
@@ -47,25 +50,147 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - id: registry
+        env:
+          IMAGE: ${{ matrix.image }}
+        run: echo "repository=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/$IMAGE" >> "$GITHUB_OUTPUT"
+
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          images: ${{ steps.registry.outputs.repository }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
             type=sha,prefix=sha-,format=short
 
       - uses: docker/build-push-action@v7
+        id: build
         with:
           context: .
           file: ${{ matrix.dockerfile }}
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          outputs: type=image,name=${{ steps.registry.outputs.repository }},push-by-digest=true,name-canonical=true,push=true
           labels: ${{ steps.meta.outputs.labels }}
           build-args: CACHE_BUST=${{ github.sha }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max
+
+      - name: Record the staged index and intended tags
+        env:
+          IMAGE: ${{ matrix.image }}
+          REPOSITORY: ${{ steps.registry.outputs.repository }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          test -n "$TAGS"
+          printf '%s@%s\n' "$REPOSITORY" "$DIGEST" > "$RUNNER_TEMP/$IMAGE.ref"
+          printf '%s\n' "$TAGS" > "$RUNNER_TEMP/$IMAGE.tags"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staged-${{ matrix.image }}
+          path: |
+            ${{ runner.temp }}/${{ matrix.image }}.ref
+            ${{ runner.temp }}/${{ matrix.image }}.tags
+          if-no-files-found: error
+
+  verify:
+    needs: build
+    name: Verify Linux ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: staged-*
+          path: ${{ runner.temp }}/staged-images
+          merge-multiple: true
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Rehearse install, upgrade and rollback on the staged images
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          app=$(cat "$RUNNER_TEMP/staged-images/outbound-os.ref")
+          mcp=$(cat "$RUNNER_TEMP/staged-images/outbound-os-mcp.ref")
+          for image in "$BASELINE_APP" "$app" "$mcp"; do
+            docker pull --platform "linux/$ARCH" "$image"
+          done
+          bash scripts/verify-container-release.sh "$BASELINE_APP" "$app" "$mcp"
+
+  publish:
+    name: Publish verified digests
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: staged-*
+          path: ${{ runner.temp }}/staged-images
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag the tested indexes and record the deployment pair
+        run: |
+          cd "$RUNNER_TEMP/staged-images"
+          for image in outbound-os outbound-os-mcp; do
+            ref=$(cat "$image.ref")
+            options=()
+            while IFS= read -r tag; do
+              test -n "$tag"
+              options+=(--tag "$tag")
+            done < "$image.tags"
+            test "${#options[@]}" -gt 0
+            docker buildx imagetools create "${options[@]}" --metadata-file "$image.json" "$ref"
+            test "$(jq -er '."containerimage.descriptor".digest' "$image.json")" = "${ref##*@}"
+          done
+          {
+            printf '# Source revision %s\n' "$GITHUB_SHA"
+            printf 'OUTBOUNDOS_APP_IMAGE=%s\n' "$(cat outbound-os.ref)"
+            printf 'OUTBOUNDOS_MCP_IMAGE=%s\n' "$(cat outbound-os-mcp.ref)"
+          } > "$RUNNER_TEMP/compose-images.env"
+          {
+            printf '### Tested Compose image pair\n\n'
+            printf '%s\n' '~~~dotenv'
+            cat "$RUNNER_TEMP/compose-images.env"
+            printf '%s\n' '~~~'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: compose-images
+          path: ${{ runner.temp }}/compose-images.env
+          if-no-files-found: error
