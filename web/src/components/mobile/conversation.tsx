@@ -1,3 +1,4 @@
+import { ScheduledEmails } from '@/components/inbox/scheduled-emails'
 import { VoiceRecorder } from '@/components/inbox/voice-recorder'
 import { ReplyPreview, MessageInteractions } from '@/components/inbox/message-interactions'
 import { ApiClientError } from '@/api/client'
@@ -251,6 +252,7 @@ export function MobileConversation({
         </label>
       )}
       {channel === 'whatsapp' && !!thread && <WhatsAppReplyWindow key={leadId} thread={thread} />}
+      <ScheduledEmails emails={thread?.scheduledEmails} />
       <div
         ref={timeline}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3"

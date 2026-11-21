@@ -1,6 +1,6 @@
 import { queryClient } from '@/lib/query-client'
 import { notificationActions } from '@/stores/notification-store'
-import type { InboxChannel, InboxMessage, InboxSenderAccount, Lead } from '@/api/types'
+import type { InboxChannel, InboxMessage, InboxSenderAccount, Lead, ScheduledInboxEmail } from '@/api/types'
 
 /**
  * A working inbox for the demo, held in memory.
@@ -229,6 +229,20 @@ const DRAWING_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height=
 </svg>`
 
 const files = new Map<number, Blob>()
+const scheduledEmails = new Map<number, ScheduledInboxEmail[]>()
+const scheduleRequests = new Map<string, ScheduledInboxEmail>()
+
+for (const thread of THREADS.filter((row) => row.channel === 'email')) {
+  scheduledEmails.set(thread.leadId, [
+    {
+      id: ++nextId,
+      emailSubject: 'Re: Updated shipping estimate',
+      status: 'queued',
+      scheduledAt: new Date(Date.now() + 86_400_000).toISOString(),
+      providerStatusReason: null,
+    },
+  ])
+}
 
 const MESSAGES: InboxMessage[] = [
   message(
@@ -625,6 +639,7 @@ export async function handleInboxRequest(
       whatsappSession: demoSession(thread.leadId),
       status: thread.threadState,
       messages: MESSAGES.filter((m) => m.leadId === thread.leadId),
+      scheduledEmails: scheduledEmails.get(thread.leadId) || [],
       senderAccount: SENDERS[thread.channel],
       availableSenderAccounts: [SENDERS[thread.channel]],
     })
@@ -687,6 +702,25 @@ export async function handleInboxRequest(
         success: false,
         error: 'Sample provider rejected this send. Your draft is still here.',
       })
+    if (body.scheduledAt != null) {
+      const scheduledAt = String(body.scheduledAt)
+      if (body.channel !== 'email' || !(Date.parse(scheduledAt) > Date.now()) || !text) {
+        return json({ error: 'Enter an email and choose a future date and time.' }, 400)
+      }
+      const key = body.clientMessageId ? `${thread.leadId}:${body.clientMessageId}` : null
+      const previous = key && scheduleRequests.get(key)
+      if (previous) return json({ success: true, scheduled: true, message: previous })
+      const email: ScheduledInboxEmail = {
+        id: ++nextId,
+        emailSubject: String(body.subject || 'No subject'),
+        status: 'queued',
+        scheduledAt,
+        providerStatusReason: null,
+      }
+      scheduledEmails.set(thread.leadId, [email, ...(scheduledEmails.get(thread.leadId) || [])])
+      if (key) scheduleRequests.set(key, email)
+      return json({ success: true, scheduled: true, scheduledAt, message: email })
+    }
     const attachmentIds = Array.isArray(body.attachmentIds) ? (body.attachmentIds as number[]) : []
     const sent: InboxMessage[] = []
 

@@ -69,7 +69,7 @@ import { hasAllLeadTags } from './utils/campaignAudience.js';
 import { verificationEnabled } from './utils/emailVerification.js';
 import replyDetector from './services/replyDetector.js';
 import leadStateService, { LEAD_STATUS } from './domain/leadStateService.js';
-import emailService from './services/emailService.js';
+import emailService, { SCHEDULED_EMAIL_KEY_PREFIX } from './services/emailService.js';
 import dailyEmailScheduler from './services/dailyEmailScheduler.js';
 import { prepareBatchTemplate, validateBatchSettings } from './utils/emailBatchPolicy.js';
 import brevoMarketingCampaigns from './services/brevoMarketingCampaigns.js';
@@ -81,6 +81,7 @@ import webhookDispatcher from './services/webhookDispatcher.js';
 import { OutboundWebhookTargetError, parseOutboundWebhookTarget } from './utils/outboundWebhookTarget.js';
 import { workspaceTimezone, zonedParts, zonedTimeToUtc } from './utils/workspaceTime.js';
 import { MEDIA_DIR as WHATSAPP_MEDIA_DIR } from './services/whatsappMedia.js';
+import { emailAttachmentIds, resolveEmailAttachments } from './services/emailAttachments.js';
 import { whatsappAddress } from './utils/whatsappAddress.js';
 import { mapInboundLead, isSendableMobile, formSubmissionMetadata } from './utils/inboundLead.js';
 import { FORM_SOURCE_PRESETS } from './utils/formSourcePresets.js';
@@ -3302,7 +3303,7 @@ async function sendInboxThreadDetail(req, res) {
 
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-    const [emailAccounts, availableSenderAccounts, telegramSenderAccounts] = await Promise.all([
+    const [emailAccounts, availableSenderAccounts, telegramSenderAccounts, scheduledEmails] = await Promise.all([
       prisma.emailAccount.findMany({
         where: {
           id: {
@@ -3319,6 +3320,17 @@ async function sendInboxThreadDetail(req, res) {
       prisma.telegramAccount.findMany({
         where: { id: { in: [...new Set(lead.messages.map((message) => message.telegramAccountId).filter(Boolean))] } },
         select: { id: true, name: true, displayName: true },
+      }),
+      prisma.message.findMany({
+        where: {
+          leadId,
+          channel: 'email',
+          manualSendKey: { startsWith: SCHEDULED_EMAIL_KEY_PREFIX },
+          status: { in: ['queued', 'sending', 'unconfirmed', 'permanently_failed', 'cancelled'] },
+        },
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        take: 10,
+        select: { id: true, emailSubject: true, status: true, scheduledAt: true, providerStatusReason: true },
       }),
     ]);
 
@@ -3346,6 +3358,7 @@ async function sendInboxThreadDetail(req, res) {
     res.json({
       ...summary,
       messages: mappedMessages,
+      scheduledEmails,
       whatsappSession: await whatsappReplyContext(lead),
       senderAccount: lead.assignedEmailAccountId ? sanitizeSenderAccount(emailAccountsById[lead.assignedEmailAccountId]) : null,
       sender: lead.assignedEmailAccountId ? sanitizeSenderAccount(emailAccountsById[lead.assignedEmailAccountId]) : null,
@@ -3690,6 +3703,27 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
       return res.status(400).json({ error: 'channel must be whatsapp, email, imessage, or telegram' });
     }
 
+    const scheduleInput = req.body?.scheduledAt;
+    const isScheduled = scheduleInput !== undefined && scheduleInput !== null;
+    const scheduledAt = isScheduled && typeof scheduleInput === 'string' ? new Date(scheduleInput) : null;
+    const requestId = req.body?.clientMessageId;
+    let scheduleKey;
+    if (isScheduled) {
+      if (channel !== 'email') return res.status(400).json({ error: 'Scheduling is available for email only.' });
+      if (requestId !== undefined) {
+        if (typeof requestId !== 'string' || !/^[\w-]{16,100}$/.test(requestId)) {
+          return res.status(400).json({ error: 'Invalid email schedule request ID.' });
+        }
+        scheduleKey = SCHEDULED_EMAIL_KEY_PREFIX + createHash('sha256')
+          .update(JSON.stringify([req.user?.id ?? req.user?.email, leadId, requestId])).digest('hex');
+        const previous = await prisma.message.findUnique({ where: { manualSendKey: scheduleKey } });
+        if (previous) return res.json({ success: true, channel: 'email', scheduled: true, scheduledAt: previous.scheduledAt, message: previous });
+      }
+      if (!scheduledAt || !(scheduledAt.getTime() > Date.now())) {
+        return res.status(400).json({ error: 'Choose a future date and time to schedule this email.' });
+      }
+    }
+
     if (channel === 'imessage') {
       const text = String(req.body?.text || req.body?.body || '').trim();
       if (!text) return res.status(400).json({ error: 'text is required for iMessage sends' });
@@ -3839,19 +3873,11 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
       return res.status(503).json({ error: 'No verified email accounts available. Add one in Settings.' });
     }
 
-    // Resolve file attachments if provided
-    let attachments;
-    const attachmentIds = Array.isArray(req.body?.attachmentIds) ? req.body.attachmentIds : [];
-    if (attachmentIds.length > 0) {
-      const mediaFiles = await prisma.mediaFile.findMany({
-        where: { id: { in: attachmentIds.map(Number).filter(Boolean) } },
-      });
-      attachments = mediaFiles.map((f) => ({
-        filename: f.originalName,
-        path: path.resolve(f.path),
-        contentType: f.mimeType,
-      }));
+    const attachmentIds = emailAttachmentIds(req.body?.attachmentIds ?? undefined);
+    if (attachmentIds.length && emailAccount.provider === 'brevo') {
+      return res.status(400).json({ error: 'This Brevo sender cannot send attachments. Choose an SMTP sender or remove the files.' });
     }
+    const attachments = await resolveEmailAttachments(attachmentIds);
 
     // CC/BCC — accept comma-separated strings or arrays
     const cc = Array.isArray(req.body?.cc)
@@ -3861,27 +3887,36 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
       ? req.body.bcc.join(', ')
       : typeof req.body?.bcc === 'string' ? req.body.bcc.trim() : undefined;
 
-    // Schedule for later — create queued message instead of sending now
-    const scheduledAt = req.body?.scheduledAt ? new Date(req.body.scheduledAt) : null;
-    if (scheduledAt && scheduledAt > new Date()) {
-      const normalizedSubject = subject || replyMessage?.emailSubject || 'No subject';
-      const queuedMsg = await prisma.message.create({
-        data: {
-          leadId,
-          direction: 'outbound',
-          channel: 'email',
-          content: body || htmlBody || '',
-          waAccount: 0,
-          emailAccountId: emailAccount.id,
-          status: 'queued',
-          emailSubject: normalizedSubject,
-          emailInReplyTo: inReplyTo || null,
-          emailCc: cc || null,
-          emailBcc: bcc || null,
-          scheduledAt,
-        },
-      });
-      return res.json({ success: true, channel: 'email', scheduled: true, scheduledAt, message: queuedMsg });
+    if (scheduledAt) {
+      // Reject a date that passed during validation instead of queuing it as due.
+      if (scheduledAt <= new Date()) {
+        return res.status(400).json({ error: 'Choose a future date and time to schedule this email.' });
+      }
+      const data = {
+        leadId,
+        direction: 'outbound',
+        channel: 'email',
+        content: body || '',
+        emailAccountId: emailAccount.id,
+        status: 'queued',
+        emailSubject: subject || replyMessage?.emailSubject || 'No subject',
+        emailHtmlBody: htmlBody || null,
+        emailAttachmentIds: attachmentIds.length ? JSON.stringify(attachmentIds) : null,
+        emailInReplyTo: inReplyTo,
+        emailCc: cc || null,
+        emailBcc: bcc || null,
+        manualSendKey: scheduleKey || SCHEDULED_EMAIL_KEY_PREFIX + randomUUID(),
+        scheduledAt,
+      };
+      let queued;
+      try {
+        queued = await prisma.message.create({ data });
+      } catch (error) {
+        if (!scheduleKey || error.code !== 'P2002') throw error;
+        queued = await prisma.message.findUnique({ where: { manualSendKey: scheduleKey } });
+        if (!queued) throw error;
+      }
+      return res.json({ success: true, channel: 'email', scheduled: true, scheduledAt: queued.scheduledAt, message: queued });
     }
 
     const result = await emailService.sendEmail({

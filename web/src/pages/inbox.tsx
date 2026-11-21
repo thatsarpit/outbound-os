@@ -23,7 +23,11 @@ import { ThreadListItem } from '@/components/inbox/thread-list-item'
 import { LeadContextPanel } from '@/components/inbox/lead-context-panel'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { DrawerShell, SkeletonCard, Button } from '@/components/ui'
-import { buildReplySubject, getRenderedTemplateText } from '@/lib/email-compose'
+import {
+  buildReplySubject,
+  getRenderedTemplateText,
+  scheduledEmailRequest,
+} from '@/lib/email-compose'
 import { saveDraft, loadDraft, clearDraft, clearSubmittedDraft } from '@/lib/email-drafts'
 import { ROLE_EXPERIENCE } from '@/lib/role-shell'
 import { cn } from '@/lib/utils'
@@ -532,12 +536,12 @@ function InboxInner() {
     assignSelfMutation.isPending
 
   const resolvedThreadError = threadError instanceof Error ? threadError : null
-  const resolvedReplyError = sendMutation.error instanceof Error ? sendMutation.error : null
 
   const handleAddAttachment = (file: MediaFile) => setAttachments((prev) => [...prev, file])
   const handleRemoveAttachment = (id: number) =>
     setAttachments((prev) => prev.filter((a) => a.id !== id))
 
+  const scheduleRequestIds = useRef(new Map<string, string>())
   const scheduleSendMutation = useMutation({
     networkMode: 'always',
     retry: false,
@@ -551,8 +555,8 @@ function InboxInner() {
       const subjectLine =
         composerSubject.trim() ||
         buildReplySubject(latestEmailMessage?.subject || activeThread?.subject)
-      return inboxApi
-        .send({
+      const { fingerprint, request } = scheduledEmailRequest(
+        {
           leadId: selectedLeadId,
           channel: 'email',
           text: messageBody,
@@ -565,15 +569,14 @@ function InboxInner() {
           cc: cc.trim() || undefined,
           bcc: bcc.trim() || undefined,
           scheduledAt,
-        })
-        .then((response) => ({
-          response,
-          submitted,
-          leadId: selectedLeadId,
-          context: draftContext,
-        }))
+        },
+        scheduleRequestIds.current,
+      )
+      await inboxApi.send(request)
+      return { submitted, leadId: selectedLeadId, context: draftContext, fingerprint }
     },
-    onSuccess: ({ submitted, leadId, context }) => {
+    onSuccess: ({ submitted, leadId, context, fingerprint }) => {
+      scheduleRequestIds.current.delete(fingerprint)
       clearSubmittedDraft(dashboardScope, leadId, submitted)
       // A reply completing after navigation must not clear another lead's editor.
       if (currentDraftContext.current === context) {
@@ -587,8 +590,12 @@ function InboxInner() {
       queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
       queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
     },
-    onError: (error: Error) => toast.error(`Schedule failed: ${error.message}`),
+    meta: { silent: true },
   })
+  const scheduleReply = async (scheduledAt: string) => {
+    await scheduleSendMutation.mutateAsync(scheduledAt)
+  }
+  const resolvedReplyError = sendMutation.error instanceof Error ? sendMutation.error : null
 
   return (
     <div className="animate-fade-in space-y-3">
@@ -867,7 +874,7 @@ function InboxInner() {
                     onCcChange={setCc}
                     bcc={bcc}
                     onBccChange={setBcc}
-                    onScheduleSend={(scheduledAt) => scheduleSendMutation.mutate(scheduledAt)}
+                    onScheduleSend={scheduleReply}
                   />
                 </div>
                 {/* Third pane: who this is, what is outstanding, what was agreed.
@@ -946,13 +953,26 @@ function InboxInner() {
               onCcChange={setCc}
               bcc={bcc}
               onBccChange={setBcc}
-              onScheduleSend={(scheduledAt) => scheduleSendMutation.mutate(scheduledAt)}
+              onScheduleSend={scheduleReply}
             />
           </DrawerShell>
         )}
       </div>
 
-      {showCompose && <ComposeEmailDrawer onClose={() => setShowCompose(false)} />}
+      {showCompose && (
+        <ComposeEmailDrawer
+          onClose={() => setShowCompose(false)}
+          onScheduled={(leadId) =>
+            updateRoute({
+              leadId: String(leadId),
+              channel: 'email',
+              accountId: null,
+              threadKey: null,
+              templateId: null,
+            })
+          }
+        />
+      )}
     </div>
   )
 }

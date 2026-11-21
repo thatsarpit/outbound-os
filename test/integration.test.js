@@ -2545,6 +2545,122 @@ async function withDeliveryFixture(run) {
   }
 }
 
+test('scheduled inbox email keeps the original payload and holds missing files or interrupted submissions', async t => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const { default: email, SCHEDULED_EMAIL_SUBMITTING } = await import('../src/services/emailService.js');
+  const { default: followup } = await import('../src/services/followup.js');
+  const { default: imessage } = await import('../src/services/imessage.js');
+  const { MEDIA_DIR } = await import('../src/services/whatsappMedia.js');
+  const account = await db.emailAccount.create({ data: {
+    name: 'Scheduled SMTP fixture', email: 'schedule-sender@example.test', smtpHost: 'smtp.example.test',
+    smtpUser: 'fixture', smtpPass: 'fixture', status: 'verified',
+  } });
+  const lead = await db.lead.create({ data: {
+    name: 'Scheduled email fixture', mobile: '12025550138', email: 'schedule-recipient@example.test',
+    assignedEmailAccountId: account.id, status: 'replied',
+  } });
+  const originalReply = await db.message.create({ data: {
+    leadId: lead.id, channel: 'email', direction: 'inbound', status: 'received',
+    content: 'Reply already in the thread', emailMessageId: '<previous-reply@example.test>',
+  } });
+  const filename = 'schedule-fixture-' + crypto.randomUUID() + '.txt';
+  const filePath = path.join(MEDIA_DIR, filename);
+  let file;
+  const calls = [];
+  const transport = t.mock.method(email, '_getTransport', () => ({
+    async sendMail(options) {
+      const sending = await db.message.findFirst({ where: { leadId: lead.id, status: 'sending' } });
+      assert.equal(sending?.providerStatusReason, SCHEDULED_EMAIL_SUBMITTING);
+      calls.push(options);
+      return { messageId: '<schedule-fixture@example.test>' };
+    },
+  }));
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.239' };
+  const send = body => request('POST', '/api/inbox/send', { headers, body: {
+    leadId: lead.id, accountId: account.id, channel: 'email', subject: 'Fixture schedule',
+    body: 'Original body', htmlBody: '<strong>Original body</strong>', cc: 'copy@example.test',
+    replyToMessageId: originalReply.id, ...body,
+  } });
+  try {
+    for (const scheduledAt of ['invalid time', new Date(0).toISOString()]) {
+      assert.equal((await send({ scheduledAt })).status, 400);
+    }
+    const date = new Date(Date.now() + 60 * 60_000).toISOString();
+    assert.equal((await send({ channel: 'whatsapp', scheduledAt: date })).status, 400);
+    assert.equal(await db.message.count({ where: { leadId: lead.id, direction: 'outbound' } }), 0);
+    assert.equal(transport.mock.callCount(), 0);
+
+    fs.mkdirSync(MEDIA_DIR, { recursive: true });
+    fs.writeFileSync(filePath, 'Synthetic attachment', { flag: 'wx' });
+    file = await db.mediaFile.create({ data: {
+      filename, originalName: 'estimate.txt', mimeType: 'text/plain', size: 20, path: 'data/media/' + filename,
+    } });
+    const body = { scheduledAt: date, attachmentIds: [file.id], clientMessageId: 'scheduled-email-fixture-001' };
+    const [first, repeated] = await Promise.all([send(body), send(body)]);
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    assert.equal(repeated.status, 200, JSON.stringify(repeated.body));
+    const id = first.body.message.id;
+    assert.equal(repeated.body.message.id, id);
+    assert.equal(await db.message.count({ where: { leadId: lead.id, direction: 'outbound' } }), 1);
+    assert.equal(transport.mock.callCount(), 0);
+    const queued = await request('GET', '/api/inbox/threads/' + lead.id, { headers });
+    assert.deepEqual(queued.body.scheduledEmails.map(row => row.status), ['queued']);
+    assert.equal(queued.body.messages.length, 1, 'queued email does not count as a conversation message yet');
+
+    await db.message.update({ where: { id }, data: { scheduledAt: new Date(0) } });
+    await email.processEmailQueue({ messageIds: [id] });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].html, '<strong>Original body</strong>');
+    assert.equal(calls[0].cc, 'copy@example.test');
+    assert.equal(calls[0].headers['In-Reply-To'], '<previous-reply@example.test>');
+    assert.deepEqual(calls[0].attachments, [{ filename: 'estimate.txt', path: filePath, contentType: 'text/plain' }]);
+    assert.equal((await db.message.findUnique({ where: { id } })).status, 'sent');
+
+    const missing = await send({ ...body, clientMessageId: 'scheduled-email-fixture-002' });
+    assert.equal(missing.status, 200, JSON.stringify(missing.body));
+    const missingId = missing.body.message.id;
+    fs.unlinkSync(filePath);
+    await db.message.update({ where: { id: missingId }, data: { scheduledAt: new Date(0) } });
+    await email.processEmailQueue({ messageIds: [missingId] });
+    assert.equal(calls.length, 1);
+    const failed = await db.message.findUnique({ where: { id: missingId } });
+    assert.equal(failed.status, 'permanently_failed');
+    assert.equal(failed.providerStatusReason, 'email_attachment_unavailable');
+
+    t.mock.method(imessage, 'recoverStuckMessages', async () => ({ count: 0, requeued: 0 }));
+    const stale = await send({ scheduledAt: date, clientMessageId: 'scheduled-email-fixture-003' });
+    assert.equal(stale.status, 200, JSON.stringify(stale.body));
+    const staleId = stale.body.message.id;
+    await db.message.update({ where: { id: staleId }, data: {
+      status: 'sending', providerStatusReason: SCHEDULED_EMAIL_SUBMITTING,
+      scheduledAt: new Date(0), updatedAt: new Date(0),
+    } });
+    await followup.recoverStuckMessages();
+    assert.equal((await db.message.findUnique({ where: { id: staleId } })).status, 'unconfirmed');
+    const review = await request('GET', '/api/inbox/threads/' + lead.id, { headers });
+    assert.ok(review.body.scheduledEmails.some(row => row.id === staleId && row.status === 'unconfirmed'));
+    await email.processEmailQueue({ messageIds: [staleId] });
+    assert.equal(calls.length, 1, 'an interrupted provider submission is never sent again automatically');
+
+    const lateReply = await send({ scheduledAt: date, clientMessageId: 'scheduled-email-fixture-004' });
+    assert.equal(lateReply.status, 200);
+    const cancelledId = lateReply.body.message.id;
+    await db.message.create({ data: {
+      leadId: lead.id, channel: 'email', direction: 'inbound', status: 'received',
+      content: 'New reply after scheduling',
+    } });
+    await db.message.update({ where: { id: cancelledId }, data: { scheduledAt: new Date(0) } });
+    await email.processEmailQueue({ messageIds: [cancelledId] });
+    assert.equal((await db.message.findUnique({ where: { id: cancelledId } })).status, 'cancelled');
+    assert.equal(calls.length, 1, 'a newer reply stops the scheduled send');
+  } finally {
+    fs.rmSync(filePath, { force: true });
+    if (file) await db.mediaFile.delete({ where: { id: file.id } });
+    await db.lead.delete({ where: { id: lead.id } });
+    await db.emailAccount.delete({ where: { id: account.id } });
+  }
+});
+
 describe('Brevo delivery receipts', () => {
   test('only the identified campaign recipient changes among many historical emails', async () => withDeliveryFixture(async ({ prisma, lead, createMessage, post, event }) => {
     const target = await createMessage();

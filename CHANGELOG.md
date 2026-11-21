@@ -6,6 +6,10 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+- Keep formatting and attachments on scheduled inbox emails, reject invalid
+  dates and deduplicate retries of the same schedule request. Show queued
+  emails and failed or interrupted submissions in the conversation.
+
 - Resume workspace setup on desktop and mobile, including after opening
   integrations, CSV import or Team. Preserve the checklist when an admin
   skips a core step and show profile validation beside the affected input.

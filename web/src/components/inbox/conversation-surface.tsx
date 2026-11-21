@@ -1,3 +1,4 @@
+import { ScheduledEmails } from './scheduled-emails'
 import { ReplyPreview, MessageInteractions } from './message-interactions'
 /**
  * The conversation pane — thread header, timeline and composer for one lead.
@@ -135,7 +136,7 @@ export interface ConversationSurfaceProps {
   onCcChange: (value: string) => void
   bcc: string
   onBccChange: (value: string) => void
-  onScheduleSend: (scheduledAt: string) => void
+  onScheduleSend: (scheduledAt: string) => Promise<void>
 }
 
 export function ConversationSurface({
@@ -219,6 +220,7 @@ export function ConversationSurface({
       {composerChannel === 'whatsapp' && activeThread && (
         <WhatsAppReplyWindow key={activeThread.leadId} thread={activeThread} />
       )}
+      <ScheduledEmails emails={activeThread?.scheduledEmails} />
       <div
         ref={timelineRef}
         {...timelineProps}
@@ -316,6 +318,7 @@ export function ConversationSurface({
         </div>
       )}
       <ComposerBar
+        key={`${activeThread?.leadId ?? 'none'}:${composerChannel}:${senderAccountId ?? 'default'}`}
         channel={composerChannel}
         onChannelChange={(channel) => {
           setSelectedReply(null)

@@ -608,6 +608,14 @@ export interface InboxMessage {
   mediaFilename: string | null
 }
 
+export interface ScheduledInboxEmail {
+  id: number
+  emailSubject: string | null
+  scheduledAt: string | null
+  status: 'queued' | 'sending' | 'unconfirmed' | 'permanently_failed' | 'cancelled'
+  providerStatusReason: string | null
+}
+
 export interface InboxThreadDetail extends InboxThreadSummary {
   whatsappSession?: {
     accountId: number | null
@@ -619,6 +627,7 @@ export interface InboxThreadDetail extends InboxThreadSummary {
     reason: string
   }
   messages: InboxMessage[]
+  scheduledEmails?: ScheduledInboxEmail[]
   senderAccount: InboxSenderAccount | null
   availableSenderAccounts?: InboxSenderAccount[]
   threadStatus?: 'open' | 'waiting' | 'resolved' | 'archived'

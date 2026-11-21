@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { ChevronDown, Clock, Loader2, Send } from 'lucide-react'
 import type { InboxChannel, InboxSenderAccount, MediaFile } from '@/api/types'
+import { emailScheduleDate } from '@/lib/email-compose'
+import { taskDateInput } from '@/lib/task-date'
 import { cn } from '@/lib/utils'
 import { CHANNELS, CHANNEL_ORDER, getChannel } from '@/lib/channels'
 import { SenderAccountSelect } from './sender-account-select'
@@ -42,7 +44,7 @@ type ComposerBarProps = {
   onCcChange?: (value: string) => void
   bcc?: string
   onBccChange?: (value: string) => void
-  onScheduleSend?: (scheduledAt: string) => void
+  onScheduleSend?: (scheduledAt: string) => Promise<void>
 }
 
 export function ComposerBar({
@@ -89,6 +91,19 @@ export function ComposerBar({
   const [showCcBcc, setShowCcBcc] = useState(false)
   const [showSchedule, setShowSchedule] = useState(false)
   const [scheduleDate, setScheduleDate] = useState('')
+  const [scheduleError, setScheduleError] = useState('')
+  const scheduleTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  async function submitSchedule() {
+    if (!onScheduleSend || sendDisabled) return
+    setScheduleError('')
+    try {
+      await onScheduleSend(emailScheduleDate(scheduleDate, scheduleTimezone))
+      setShowSchedule(false)
+      setScheduleDate('')
+    } catch (error) {
+      setScheduleError(error instanceof Error ? error.message : 'Could not schedule the email.')
+    }
+  }
 
   return (
     <div className="max-h-[65%] shrink-0 overflow-y-auto border-t border-border px-4 py-3 sm:px-5">
@@ -324,29 +339,32 @@ export function ComposerBar({
                     </p>
                     <input
                       type="datetime-local"
+                      aria-label={`Email date and time in ${scheduleTimezone}`}
+                      disabled={sendPending}
                       value={scheduleDate}
                       onChange={(e) => setScheduleDate(e.target.value)}
-                      min={new Date().toISOString().slice(0, 16)}
+                      min={taskDateInput(new Date().toISOString(), scheduleTimezone)}
                       className={cn(
                         'w-full rounded-lg border border-border bg-surface-overlay px-3 py-2 text-sm text-text-primary',
                         'focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30',
                       )}
                     />
+                    <p className="mt-1 text-xs text-text-muted">{scheduleTimezone}</p>
+                    {scheduleError && (
+                      <p role="alert" className="mt-2 text-xs text-danger">
+                        {scheduleError}
+                      </p>
+                    )}
                     <button
                       type="button"
-                      onClick={() => {
-                        if (!scheduleDate) return
-                        onScheduleSend(new Date(scheduleDate).toISOString())
-                        setShowSchedule(false)
-                        setScheduleDate('')
-                      }}
-                      disabled={!scheduleDate}
+                      onClick={() => void submitSchedule()}
+                      disabled={!scheduleDate || sendDisabled || sendPending}
                       className={cn(
                         'mt-2 w-full rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-accent-fg transition-colors',
                         'hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50',
                       )}
                     >
-                      Schedule Send
+                      {sendPending ? 'Scheduling…' : 'Schedule send'}
                     </button>
                   </div>
                 )}

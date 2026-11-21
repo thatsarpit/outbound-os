@@ -9,7 +9,7 @@ import activityLog, { EVENT_TYPES } from '../utils/activityLog.js';
 import { chooseSystemSenderAccount, resolveSystemEmailPreference } from '../utils/systemEmailPreference.js';
 import { normalizeEmailSubject } from '../utils/email-subject.js';
 import whatsappManager from './whatsapp.js';
-import leadStateService from '../domain/leadStateService.js';
+import leadStateService, { LEAD_STATUS } from '../domain/leadStateService.js';
 import leadScorer from './leadScorer.js';
 import { isSameZonedDay } from '../utils/workspaceTime.js';
 import inboundEmailIngestion from './inboundEmailIngestion.js';
@@ -17,6 +17,13 @@ import { EMAIL_INGRESS_MAX_BYTES } from '../utils/emailIngressSignature.js';
 import { usesCloudflareReceiving, emailReceivingStatus } from '../utils/emailReceiving.js';
 import emailVerification from './emailVerification.js';
 import { recipientAddresses } from '../utils/emailVerification.js';
+import { HUMAN_REPLY_WHERE } from '../utils/emailInbound.js';
+import { EmailAttachmentError, emailAttachmentIds, resolveEmailAttachments } from './emailAttachments.js';
+
+export const SCHEDULED_EMAIL_KEY_PREFIX = 'scheduled-email:';
+export const SCHEDULED_EMAIL_SUBMITTING = 'scheduled_email_submitting';
+const SCHEDULED_EMAIL_PREPARING = 'scheduled_email_preparing';
+const SCHEDULED_EMAIL_STOP_STATUSES = [LEAD_STATUS.PAUSED, LEAD_STATUS.CLOSED];
 
 /**
  * Unsubscribe requests go to the mailbox that sent the email, which is the one
@@ -545,7 +552,7 @@ class EmailService {
    * @param {object} options - { leadId, accountId, subject, body, htmlBody, inReplyTo, existingMessageId }
    * @returns {{ success: boolean, messageId?: string, error?: string }}
    */
-  async sendEmail({ leadId, accountId, subject, body, htmlBody, inReplyTo, existingMessageId, attachments, cc, bcc }) {
+  async sendEmail({ leadId, accountId, subject, body, htmlBody, inReplyTo, existingMessageId, attachments, cc, bcc, scheduledQueue = false }) {
     const lead = await prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) throw new Error('Lead not found');
     if (!lead.email) throw new Error('Lead has no email address');
@@ -603,6 +610,28 @@ class EmailService {
     if (inReplyTo) {
       mailOptions.headers['In-Reply-To'] = inReplyTo;
       mailOptions.headers['References'] = inReplyTo;
+    }
+
+    if (scheduledQueue) {
+      const preparing = { id: existingMessageId, status: 'sending', providerStatusReason: SCHEDULED_EMAIL_PREPARING };
+      const ready = await prisma.message.updateMany({
+        where: {
+          ...preparing,
+          lead: {
+            status: { notIn: SCHEDULED_EMAIL_STOP_STATUSES },
+            messages: { none: { id: { gt: existingMessageId }, ...HUMAN_REPLY_WHERE } },
+          },
+        },
+        data: { providerStatusReason: SCHEDULED_EMAIL_SUBMITTING },
+      });
+      if (!ready.count) {
+        await this._releaseSendCapacity(account.id).catch(() => {});
+        await prisma.message.updateMany({
+          where: preparing,
+          data: { status: 'cancelled', providerStatusReason: 'scheduled_email_conversation_changed' },
+        });
+        return { skipped: true };
+      }
     }
 
     let messageId;
@@ -1179,11 +1208,15 @@ class EmailService {
     logger.info(`📧 Processing ${pending.length} queued email(s)...`);
 
     for (const msg of pending) {
+      const isScheduledEmail = msg.manualSendKey?.startsWith(SCHEDULED_EMAIL_KEY_PREFIX);
       try {
         // Atomic claim
         const claimed = await prisma.message.updateMany({
           where: { id: msg.id, status: 'queued' },
-          data: { status: 'sending' },
+          data: {
+            status: 'sending',
+            ...(isScheduledEmail ? { providerStatusReason: SCHEDULED_EMAIL_PREPARING } : {}),
+          },
         });
         if (claimed.count === 0) continue;
 
@@ -1197,15 +1230,20 @@ class EmailService {
           continue;
         }
 
-        // Re-fetch lead state after claim. If the lead has replied / been paused /
-        // closed since this email was queued, cancel the send rather than dispatch
-        // a stale outbound message into a live conversation.
+        // A manually scheduled reply can follow an existing conversation.
+        // It still stops on pause, close, suppression or a newer human reply.
         const liveLead = await prisma.lead.findUnique({ where: { id: msg.leadId } });
-        if (!liveLead || leadStateService.shouldBlockAutomation(liveLead.status, { channel: 'email' })) {
+        const leadBlocked = liveLead && (isScheduledEmail
+          ? SCHEDULED_EMAIL_STOP_STATUSES.includes(liveLead.status.trim().toLowerCase())
+          : leadStateService.shouldBlockAutomation(liveLead.status, { channel: 'email' }));
+        if (!liveLead || leadBlocked) {
           logger.info(`⏭️ Email ${msg.id} cancelled — lead ${msg.leadId} is ${liveLead?.status || 'missing'}`);
           await prisma.message.updateMany({
             where: { id: msg.id, status: 'sending' },
-            data: { status: 'cancelled' },
+            data: {
+              status: 'cancelled',
+              ...(isScheduledEmail ? { providerStatusReason: 'scheduled_email_conversation_changed' } : {}),
+            },
           });
           continue;
         }
@@ -1272,6 +1310,26 @@ class EmailService {
           continue;
         }
 
+        let attachments;
+        if (msg.emailAttachmentIds !== null) {
+          try {
+            attachments = await resolveEmailAttachments(emailAttachmentIds(JSON.parse(msg.emailAttachmentIds)));
+            if (selectedAccount.provider === 'brevo' && attachments.length) {
+              throw new EmailAttachmentError('This Brevo sender cannot send attachments.', 400, 'email_attachments_unsupported');
+            }
+          } catch (error) {
+            if (!(error instanceof EmailAttachmentError || error instanceof SyntaxError)) throw error;
+            await prisma.message.update({
+              where: { id: msg.id },
+              data: {
+                status: 'permanently_failed',
+                providerStatusReason: error.reason || 'invalid_email_attachments',
+              },
+            });
+            continue;
+          }
+        }
+
         const result = await this.sendEmail({
           leadId: msg.leadId,
           accountId,
@@ -1280,11 +1338,13 @@ class EmailService {
           htmlBody: msg.emailHtmlBody || undefined,
           inReplyTo: msg.emailInReplyTo,
           existingMessageId: msg.id,
+          scheduledQueue: isScheduledEmail,
+          attachments,
           cc: msg.emailCc || undefined,
           bcc: msg.emailBcc || undefined,
         });
 
-        if (result.success) {
+        if (result.success || result.skipped) {
           continue;
         } else {
           if (/daily email limit reached|brevo shared daily limit reached/i.test(result.error || '')) {
@@ -1343,8 +1403,16 @@ class EmailService {
         }
       } catch (error) {
         logger.error(`Email queue processing error for msg ${msg.id}: ${error.message}`);
-        await prisma.message.update({
-          where: { id: msg.id },
+        const where = { id: msg.id, status: 'sending' };
+        if (isScheduledEmail) {
+          await prisma.message.updateMany({
+            where: { ...where, providerStatusReason: SCHEDULED_EMAIL_SUBMITTING },
+            data: { status: 'unconfirmed', providerStatusReason: 'confirmation_unknown' },
+          }).catch(() => {});
+          where.providerStatusReason = SCHEDULED_EMAIL_PREPARING;
+        }
+        await prisma.message.updateMany({
+          where,
           data: { status: 'queued', retryCount: (msg.retryCount || 0) + 1 },
         }).catch(() => {});
       }

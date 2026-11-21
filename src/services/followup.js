@@ -12,7 +12,7 @@ import whatsappManager from './whatsapp.js';
 import composer from './messageComposer.js';
 import replyDetector from './replyDetector.js';
 import leadStateService from '../domain/leadStateService.js';
-import emailService from './emailService.js';
+import emailService, { SCHEDULED_EMAIL_SUBMITTING } from './emailService.js';
 import imessageService from './imessage.js';
 
 const PREPARING = 'whatsapp_preparing';
@@ -46,8 +46,12 @@ class FollowupEngine {
         where: { ...stale, campaignId: { not: null }, channel: { notIn: ['whatsapp', 'imessage'] } },
         data: { status: 'unconfirmed', providerStatusReason: 'confirmation_unknown' },
       });
-      // Only a WhatsApp worker with a durable preparation marker can prove
-      // it did not reach the provider. Older rows stay held for review.
+      const scheduledEmail = await prisma.message.updateMany({
+        where: { ...stale, channel: 'email', providerStatusReason: SCHEDULED_EMAIL_SUBMITTING },
+        data: { status: 'unconfirmed', providerStatusReason: 'confirmation_unknown' },
+      });
+      // WhatsApp rows can only be requeued when they have a preparation marker.
+      // Scheduled email submissions that could have reached the provider were held above.
       const result = await prisma.message.updateMany({
         where: { ...stale, campaignId: null,
           OR: [{ channel: 'whatsapp', providerStatusReason: PREPARING },
@@ -58,11 +62,12 @@ class FollowupEngine {
         logger.warn(`Failed to reconcile interrupted iMessage sends: ${error.message}`);
         return { count: 0, confirmed: 0, requeued: 0 };
       });
-      const count = result.count + imessage.count + whatsapp.count + campaign.count;
+      const unconfirmed = whatsapp.count + campaign.count + scheduledEmail.count;
+      const count = result.count + imessage.count + unconfirmed;
       if (count > 0) {
-        logger.info(`Recovered ${count} interrupted messages (${result.count + imessage.requeued} requeued, ${whatsapp.count + campaign.count} held for review).`);
+        logger.info(`Recovered ${count} interrupted messages (${result.count + imessage.requeued} requeued, ${unconfirmed} held for review).`);
       }
-      return { count, requeued: result.count + imessage.requeued, unconfirmed: whatsapp.count + campaign.count, imessage };
+      return { count, requeued: result.count + imessage.requeued, unconfirmed, imessage };
     } catch (e) {
       logger.warn(`Failed to recover stuck messages: ${e.message}`);
       return { count: 0, error: e.message };
