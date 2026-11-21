@@ -18,6 +18,7 @@ const MobileInstallPage = lazy(() => import('@/pages/mobile/install'))
 
 /* ── Page imports ── */
 const LoginPage = lazy(() => import('@/pages/login'))
+const DeliveryReviewPage = lazy(() => import('@/pages/delivery-review'))
 const SetupPage = lazy(() => import('@/pages/setup'))
 const IntegrationCataloguePage = lazy(() => import('@/pages/integrations/catalogue'))
 const OverviewPage = lazy(() => import('@/pages/overview'))
@@ -134,6 +135,7 @@ const PAGE_ROUTES: Array<{ path: string; element: React.ReactNode }> = [
   { path: 'activity', element: <ActivityPage /> },
   { path: 'account', element: <AccountPage /> },
   { path: 'setup', element: <SetupPage /> },
+  { path: 'delivery', element: <DeliveryReviewPage /> },
 ]
 
 const pageRoutes = () =>

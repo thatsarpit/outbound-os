@@ -6,6 +6,11 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+- Add Delivery review for managers and admins. Filter queued, sending, failed
+  and unconfirmed attempts by channel and open the related conversation or
+  campaign for investigation. The legacy requeue action blocks attempts with
+  evidence of provider acceptance and protects against concurrent updates.
+
 - Keep formatting and attachments on scheduled inbox emails, reject invalid
   dates and deduplicate retries of the same schedule request. Show queued
   emails and failed or interrupted submissions in the conversation.

@@ -1,3 +1,4 @@
+import deliveryReviewRoutes from './routes/deliveryReview.js';
 import messageActionRoutes from './routes/messageActions.js';
 import { assertReplyTarget, nativeMessageId, messageAccount, reactionTarget } from './utils/messageActions.js';
 import websiteEnquiries from './routes/websiteEnquiries.js';
@@ -947,6 +948,7 @@ app.use('/api', emailAttachmentRoutes);
 app.use('/api', requirePoolAccess());
 app.use('/api', inboxReadStateRoutes);
 app.use('/api', messageActionRoutes);
+app.use('/api', deliveryReviewRoutes);
 app.use('/api', webPushRoutes);
 app.use('/api', analyticsViewRoutes);
 app.use('/api', campaignScheduleRoutes);
@@ -2814,23 +2816,50 @@ app.get('/api/whatsapp/status', async (req, res) => {
 
   app.post('/api/messages/:id/requeue', requireRole('manager'), async (req, res) => {
     try {
-      const id = parseInt(req.params.id);
+      const id = Number(req.params.id);
+      if (!Number.isSafeInteger(id) || id <= 0) return res.status(400).json({ error: 'Valid message ID required' });
       const msg = await prisma.message.findUnique({ where: { id } });
       if (!msg) return res.status(404).json({ error: 'Message not found' });
       if (msg.status !== 'permanently_failed') {
         return res.status(409).json({ error: `Cannot requeue message in status '${msg.status}'` });
       }
-      if (msg.channel === 'email' && msg.providerCampaignId) {
+      if (msg.channel === 'email' && (msg.providerCampaignId || msg.providerMessageId?.startsWith('brevo-campaign:'))) {
         return res.status(409).json({ error: 'Review this marketing campaign in Brevo. Campaign deliveries cannot be retried through the email queue.' });
       }
-      await prisma.message.update({
-        where: { id },
+      if (msg.direction !== 'outbound' || msg.campaignId || msg.manualSendKey
+          || msg.idempotencyKey?.startsWith('manual-wa:')
+          || msg.waCampaignName || msg.mediaUrl || msg.emailAttachmentIds) {
+        return res.status(409).json({ error: 'Review the message in its original conversation or campaign before sending again.' });
+      }
+      if (msg.sentAt || msg.providerMessageId || msg.waMessageId || msg.emailMessageId
+          || msg.imessageMessageId || msg.telegramMessageId || msg.providerDeliveryStatus || msg.ackStatus > 0
+          || ['confirmation_unknown', 'timeout', 'exception', 'no_message_id'].includes(msg.providerStatusReason)) {
+        return res.status(409).json({ error: 'This message may have reached its provider. Check its delivery history before sending again.' });
+      }
+      // A receipt may arrive between reading the row and updating the queue.
+      const queued = await prisma.message.updateMany({
+        where: {
+          id,
+          status: 'permanently_failed',
+          updatedAt: msg.updatedAt,
+          sentAt: null,
+          ackStatus: msg.ackStatus,
+          providerMessageId: msg.providerMessageId,
+          providerDeliveryStatus: msg.providerDeliveryStatus,
+          waMessageId: msg.waMessageId,
+          emailMessageId: msg.emailMessageId,
+          imessageMessageId: msg.imessageMessageId,
+          telegramMessageId: msg.telegramMessageId,
+        },
         data: {
           status: 'queued',
           retryCount: 0,
           scheduledAt: new Date(Date.now() + 60 * 1000),
         },
       });
+      if (!queued.count) {
+        return res.status(409).json({ error: 'The message status changed. Refresh delivery review before trying again.' });
+      }
       logger.info(`↩️  Message ${id} manually requeued by ${req.user?.email || 'unknown'}`);
       res.json({ success: true });
     } catch (error) {

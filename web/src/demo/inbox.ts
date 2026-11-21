@@ -1,3 +1,4 @@
+import type { DeliveryReviewFilter, DeliveryReviewItem } from '@/api/endpoints/inbox'
 import { queryClient } from '@/lib/query-client'
 import { notificationActions } from '@/stores/notification-store'
 import type { InboxChannel, InboxMessage, InboxSenderAccount, Lead, ScheduledInboxEmail } from '@/api/types'
@@ -597,6 +598,59 @@ export async function handleInboxRequest(
 
   if (/\/api\/whatsapp\/accounts\/\d+\/templates$/.test(path.pathname))
     return json({ ok: true, templates: APPROVED_TEMPLATES })
+
+  if (path.pathname === '/api/messages/review' && method === 'GET') {
+    const status = path.searchParams.get('status') ?? 'attention'
+    const channel = path.searchParams.get('channel')
+    const review: DeliveryReviewItem[] = [
+      {
+        id: 90601,
+        leadId: 1,
+        leadName: THREADS[0].leadName,
+        campaignId: null,
+        channel: 'whatsapp',
+        status: 'unconfirmed',
+        detail: 'Check the sending provider’s history before sending again.',
+        providerCode: null,
+        updatedAt: ago(12),
+        scheduledAt: null,
+      },
+      {
+        id: 90602,
+        leadId: 2,
+        leadName: THREADS[1].leadName,
+        campaignId: null,
+        channel: 'email',
+        status: 'bounced',
+        detail: 'The email provider reported a hard bounce. Check the address and its suppression status.',
+        providerCode: null,
+        updatedAt: ago(27),
+        scheduledAt: null,
+      },
+    ]
+    for (const [leadId, emails] of scheduledEmails.entries()) {
+      const thread = THREADS.find((row) => row.leadId === leadId)
+      if (!thread) continue
+      for (const row of emails) {
+        review.push({
+          id: row.id, leadId, leadName: thread.leadName, campaignId: null, channel: 'email',
+          status: 'queued', detail: 'Waiting for the queue worker.', providerCode: null,
+          updatedAt: ago(0), scheduledAt: row.scheduledAt,
+        })
+      }
+    }
+    const matchesChannel = review.filter(row => !channel || row.channel === channel)
+    const groups: Record<DeliveryReviewFilter, DeliveryReviewItem[]> = {
+      failed: matchesChannel.filter(row => row.status === 'bounced'),
+      unconfirmed: matchesChannel.filter(row => row.status === 'unconfirmed'),
+      attention: matchesChannel.filter(row => row.status === 'unconfirmed' || row.status === 'bounced'),
+      queued: matchesChannel.filter(row => row.status === 'queued'),
+      sending: [],
+    }
+    const items = groups[status as DeliveryReviewFilter] || []
+    const counts = Object.fromEntries(Object.entries(groups).map(([filter, rows]) => [filter, rows.length]))
+    return json({ items: items.slice(0, 25), counts, total: items.length, page: 1, pages: 1 })
+  }
 
   if (path.pathname.endsWith('/api/inbox/senders')) {
     return json(Object.values(SENDERS))

@@ -1,7 +1,8 @@
 import { Suspense, lazy, useDeferredValue, useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
-import { Inbox, Search } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { Inbox, ListChecks, Search } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { inboxApi } from '@/api/endpoints/inbox'
 import type { InboxChannel, InboxThreadState } from '@/api/types'
 import { ThreadListItem } from '@/components/inbox/thread-list-item'
@@ -23,7 +24,7 @@ const MobileConversation = lazy(() =>
 )
 
 export default function MobileInboxPage() {
-  const { dashboardScope } = useAuthStore()
+  const { dashboardScope, hasCapability } = useAuthStore()
   const [params, setParams] = useSearchParams()
   const selected = mobileLeadId(params.get('leadId'))
   const [search, setSearch] = useState(params.get('search') || '')
@@ -95,7 +96,17 @@ export default function MobileInboxPage() {
   const rows = result.data?.threads ?? []
   return (
     <div className="space-y-4">
-      <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching} />
+        {hasCapability('page.campaigns') && (
+          <Button asChild size="sm" variant="secondary" className="min-h-11">
+            <Link to="/delivery">
+              <ListChecks className="size-4" aria-hidden="true" />
+              Delivery review
+            </Link>
+          </Button>
+        )}
+      </div>
       <label className="relative block">
         <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-text-muted" />
         <span className="sr-only">Search conversations</span>

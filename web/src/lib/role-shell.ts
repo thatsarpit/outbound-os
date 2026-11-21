@@ -24,6 +24,7 @@ export const ROUTE_CAPABILITIES = [
   { route: '/activity', capability: 'page.activity' },
   { route: '/account', capability: 'page.account' },
   { route: '/campaigns', capability: 'page.campaigns' },
+  { route: '/delivery', capability: 'page.campaigns' },
   { route: '/templates', capability: 'page.templates' },
   { route: '/import', capability: 'page.import' },
   { route: '/channels', capability: 'page.integrations' },

@@ -168,6 +168,104 @@ test('compiled assets, dashboard navigation and service endpoints keep separate 
   }
 });
 
+test('delivery review is manager-only and separates queue state from delivery', async () => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const { hashPassword } = await import('../src/auth/rbac.js');
+  const endpoint = '/api/messages/review';
+  const password = 'delivery review fixture password';
+  const lead = await db.lead.create({ data: { name: 'Delivery review fixture', mobile: '12025550167' } });
+  const users = [];
+  try {
+    const headersByRole = {};
+    for (const role of ['manager', 'viewer']) {
+      const email = 'delivery-review-' + role + '@example.test';
+      const user = await db.user.create({ data: { email, name: role, role, passwordHash: hashPassword(password) } });
+      users.push(user.id);
+      const ip = role === 'manager' ? '192.0.2.245' : '192.0.2.246';
+      const auth = await request('POST', '/api/auth/login', {
+        headers: { 'X-Forwarded-For': ip }, body: { email, password },
+      });
+      assert.equal(auth.status, 200);
+      headersByRole[role] = { Authorization: 'Bearer ' + auth.body.token, 'X-Forwarded-For': ip };
+    }
+
+    const common = {
+      leadId: lead.id, direction: 'outbound', content: 'private fixture body',
+      updatedAt: new Date('2026-11-21T00:00:00Z'),
+    };
+    await db.message.createMany({ data: [
+      ...Array.from({ length: 26 }, () => ({
+        ...common, channel: 'whatsapp', status: 'failed', providerStatusReason: 'payment_issue',
+        providerErrorCode: '131042', providerErrorMessage: 'private synthetic provider response',
+      })),
+      { ...common, channel: 'email', status: 'unconfirmed', providerStatusReason: 'private synthetic provider response' },
+      { ...common, channel: 'email', status: 'bounced' },
+      { ...common, channel: 'email', status: 'queued', scheduledAt: new Date('2026-11-22T10:00:00Z') },
+      { ...common, channel: 'imessage', status: 'sending' },
+      { ...common, channel: 'whatsapp', status: 'sent' },
+      { ...common, channel: 'email', status: 'delivered' },
+      { ...common, channel: 'email', direction: 'inbound', status: 'failed' },
+    ] });
+
+    assert.equal((await request('GET', endpoint, { headers: { 'X-Forwarded-For': '198.51.100.245' } })).status, 401);
+    assert.equal((await request('GET', endpoint, { headers: headersByRole.viewer })).status, 403);
+    const headers = headersByRole.manager;
+    const attention = await request('GET', endpoint, { headers });
+    assert.equal(attention.status, 200, JSON.stringify(attention.body));
+    assert.deepEqual(attention.body.counts, { attention: 28, failed: 27, unconfirmed: 1, queued: 1, sending: 1 });
+    assert.equal(attention.body.total, 28);
+    assert.equal(attention.body.pages, 2);
+    assert.ok(attention.body.items.every(item => ['failed', 'bounced', 'unconfirmed'].includes(item.status)));
+    assert.doesNotMatch(JSON.stringify(attention.body), /private fixture body|private synthetic provider response/);
+
+    const query = endpoint + '?status=failed&channel=whatsapp';
+    const [{ body: first }, { body: last }] = await Promise.all([
+      request('GET', query, { headers }),
+      request('GET', query + '&page=900', { headers }),
+    ]);
+    assert.equal(first.total, 26);
+    assert.equal(first.items.length, 25);
+    assert.equal(last.page, 2);
+    assert.equal(last.items.length, 1);
+    assert.ok(first.items[24].id > last.items[0].id, 'rows with matching timestamps paginate in ID order');
+    assert.equal(first.items[0].providerCode, '131042');
+    assert.match(first.items[0].detail, /billing/);
+
+    const queued = await request('GET', endpoint + '?status=queued&channel=email', { headers });
+    assert.equal(queued.body.items[0].scheduledAt, '2026-11-22T10:00:00.000Z');
+    const uncertain = await request('GET', endpoint + '?status=unconfirmed&channel=email', { headers });
+    assert.match(uncertain.body.items[0].detail, /check the sending provider/i);
+
+    for (const invalid of ['status=sent', 'channel=sms', 'page=-1', 'page=1&page=2']) {
+      assert.equal((await request('GET', endpoint + '?' + invalid, { headers })).status, 400);
+    }
+    assert.equal(await db.message.count({ where: { leadId: lead.id } }), 33);
+    const requeue = id => request('POST', '/api/messages/' + id + '/requeue', { headers });
+    const rejectedCases = [
+      { direction: 'inbound' },
+      { sentAt: new Date(), providerErrorCode: '131042' },
+      { providerStatusReason: 'confirmation_unknown' },
+      { manualSendKey: 'scheduled-email:review-test-fixture' },
+      { campaignId: 91203 },
+    ];
+    for (const patch of rejectedCases) {
+      const message = await db.message.create({ data: { ...common, status: 'permanently_failed', channel: 'email', ...patch } });
+      assert.equal((await requeue(message.id)).status, 409);
+      assert.equal((await db.message.findUnique({ where: { id: message.id } })).status, 'permanently_failed');
+    }
+
+    const safe = await db.message.create({ data: {
+      ...common, status: 'permanently_failed', channel: 'email', providerStatusReason: 'auth_failed',
+    } });
+    const retries = await Promise.all([requeue(safe.id), requeue(safe.id)]);
+    assert.deepEqual(retries.map(result => result.status).sort(), [200, 409]);
+    assert.equal((await db.message.findUnique({ where: { id: safe.id } })).status, 'queued');
+  } finally {
+    await db.lead.delete({ where: { id: lead.id } });
+    await db.user.deleteMany({ where: { id: { in: users } } });
+  }
+});
+
 describe('GET /api/leads', () => {
   test('returns empty leads list initially', async () => {
     const res = await request('GET', '/api/leads', { headers: authHeader() });
