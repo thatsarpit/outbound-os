@@ -6,6 +6,7 @@ import {
   type DeliveryReviewFilter,
   type DeliveryReviewItem,
   type QueueWorkerStatus,
+  type ReceiptActivity,
 } from '@/api/endpoints/inbox'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -41,6 +42,16 @@ const WORKER_LABELS = {
   campaigns: 'Campaign schedules',
 }
 
+const RECEIPT_LABELS = { whatsapp: 'WhatsApp webhooks', brevo: 'Brevo email' }
+
+function LocalTime({ value }: { value: string }) {
+  return (
+    <time dateTime={value}>
+      {new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+    </time>
+  )
+}
+
 function QueueScans({ workers }: { workers: QueueWorkerStatus[] | null }) {
   return (
     <section
@@ -62,16 +73,7 @@ function QueueScans({ workers }: { workers: QueueWorkerStatus[] | null }) {
                 {WORKER_LABELS[worker.worker]}
               </dt>
               <dd className="mt-1 text-sm text-text-primary">
-                {worker.lastScanAt ? (
-                  <time dateTime={worker.lastScanAt}>
-                    {new Date(worker.lastScanAt).toLocaleString(undefined, {
-                      dateStyle: 'medium',
-                      timeStyle: 'short',
-                    })}
-                  </time>
-                ) : (
-                  'No scan recorded'
-                )}
+                {worker.lastScanAt ? <LocalTime value={worker.lastScanAt} /> : 'No scan recorded'}
               </dd>
               <dd
                 className={cn(
@@ -86,6 +88,43 @@ function QueueScans({ workers }: { workers: QueueWorkerStatus[] | null }) {
             </div>
           ))}
         </dl>
+      )}
+    </section>
+  )
+}
+
+function ProviderReceipts({ activity }: { activity: ReceiptActivity[] | null }) {
+  return (
+    <section
+      aria-labelledby="provider-receipts-heading"
+      className="rounded-lg border border-border bg-surface p-4"
+    >
+      <h2 id="provider-receipts-heading" className="text-sm font-semibold text-text-primary">
+        Provider receipts
+      </h2>
+      {activity === null ? (
+        <p className="mt-1 text-sm text-text-secondary" role="status">
+          Receipt activity is temporarily unavailable.
+        </p>
+      ) : (
+        <>
+          <p className="mt-1 text-xs text-text-secondary">Latest receipts on file for this instance.</p>
+          <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
+            {activity.map(({ source, lastReceivedAt, unmatched }) => (
+              <div key={source} className="min-w-0">
+                <dt className="text-xs font-medium text-text-secondary">{RECEIPT_LABELS[source]}</dt>
+                <dd className="mt-1 text-sm text-text-primary">
+                  {lastReceivedAt ? <LocalTime value={lastReceivedAt} /> : 'No receipt recorded'}
+                </dd>
+                {unmatched > 0 && (
+                  <dd className="mt-1 text-xs text-warning">
+                    {unmatched.toLocaleString()} unmatched {unmatched === 1 ? 'receipt' : 'receipts'}
+                  </dd>
+                )}
+              </div>
+            ))}
+          </dl>
+        </>
       )}
     </section>
   )
@@ -204,7 +243,12 @@ export default function DeliveryReviewPage() {
         }
       />
 
-      {data?.workers !== undefined && <QueueScans workers={data.workers} />}
+      {(data?.workers !== undefined || data?.receiptActivity !== undefined) && (
+        <div className="grid gap-4 xl:grid-flow-col xl:auto-cols-fr">
+          {data.workers !== undefined && <QueueScans workers={data.workers} />}
+          {data.receiptActivity !== undefined && <ProviderReceipts activity={data.receiptActivity} />}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-end justify-between gap-3 rounded-lg border border-border bg-surface p-3">
         <div role="group" aria-label="Message status" className="flex flex-wrap gap-1">

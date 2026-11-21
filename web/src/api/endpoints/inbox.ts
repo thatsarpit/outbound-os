@@ -46,10 +46,17 @@ export interface QueueWorkerStatus {
   state: 'recent' | 'stale' | 'not_recorded'
 }
 
+export interface ReceiptActivity {
+  source: 'whatsapp' | 'brevo'
+  lastReceivedAt: string | null
+  unmatched: number
+}
+
 export interface DeliveryReviewResponse {
   items: DeliveryReviewItem[]
   counts: Record<Exclude<DeliveryReviewFilter, 'overdue'>, number> & { overdue?: number }
   workers?: QueueWorkerStatus[] | null
+  receiptActivity?: ReceiptActivity[] | null
   overdueGraceMinutes?: number
   total: number
   page: number

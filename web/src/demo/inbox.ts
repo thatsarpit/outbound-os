@@ -1,4 +1,4 @@
-import type { DeliveryReviewFilter, DeliveryReviewItem, QueueWorkerStatus } from '@/api/endpoints/inbox'
+import type { DeliveryReviewFilter, DeliveryReviewItem, QueueWorkerStatus, ReceiptActivity } from '@/api/endpoints/inbox'
 import { queryClient } from '@/lib/query-client'
 import { notificationActions } from '@/stores/notification-store'
 import type { InboxChannel, InboxMessage, InboxSenderAccount, Lead, ScheduledInboxEmail } from '@/api/types'
@@ -669,7 +669,11 @@ export async function handleInboxRequest(
       { worker: 'imessage', intervalMinutes: 1, lastScanAt: null, state: 'not_recorded' },
       { worker: 'campaigns', intervalMinutes: 1, lastScanAt: ago(1), state: 'recent' },
     ]
-    return json({ items: items.slice(0, 25), counts, total: items.length, page: 1, pages: 1, workers, overdueGraceMinutes: 5 })
+    const receiptActivity: ReceiptActivity[] = [
+      { source: 'whatsapp', lastReceivedAt: ago(4), unmatched: 2 },
+      { source: 'brevo', lastReceivedAt: null, unmatched: 0 },
+    ]
+    return json({ items: items.slice(0, 25), counts, total: items.length, page: 1, pages: 1, workers, receiptActivity, overdueGraceMinutes: 5 })
   }
 
   if (path.pathname.endsWith('/api/inbox/senders')) {

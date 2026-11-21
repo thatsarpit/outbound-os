@@ -53,6 +53,23 @@ function reviewDetail(message) {
     || (message.status === 'queued' ? 'Waiting for the queue worker.' : 'Check the conversation and the sending provider for details.');
 }
 
+async function loadReceiptActivity() {
+  // Receipt IDs follow local insertion order. Replays preserve the original
+  // ID and timestamp, and provider event times can arrive out of order.
+  const latest = { orderBy: { id: 'desc' }, select: { receivedAt: true } };
+  const brevo = { provider: 'brevo' };
+  const [whatsapp, email, whatsappUnmatched, emailUnmatched] = await prisma.$transaction([
+    prisma.whatsAppReceipt.findFirst(latest),
+    prisma.emailDeliveryEvent.findFirst({ ...latest, where: brevo }),
+    prisma.whatsAppReceipt.count({ where: { appliedAt: null } }),
+    prisma.emailDeliveryEvent.count({ where: { ...brevo, outcome: 'unmatched' } }),
+  ]);
+  return [
+    { source: 'whatsapp', lastReceivedAt: whatsapp?.receivedAt ?? null, unmatched: whatsappUnmatched },
+    { source: 'brevo', lastReceivedAt: email?.receivedAt ?? null, unmatched: emailUnmatched },
+  ];
+}
+
 router.get('/messages/review', requireRole('manager'), async (req, res) => {
   const { status = 'attention', channel, page: pageInput = '1' } = req.query;
   if (typeof status !== 'string' || !Object.hasOwn(FILTERS, status)
@@ -118,11 +135,17 @@ router.get('/messages/review', requireRole('manager'), async (req, res) => {
       return { items, counts, total, page, pages };
     });
 
-    const workers = await queueWorkerStatus(prisma).catch(error => {
-      logger.warn(`Could not load queue scan status: ${error.message}`);
-      return null;
-    });
-    res.json({ ...result, workers, overdueGraceMinutes: OVERDUE_GRACE_MINUTES });
+    const [workers, receiptActivity] = await Promise.all([
+      queueWorkerStatus(prisma).catch(error => {
+        logger.warn(`Could not load queue scan status: ${error.message}`);
+        return null;
+      }),
+      loadReceiptActivity().catch(error => {
+        logger.warn(`Could not load provider receipt activity: ${error.message}`);
+        return null;
+      }),
+    ]);
+    res.json({ ...result, workers, receiptActivity, overdueGraceMinutes: OVERDUE_GRACE_MINUTES });
   } catch (error) {
     logger.warn(`Delivery review failed: ${error.message}`);
     res.status(500).json({ error: 'Could not load delivery review.' });

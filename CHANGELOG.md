@@ -6,6 +6,9 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+- Show the latest WhatsApp and Brevo webhook receipts on file and counts of
+  unmatched receipts in Delivery review.
+
 - Show the last due-work scan for WhatsApp, email, iMessage and scheduled
   campaigns. Delivery review flags queued messages five minutes past their
   scheduled time, with a separate filter ordered by oldest scheduled time.

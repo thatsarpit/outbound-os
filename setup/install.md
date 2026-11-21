@@ -98,6 +98,14 @@ readiness and webhook verification before sending. Do not use customer
 outreach as an installation test. Validate a restore with automation disabled
 and provider credentials removed, so restored queues cannot send messages.
 
+After an approved test send, open **Delivery review** as a manager or admin.
+Compare **Queue scans** with the **Provider receipts** timestamps for WhatsApp
+or Brevo. A new receipt shows that the instance recorded provider feedback.
+If the provider shows a delivery update and you see no receipt for the test,
+check the webhook URL, credentials and provider logs. An unmatched
+receipt may arrive before its message is saved. Check the provider and
+conversation before retrying the message.
+
 ## Manual (development)
 
 Needs Node.js 24+.

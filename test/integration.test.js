@@ -244,9 +244,29 @@ test('delivery review is manager-only and separates queue state from delivery', 
     assert.equal(workers.email.state, 'stale');
     assert.equal(workers.email.lastScanAt, at(-30).toISOString());
     assert.deepEqual(workers.imessage, { worker: 'imessage', intervalMinutes: 1, lastScanAt: null, state: 'not_recorded' });
+    assert.deepEqual(attention.body.receiptActivity, [
+      { source: 'whatsapp', lastReceivedAt: null, unmatched: 0 },
+      { source: 'brevo', lastReceivedAt: null, unmatched: 0 },
+    ]);
     assert.equal(attention.body.pages, 2);
     assert.ok(attention.body.items.every(item => ['failed', 'bounced', 'unconfirmed'].includes(item.status)));
     assert.doesNotMatch(JSON.stringify(attention.body), /private fixture body|private synthetic provider response/);
+
+    const waReceipt = {
+      accountId: 1234, waMessageId: 'wamid.delivery-review-fixture', status: 'delivered',
+    };
+    await db.whatsAppReceipt.createMany({ data: [
+      { ...waReceipt, eventKey: 'review-wa-unmatched', receivedAt: at(-16) },
+      { ...waReceipt, eventKey: 'review-wa-applied', receivedAt: at(-15), appliedAt: at(-15) },
+    ] });
+    const emailReceipt = {
+      event: 'delivered', recipient: 'review-receipt@example.test',
+    };
+    await db.emailDeliveryEvent.createMany({ data: [
+      { ...emailReceipt, eventKey: 'review-brevo-older', occurredAt: at(-10), receivedAt: at(-9), outcome: 'recorded' },
+      { ...emailReceipt, eventKey: 'review-brevo-unmatched', occurredAt: at(-40), receivedAt: at(-8), outcome: 'unmatched', lastAttemptAt: at(0) },
+      { ...emailReceipt, eventKey: 'review-other-provider', provider: 'fixture-other', receivedAt: at(-1), outcome: 'unmatched' },
+    ] });
 
     const query = endpoint + '?status=failed&channel=whatsapp';
     const [{ body: first }, { body: last }] = await Promise.all([
@@ -260,6 +280,10 @@ test('delivery review is manager-only and separates queue state from delivery', 
     assert.ok(first.items[24].id > last.items[0].id, 'rows with matching timestamps paginate in ID order');
     assert.equal(first.items[0].providerCode, '131042');
     assert.match(first.items[0].detail, /billing/);
+    assert.deepEqual(first.receiptActivity, [
+      { source: 'whatsapp', lastReceivedAt: at(-15).toISOString(), unmatched: 1 },
+      { source: 'brevo', lastReceivedAt: at(-8).toISOString(), unmatched: 1 },
+    ], 'instance receipt activity stays visible when filtering messages by channel');
 
     const queued = await request('GET', endpoint + '?status=queued&channel=email', { headers });
     const dueAt = queued.body.items.find(row => row.scheduledAt === at(60).toISOString());
@@ -301,6 +325,8 @@ test('delivery review is manager-only and separates queue state from delivery', 
     assert.deepEqual(retries.map(result => result.status).sort(), [200, 409]);
     assert.equal((await db.message.findUnique({ where: { id: safe.id } })).status, 'queued');
   } finally {
+    await db.whatsAppReceipt.deleteMany({ where: { waMessageId: 'wamid.delivery-review-fixture' } });
+    await db.emailDeliveryEvent.deleteMany({ where: { recipient: 'review-receipt@example.test' } });
     await db.lead.delete({ where: { id: lead.id } });
     await db.user.deleteMany({ where: { id: { in: users } } });
     await db.systemConfig.deleteMany({ where: { key: { in: scanKeys } } });
