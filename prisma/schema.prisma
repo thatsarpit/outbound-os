@@ -71,6 +71,7 @@ model Lead {
   // Pipeline state
   status String @default("new")
   // new | wa_unavailable | wa_undelivered | contacted | replied | engaged | closed | paused
+  statusBeforePause String?
 
   // Agent assignment (which team member owns this lead)
   assignedToId Int? // FK to User.id — null = unassigned

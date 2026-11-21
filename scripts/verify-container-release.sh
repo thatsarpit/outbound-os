@@ -9,13 +9,14 @@ baseline=$1
 candidate=$2
 mcp_image=$3
 
-# These disposable instances use fixture data and run without network access.
+# These disposable instances use fixture data and have no external network.
 prefix=outbound-release-$(date +%s)-$$
 app=$prefix-app
 mcp=$prefix-mcp
 fresh=$prefix-fresh
 data=$prefix-data
 recovery=$prefix-recovery
+restored=$prefix-restored
 volumes=()
 app_created=false
 mcp_created=false
@@ -25,14 +26,16 @@ cleanup() {
     if [[ $app_created == true ]]; then docker logs --tail 60 "$app" >&2 || true; fi
     if [[ $mcp_created == true ]]; then docker logs --tail 60 "$mcp" >&2 || true; fi
   fi
-  if [[ $app_created == true ]]; then docker rm -f "$app" >/dev/null || true; fi
   if [[ $mcp_created == true ]]; then docker rm -f "$mcp" >/dev/null || true; fi
+  if [[ $app_created == true ]]; then docker rm -f "$app" >/dev/null || true; fi
   if [[ ${#volumes[@]} -gt 0 ]]; then docker volume rm "${volumes[@]}" >/dev/null || true; fi
 }
 trap cleanup EXIT
 
 fixture_email=release-admin@example.test
 fixture_password=release-smoke-fixture-only
+fixture_service_token=release-smoke-backend-fixture-only
+fixture_mcp_token=release-smoke-mcp-fixture-only
 login_body=$(jq -cn --arg email "$fixture_email" --arg password "$fixture_password" '{$email, $password}')
 
 wait_for_health() {
@@ -53,6 +56,7 @@ start_app() {
   docker run --pull never --detach --network none --name "$app" \
     --mount "type=volume,src=$volume,dst=/app/data" \
     -e NODE_ENV=production -e DATABASE_URL=file:/app/data/outboundos.db \
+    -e MCP_SERVICE_TOKEN="$fixture_service_token" \
     -e AUTH_PROVIDER=local -e ADMIN_EMAIL="$fixture_email" -e ADMIN_PASSWORD="$fixture_password" "$image" >/dev/null
   app_created=true
   wait_for_health "$app" 3001
@@ -96,7 +100,7 @@ check_schema() {
   '
 }
 
-for volume in "$fresh" "$data" "$recovery"; do
+for volume in "$fresh" "$data" "$recovery" "$restored"; do
   docker volume create "$volume" >/dev/null
   volumes+=("$volume")
 done
@@ -133,6 +137,94 @@ test "$(key_fingerprint)" = "$keys"
 assert_lead "$lead" 'Before upgrade'
 upgraded_lead=$(create_lead 'After upgrade' '+12025550112')
 assert_lead "$upgraded_lead" 'After upgrade'
+
+printf 'Exporting and verifying an online recovery set.\n'
+docker exec -i "$app" node --input-type=module - <<'NODE'
+import './src/bootstrapEnv.js';
+import { mkdir, writeFile } from 'node:fs/promises';
+import prisma from './src/utils/prismaClient.js';
+import { InboundEmailSpool } from './src/utils/inboundEmailSpool.js';
+
+await mkdir('/app/data/media', { recursive: true });
+await writeFile('/app/data/media/release-fixture.txt', 'synthetic attachment');
+await prisma.mediaFile.create({ data: {
+  filename: 'release-fixture.txt', originalName: 'release-fixture.txt', mimeType: 'text/plain',
+  size: 20, path: 'data/media/release-fixture.txt',
+} });
+const spool = new InboundEmailSpool({
+  directory: '/app/data/private/inbound-email', secret: process.env.LEAD_SYNC_ENCRYPTION_KEY,
+});
+const dedupeKey = 'release-rehearsal-original';
+const rawPath = await spool.store(dedupeKey, Buffer.from('synthetic original'));
+await prisma.inboundEmailReceipt.create({ data: {
+  provider: 'fixture', dedupeKey, payloadHash: 'fixture', envelopeFrom: 'source@example.test',
+  envelopeTo: 'destination@example.test', state: 'ignored', rawPath,
+} });
+await prisma.$disconnect();
+NODE
+docker exec "$app" node scripts/instance-backup.mjs create --output /app/data/test-backups
+stop_app
+
+docker run --pull never --rm --network none --user 0 --entrypoint sh \
+  --mount "type=volume,src=$data,dst=/source,readonly" \
+  --mount "type=volume,src=$restored,dst=/app/data" \
+  "$candidate" -ec '
+    set -- /source/test-backups/instance-*
+    test "$#" -eq 1
+    node scripts/instance-backup.mjs restore "$1" /app/data/staged
+    cp -a /app/data/staged/. /app/data/
+    rm -rf /app/data/staged
+    chown -R 1001:1001 /app/data
+  '
+start_app "$candidate" "$restored"
+check_schema
+test "$(key_fingerprint)" = "$keys"
+assert_lead "$upgraded_lead" 'After upgrade'
+docker exec -i "$app" node --input-type=module - <<'NODE'
+import './src/bootstrapEnv.js';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import prisma from './src/utils/prismaClient.js';
+import { InboundEmailSpool } from './src/utils/inboundEmailSpool.js';
+
+assert.equal(await readFile('/app/data/media/release-fixture.txt', 'utf8'), 'synthetic attachment');
+const dedupeKey = 'release-rehearsal-original';
+const receipt = await prisma.inboundEmailReceipt.findUniqueOrThrow({ where: { dedupeKey } });
+const spool = new InboundEmailSpool({
+  directory: '/app/data/private/inbound-email', secret: process.env.LEAD_SYNC_ENCRYPTION_KEY,
+});
+assert.equal((await spool.read(receipt.rawPath, dedupeKey)).toString(), 'synthetic original');
+await prisma.$disconnect();
+NODE
+
+printf 'Checking the companion MCP image against the restored API.\n'
+# Share the app's isolated network namespace so the companion can only reach
+# the test API on loopback. Neither container can reach a sending provider.
+docker run --pull never --detach --network "container:$app" --name "$mcp" \
+  -e MCP_BEARER_TOKEN="$fixture_mcp_token" -e MCP_SERVICE_TOKEN="$fixture_service_token" \
+  -e BACKEND_URL=http://127.0.0.1:3001 "$mcp_image" >/dev/null
+mcp_created=true
+wait_for_health "$mcp" 3010
+test "$(docker exec "$mcp" curl -sS --max-time 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:3010/mcp)" = 401
+docker exec -i "$mcp" node --input-type=module - <<'NODE'
+import assert from 'node:assert/strict';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+const client = new Client({ name: 'release-smoke', version: '1.0.0' });
+try {
+  await client.connect(new StreamableHTTPClientTransport(new URL('http://127.0.0.1:3010/mcp'), {
+    requestInit: { headers: { Authorization: 'Bearer ' + process.env.MCP_BEARER_TOKEN } },
+  }));
+  const response = await client.callTool({ name: 'system_status', arguments: {} }, undefined, { timeout: 5000 });
+  assert.equal(Boolean(response.isError), false);
+  assert.equal(typeof JSON.parse(response.content[0].text).enabledAccounts, 'number');
+} finally {
+  await client.close();
+}
+NODE
+docker rm -f "$mcp" >/dev/null
+mcp_created=false
 stop_app
 
 printf 'Checking rollback with the previous image and its recovery volume.\n'
@@ -144,10 +236,4 @@ test "$(docker exec "$app" curl -sS --max-time 5 -o /dev/null -w '%{http_code}' 
   -H "Authorization: Bearer $session" "http://127.0.0.1:3001/api/leads/$upgraded_lead")" = 404
 stop_app
 
-printf 'Checking the companion MCP image.\n'
-docker run --pull never --detach --network none --name "$mcp" \
-  -e MCP_BEARER_TOKEN=release-smoke-mcp-fixture-only -e BACKEND_URL=http://127.0.0.1:3001 "$mcp_image" >/dev/null
-mcp_created=true
-wait_for_health "$mcp" 3010
-test "$(docker exec "$mcp" curl -sS --max-time 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:3010/mcp)" = 401
-printf 'Fresh install, upgrade, rollback and MCP startup passed.\n'
+printf 'Fresh install, upgrade, recovery-set restore, rollback and authenticated MCP passed.\n'

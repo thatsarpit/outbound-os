@@ -6,7 +6,6 @@ export function getLeadAutomationAction(status: LeadStatus) {
 
   return {
     isPaused,
-    nextStatus: isPaused ? ('new' as const) : ('paused' as const),
     label: isPaused ? 'Resume automation' : 'Pause automation',
     shortLabel: isPaused ? 'Resume' : 'Pause',
   }

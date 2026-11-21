@@ -91,7 +91,10 @@ docker compose up -d --no-build --pull never --wait --wait-timeout 150
 Check the app with `docker compose ps`. Guided installs can also run
 `bash setup/install.sh --check`. The Docker images workflow tests the exact
 app and MCP digests on Linux amd64 and arm64 before applying release tags.
-Its rollback check uses an isolated copy of the pre-upgrade data.
+The rehearsal checks rollback with a copy of pre-upgrade data. It also exports
+an online backup from the candidate, boots its verified restore, reads a
+restored attachment and encrypted original, and runs an authenticated MCP
+status call against the restored API.
 
 Health verifies process/database readiness. Also sign in and check channel
 readiness and webhook verification before sending. Do not use customer

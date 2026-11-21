@@ -37,6 +37,9 @@ const TYPE_META: Record<string, { label: string; icon: React.ElementType; tone: 
   message_sent: { label: 'Message sent', icon: ArrowUpRight, tone: 'neutral' },
   message_failed: { label: 'Send failed', icon: AlertTriangle, tone: 'danger' },
   system_error: { label: 'System error', icon: AlertTriangle, tone: 'danger' },
+  outreach_pause_changed: { label: 'Outreach status changed', icon: AlertTriangle, tone: 'info' },
+  lead_takeover: { label: 'Lead outreach paused', icon: AlertTriangle, tone: 'info' },
+  lead_resumed: { label: 'Lead outreach resumed', icon: ArrowUpRight, tone: 'info' },
 }
 
 const TONE_CLASSES: Record<ActivityTone, string> = {

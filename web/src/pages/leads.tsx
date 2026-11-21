@@ -39,8 +39,6 @@ import {
 import {
   getLeadAutomationAction,
   invalidateLeadSurfaceQueries,
-  optimisticLeadPatch,
-  rollbackLeadPatch,
 } from '@/lib/lead-automation'
 import { cn, formatRelativeTime } from '@/lib/utils'
 import {
@@ -309,31 +307,24 @@ export default function LeadsPage() {
   const leadAutomationMutation = useMutation({
     networkMode: 'always',
     retry: false,
-    mutationFn: ({ leadId, nextStatus }: { leadId: number; nextStatus: Lead['status'] }) => {
+    mutationFn: ({ leadId, paused }: { leadId: number; paused: boolean }) => {
       if (!canEdit) throw new Error('Reconnect with a sales account to change automation.')
-      return leadsApi.updateLead(leadId, { status: nextStatus })
+      return leadsApi.setOutreachPaused(leadId, paused)
     },
-    // Optimistically flip the lead's status in the cache so the UI updates
-    // instantly. Roll back on error.
-    onMutate: ({ leadId, nextStatus }) =>
-      optimisticLeadPatch(queryClient, leadId, { status: nextStatus }),
     onSuccess: (updatedLead, variables) => {
       setSelectedLead((current) =>
         updatedLead && current?.id === updatedLead.id ? updatedLead : current,
       )
-      if (variables.nextStatus === 'paused') {
+      if (variables.paused) {
         toast.warning('Lead automation paused')
       } else {
         toast.success('Lead automation resumed')
       }
     },
-    onError: (error: Error, variables, ctx) => {
-      if (ctx) rollbackLeadPatch(queryClient, ctx)
-      const verb = variables.nextStatus === 'paused' ? 'pause' : 'resume'
+    onError: (error: Error, variables) => {
+      const verb = variables.paused ? 'pause' : 'resume'
       toast.error(`Failed to ${verb} lead: ${error.message}`)
     },
-    // Re-fetch so cache eventually reconciles with the server (especially the
-    // overview/pipeline aggregates that the optimistic patch doesn't touch).
     onSettled: () => invalidateLeadSurfaceQueries(queryClient),
   })
 
@@ -342,6 +333,7 @@ export default function LeadsPage() {
   const pages = data?.pages || 1
   const hasActiveFilters = Boolean(
     filters.status ||
+    filters.outreachHistory ||
     filters.search ||
     filters.tier ||
     filters.source ||
@@ -361,7 +353,7 @@ export default function LeadsPage() {
   const toggleLeadAutomation = (lead: Lead) => {
     if (!canEdit) return
     const action = getLeadAutomationAction(lead.status)
-    leadAutomationMutation.mutate({ leadId: lead.id, nextStatus: action.nextStatus })
+    leadAutomationMutation.mutate({ leadId: lead.id, paused: !action.isPaused })
   }
 
   // j / k step through leads while the detail drawer is open (only active when a
@@ -855,8 +847,9 @@ export default function LeadsPage() {
               {hasActiveFilters ? 'Active filters applied' : `${total} total leads`}
             </span>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[repeat(4,minmax(0,auto))_1fr] xl:items-center">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[repeat(5,minmax(0,auto))_1fr] xl:items-center">
             <select
+              aria-label="Filter by lead status"
               value={filters.status}
               onChange={(e) => setFilters((f) => ({ ...f, status: e.target.value, page: 1 }))}
               className="w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-text-secondary focus:border-accent focus:outline-none"
@@ -866,6 +859,21 @@ export default function LeadsPage() {
                   {opt.label}
                 </option>
               ))}
+            </select>
+
+            <select
+              value={filters.outreachHistory ?? ''}
+              onChange={(e) => setFilters((f) => ({
+                ...f,
+                outreachHistory: e.target.value ? e.target.value as LeadFilters['outreachHistory'] : undefined,
+                page: 1,
+              }))}
+              aria-label="Filter by outreach history"
+              className="w-full rounded-lg border border-border bg-surface-raised px-3 py-2 text-sm text-text-secondary focus:border-accent focus:outline-none"
+            >
+              <option value="">All outreach history</option>
+              <option value="no_acceptance">No accepted sends</option>
+              <option value="accepted">Has accepted sends</option>
             </select>
 
             <select
@@ -909,6 +917,7 @@ export default function LeadsPage() {
                   setFilters((f) => ({
                     ...f,
                     status: '',
+                    outreachHistory: undefined,
                     search: '',
                     tier: '',
                     source: '',
@@ -956,6 +965,7 @@ export default function LeadsPage() {
               setFilters((f) => ({
                 ...f,
                 status: '',
+                outreachHistory: undefined,
                 search: '',
                 tier: '',
                 source: '',

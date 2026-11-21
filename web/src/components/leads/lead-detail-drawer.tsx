@@ -380,12 +380,13 @@ export function LeadDetailDrawer({
                         </p>
                         <p className="mt-1 text-sm text-text-secondary">
                           {automationAction.isPaused
-                            ? 'Resume to return this lead to the outbound queue.'
+                            ? 'Resume to restore the lead’s previous sales stage. Sending still depends on eligibility.'
                             : 'Pause to stop automated follow-ups while the team handles it manually.'}
                         </p>
                       </div>
                       <button
                         type="button"
+                        aria-label={automationAction.label}
                         onClick={() => onToggleAutomation(lead)}
                         disabled={!canEdit || automationPending}
                         className={cn(

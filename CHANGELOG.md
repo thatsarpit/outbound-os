@@ -6,6 +6,12 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+- Filter Leads by recorded outbound acceptance independently of pipeline stage.
+- Restore a lead’s previous sales stage after an operator resumes its outreach.
+  Record pause and resume actions in Activity.
+- Rehearse an online recovery-set restore and authenticated MCP connectivity
+  before promoting Docker release images.
+- Report available space on the database volume and warn when it is nearly full.
 - Add a manager-controlled workspace outreach pause in Delivery review that
   holds new automated submissions across the configured sending channels.
 - Require a current launch review for both immediate and scheduled campaigns,

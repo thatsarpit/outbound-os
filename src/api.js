@@ -4,6 +4,7 @@ import scheduledEmailRoutes from './routes/scheduledEmails.js';
 import outreachPauseRoutes from './routes/outreachPause.js';
 import { isOutreachPaused } from './services/outreachPause.js';
 import { campaignLaunchReview } from './services/campaignLaunchReview.js';
+import { changeLeadPause } from './services/leadOutreachPause.js';
 import messageActionRoutes from './routes/messageActions.js';
 import { assertReplyTarget, nativeMessageId, messageAccount, reactionTarget } from './utils/messageActions.js';
 import websiteEnquiries from './routes/websiteEnquiries.js';
@@ -1142,6 +1143,8 @@ app.get('/api/system/health', requireRole('manager'), async (req, res) => {
   // accounts dropped — all unnoticed for weeks).
   const issues = [];
   if (!dbOk) issues.push({ severity: 'down', area: 'database', message: 'Database is unreachable' });
+  if (!base.disk.available) issues.push({ severity: 'warn', area: 'storage', message: 'Could not check space on the database volume' });
+  else if (base.disk.percent >= 90) issues.push({ severity: 'warn', area: 'storage', message: `Database volume is ${base.disk.percent}% full` });
   // WhatsApp accounts reconnect on a staggered ~4-min boot after every restart.
   // During that window they're legitimately not-ready, which previously made the
   // banner shout "N accounts disconnected" right after every deploy — alarming
@@ -1616,7 +1619,7 @@ app.get('/api/leads', async (req, res) => {
     const {
       status, search, page = 1, limit = 25,
       sortBy = 'createdAt', sortOrder = 'desc',
-      minScore, maxScore, source, tags, engagement,
+      minScore, maxScore, source, tags, engagement, outreachHistory,
       dateFrom, dateTo, assignedToId, assignedMemberKey, scope, poolId, originSupplierId,
     } = req.query;
 
@@ -1637,6 +1640,19 @@ app.get('/api/leads', async (req, res) => {
     }
 
     if (req.query.hasQueuedMessages === 'true') andClauses.push({ messages: { some: { status: { in: ['queued', 'sending'] } } } });
+    if (outreachHistory !== undefined) {
+      if (!['no_acceptance', 'accepted'].includes(outreachHistory)) {
+        return res.status(400).json({ error: 'Choose a valid outreach history filter.' });
+      }
+      // A queued or uncertain attempt can exist even when the lead has moved
+      // pipeline stage. Only stored outbound acceptance evidence counts.
+      andClauses.push({ messages: {
+        [outreachHistory === 'accepted' ? 'some' : 'none']: {
+          direction: 'outbound',
+          OR: [{ sentAt: { not: null } }, { status: { in: ['sent', 'delivered', 'read'] } }],
+        },
+      } });
+    }
     if (status && status !== 'all') {
       if (status === 'wa_unavailable') {
         andClauses.push({ isOnWhatsApp: false });
@@ -1811,6 +1827,16 @@ app.post('/api/leads', requireRole('agent'), async (req, res) => {
 
 app.patch('/api/leads/:id', requireRole('agent'), async (req, res) => {
   try {
+    if (req.body.outreachPaused !== undefined) {
+      if (typeof req.body.outreachPaused !== 'boolean') return res.status(400).json({ error: 'Choose whether outreach is paused.' });
+      const id = parsePositiveInt(req.params.id);
+      if (!id) return res.status(400).json({ error: 'Choose a valid lead.' });
+      const result = await changeLeadPause([id], {
+        paused: req.body.outreachPaused, reason: req.body.outreachReason, user: req.user,
+      });
+      if (!result.status) return res.status(404).json({ error: 'Lead not found' });
+      return res.json(await prisma.lead.findUnique({ where: { id } }));
+    }
     const updates = {};
     const allowed = [
       'name',
@@ -1835,6 +1861,9 @@ app.patch('/api/leads/:id', requireRole('agent'), async (req, res) => {
       return res.status(400).json({ error: `Invalid status. Must be one of: ${VALID_LEAD_STATUSES.join(', ')}` });
     }
     const prev = await prisma.lead.findUnique({ where: { id: parseInt(req.params.id) }, select: { status: true } });
+    if (updates.status && prev && updates.status !== prev.status) {
+      updates.statusBeforePause = updates.status === 'paused' ? prev.status : null;
+    }
     const lead = await prisma.lead.update({
       where: { id: parseInt(req.params.id) },
       data: updates,
@@ -1848,7 +1877,7 @@ app.patch('/api/leads/:id', requireRole('agent'), async (req, res) => {
     res.json(lead);
   } catch (error) {
     if (error.code === 'P2025') return res.status(404).json({ error: 'Lead not found' });
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -1883,13 +1912,11 @@ app.delete('/api/leads/:id', requireRole('manager'), async (req, res) => {
 app.post('/api/leads/:id/pause', requireRole('manager'), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const lead = await prisma.lead.findUnique({ where: { id }, select: { id: true, status: true } });
-    if (!lead) return res.status(404).json({ error: 'Lead not found' });
-    const newStatus = lead.status === 'paused' ? 'new' : 'paused';
-    await prisma.lead.update({ where: { id }, data: { status: newStatus } });
-    res.json({ id, status: newStatus });
+    const { status } = await changeLeadPause([id], { user: req.user });
+    if (!status) return res.status(404).json({ error: 'Lead not found' });
+    res.json({ id, status });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -1903,7 +1930,9 @@ app.post('/api/leads/:id/status', requireRole('manager'), async (req, res) => {
     }
     const prev = await prisma.lead.findUnique({ where: { id }, select: { status: true, name: true } });
     if (!prev) return res.status(404).json({ error: 'Lead not found' });
-    const lead = await prisma.lead.update({ where: { id }, data: { status } });
+    const lead = await prisma.lead.update({ where: { id }, data: { status,
+      ...(status !== prev.status ? { statusBeforePause: status === 'paused' ? prev.status : null } : {}),
+    } });
     if (status !== prev.status) {
       webhookDispatcher.dispatch('lead.status_changed', {
         leadId: id, name: prev.name, oldStatus: prev.status, newStatus: status,
@@ -2323,22 +2352,20 @@ app.post('/api/leads/bulk', requireRole('manager'), async (req, res) => {
         if (!allowed.includes(payload.status)) {
           return res.status(400).json({ error: `payload.status must be one of: ${allowed.join(', ')}` });
         }
-        const result = await prisma.lead.updateMany({ where: { id: { in: intIds } }, data: { status: payload.status } });
-        return res.json({ updated: result.count, action });
-      }
-
-      case 'pause': {
-        const result = await prisma.lead.updateMany({ where: { id: { in: intIds } }, data: { status: 'paused' } });
-        return res.json({ updated: result.count, action });
-      }
-
-      case 'resume': {
-        // Only resume leads that are currently paused
+        if (payload.status === 'paused') {
+          const { updated } = await changeLeadPause(intIds, { paused: true, user: req.user });
+          return res.json({ updated, action });
+        }
         const result = await prisma.lead.updateMany({
-          where: { id: { in: intIds }, status: 'paused' },
-          data: { status: 'new' },
+          where: { id: { in: intIds } }, data: { status: payload.status, statusBeforePause: null },
         });
         return res.json({ updated: result.count, action });
+      }
+
+      case 'pause':
+      case 'resume': {
+        const { updated } = await changeLeadPause(intIds, { paused: action === 'pause', reason: payload.reason, user: req.user });
+        return res.json({ updated, action });
       }
 
       case 'assign_wa': {
@@ -2384,7 +2411,7 @@ app.post('/api/leads/bulk', requireRole('manager'), async (req, res) => {
         return res.status(400).json({ error: `Unknown action: ${action}` });
     }
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.statusCode || 500).json({ error: error.message });
   }
 });
 
@@ -2561,6 +2588,7 @@ app.get('/api/campaigns/:id/leads', requireRole('manager'), async (req, res) => 
     if (status) where.status = status;
 
     const reviewRequested = req.query.launchReview === '1' && !status;
+    if (reviewRequested) res.set('Cache-Control', 'private, no-store');
     const result = await prisma.$transaction(async tx => {
       const campaign = await tx.campaign.findUnique({ where: { id: where.campaignId } });
       const campaignLeads = await tx.campaignLead.findMany({

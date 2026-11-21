@@ -911,6 +911,9 @@ describe('System endpoints', () => {
     const res = await request('GET', '/api/system/health', { headers: authHeader() });
     assert.equal(res.status, 200);
     assert.ok(res.body.cpu !== undefined || res.body.status !== undefined);
+    assert.equal(res.body.disk.available, true);
+    assert.ok(res.body.disk.total > 0);
+    assert.ok(res.body.disk.percent >= 0 && res.body.disk.percent <= 100);
   });
 
   test("GET /api/system/status returns live connection counts", async () => {
@@ -4021,6 +4024,58 @@ describe('MCP dashboard connection setup', () => {
 });
 
 describe('Audit workflow repairs', () => {
+  test('explicit lead pause and resume preserve sales state and record the reason', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const lead = await db.lead.create({ data: { name: 'Pause stage fixture', mobile: 'no-phone:stage-pause', status: 'engaged' } });
+    const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.207' };
+    try {
+      const pause = (paused, outreachReason) => request('PATCH', `/api/leads/${lead.id}`, {
+        headers, body: { outreachPaused: paused, outreachReason },
+      });
+      assert.equal((await pause(true, 'Review requested')).body.status, 'paused');
+      assert.equal((await pause(true)).body.statusBeforePause, 'engaged', 'a repeated pause preserves the saved state');
+      assert.equal((await pause(false)).body.status, 'engaged');
+      const bulk = action => request('POST', '/api/leads/bulk', { headers, body: { ids: [lead.id], action } });
+      assert.equal((await bulk('pause')).body.updated, 1);
+      assert.equal((await bulk('resume')).body.updated, 1);
+      assert.equal((await db.lead.findUnique({ where: { id: lead.id } })).status, 'engaged');
+      const events = await db.activityLog.findMany({ where: { leadId: lead.id }, orderBy: { id: 'asc' } });
+      assert.equal(events.length, 4);
+      assert.equal(JSON.parse(events[0].meta).reason, 'Review requested');
+      assert.equal(JSON.parse(events[1].meta).to, 'engaged');
+    } finally {
+      await db.activityLog.deleteMany({ where: { leadId: lead.id } });
+      await db.lead.delete({ where: { id: lead.id } });
+    }
+  });
+
+  test('outreach history composes with lead status and uses outbound acceptance evidence', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.206' };
+    const source = 'history-filter-fixture';
+    const [unconfirmed, accepted, queued] = await Promise.all([
+      { name: 'Unconfirmed', status: 'paused', messages: [{ direction: 'inbound', status: 'received' }, { direction: 'outbound', status: 'unconfirmed' }] },
+      { name: 'Accepted before bounce', status: 'paused', messages: [{ direction: 'outbound', status: 'bounced', sentAt: new Date() }] },
+      { name: 'Only queued', status: 'contacted', messages: [{ direction: 'outbound', status: 'queued' }] },
+    ].map((row, index) => db.lead.create({ data: {
+      name: row.name, status: row.status, source, mobile: 'no-phone:history-filter:' + index,
+      messages: { create: row.messages.map(message => ({ ...message, channel: 'email', content: 'Fixture' })) },
+    } })));
+    try {
+      const list = filter => request('GET', `/api/leads?source=${source}&${filter}`, { headers });
+      const paused = await list('status=paused&outreachHistory=no_acceptance');
+      assert.equal(paused.body.total, 1);
+      assert.deepEqual(paused.body.leads.map(lead => lead.id), [unconfirmed.id]);
+      const sent = await list('outreachHistory=accepted');
+      assert.deepEqual(sent.body.leads.map(lead => lead.id), [accepted.id]);
+      const without = await list('outreachHistory=no_acceptance');
+      assert.deepEqual(without.body.leads.map(lead => lead.id).sort(), [unconfirmed.id, queued.id].sort());
+      assert.equal((await list('outreachHistory=invalid')).status, 400);
+    } finally {
+      await db.lead.deleteMany({ where: { source } });
+    }
+  });
+
   test('email-only CSV contacts skip matching addresses and preserve suppression', async () => {
     const { default: db } = await import('../src/utils/prismaClient.js');
     const filename = 'audit-email-only.csv';

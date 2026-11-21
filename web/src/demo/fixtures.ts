@@ -2053,10 +2053,13 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
     (url: string) => {
       const params = new URL(url, location.origin).searchParams
       const status = params.get('status')
+      const outreach = params.get('outreachHistory')
+      const acceptedSampleLeads = [1, 2, 4]
       const search = (params.get('search') || '').toLowerCase()
       const leads = FIXTURE_LEADS.filter(
         (lead) =>
           (!status || lead.status === status) &&
+          (!outreach || acceptedSampleLeads.includes(lead.id) === (outreach === 'accepted')) &&
           (!search ||
             [lead.name, lead.email, lead.mobile, lead.company].some((value) =>
               value?.toLowerCase().includes(search),
@@ -2373,6 +2376,7 @@ export function installFixtureFetch() {
   const original = window.fetch.bind(window)
   let sendingPaused = false
   const sampleSources = new Map<string, string>()
+  const pausedStages = new Map<number, (typeof FIXTURE_LEADS)[number]['status']>()
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     if (!url.includes('/api/')) return original(input, init)
@@ -2473,6 +2477,22 @@ export function installFixtureFetch() {
 
     const method = (init?.method || 'GET').toUpperCase()
     const pathname = new URL(url, location.origin).pathname
+    const leadPauseId = pathname.match(/^\/api\/leads\/(\d+)$/)?.[1]
+    if (leadPauseId && method === 'PATCH' && typeof init?.body === 'string') {
+      const { outreachPaused } = JSON.parse(init.body)
+      if (typeof outreachPaused === 'boolean') {
+        const lead = FIXTURE_LEADS.find(item => item.id === Number(leadPauseId))
+        if (!lead) return Response.json({ error: 'Sample lead not found.' }, { status: 404 })
+        if (outreachPaused && lead.status !== 'paused') {
+          pausedStages.set(lead.id, lead.status)
+          lead.status = 'paused'
+        } else if (!outreachPaused && lead.status === 'paused') {
+          lead.status = pausedStages.get(lead.id) ?? 'new'
+          pausedStages.delete(lead.id)
+        }
+        return Response.json(lead)
+      }
+    }
     if (pathname === '/api/import/csv' && method === 'POST' && init?.body instanceof FormData) {
       return init.body.get('preview') === '1'
         ? Response.json({
