@@ -6,6 +6,10 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+- Show the last due-work scan for WhatsApp, email, iMessage and scheduled
+  campaigns. Delivery review flags queued messages five minutes past their
+  scheduled time, with a separate filter ordered by oldest scheduled time.
+
 - Add Delivery review for managers and admins. Filter queued, sending, failed
   and unconfirmed attempts by channel and open the related conversation or
   campaign for investigation. The legacy requeue action blocks attempts with

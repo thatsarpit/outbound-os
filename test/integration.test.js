@@ -171,6 +171,15 @@ test('compiled assets, dashboard navigation and service endpoints keep separate 
 test('delivery review is manager-only and separates queue state from delivery', async () => {
   const { default: db } = await import('../src/utils/prismaClient.js');
   const { hashPassword } = await import('../src/auth/rbac.js');
+  const { default: followup } = await import('../src/services/followup.js');
+  const { default: emailWorker } = await import('../src/services/emailService.js');
+  const { default: imessage } = await import('../src/services/imessage.js');
+  const { default: campaignScheduler } = await import('../src/services/campaignScheduler.js');
+  const { QUEUE_SCAN_INTERVALS } = await import('../src/services/queueHealth.js');
+  const scanKey = worker => 'runtime.queue.' + worker + '.last_scan_at';
+  const scanKeys = Object.keys(QUEUE_SCAN_INTERVALS).map(scanKey);
+  const now = Date.now();
+  const at = minutes => new Date(now + minutes * 60_000);
   const endpoint = '/api/messages/review';
   const password = 'delivery review fixture password';
   const lead = await db.lead.create({ data: { name: 'Delivery review fixture', mobile: '12025550167' } });
@@ -189,6 +198,16 @@ test('delivery review is manager-only and separates queue state from delivery', 
       headersByRole[role] = { Authorization: 'Bearer ' + auth.body.token, 'X-Forwarded-For': ip };
     }
 
+    await emailWorker.processEmailQueue({ messageIds: [] });
+    assert.equal(await db.systemConfig.count({ where: { key: scanKey('email') } }), 0);
+    await followup.processQueue();
+    await emailWorker.processEmailQueue();
+    await imessage.processQueue();
+    await campaignScheduler.processDue();
+    assert.equal(await db.systemConfig.count({ where: { key: { in: scanKeys } } }), 4, 'empty queues still record a successful scan');
+    await db.systemConfig.update({ where: { key: scanKey('email') }, data: { value: at(-30).toISOString() } });
+    await db.systemConfig.delete({ where: { key: scanKey('imessage') } });
+
     const common = {
       leadId: lead.id, direction: 'outbound', content: 'private fixture body',
       updatedAt: new Date('2026-11-21T00:00:00Z'),
@@ -200,7 +219,11 @@ test('delivery review is manager-only and separates queue state from delivery', 
       })),
       { ...common, channel: 'email', status: 'unconfirmed', providerStatusReason: 'private synthetic provider response' },
       { ...common, channel: 'email', status: 'bounced' },
-      { ...common, channel: 'email', status: 'queued', scheduledAt: new Date('2026-11-22T10:00:00Z') },
+      { ...common, channel: 'email', status: 'queued', scheduledAt: at(60) },
+      { ...common, channel: 'email', status: 'queued', scheduledAt: at(-10) },
+      { ...common, channel: 'whatsapp', status: 'queued', scheduledAt: at(-20) },
+      { ...common, channel: 'email', status: 'queued', scheduledAt: at(-1) },
+      { ...common, channel: 'email', status: 'queued' },
       { ...common, channel: 'imessage', status: 'sending' },
       { ...common, channel: 'whatsapp', status: 'sent' },
       { ...common, channel: 'email', status: 'delivered' },
@@ -212,8 +235,15 @@ test('delivery review is manager-only and separates queue state from delivery', 
     const headers = headersByRole.manager;
     const attention = await request('GET', endpoint, { headers });
     assert.equal(attention.status, 200, JSON.stringify(attention.body));
-    assert.deepEqual(attention.body.counts, { attention: 28, failed: 27, unconfirmed: 1, queued: 1, sending: 1 });
+    assert.deepEqual(attention.body.counts, { attention: 28, failed: 27, unconfirmed: 1, queued: 5, overdue: 2, sending: 1 });
     assert.equal(attention.body.total, 28);
+    const workers = Object.fromEntries(attention.body.workers.map(row => [row.worker, row]));
+    assert.equal(workers.whatsapp.state, 'recent');
+    assert.equal(workers.whatsapp.intervalMinutes, 2);
+    assert.equal(workers.campaigns.state, 'recent');
+    assert.equal(workers.email.state, 'stale');
+    assert.equal(workers.email.lastScanAt, at(-30).toISOString());
+    assert.deepEqual(workers.imessage, { worker: 'imessage', intervalMinutes: 1, lastScanAt: null, state: 'not_recorded' });
     assert.equal(attention.body.pages, 2);
     assert.ok(attention.body.items.every(item => ['failed', 'bounced', 'unconfirmed'].includes(item.status)));
     assert.doesNotMatch(JSON.stringify(attention.body), /private fixture body|private synthetic provider response/);
@@ -232,14 +262,24 @@ test('delivery review is manager-only and separates queue state from delivery', 
     assert.match(first.items[0].detail, /billing/);
 
     const queued = await request('GET', endpoint + '?status=queued&channel=email', { headers });
-    assert.equal(queued.body.items[0].scheduledAt, '2026-11-22T10:00:00.000Z');
+    const dueAt = queued.body.items.find(row => row.scheduledAt === at(60).toISOString());
+    assert.equal(dueAt.overdue, false);
+    assert.equal(queued.body.counts.overdue, 1, 'counts follow the selected channel');
+    assert.equal(queued.body.overdueGraceMinutes, 5);
+    const overdue = await request('GET', endpoint + '?status=overdue', { headers });
+    assert.deepEqual(overdue.body.items.map(row => [row.scheduledAt, row.overdue]), [
+      [at(-20).toISOString(), true],
+      [at(-10).toISOString(), true],
+    ]);
+    const overdueEmail = await request('GET', endpoint + '?status=overdue&channel=email', { headers });
+    assert.equal(overdueEmail.body.total, 1);
     const uncertain = await request('GET', endpoint + '?status=unconfirmed&channel=email', { headers });
     assert.match(uncertain.body.items[0].detail, /check the sending provider/i);
 
     for (const invalid of ['status=sent', 'channel=sms', 'page=-1', 'page=1&page=2']) {
       assert.equal((await request('GET', endpoint + '?' + invalid, { headers })).status, 400);
     }
-    assert.equal(await db.message.count({ where: { leadId: lead.id } }), 33);
+    assert.equal(await db.message.count({ where: { leadId: lead.id } }), 37);
     const requeue = id => request('POST', '/api/messages/' + id + '/requeue', { headers });
     const rejectedCases = [
       { direction: 'inbound' },
@@ -263,6 +303,7 @@ test('delivery review is manager-only and separates queue state from delivery', 
   } finally {
     await db.lead.delete({ where: { id: lead.id } });
     await db.user.deleteMany({ where: { id: { in: users } } });
+    await db.systemConfig.deleteMany({ where: { key: { in: scanKeys } } });
   }
 });
 

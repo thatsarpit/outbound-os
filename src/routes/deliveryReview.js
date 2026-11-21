@@ -3,6 +3,7 @@ import { requireRole } from '../auth/index.js';
 import { getAccessiblePoolIds } from '../auth/rbac.js';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
+import { OVERDUE_GRACE_MINUTES, queueWorkerStatus } from '../services/queueHealth.js';
 
 const router = Router();
 const CHANNELS = ['whatsapp', 'email', 'imessage', 'telegram'];
@@ -12,6 +13,7 @@ const FILTERS = {
   failed: FAILED,
   unconfirmed: ['unconfirmed'],
   queued: ['queued'],
+  overdue: ['queued'],
   sending: ['sending'],
 };
 const PAGE_SIZE = 25;
@@ -68,6 +70,8 @@ router.get('/messages/review', requireRole('manager'), async (req, res) => {
       ...(pools === null ? {} : { lead: { poolId: { in: pools } } }),
     };
 
+    const overdueAt = new Date(Date.now() - OVERDUE_GRACE_MINUTES * 60_000);
+    const overdueWhere = { status: 'queued', scheduledAt: { lte: overdueAt } };
     const result = await prisma.$transaction(async tx => {
       const totals = await tx.message.groupBy({
         by: ['status'],
@@ -78,12 +82,17 @@ router.get('/messages/review', requireRole('manager'), async (req, res) => {
       const counts = Object.fromEntries(Object.entries(FILTERS).map(([filter, statuses]) => [
         filter, statuses.reduce((sum, value) => sum + (byStatus.get(value) || 0), 0),
       ]));
+      counts.overdue = counts.queued
+        ? await tx.message.count({ where: { ...scope, ...overdueWhere } })
+        : 0;
       const total = counts[status];
       const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
       const page = Math.min(Number(pageInput), pages);
       const rows = total === 0 ? [] : await tx.message.findMany({
-        where: { ...scope, status: { in: FILTERS[status] } },
-        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        where: { ...scope, ...(status === 'overdue' ? overdueWhere : { status: { in: FILTERS[status] } }) },
+        orderBy: status === 'overdue'
+          ? [{ scheduledAt: 'asc' }, { id: 'asc' }]
+          : [{ updatedAt: 'desc' }, { id: 'desc' }],
         skip: (page - 1) * PAGE_SIZE,
         take: PAGE_SIZE,
         select: {
@@ -102,13 +111,18 @@ router.get('/messages/review', requireRole('manager'), async (req, res) => {
       const items = rows.map(({ providerStatusReason, providerErrorCode, lead, ...row }) => ({
         ...row,
         leadName: lead.name,
+        overdue: row.status === 'queued' && row.scheduledAt !== null && row.scheduledAt <= overdueAt,
         detail: reviewDetail({ status: row.status, scheduledAt: row.scheduledAt, providerStatusReason }),
         providerCode: /^\d{3,10}$/.test(providerErrorCode || '') ? providerErrorCode : null,
       }));
       return { items, counts, total, page, pages };
     });
 
-    res.json(result);
+    const workers = await queueWorkerStatus(prisma).catch(error => {
+      logger.warn(`Could not load queue scan status: ${error.message}`);
+      return null;
+    });
+    res.json({ ...result, workers, overdueGraceMinutes: OVERDUE_GRACE_MINUTES });
   } catch (error) {
     logger.warn(`Delivery review failed: ${error.message}`);
     res.status(500).json({ error: 'Could not load delivery review.' });

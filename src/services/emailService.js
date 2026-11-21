@@ -1,3 +1,4 @@
+import { recordQueueScan } from './queueHealth.js';
 import { createTransport } from 'nodemailer';
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
@@ -1204,6 +1205,7 @@ class EmailService {
       take: Array.isArray(messageIds) ? Math.max(1, messageIds.length) : 20,
     });
 
+    if (!Array.isArray(messageIds)) await recordQueueScan('email');
     if (pending.length === 0) return;
     logger.info(`📧 Processing ${pending.length} queued email(s)...`);
 

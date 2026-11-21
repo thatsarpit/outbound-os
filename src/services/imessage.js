@@ -1,3 +1,4 @@
+import { recordQueueScan } from './queueHealth.js';
 /**
  * iMessage Service via BlueBubbles Server
  *
@@ -429,6 +430,7 @@ class IMessageService {
       take: Array.isArray(messageIds) ? Math.max(1, messageIds.length) : 10,
     });
 
+    if (!Array.isArray(messageIds)) await recordQueueScan('imessage');
     for (const message of pending) {
       const claimed = await prisma.message.updateMany({
         where: { id: message.id, status: 'queued' }, data: { status: 'sending' },

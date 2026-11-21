@@ -2,6 +2,7 @@ import prisma from '../utils/prismaClient.js';
 import campaignEngine from './campaignEngine.js';
 import config from '../config.js';
 import logger from '../utils/logger.js';
+import { recordQueueScan } from './queueHealth.js';
 import { isBusinessHours } from '../utils/delay.js';
 
 const fail = (message, statusCode = 400) => Object.assign(new Error(message), { statusCode });
@@ -87,6 +88,7 @@ export class CampaignScheduler {
       orderBy: [{ scheduledAt: 'asc' }, { id: 'asc' }],
       take: 20,
     });
+    await recordQueueScan('campaigns', this.db);
     for (const campaign of due) {
       const identity = { id: campaign.id, status: 'scheduled', scheduledAt: campaign.scheduledAt, updatedAt: campaign.updatedAt };
       if (now - campaign.scheduledAt > LATE_WINDOW_MS) {

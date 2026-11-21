@@ -22,7 +22,8 @@ export interface InboxThreadFilters {
   limit?: number
 }
 
-export type DeliveryReviewFilter = 'attention' | 'failed' | 'unconfirmed' | 'queued' | 'sending'
+export type DeliveryReviewFilter =
+  'attention' | 'failed' | 'unconfirmed' | 'queued' | 'overdue' | 'sending'
 
 export interface DeliveryReviewItem {
   id: number
@@ -35,11 +36,21 @@ export interface DeliveryReviewItem {
   providerCode: string | null
   updatedAt: string
   scheduledAt: string | null
+  overdue?: boolean
+}
+
+export interface QueueWorkerStatus {
+  worker: 'whatsapp' | 'email' | 'imessage' | 'campaigns'
+  intervalMinutes: number
+  lastScanAt: string | null
+  state: 'recent' | 'stale' | 'not_recorded'
 }
 
 export interface DeliveryReviewResponse {
   items: DeliveryReviewItem[]
-  counts: Record<DeliveryReviewFilter, number>
+  counts: Record<Exclude<DeliveryReviewFilter, 'overdue'>, number> & { overdue?: number }
+  workers?: QueueWorkerStatus[] | null
+  overdueGraceMinutes?: number
   total: number
   page: number
   pages: number

@@ -16,6 +16,7 @@ import telegramService from './services/telegram.js';
 import interventionEngine from './services/interventionEngine.js';
 import reportingService from './services/reportingService.js';
 import recoveryCoordinator from './services/recoveryCoordinator.js';
+import { QUEUE_SCAN_INTERVALS } from './services/queueHealth.js';
 import { startApiServer, broadcastEvent } from './api.js';
 import prisma from './utils/prismaClient.js';
 import { ensureDefaultAdmin } from './auth/rbac.js';
@@ -75,7 +76,7 @@ async function main() {
     cron.schedule('* * * * *', () => indiamartIntake.kick());
 
     // Process message queue every 2 minutes (priority sorted: HOT > WARM > COLD)
-    cron.schedule('*/2 * * * *', async () => {
+    cron.schedule(`*/${QUEUE_SCAN_INTERVALS.whatsapp} * * * *`, async () => {
       try {
         await followupEngine.processQueue();
       } catch (error) {
@@ -177,7 +178,7 @@ async function main() {
     });
 
     // Process staged iMessages independently of WhatsApp and email.
-    cron.schedule('* * * * *', async () => {
+    cron.schedule(`*/${QUEUE_SCAN_INTERVALS.imessage} * * * *`, async () => {
       try { await imessageService.processQueue(); }
       catch (error) { logger.error(`iMessage queue processing error: ${error.message}`); }
     });
@@ -211,7 +212,7 @@ async function main() {
     });
 
     // Process email queue every 2 minutes (parallel to WA queue)
-    cron.schedule('*/2 * * * *', async () => {
+    cron.schedule(`*/${QUEUE_SCAN_INTERVALS.email} * * * *`, async () => {
       try {
         await emailService.processEmailQueue();
       } catch (error) {
@@ -287,7 +288,7 @@ async function main() {
     // Check due campaigns after startup recovery has reconciled inbound replies.
     const runScheduledCampaigns = () => campaignScheduler.processDue().catch(() => logger.warn('Campaign schedule check failed; retrying next minute.'));
     await runScheduledCampaigns();
-    cron.schedule('* * * * *', runScheduledCampaigns);
+    cron.schedule(`*/${QUEUE_SCAN_INTERVALS.campaigns} * * * *`, runScheduledCampaigns);
     logger.info(`🔁 Runtime recovery: ${recovery?.lastRecoveryStatus || recovery?.summary?.status || 'ready'}`);
 
     logger.info('='.repeat(50));

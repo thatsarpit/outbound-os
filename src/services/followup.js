@@ -1,3 +1,4 @@
+import { recordQueueScan } from './queueHealth.js';
 import { reconcileMetaReceipts } from './whatsappDelivery.js';
 import { whatsappQuotaMessage } from './whatsappDispatch.js';
 import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
@@ -366,6 +367,7 @@ class FollowupEngine {
         take: Array.isArray(messageIds) ? Math.max(1, messageIds.length) : 20,
       });
 
+      if (!Array.isArray(messageIds)) await recordQueueScan('whatsapp');
       if (pendingMessages.length === 0) return;
 
       let toProcess = pendingMessages;

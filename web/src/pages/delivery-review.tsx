@@ -1,7 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, ArrowRight, ListChecks, RefreshCw } from 'lucide-react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
-import { inboxApi, type DeliveryReviewFilter, type DeliveryReviewItem } from '@/api/endpoints/inbox'
+import {
+  inboxApi,
+  type DeliveryReviewFilter,
+  type DeliveryReviewItem,
+  type QueueWorkerStatus,
+} from '@/api/endpoints/inbox'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ErrorState } from '@/components/ui/error-state'
@@ -16,6 +21,7 @@ const FILTERS: { value: DeliveryReviewFilter; label: string }[] = [
   { value: 'failed', label: 'Failed' },
   { value: 'unconfirmed', label: 'Unconfirmed' },
   { value: 'queued', label: 'Queued' },
+  { value: 'overdue', label: 'Overdue' },
   { value: 'sending', label: 'Sending' },
 ]
 
@@ -26,6 +32,63 @@ const STATUSES: Record<DeliveryReviewItem['status'], { label: string; className:
   unconfirmed: { label: 'Unconfirmed', className: 'bg-warning-muted text-warning' },
   queued: { label: 'Queued', className: 'bg-surface-raised text-text-secondary' },
   sending: { label: 'Sending', className: 'bg-surface-raised text-text-secondary' },
+}
+
+const WORKER_LABELS = {
+  whatsapp: 'WhatsApp',
+  email: 'Email',
+  imessage: 'iMessage',
+  campaigns: 'Campaign schedules',
+}
+
+function QueueScans({ workers }: { workers: QueueWorkerStatus[] | null }) {
+  return (
+    <section
+      aria-labelledby="queue-scans-heading"
+      className="rounded-lg border border-border bg-surface p-4"
+    >
+      <h2 id="queue-scans-heading" className="text-sm font-semibold text-text-primary">
+        Queue scans
+      </h2>
+      {workers === null ? (
+        <p className="mt-1 text-sm text-text-secondary" role="status">
+          Scan times are temporarily unavailable.
+        </p>
+      ) : (
+        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 lg:grid-cols-4">
+          {workers.map((worker) => (
+            <div className="min-w-0" key={worker.worker}>
+              <dt className="text-xs font-medium text-text-secondary">
+                {WORKER_LABELS[worker.worker]}
+              </dt>
+              <dd className="mt-1 text-sm text-text-primary">
+                {worker.lastScanAt ? (
+                  <time dateTime={worker.lastScanAt}>
+                    {new Date(worker.lastScanAt).toLocaleString(undefined, {
+                      dateStyle: 'medium',
+                      timeStyle: 'short',
+                    })}
+                  </time>
+                ) : (
+                  'No scan recorded'
+                )}
+              </dd>
+              <dd
+                className={cn(
+                  'mt-1 text-xs',
+                  worker.state === 'stale' ? 'text-warning' : 'text-text-muted',
+                )}
+              >
+                {worker.state === 'stale' ? 'Scan overdue · ' : ''}
+                Checks every {worker.intervalMinutes}{' '}
+                {worker.intervalMinutes === 1 ? 'minute' : 'minutes'}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </section>
+  )
 }
 
 function ReviewRow({ item, pathPrefix }: { item: DeliveryReviewItem; pathPrefix: string }) {
@@ -54,9 +117,12 @@ function ReviewRow({ item, pathPrefix }: { item: DeliveryReviewItem; pathPrefix:
       </div>
       <div className="min-w-0 space-y-1">
         <span
-          className={cn('inline-flex rounded-md px-2 py-1 text-xs font-medium', status.className)}
+          className={cn(
+            'inline-flex rounded-md px-2 py-1 text-xs font-medium',
+            item.overdue ? 'bg-warning-muted text-warning' : status.className,
+          )}
         >
-          {status.label}
+          {item.overdue ? 'Overdue' : status.label}
         </span>
         <p className="break-words text-sm text-text-secondary">{item.detail}</p>
         {item.providerCode && (
@@ -138,9 +204,17 @@ export default function DeliveryReviewPage() {
         }
       />
 
+      {data?.workers !== undefined && <QueueScans workers={data.workers} />}
+
       <div className="flex flex-wrap items-end justify-between gap-3 rounded-lg border border-border bg-surface p-3">
         <div role="group" aria-label="Message status" className="flex flex-wrap gap-1">
-          {FILTERS.map(({ value, label }) => (
+          {FILTERS.filter(
+            ({ value }) =>
+              value !== 'overdue' ||
+              !data ||
+              data.counts.overdue !== undefined ||
+              status === 'overdue',
+          ).map(({ value, label }) => (
             <Button
               key={value}
               size="sm"
@@ -150,7 +224,9 @@ export default function DeliveryReviewPage() {
               className="min-h-10"
             >
               {label}
-              {data && <span className="tabular-nums text-text-muted">{data.counts[value]}</span>}
+              {data?.counts[value] !== undefined && (
+                <span className="tabular-nums text-text-muted">{data.counts[value]}</span>
+              )}
             </Button>
           ))}
         </div>
@@ -172,6 +248,12 @@ export default function DeliveryReviewPage() {
         </div>
       </div>
 
+      {status === 'overdue' && data?.overdueGraceMinutes && (
+        <p className="text-xs text-text-secondary">
+          Messages appear here {data.overdueGraceMinutes} minutes after their scheduled send time.
+          Check sending hours and sender limits when the queue scan is current.
+        </p>
+      )}
       {review.isError ? (
         <ErrorState
           title="Could not load delivery review"
@@ -184,7 +266,11 @@ export default function DeliveryReviewPage() {
         <EmptyState
           icon={ListChecks}
           title={
-            status === 'attention' && !channel ? 'No messages need review' : 'No matching messages'
+            status === 'attention' && !channel
+              ? 'No messages need review'
+              : status === 'overdue'
+                ? 'No overdue messages'
+                : 'No matching messages'
           }
           description={
             status === 'attention' && !channel

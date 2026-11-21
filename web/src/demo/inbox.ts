@@ -1,4 +1,4 @@
-import type { DeliveryReviewFilter, DeliveryReviewItem } from '@/api/endpoints/inbox'
+import type { DeliveryReviewFilter, DeliveryReviewItem, QueueWorkerStatus } from '@/api/endpoints/inbox'
 import { queryClient } from '@/lib/query-client'
 import { notificationActions } from '@/stores/notification-store'
 import type { InboxChannel, InboxMessage, InboxSenderAccount, Lead, ScheduledInboxEmail } from '@/api/types'
@@ -639,17 +639,37 @@ export async function handleInboxRequest(
         })
       }
     }
+    review.push({
+      id: 90603,
+      leadId: 2,
+      leadName: THREADS[1].leadName,
+      campaignId: null,
+      channel: 'email',
+      status: 'queued',
+      detail: 'Waiting for the queue worker.',
+      providerCode: null,
+      updatedAt: ago(18),
+      scheduledAt: ago(12),
+      overdue: true,
+    })
     const matchesChannel = review.filter(row => !channel || row.channel === channel)
     const groups: Record<DeliveryReviewFilter, DeliveryReviewItem[]> = {
       failed: matchesChannel.filter(row => row.status === 'bounced'),
       unconfirmed: matchesChannel.filter(row => row.status === 'unconfirmed'),
       attention: matchesChannel.filter(row => row.status === 'unconfirmed' || row.status === 'bounced'),
       queued: matchesChannel.filter(row => row.status === 'queued'),
+      overdue: matchesChannel.filter(row => row.overdue),
       sending: [],
     }
     const items = groups[status as DeliveryReviewFilter] || []
     const counts = Object.fromEntries(Object.entries(groups).map(([filter, rows]) => [filter, rows.length]))
-    return json({ items: items.slice(0, 25), counts, total: items.length, page: 1, pages: 1 })
+    const workers: QueueWorkerStatus[] = [
+      { worker: 'whatsapp', intervalMinutes: 2, lastScanAt: ago(1), state: 'recent' },
+      { worker: 'email', intervalMinutes: 2, lastScanAt: ago(12), state: 'stale' },
+      { worker: 'imessage', intervalMinutes: 1, lastScanAt: null, state: 'not_recorded' },
+      { worker: 'campaigns', intervalMinutes: 1, lastScanAt: ago(1), state: 'recent' },
+    ]
+    return json({ items: items.slice(0, 25), counts, total: items.length, page: 1, pages: 1, workers, overdueGraceMinutes: 5 })
   }
 
   if (path.pathname.endsWith('/api/inbox/senders')) {
