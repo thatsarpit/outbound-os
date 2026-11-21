@@ -50,6 +50,7 @@ export interface CampaignLeadsResponse {
   page: number
   pages: number
   campaignUpdatedAt: string | null
+  launchReview?: { token: string; recipientCount: number } | null
 }
 
 export const campaignsApi = {
@@ -76,19 +77,19 @@ export const campaignsApi = {
 
   create: (data: CampaignMutationPayload) => api.post<Campaign>('/campaigns', data),
 
-  update: (id: number, data: Partial<CampaignMutationPayload>) =>
+  update: (id: number, data: Partial<CampaignMutationPayload> & { editRevision?: string }) =>
     api.patch<Campaign>(`/campaigns/${id}`, data),
 
   remove: (id: number) => api.delete<{ success: boolean; deleted: number }>(`/campaigns/${id}`),
 
   populate: (id: number) => api.post(`/campaigns/${id}/populate`),
 
-  start: (id: number) => api.post(`/campaigns/${id}/start`),
+  start: (id: number, reviewToken: string) => api.post(`/campaigns/${id}/start`, { reviewToken }),
 
   pause: (id: number) => api.post(`/campaigns/${id}/pause`),
 
-  schedule: (id: number, scheduledAt: string, timezone: string, review: { updatedAt: string; recipientCount: number }) =>
-    api.post<Campaign>(`/campaigns/${id}/schedule`, { scheduledAt, timezone, review }),
+  schedule: (id: number, scheduledAt: string, timezone: string, reviewToken: string) =>
+    api.post<Campaign>(`/campaigns/${id}/schedule`, { scheduledAt, timezone, reviewToken }),
 
   cancelSchedule: (id: number) => api.delete(`/campaigns/${id}/schedule`),
 
@@ -101,7 +102,7 @@ export const campaignsApi = {
       testEmail ? { testEmail } : {},
     ),
 
-  getLeads: (id: number, filters: { page?: number; limit?: number; status?: string } = {}) => {
+  getLeads: (id: number, filters: { page?: number; limit?: number; status?: string; launchReview?: 1 } = {}) => {
     const params = new URLSearchParams()
     Object.entries(filters).forEach(([key, value]) => {
       if (value === undefined || value === null || value === '') return

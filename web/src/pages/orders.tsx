@@ -613,7 +613,7 @@ function NewOrderDrawer({
     setItems((cur) => cur.map((it, i) => (i === idx ? { ...it, ...patch } : it)))
 
   return (
-    <DrawerShell onClose={onClose}>
+    <DrawerShell title="New order" onClose={onClose}>
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <h2 className="text-sm font-semibold">New order</h2>
         <button
@@ -949,7 +949,7 @@ function OrderDrawer({
   })
 
   return (
-    <DrawerShell onClose={onClose}>
+    <DrawerShell title={order?.orderNumber ?? 'Order'} onClose={onClose}>
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div>
           <h2 className="font-mono text-sm font-semibold">{order?.orderNumber ?? 'Order'}</h2>

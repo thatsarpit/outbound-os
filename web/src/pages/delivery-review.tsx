@@ -16,6 +16,7 @@ import { PageHeader } from '@/components/ui/page-header'
 import { CHANNEL_ORDER, CHANNELS } from '@/lib/channels'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
+import { OutreachPause } from '@/components/outreach/outreach-pause'
 
 const FILTERS: { value: DeliveryReviewFilter; label: string }[] = [
   { value: 'attention', label: 'Needs review' },
@@ -134,6 +135,7 @@ function ReviewRow({ item, pathPrefix }: { item: DeliveryReviewItem; pathPrefix:
   const channel = CHANNELS[item.channel]
   const status = STATUSES[item.status]
   const thread = new URLSearchParams({ leadId: String(item.leadId), channel: item.channel })
+  if (item.channel === 'email' && item.emailAccountId) thread.set('accountId', String(item.emailAccountId))
 
   return (
     <li className="grid min-w-0 gap-3 px-4 py-4 sm:px-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.35fr)_auto] lg:items-center">
@@ -243,6 +245,7 @@ export default function DeliveryReviewPage() {
         }
       />
 
+      <OutreachPause />
       {(data?.workers !== undefined || data?.receiptActivity !== undefined) && (
         <div className="grid gap-4 xl:grid-flow-col xl:auto-cols-fr">
           {data.workers !== undefined && <QueueScans workers={data.workers} />}

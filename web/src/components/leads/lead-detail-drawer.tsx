@@ -195,7 +195,7 @@ export function LeadDetailDrawer({
 
   return (
     <>
-      <DrawerShell onClose={onClose} panelClassName="lg:max-w-lg">
+      <DrawerShell title={lead.name} onClose={onClose} panelClassName="lg:max-w-lg">
         <div className="relative flex flex-1 flex-col overflow-hidden">
           {/* Header */}
           <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-surface/95 px-4 py-4 backdrop-blur-md sm:px-6">

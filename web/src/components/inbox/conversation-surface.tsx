@@ -220,7 +220,7 @@ export function ConversationSurface({
       {composerChannel === 'whatsapp' && activeThread && (
         <WhatsAppReplyWindow key={activeThread.leadId} thread={activeThread} />
       )}
-      <ScheduledEmails emails={activeThread?.scheduledEmails} />
+      <ScheduledEmails emails={activeThread?.scheduledEmails} leadId={activeThread?.leadId} />
       <div
         ref={timelineRef}
         {...timelineProps}

@@ -2087,15 +2087,22 @@ test('Inbox thread exposes Meta pricing without inventing an amount', async () =
 });
 
 describe('Campaign schedule API', () => {
-  test('requires manager access and persists/cancels a populated future schedule without sending', async () => {
+  test('requires manager review for both launch paths and invalidates an audience swap with an unchanged count', async t => {
     const scheduleRequest = (method, url, options = {}) => request(method, url, { ...options, headers: { ...options.headers, 'X-Forwarded-For': '192.0.2.182' } });
     const { default: db } = await import('../src/utils/prismaClient.js');
     const { signToken } = await import('../src/auth/rbac.js');
     const user = await db.user.create({ data: { name: 'Schedule viewer', email: 'schedule-viewer@example.test', role: 'viewer', passwordHash: 'fixture' } });
     const lead = await db.lead.create({ data: { name: 'Schedule fixture', mobile: '15550001998', email: 'schedule-fixture@example.test' } });
+    const replacement = await db.lead.create({ data: { name: 'Schedule replacement', mobile: '15550001997', email: 'replacement@example.test' } });
     const campaign = await db.campaign.create({ data: { name: 'Schedule fixture', messageTemplate: 'Hello', channel: 'email' } });
     await db.campaignLead.create({ data: { campaignId: campaign.id, leadId: lead.id } });
     const url = `/api/campaigns/${campaign.id}/schedule`;
+    const startUrl = `/api/campaigns/${campaign.id}/start`;
+    const snapshot = async () => {
+      const response = await scheduleRequest('GET', `/api/campaigns/${campaign.id}/leads?launchReview=1`, { headers: authHeader() });
+      assert.equal(response.status, 200);
+      return response.body.launchReview;
+    };
     const scheduledAt = new Date(Date.now() + 86400000);
     scheduledAt.setUTCHours(12, 0, 0, 0);
     const body = { scheduledAt: scheduledAt.toISOString(), timezone: 'UTC' };
@@ -2107,23 +2114,89 @@ describe('Campaign schedule API', () => {
       const viewer = { Authorization: `Bearer ${signToken(user)}` };
       assert.equal((await scheduleRequest('POST', url, { body, headers: viewer })).status, 403);
       assert.equal((await scheduleRequest('DELETE', url, { headers: viewer })).status, 403);
-      const scheduled = await scheduleRequest('POST', url, { body, headers: authHeader() });
+      assert.equal((await scheduleRequest('POST', url, { body, headers: authHeader() })).status, 409);
+      assert.equal((await scheduleRequest('POST', startUrl, { headers: authHeader() })).status, 409);
+      const original = await snapshot();
+      assert.equal(original.recipientCount, 1);
+      await db.campaignLead.updateMany({ where: { campaignId: campaign.id }, data: { leadId: replacement.id } });
+      assert.equal((await scheduleRequest('POST', url, { body: { ...body, reviewToken: original.token }, headers: authHeader() })).status, 409);
+      assert.equal((await scheduleRequest('POST', startUrl, { body: { reviewToken: original.token }, headers: authHeader() })).status, 409);
+      const scheduled = await scheduleRequest('POST', url, { body: { ...body, reviewToken: (await snapshot()).token }, headers: authHeader() });
       assert.equal(scheduled.status, 200);
       assert.equal(scheduled.body.status, 'scheduled');
       assert.equal(scheduled.body.scheduleTimezone, 'UTC');
       assert.equal(await db.message.count({ where: { campaignId: campaign.id } }), 0);
       assert.equal((await scheduleRequest('POST', `/api/campaigns/${campaign.id}/start`, { headers: authHeader() })).status, 409);
+      await db.lead.update({ where: { id: replacement.id }, data: { email: 'changed-after-approval@example.test' } });
+      await db.campaign.update({ where: { id: campaign.id }, data: { scheduledAt: new Date(Date.now() - 1000) } });
+      const { default: scheduler } = await import('../src/services/campaignScheduler.js');
+      await scheduler.processDue();
+      const held = await db.campaign.findUnique({ where: { id: campaign.id } });
+      assert.equal(held.status, 'paused');
+      assert.match(held.scheduleError, /scheduled audience changed/);
+      assert.equal(await db.message.count({ where: { campaignId: campaign.id } }), 0);
+      assert.equal((await scheduleRequest('POST', url, { body: { ...body, reviewToken: (await snapshot()).token }, headers: authHeader() })).status, 200);
       assert.equal((await scheduleRequest('DELETE', url, { headers: authHeader() })).status, 200);
       assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'draft');
       assert.equal((await scheduleRequest('POST', url, { body: { scheduledAt: 'invalid', timezone: 'UTC' }, headers: authHeader() })).status, 400);
+      const { default: engine } = await import('../src/services/campaignEngine.js');
+      const execute = t.mock.method(engine, '_executeCampaign', async () => {});
+      assert.equal((await scheduleRequest('POST', startUrl, { body: { reviewToken: (await snapshot()).token }, headers: authHeader() })).status, 200);
+      assert.equal(execute.mock.callCount(), 1);
     } finally {
       config.businessHours = old;
       await db.campaignLead.deleteMany({ where: { campaignId: campaign.id } });
       await db.campaign.delete({ where: { id: campaign.id } });
       await db.lead.delete({ where: { id: lead.id } });
+      await db.lead.delete({ where: { id: replacement.id } });
       await db.user.delete({ where: { id: user.id } });
     }
   });
+});
+
+test('workspace outreach pause persists, holds due work without retries and audits the operator action', async () => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const { default: followup } = await import('../src/services/followup.js');
+  const { default: email } = await import('../src/services/emailService.js');
+  const { default: imessage } = await import('../src/services/imessage.js');
+  const { default: fresh } = await import('../src/services/freshLeadOutreach.js');
+  const { default: scheduler } = await import('../src/services/campaignScheduler.js');
+  const lead = await db.lead.create({ data: {
+    name: 'Paused outreach fixture', mobile: '12025550191', email: 'pause-fixture@example.test', telegramPeer: 'pause_fixture',
+  } });
+  const campaign = await db.campaign.create({ data: {
+    name: 'Paused scheduled fixture', messageTemplate: 'Fixture', status: 'scheduled',
+    scheduledAt: new Date(), scheduleTimezone: 'UTC',
+  } });
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.214' };
+  try {
+    await db.message.createMany({ data: ['whatsapp', 'email', 'imessage'].map(channel => ({
+      leadId: lead.id, channel, direction: 'outbound', status: 'queued', scheduledAt: new Date(0), content: 'Fixture',
+    })) });
+    const pause = await request('POST', '/api/system/pause', { headers });
+    assert.equal(pause.status, 200);
+    assert.deepEqual(pause.body, { sendingPaused: true });
+    assert.equal((await db.systemConfig.findUnique({ where: { key: 'sending_paused' } })).value, 'true');
+    assert.deepEqual((await request('GET', '/api/system/outreach', { headers })).body, { sendingPaused: true });
+    const ids = (await db.message.findMany({ where: { leadId: lead.id }, select: { id: true } })).map(row => row.id);
+    await followup.processQueue({ messageIds: ids });
+    await email.processEmailQueue({ messageIds: ids });
+    await imessage.processQueue({ messageIds: ids });
+    assert.equal((await fresh.queue(lead, { channels: ['telegram'] })).telegram, 'paused');
+    await scheduler.processDue();
+    assert.equal(await db.message.count({ where: { leadId: lead.id, status: 'queued', retryCount: 0 } }), 3);
+    assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'scheduled');
+    assert.deepEqual((await request('POST', '/api/system/resume', { headers })).body, { sendingPaused: false });
+    const events = await db.activityLog.findMany({ where: { type: 'outreach_pause_changed' }, orderBy: { id: 'asc' } });
+    assert.deepEqual(events.map(row => JSON.parse(row.meta)), [
+      { actorId: 'mcp-service', sendingPaused: true }, { actorId: 'mcp-service', sendingPaused: false },
+    ]);
+  } finally {
+    await db.systemConfig.deleteMany({ where: { key: { in: ['sending_paused', 'runtime.queue.campaigns.last_scan_at'] } } });
+    await db.activityLog.deleteMany({ where: { type: 'outreach_pause_changed' } });
+    await db.campaign.delete({ where: { id: campaign.id } });
+    await db.lead.delete({ where: { id: lead.id } });
+  }
 });
 
 describe('Account dashboard layouts', () => {
@@ -2783,6 +2856,13 @@ test('scheduled inbox email keeps the original payload and holds missing files o
     assert.deepEqual(queued.body.scheduledEmails.map(row => row.status), ['queued']);
     assert.equal(queued.body.messages.length, 1, 'queued email does not count as a conversation message yet');
 
+    const changeUrl = messageId => `/api/inbox/threads/${lead.id}/scheduled-emails/${messageId}`;
+    const moved = new Date(Date.now() + 120 * 60_000).toISOString();
+    assert.equal((await request('PATCH', changeUrl(id), { headers, body: { scheduledAt: moved } })).status, 200);
+    await email.processEmailQueue({ messageIds: [id] });
+    assert.equal(calls.length, 0, 'a rescheduled message is held until the new time');
+    assert.equal((await db.message.findUnique({ where: { id } })).scheduledAt.toISOString(), moved);
+
     await db.message.update({ where: { id }, data: { scheduledAt: new Date(0) } });
     await email.processEmailQueue({ messageIds: [id] });
     assert.equal(calls.length, 1);
@@ -2829,6 +2909,13 @@ test('scheduled inbox email keeps the original payload and holds missing files o
     await email.processEmailQueue({ messageIds: [cancelledId] });
     assert.equal((await db.message.findUnique({ where: { id: cancelledId } })).status, 'cancelled');
     assert.equal(calls.length, 1, 'a newer reply stops the scheduled send');
+    assert.equal((await request('DELETE', changeUrl(id), { headers })).status, 409, 'accepted mail cannot be cancelled');
+    const toCancel = await send({ scheduledAt: date, clientMessageId: 'scheduled-email-fixture-005' });
+    assert.equal(toCancel.status, 200);
+    const cancelId = toCancel.body.message.id;
+    assert.equal((await request('DELETE', changeUrl(cancelId), { headers })).status, 200);
+    assert.equal((await db.message.findUnique({ where: { id: cancelId } })).providerStatusReason, 'scheduled_email_cancelled_by_operator');
+    assert.equal((await request('PATCH', changeUrl(cancelId), { headers, body: { scheduledAt: moved } })).status, 409);
   } finally {
     fs.rmSync(filePath, { force: true });
     if (file) await db.mediaFile.delete({ where: { id: file.id } });
@@ -3934,17 +4021,69 @@ describe('MCP dashboard connection setup', () => {
 });
 
 describe('Audit workflow repairs', () => {
-  test('CSV upload works without removed pool fields and preview accepts unrestricted scope', async () => {
+  test('email-only CSV contacts skip matching addresses and preserve suppression', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const filename = 'audit-email-only.csv';
+    const known = await db.lead.create({ data: {
+      name: 'Existing suppressed contact', mobile: '12025550173', email: ' Already-Known@example.test ',
+      emailOptOut: true,
+    } });
+    try {
+      const form = new FormData();
+      form.set('file', new Blob([
+        'name,email,company\nExisting,already-known@example.test,Should not fill\nNew,email-csv@example.test,Fixture\nRepeat,EMAIL-CSV@example.test,Ignored\nInvalid,missing-domain,Example\n',
+      ], { type: 'text/csv' }), filename);
+      const upload = () => fetch(`${baseUrl}/api/import/csv`, {
+        method: 'POST', headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.208' }, body: form,
+      });
+      form.set('preview', '1');
+      const preview = await upload();
+      assert.equal(preview.status, 200);
+      const review = await preview.json();
+      assert.deepEqual([review.imported, review.skipped, review.failed], [1, 2, 1]);
+      form.delete('preview');
+      form.set('reviewToken', review.reviewToken);
+      assert.equal((await upload()).status, 200);
+      const imported = await db.lead.findMany({ where: { email: 'email-csv@example.test' } });
+      assert.equal(imported.length, 1);
+      assert.match(imported[0].mobile, /^no-phone:csv:/);
+      assert.equal(await db.message.count({ where: { leadId: imported[0].id } }), 0);
+      const existing = await db.lead.findUnique({ where: { id: known.id } });
+      assert.equal(existing.company, null);
+      assert.equal(existing.emailOptOut, true);
+    } finally {
+      await db.lead.deleteMany({ where: { OR: [{ id: known.id }, { email: 'email-csv@example.test' }] } });
+      await db.importBatch.deleteMany({ where: { filename } });
+    }
+  });
+
+  test('CSV preview writes nothing and applies only the current reviewed upload', async () => {
     const { default: db } = await import('../src/utils/prismaClient.js');
     const name = 'CSV multiline audit fixture';
     try {
       const form = new FormData();
       form.set('file', new Blob(['name,mobile,notes\r\n"CSV multiline audit fixture",447700900811,"line one\nline two"\r\n'], { type: 'text/csv' }), 'audit-fixture.csv');
-      const result = await fetch(`${baseUrl}/api/import/csv`, { method: 'POST', headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.210' }, body: form });
+      form.set('preview', '1');
+      const upload = () => fetch(`${baseUrl}/api/import/csv`, {
+        method: 'POST', headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.210' }, body: form,
+      });
+      const scanned = await upload();
+      assert.equal(scanned.status, 200);
+      const review = await scanned.json();
+      assert.equal(review.imported, 1);
+      assert.equal(review.columnMapping.mobile, 'mobile');
+      assert.equal(await db.lead.count({ where: { name } }), 0);
+      assert.equal(await db.importBatch.count({ where: { filename: 'audit-fixture.csv' } }), 0);
+      form.delete('preview');
+      form.set('reviewToken', 'a'.repeat(64));
+      assert.equal((await upload()).status, 409);
+      form.set('reviewToken', review.reviewToken);
+      const result = await upload();
       assert.equal(result.status, 200, JSON.stringify(await result.clone().json()));
       const saved = await db.lead.findFirst({ where: { name } });
       assert.ok(saved);
       assert.equal(saved.notes, 'line one\nline two');
+      assert.equal((await upload()).status, 409, 'repeat approval is stale once the matching contact exists');
       const preview = await request('POST', '/api/campaigns/preview-leads', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.211' }, body: { filter: { status: 'new' }, channel: 'whatsapp' } });
       assert.equal(preview.status, 200);
       assert.equal(typeof preview.body.count, 'number');

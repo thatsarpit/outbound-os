@@ -22,12 +22,27 @@ export interface ImportResult {
   batchId?: number
 }
 
+export interface CsvPreview extends ImportResult {
+  reviewToken: string
+  columnMapping: Record<string, string>
+  totalRows: number
+  rowIssues: Array<{ record: number; reason: string }>
+}
+
 export const importApi = {
   listBatches: () => api.get<ImportBatch[]>('/import/batches'),
 
-  uploadCsv: (file: File) => {
+  previewCsv: (file: File) => {
     const formData = new FormData()
     formData.append('file', file)
+    formData.append('preview', '1')
+    return api.upload<CsvPreview>('/import/csv', formData)
+  },
+
+  uploadCsv: (file: File, reviewToken: string) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('reviewToken', reviewToken)
     return api.upload<ImportResult>('/import/csv', formData)
   },
 

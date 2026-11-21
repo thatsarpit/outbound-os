@@ -1,4 +1,13 @@
 import type { ScheduledInboxEmail } from '@/api/types'
+import { useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { inboxApi } from '@/api/endpoints/inbox'
+import { Button, Input } from '@/components/ui'
+import { ConfirmDialog } from '@/components/ui/dialog'
+import { emailScheduleDate } from '@/lib/email-compose'
+import { taskDateInput } from '@/lib/task-date'
+import { useAuthStore } from '@/stores/auth-store'
+import { toast } from '@/stores/toast-store'
 
 const LABELS: Record<ScheduledInboxEmail['status'], string> = {
   queued: 'Scheduled',
@@ -26,7 +35,35 @@ function guidance(email: ScheduledInboxEmail) {
   return null
 }
 
-export function ScheduledEmails({ emails = [] }: { emails?: ScheduledInboxEmail[] }) {
+export function ScheduledEmails({ emails = [], leadId }: { emails?: ScheduledInboxEmail[]; leadId: number | undefined }) {
+  const canEdit = useAuthStore((state) => Boolean(state.user && state.user.role !== 'viewer'))
+  const queryClient = useQueryClient()
+  const [action, setAction] = useState<{ email: ScheduledInboxEmail; cancel: boolean } | null>(null)
+  const [time, setTime] = useState('')
+  const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const change = useMutation({
+    mutationFn: async ({ email, cancel }: NonNullable<typeof action>) => {
+      if (!leadId) throw new Error('Conversation is unavailable.')
+      return cancel
+        ? inboxApi.cancelScheduledEmail(leadId, email.id)
+        : inboxApi.rescheduleEmail(leadId, email.id, emailScheduleDate(time, timezone))
+    },
+    onSuccess: (_result, { cancel }) => {
+      toast.success(cancel ? 'Scheduled email cancelled' : 'Email rescheduled')
+      setAction(null)
+    },
+    onSettled: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] }),
+      queryClient.invalidateQueries({ queryKey: ['delivery-review'] }),
+    ]),
+    meta: { silent: true },
+  })
+  function choose(email: ScheduledInboxEmail, cancel: boolean) {
+    change.reset()
+    setTime(taskDateInput(email.scheduledAt, timezone))
+    setAction({ email, cancel })
+  }
+
   if (!emails.length) return null
   return (
     <details className="shrink-0 border-b border-border px-4 py-2 text-sm">
@@ -57,10 +94,33 @@ export function ScheduledEmails({ emails = [] }: { emails?: ScheduledInboxEmail[
                 )}
               </p>
               {detail && <p className="text-xs text-text-secondary">{detail}</p>}
+              {email.status === 'queued' && canEdit && (
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => choose(email, false)}>Reschedule</Button>
+                  <Button size="sm" variant="ghost" onClick={() => choose(email, true)}>Cancel email</Button>
+                </div>
+              )}
             </li>
           )
         })}
       </ul>
+      {action && (
+        <ConfirmDialog
+          open
+          onOpenChange={(open) => { if (!open && !change.isPending) setAction(null) }}
+          title={action.cancel ? 'Cancel scheduled email?' : 'Reschedule email'}
+          description={action.email.emailSubject || 'No subject'}
+          confirmLabel={action.cancel ? 'Cancel email' : 'Save new time'}
+          cancelLabel="Back"
+          destructive={action.cancel}
+          isLoading={change.isPending}
+          onConfirm={() => change.mutate(action)}
+        >
+          {!action.cancel && <Input label={`Send time in ${timezone}`} type="datetime-local" value={time}
+            onChange={(event) => setTime(event.target.value)} disabled={change.isPending} />}
+          {change.error && <p role="alert" className="mt-2 text-sm text-danger">{change.error.message}</p>}
+        </ConfirmDialog>
+      )}
     </details>
   )
 }

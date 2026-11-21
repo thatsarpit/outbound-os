@@ -211,14 +211,16 @@ function InboxInner() {
 
   const composerChannel = routedChannel ?? activeThread?.channel ?? 'whatsapp'
   const availableSenders = activeThread?.availableSenderAccounts ?? []
+  const chosenSender = availableSenders.find((account) => account.id === routedAccountId)
   const senderAccountId =
-    availableSenders.find((account) => account.id === routedAccountId)?.id ??
-    activeThread?.senderAccount?.id ??
-    availableSenders[0]?.id ??
-    null
+    routedAccountId
+      ? chosenSender?.id ?? null
+      : activeThread?.senderAccount?.id ?? availableSenders[0]?.id ?? null
 
   const latestEmailMessage =
-    activeThread?.messages?.slice().reverse().find(isReplyableEmail) || null
+    activeThread?.messages?.slice().reverse().find(message =>
+      isReplyableEmail(message) && (!routedAccountId || message.emailAccountId === senderAccountId),
+    ) || null
 
   const { data: templates = [], isLoading: templatesLoading } = useQuery({
     queryKey: EMAIL_TEMPLATE_LIST_QUERY_KEY,
@@ -301,9 +303,11 @@ function InboxInner() {
           : composerChannel === 'email'
             ? !activeThread.leadEmail
               ? 'This lead does not have an email address yet.'
-              : activeThread.availableSenderAccounts?.length
-                ? null
-                : 'No verified sender account is available for this lead.'
+              : routedAccountId && !chosenSender
+                ? 'The original sender is unavailable. Choose a sender to write a reply.'
+                : activeThread.availableSenderAccounts?.length
+                  ? null
+                  : 'No verified sender account is available for this lead.'
             : composerChannel === 'telegram'
               ? !activeThread.leadTelegramPeer
                 ? 'Add a Telegram @username, phone number, or peer ID to this lead first.'
@@ -904,6 +908,7 @@ function InboxInner() {
 
         {selectedLeadId && isMobileViewport && (
           <DrawerShell
+            title={activeThread?.leadName ?? 'Conversation'}
             onClose={() => {
               persistCurrentDraft()
               setSelectedLeadId(null)

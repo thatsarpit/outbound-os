@@ -6,6 +6,23 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+- Add a manager-controlled workspace outreach pause in Delivery review that
+  holds new automated submissions across the configured sending channels.
+- Require a current launch review for both immediate and scheduled campaigns,
+  and reject approvals after the draft or pending recipient set changes.
+- Edit and discard campaign drafts from the dashboard. Changing a draft’s
+  channel, audience filters or sender clears its prepared audience.
+- Keep keyboard focus inside open detail drawers and restore it when they close.
+- Cancel or reschedule email while it is still queued on desktop and mobile.
+- Open Delivery review email conversations with the original sender selected
+  and prompt the operator to choose if that sender is unavailable.
+- Test an intake payload from workspace setup without creating leads or sending
+  messages, and show sending verification alongside channel configuration.
+- Preview CSV mapping, duplicate counts and invalid records before importing
+  in the dashboard. Reject stale previews when the file or matching leads change.
+- Import email-only contacts. Skip email-only rows matching an existing
+  address while preserving the existing records and opt-outs.
+
 - Show the dashboard and server version and source revision under **About
   Outbound OS**. Label development builds and check that Docker release tags
   match the product version.

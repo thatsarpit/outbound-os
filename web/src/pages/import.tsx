@@ -2,7 +2,7 @@ import { invalidateLeadSurfaceQueries } from '@/lib/lead-automation'
 import { getSessionToken } from '@/stores/auth-store'
 import { useState, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { importApi } from '@/api/endpoints/import'
+import { importApi, type CsvPreview } from '@/api/endpoints/import'
 import { cn, formatNumber } from '@/lib/utils'
 import { formatDate } from '@/lib/format-date'
 import {
@@ -16,6 +16,7 @@ import {
   Clock,
 } from 'lucide-react'
 import { Button } from '@/components/ui'
+import { ConfirmDialog } from '@/components/ui/dialog'
 
 interface ImportBatch {
   id: number
@@ -64,6 +65,7 @@ export default function ImportPage() {
   const queryClient = useQueryClient()
   const fileRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+  const [preview, setPreview] = useState<{ file: File; data: CsvPreview } | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
   const [lastResult, setLastResult] = useState<ImportResult | null>(null)
   const [dragOver, setDragOver] = useState(false)
@@ -104,7 +106,8 @@ export default function ImportPage() {
   const latestBatchTotal = getBatchTotal(latestBatch)
   const latestSuccessRate = getBatchSuccessRate(latestBatch)
 
-  const handleUpload = async (file: File) => {
+  const handleUpload = async (file: File, confirm?: CsvPreview) => {
+    if (uploading) return
     if (!file.name.toLowerCase().endsWith('.csv')) {
       setLastResult({
         success: false,
@@ -120,9 +123,14 @@ export default function ImportPage() {
     setLastResult(null)
 
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      const result = await importApi.uploadCsv(file)
+      if (!confirm) {
+        const data = await importApi.previewCsv(file)
+        if (!data?.reviewToken) throw new Error('Could not read the CSV preview.')
+        setPreview({ file, data })
+        return
+      }
+      const result = await importApi.uploadCsv(file, confirm.reviewToken)
+      setPreview(null)
       setLastResult(
         result ?? {
           success: false,
@@ -136,6 +144,7 @@ export default function ImportPage() {
       invalidateLeadSurfaceQueries(queryClient)
       void queryClient.invalidateQueries({ queryKey: ['lead-tags'] })
     } catch (err) {
+      setPreview(null)
       setLastResult({
         success: false,
         imported: 0,
@@ -282,16 +291,18 @@ export default function ImportPage() {
           {uploading ? (
             <>
               <Loader2 className="mx-auto mb-3 h-10 w-10 animate-spin text-accent" />
-              <p className="text-text-primary font-medium">Importing leads…</p>
+              <p className="text-text-primary font-medium">{preview ? 'Importing leads…' : 'Checking CSV…'}</p>
               <p className="text-text-muted text-sm mt-1">This may take a moment</p>
             </>
           ) : (
             <>
               <Upload className="mx-auto mb-3 h-10 w-10 text-accent" />
               <p className="text-text-primary font-medium">Drop CSV file here</p>
-              <p className="text-text-muted text-sm mt-1">or click to browse</p>
+              <Button variant="secondary" size="sm" className="mt-2" onClick={(event) => { event.stopPropagation(); fileRef.current?.click() }}>
+                Choose CSV
+              </Button>
               <p className="text-text-muted text-xs mt-3">
-                Required: <span className="font-mono text-accent">name, mobile</span>
+                Include a phone or email column
               </p>
               <p className="text-text-muted text-xs">
                 Optional:{' '}
@@ -300,6 +311,32 @@ export default function ImportPage() {
             </>
           )}
         </div>
+        {preview && (
+          <ConfirmDialog
+            open
+            onOpenChange={(open) => { if (!open && !uploading) setPreview(null) }}
+            title="Review CSV import"
+            description={preview.file.name}
+            confirmLabel="Apply import"
+            onConfirm={() => handleUpload(preview.file, preview.data)}
+            isLoading={uploading}
+          >
+            <p className="text-sm text-text-secondary">
+              {preview.data.imported} new · {preview.data.skipped} duplicates · {preview.data.failed} invalid
+            </p>
+            <p className="mt-1 text-xs text-text-muted">Matching phone numbers can fill blank fields. Email-only matches are skipped. Imports do not queue outreach.</p>
+            <dl className="mt-3 grid max-h-40 grid-cols-[auto_1fr] gap-x-4 gap-y-1 overflow-y-auto text-xs">
+              {Object.entries(preview.data.columnMapping).map(([field, column]) => (
+                <div key={field} className="contents"><dt className="text-text-muted">{field}</dt><dd className="break-words">{column}</dd></div>
+              ))}
+            </dl>
+            {preview.data.rowIssues.length > 0 && (
+              <ul className="mt-3 max-h-24 space-y-1 overflow-y-auto text-xs text-text-secondary">
+                {preview.data.rowIssues.map(issue => <li key={issue.record}>Data record {issue.record} · {issue.reason}</li>)}
+              </ul>
+            )}
+          </ConfirmDialog>
+        )}
 
         <div className="glass flex flex-col items-center justify-between rounded-lg p-8 text-center transition-all hover:border-accent/30 hover:shadow-sm">
           <div>

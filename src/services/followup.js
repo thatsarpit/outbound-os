@@ -1,3 +1,4 @@
+import { isOutreachPaused, OUTREACH_PAUSED } from './outreachPause.js';
 import { recordQueueScan } from './queueHealth.js';
 import { reconcileMetaReceipts } from './whatsappDelivery.js';
 import { whatsappQuotaMessage } from './whatsappDispatch.js';
@@ -368,7 +369,7 @@ class FollowupEngine {
       });
 
       if (!Array.isArray(messageIds)) await recordQueueScan('whatsapp');
-      if (pendingMessages.length === 0) return;
+      if (pendingMessages.length === 0 || await isOutreachPaused()) return;
 
       let toProcess = pendingMessages;
 
@@ -398,6 +399,7 @@ class FollowupEngine {
       logger.info(`📤 Processing ${sorted.length} queued messages (priority sorted)...`);
 
       for (const msg of sorted) {
+        if (await isOutreachPaused()) break;
         let claimedMsg;
         let submission;
         let sendResult;
@@ -500,6 +502,12 @@ class FollowupEngine {
                 (await suppressedWhatsAppLeads(prisma, [lead.id], accountId)).has(lead.id)) {
                 await prisma.message.updateMany({
                   where: ownsPreparation(), data: { status: 'cancelled', providerStatusReason: 'dispatch_cancelled' },
+                });
+                return false;
+              }
+              if (await isOutreachPaused()) {
+                await prisma.message.updateMany({
+                  where: ownsPreparation(), data: { status: 'queued', providerStatusReason: OUTREACH_PAUSED },
                 });
                 return false;
               }
@@ -756,7 +764,7 @@ class FollowupEngine {
             scheduledAt: { lte: new Date() },
           }
         });
-        if (!Array.isArray(messageIds) && morePending > 0 && processedAny && !deferredByBusinessHours) {
+        if (!Array.isArray(messageIds) && morePending > 0 && processedAny && !deferredByBusinessHours && !await isOutreachPaused()) {
           setTimeout(() => this.processQueue(), 1000);
         }
       } catch (err) {

@@ -111,6 +111,19 @@ check the webhook URL, credentials and provider logs. An unmatched
 receipt may arrive before its message is saved. Check the provider and
 conversation before retrying the message.
 
+Use **Pause outreach** in Delivery review to hold new automated submissions.
+The pause persists across restarts. Incoming replies and manual replies remain
+available, and provider requests already in progress can finish. When outreach
+resumes, due queues can send again. Review any interrupted running campaign
+before using **Resume campaign**.
+
+Update the API, dashboard and MCP together for the campaign launch review.
+Starting and scheduling a campaign now require the current token from
+**Campaign launch**. For MCP, request `launchReview: 1` from `campaign_leads`
+and use the returned token after operator approval. Schedules saved on this
+release pause for review if their recipient membership or destination changes
+before launch. Older schedules retain their existing approval behavior.
+
 ## Manual (development)
 
 Needs Node.js 24+.

@@ -24,6 +24,8 @@ const PAGE_TITLES: Array<{ route: string; title: string }> = [
   { route: '/leads', title: 'Leads' },
   { route: '/analytics', title: 'Analytics' },
   { route: '/pipeline', title: 'Pipeline' },
+  { route: '/tasks', title: 'Tasks' },
+  { route: '/delivery', title: 'Delivery review' },
   { route: '/orders', title: 'Orders' },
   { route: '/products', title: 'Products' },
   { route: '/customers', title: 'Customers' },

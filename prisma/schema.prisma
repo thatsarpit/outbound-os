@@ -373,6 +373,7 @@ model Campaign {
   scheduledAt      DateTime?
   scheduleTimezone String?
   scheduleError    String?
+  reviewedAudienceHash String?
   startedAt        DateTime?
   completedAt      DateTime?
   createdAt        DateTime  @default(now())

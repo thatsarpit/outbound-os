@@ -50,6 +50,9 @@ export interface SystemHealthCheck {
 
 export const systemApi = {
   getStatus: () => api.get<SystemStatus>('/system/status'),
+  getOutreach: () => api.get<{ sendingPaused: boolean }>('/system/outreach'),
+  setOutreachPaused: (paused: boolean) =>
+    api.post<{ sendingPaused: boolean }>(paused ? '/system/pause' : '/system/resume'),
 
   getHealth: () => api.get<SystemHealthCheck>('/system/health'),
 

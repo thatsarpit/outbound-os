@@ -485,6 +485,20 @@ export async function handleInboxRequest(
 ): Promise<Response | null> {
   const method = (init?.method || 'GET').toUpperCase()
   const path = new URL(url, window.location.origin)
+  const emailAction = path.pathname.match(/^\/api\/inbox\/threads\/(\d+)\/scheduled-emails\/(\d+)$/)
+  if (emailAction && (method === 'PATCH' || method === 'DELETE')) {
+    const email = scheduledEmails.get(Number(emailAction[1]))?.find(row => row.id === Number(emailAction[2]))
+    if (!email || email.status !== 'queued') return Response.json({ error: 'This sample email is no longer queued.' }, { status: 409 })
+    if (method === 'DELETE') {
+      email.status = 'cancelled'
+      email.providerStatusReason = 'scheduled_email_cancelled_by_operator'
+    } else {
+      const { scheduledAt } = JSON.parse(String(init?.body ?? '{}'))
+      if (!(Date.parse(scheduledAt) > Date.now())) return Response.json({ error: 'Choose a future time.' }, { status: 400 })
+      email.scheduledAt = scheduledAt
+    }
+    return Response.json({ success: true })
+  }
 
   const members = [
     {

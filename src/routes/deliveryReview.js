@@ -118,6 +118,7 @@ router.get('/messages/review', requireRole('manager'), async (req, res) => {
           channel: true,
           status: true,
           campaignId: true,
+          emailAccountId: true,
           scheduledAt: true,
           updatedAt: true,
           providerStatusReason: true,

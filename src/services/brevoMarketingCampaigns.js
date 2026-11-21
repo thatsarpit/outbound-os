@@ -1,3 +1,4 @@
+import { isOutreachPaused } from './outreachPause.js';
 import businessProfile from '../businessProfile.js';
 import crypto from 'crypto';
 
@@ -51,11 +52,6 @@ async function writeConfig(key, value) {
   return prisma.systemConfig.upsert({
     where: { key }, update: { value: String(value) }, create: { key, value: String(value) },
   });
-}
-
-async function isGloballyPaused() {
-  const row = await readConfig('sending_paused');
-  return row?.value === 'true';
 }
 
 function standardCampaignName({ date, account }) {
@@ -142,7 +138,7 @@ class BrevoMarketingCampaigns {
     const uniqueIds = [...new Set(senderIds.map(Number).filter(Number.isInteger))];
     const [enabled, paused, folderRow, accounts, consentedCount, optOutCount] = await Promise.all([
       this.isEnabled(),
-      isGloballyPaused(),
+      isOutreachPaused(),
       readConfig(KEYS.folderId),
       uniqueIds.length
         ? prisma.emailAccount.findMany({
@@ -311,7 +307,7 @@ class BrevoMarketingCampaigns {
     return state;
   }
 
-  async _dispatchCampaign({ date, account, leads, state, validateRecipients, allowWhileGloballyPaused = false }) {
+  async _dispatchCampaign({ date, account, leads, state, validateRecipients }) {
     if (state.sentAt) return { state, alreadySent: true };
 
     // If a crash happened after accepting sendNow, do not issue the request a
@@ -337,8 +333,8 @@ class BrevoMarketingCampaigns {
       || currentAccount.smtpPass !== account.smtpPass || remaining < leads.length
       || !capacity || capacity.remaining < leads.length || !await this.isEnabled()
       || !await validateRecipients(leads)) return { state, blocked: true, reason: 'audience_or_settings_changed' };
-    if (!allowWhileGloballyPaused && await isGloballyPaused()) return { state, paused: true };
     await emailVerification.assertRecipients(leads.map(lead => lead.email));
+    if (await isOutreachPaused()) return { state, paused: true };
     state.sendRequestedAt = new Date().toISOString();
     await this._writeBatchState(date, account.id, state);
     await emailService.brevoRequestForAccount(account.id, `/emailCampaigns/${encodeURIComponent(state.campaignId)}/sendNow`, { method: 'POST' });
@@ -410,7 +406,7 @@ class BrevoMarketingCampaigns {
     }
   }
 
-  async dispatchDailyBatch({ date, allocations = [], template, countries = [], validateRecipients, dryRun = false, allowWhileGloballyPaused = false } = {}) {
+  async dispatchDailyBatch({ date, allocations = [], template, countries = [], validateRecipients, dryRun = false } = {}) {
     if (!template || !countries.length || typeof validateRecipients !== 'function') {
       return { handled: true, skipped: true, reason: 'batch_policy_required' };
     }
@@ -440,7 +436,7 @@ class BrevoMarketingCampaigns {
       };
     }
     if (!readiness.enabled) return { handled: true, skipped: true, reason: 'brevo_marketing_campaigns_disabled', readiness };
-    if (readiness.globallyPaused && !allowWhileGloballyPaused) {
+    if (readiness.globallyPaused) {
       return { handled: true, skipped: true, reason: 'sending_paused', readiness };
     }
     if (!readiness.configuredBrevoSenders) return { handled: true, skipped: true, reason: 'verified_brevo_senders_required', readiness };
@@ -468,7 +464,6 @@ class BrevoMarketingCampaigns {
         account,
         leads,
         state,
-        allowWhileGloballyPaused,
         validateRecipients,
       });
       if (dispatched.paused || dispatched.pendingReview || dispatched.blocked) {

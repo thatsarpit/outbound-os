@@ -78,6 +78,7 @@ export default function MobileInboxPage() {
           key={`${dashboardScope}:${selected}`}
           leadId={selected}
           initialChannel={params.get('channel')}
+          initialEmailAccountId={mobileLeadId(params.get('accountId'))}
           onClose={() => setParams(queueParams())}
           onChannelNavigate={(channel) =>
             setParams(

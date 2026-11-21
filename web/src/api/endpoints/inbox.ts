@@ -30,6 +30,7 @@ export interface DeliveryReviewItem {
   leadId: number
   leadName: string
   campaignId: number | null
+  emailAccountId?: number | null
   channel: InboxChannel
   status: 'failed' | 'permanently_failed' | 'bounced' | 'unconfirmed' | 'queued' | 'sending'
   detail: string
@@ -102,6 +103,12 @@ export const inboxApi = {
 
   getThread: (leadId: number) =>
     api.get<InboxThreadDetail>(`/inbox/threads/${encodeURIComponent(String(leadId))}`),
+
+  cancelScheduledEmail: (leadId: number, id: number) =>
+    api.delete(`/inbox/threads/${leadId}/scheduled-emails/${id}`),
+
+  rescheduleEmail: (leadId: number, id: number, scheduledAt: string) =>
+    api.patch(`/inbox/threads/${leadId}/scheduled-emails/${id}`, { scheduledAt }),
 
   markRead: (leadId: number, messageId: number) =>
     api.post<{ success: boolean; lastReadMessageId: number }>(`/inbox/threads/${leadId}/read`, {

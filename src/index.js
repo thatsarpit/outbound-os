@@ -51,9 +51,6 @@ async function main() {
     // service reads the business profile, time zone or country code.
     await loadWorkspaceProfile();
 
-    // ── Step 0b: Restore persisted pause flag so a crash-while-paused
-    // instance doesn't silently start sending again on the next boot. ──
-
     // ── Step 1: Initialize WhatsApp clients ──
     logger.info('Step 1/4: Initializing WhatsApp...');
     await whatsappManager.initialize();

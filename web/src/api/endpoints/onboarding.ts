@@ -29,6 +29,18 @@ export const onboardingApi = {
   saveProfile: (values: WorkspaceProfile) => api.put<WorkspaceProfile>('/workspace/profile', values),
   createSource: (presetId: string, name?: string) =>
     api.post<CreatedLeadSource>('/webhooks/sources/from-preset', { presetId, name }),
+  testSource: async (source: CreatedLeadSource, payload: Record<string, unknown>) => {
+    const response = await fetch(`/api/webhooks/inbound/${encodeURIComponent(source.source)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': source.apiKey },
+      body: JSON.stringify({ ...payload, test: true }),
+    })
+    const result = await response.json().catch(() => null)
+    if (!response.ok || result?.test !== true || result?.created !== false) {
+      throw new Error(result?.error || 'The source did not confirm a mapping test. Check its key and configuration.')
+    }
+    return result.mapped as Record<string, unknown>
+  },
 }
 
 export const onboardingStatusQuery = queryOptions({

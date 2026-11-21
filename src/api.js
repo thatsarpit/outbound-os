@@ -1,5 +1,9 @@
 import deliveryReviewRoutes from './routes/deliveryReview.js';
 import systemVersionRoutes from './routes/systemVersion.js';
+import scheduledEmailRoutes from './routes/scheduledEmails.js';
+import outreachPauseRoutes from './routes/outreachPause.js';
+import { isOutreachPaused } from './services/outreachPause.js';
+import { campaignLaunchReview } from './services/campaignLaunchReview.js';
 import messageActionRoutes from './routes/messageActions.js';
 import { assertReplyTarget, nativeMessageId, messageAccount, reactionTarget } from './utils/messageActions.js';
 import websiteEnquiries from './routes/websiteEnquiries.js';
@@ -920,6 +924,7 @@ app.get('/api/events', async (req, res) => {
 
 app.use('/api', requireRole('viewer'));
 app.use('/api', systemVersionRoutes);
+app.use('/api', outreachPauseRoutes);
 app.use('/api', connectorAdmin);
 app.use('/api', mcpSetup);
 app.use('/api/whatsapp', whatsappTemplateRoutes);
@@ -950,6 +955,7 @@ app.use('/api', emailAttachmentRoutes);
 app.use('/api', requirePoolAccess());
 app.use('/api', inboxReadStateRoutes);
 app.use('/api', messageActionRoutes);
+app.use('/api', scheduledEmailRoutes);
 app.use('/api', deliveryReviewRoutes);
 app.use('/api', webPushRoutes);
 app.use('/api', analyticsViewRoutes);
@@ -1078,6 +1084,7 @@ app.get('/api/system/status', requireRole('manager'), async (req, res) => {
       connectedAccounts,
       enabledAccounts,
       dashboardConnections: sseClients.size,
+      sendingPaused: await isOutreachPaused(),
       indiamart: await indiamartIntakeService.health(),
     });
   } catch (error) {
@@ -2209,16 +2216,21 @@ app.post('/api/import/csv', requireRole('manager'), upload.single('file'), async
     if (poolId && !(await userCanAccessPool(req, poolId))) {
       return res.status(403).json({ error: 'You do not have access to this lead pool.' });
     }
-    const result = await csvImporter.importCSV(csvText, req.file.originalname, { poolId });
+    const preview = req.body.preview === '1';
+    const reviewToken = req.body.reviewToken;
+    if (reviewToken !== undefined && (typeof reviewToken !== 'string' || !/^[a-f0-9]{64}$/.test(reviewToken))) {
+      return res.status(400).json({ error: 'Preview the CSV before applying it.' });
+    }
+    const result = await csvImporter.importCSV(csvText, req.file.originalname, { poolId, preview, reviewToken });
 
-    if (result.success) {
+    if (result.success && !preview) {
       activityLog.add(EVENT_TYPES.IMPORT_COMPLETED,
         `CSV import: ${result.imported} leads from ${req.file.originalname}`,
         result
       );
     }
 
-    res.status(result.success ? 200 : 400).json(result);
+    res.status(result.success ? 200 : result.statusCode || 400).json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -2471,7 +2483,9 @@ app.post('/api/campaigns/:id/populate', requireRole('manager'), async (req, res)
 
 app.post('/api/campaigns/:id/start', requireRole('manager'), async (req, res) => {
   try {
-    const result = await campaignEngine.startCampaign(parseInt(req.params.id));
+    const result = await campaignEngine.startCampaign(parseInt(req.params.id), {
+      requireReview: true, reviewToken: req.body?.reviewToken,
+    });
     res.json(result);
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message, ...(error.reason ? { reason: error.reason } : {}) });
@@ -2494,12 +2508,24 @@ app.patch('/api/campaigns/:id', requireRole('manager'), async (req, res) => {
     const campaign = await prisma.campaign.findUnique({ where: { id } });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
     if (campaign.status !== 'draft') return res.status(400).json({ error: 'Can only edit draft campaigns' });
+    if (req.body?.editRevision !== undefined && req.body.editRevision !== campaign.updatedAt.toISOString()) {
+      return res.status(409).json({ error: 'This draft changed. Reopen it before editing.' });
+    }
 
     const updates = await campaignInput(req.body, { db: prisma, existing: campaign });
 
-    const result = await prisma.campaign.updateMany({ where: { id, status: 'draft', updatedAt: campaign.updatedAt }, data: updates });
-    if (!result.count) return res.status(409).json({ error: 'Campaign changed. Refresh before editing.' });
-    const updated = await prisma.campaign.findUnique({ where: { id } });
+    const resetAudience = ['channel', 'targetFilter', 'senderAccountId', 'emailSenderAccountId', 'whatsappSenderAccountId']
+      .some(key => campaign[key] !== updates[key]);
+    const updated = await prisma.$transaction(async tx => {
+      const result = await tx.campaign.updateMany({
+        where: { id, status: 'draft', updatedAt: campaign.updatedAt },
+        data: { ...updates, ...(resetAudience ? { totalLeads: 0 } : {}) },
+      });
+      if (!result.count) return null;
+      if (resetAudience) await tx.campaignLead.deleteMany({ where: { campaignId: id } });
+      return tx.campaign.findUnique({ where: { id } });
+    });
+    if (!updated) return res.status(409).json({ error: 'Campaign changed. Refresh before editing.' });
     res.json(updated);
   } catch (error) {
     res.status(error.statusCode || 500).json({ error: error.message });
@@ -2534,9 +2560,10 @@ app.get('/api/campaigns/:id/leads', requireRole('manager'), async (req, res) => 
     const where = { campaignId: parseInt(req.params.id) };
     if (status) where.status = status;
 
-    const [campaign, campaignLeads, total] = await prisma.$transaction([
-      prisma.campaign.findUnique({ where: { id: where.campaignId }, select: { updatedAt: true } }),
-      prisma.campaignLead.findMany({
+    const reviewRequested = req.query.launchReview === '1' && !status;
+    const result = await prisma.$transaction(async tx => {
+      const campaign = await tx.campaign.findUnique({ where: { id: where.campaignId } });
+      const campaignLeads = await tx.campaignLead.findMany({
         where,
         // The private sales approval snapshot must cover actual destinations,
         // personalization and stop/routing fields, not just a display label.
@@ -2550,10 +2577,14 @@ app.get('/api/campaigns/:id/leads', requireRole('manager'), async (req, res) => 
         orderBy: [{ sentAt: 'desc' }, { id: 'asc' }],
         skip: (page - 1) * limit,
         take: limit,
-      }),
-      prisma.campaignLead.count({ where }),
-    ]);
-    res.json({ leads: campaignLeads, total, page, pages: Math.ceil(total / limit), campaignUpdatedAt: campaign?.updatedAt ?? null });
+      });
+      const total = await tx.campaignLead.count({ where });
+      const review = reviewRequested && campaign ? await campaignLaunchReview(tx, campaign) : null;
+      const launchReview = review && { token: review.token, recipientCount: review.recipientCount };
+      return { leads: campaignLeads, total, page, pages: Math.ceil(total / limit),
+        campaignUpdatedAt: campaign?.updatedAt ?? null, launchReview };
+    });
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

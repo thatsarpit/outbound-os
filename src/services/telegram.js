@@ -1,3 +1,4 @@
+import { isOutreachPaused } from './outreachPause.js';
 import crypto from 'crypto';
 import { Api, TelegramClient } from 'teleproto';
 import { NewMessage } from 'teleproto/events/index.js';
@@ -442,7 +443,7 @@ class TelegramService {
     } finally { await disconnectQuietly(client); }
   }
 
-  async sendMessage({ accountId, peer, message, replyTo }) {
+  async sendMessage({ accountId, peer, message, replyTo, automated = false }) {
     let account = accountId
       ? await prisma.telegramAccount.findUnique({ where: { id: Number(accountId) } })
       : await prisma.telegramAccount.findFirst({
@@ -473,6 +474,7 @@ class TelegramService {
       client = this.createClient(account);
       await client.connect();
       if (!(await client.checkAuthorization())) throw new Error('Telegram session is no longer authorized');
+      if (automated && await isOutreachPaused()) return { paused: true };
       const sent = await client.sendMessage(recipient, { message: text, ...(replyTo ? { replyTo: Number(replyTo) } : {}) });
       await prisma.telegramAccount.update({
         where: { id: account.id },

@@ -3,8 +3,11 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { BarChart3, Mail, X } from 'lucide-react'
 import { campaignsApi } from '@/api/endpoints/campaigns'
+import { emailSendersApi } from '@/api/endpoints/email'
+import { whatsappApi } from '@/api/endpoints/whatsapp'
 import type { Campaign } from '@/api/types'
 import { Button, DrawerShell, LoadingState } from '@/components/ui'
+import { ConfirmDialog } from '@/components/ui/dialog'
 import { cn, formatCount, formatDate, formatRelativeTime } from '@/lib/utils'
 import { toast } from '@/stores/toast-store'
 import { CampaignSchedulePanel } from './campaign-schedule-panel'
@@ -22,12 +25,35 @@ import {
 export function CampaignDetailDrawer({
   campaign,
   onClose,
+  onEdit,
 }: {
   campaign: Campaign
   onClose: () => void
+  onEdit: () => void
 }) {
   const [page, setPage] = useState(1)
   const queryClient = useQueryClient()
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  const remove = useMutation({
+    mutationFn: () => campaignsApi.remove(campaign.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['campaigns'] })
+      onClose()
+      toast.success('Draft discarded')
+    },
+  })
+  const usesEmail = campaign.channel === 'email' || campaign.channel === 'both'
+  const usesWhatsApp = campaign.channel === 'whatsapp' || campaign.channel === 'both'
+  const emailSenderId = campaign.emailSenderAccountId ?? campaign.senderAccountId
+  const whatsappSenderId = campaign.whatsappSenderAccountId ?? (campaign.channel === 'whatsapp' ? campaign.senderAccountId : null)
+  const emailAccounts = useQuery({
+    queryKey: ['campaign-senders'], queryFn: async () => (await emailSendersApi.list()) || [],
+    enabled: usesEmail && Boolean(emailSenderId),
+  })
+  const whatsappAccounts = useQuery({
+    queryKey: ['campaign-whatsapp-senders'], queryFn: async () => (await whatsappApi.list()) || [],
+    enabled: usesWhatsApp && Boolean(whatsappSenderId),
+  })
   const populate = useMutation({
     mutationFn: () => campaignsApi.populate(campaign.id),
     onSuccess: async () => {
@@ -48,7 +74,10 @@ export function CampaignDetailDrawer({
   } = useQuery({
     queryKey: ['campaign-leads', campaign.id, campaign.updatedAt, page],
     queryFn: async () => {
-      const res = await campaignsApi.getLeads(campaign.id, { page, limit: 50 })
+      const res = await campaignsApi.getLeads(campaign.id, {
+        page, limit: 50,
+        launchReview: ['draft', 'paused', 'scheduled'].includes(campaign.status) ? 1 : undefined,
+      })
       if (!res || !Array.isArray(res.leads)) throw new Error('Could not load campaign recipients.')
       return res
     },
@@ -87,7 +116,7 @@ export function CampaignDetailDrawer({
     normalizeStatus(campaign.status) === 'draft'
 
   return (
-    <DrawerShell onClose={onClose}>
+    <DrawerShell title={campaign.name} onClose={onClose}>
       <div className="flex flex-1 flex-col overflow-hidden">
         <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-border bg-surface px-5 py-4 sm:px-6">
           <div className="min-w-0">
@@ -106,6 +135,12 @@ export function CampaignDetailDrawer({
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto p-5 sm:p-6">
+          {campaign.status === 'draft' && (
+            <div className="flex flex-wrap gap-2">
+              <Button variant="secondary" size="sm" onClick={onEdit}>Edit draft</Button>
+              <Button variant="ghost" size="sm" onClick={() => { remove.reset(); setConfirmDiscard(true) }}>Discard draft</Button>
+            </div>
+          )}
           {campaign.status === 'draft' && campaign.totalLeads === 0 && (
             <Panel title="Prepare the audience">
               <p className="mb-3 text-sm text-text-secondary">Add eligible leads from this draft’s filters, then review the recipient list below.</p>
@@ -115,7 +150,7 @@ export function CampaignDetailDrawer({
           )}
           <CampaignSchedulePanel
             campaign={campaign}
-            reviewedRecipientCount={!isError && response?.campaignUpdatedAt === campaign.updatedAt ? response.total : null}
+            review={!isError && response?.campaignUpdatedAt === campaign.updatedAt ? response.launchReview ?? null : null}
           />
           <div className="grid grid-cols-3 gap-px overflow-hidden rounded-md border border-border bg-border">
             <DrawerStat label="Audience" value={formatCount(totalLeads)} />
@@ -178,10 +213,24 @@ export function CampaignDetailDrawer({
               <dd className="text-text-primary">
                 {campaign.createdAt ? formatRelativeTime(campaign.createdAt) : '—'}
               </dd>
-              {campaign.senderAccountId != null && (
+              {usesEmail && (
                 <>
-                  <dt className="text-text-muted">Sender</dt>
-                  <dd className="tabular-nums text-text-primary">#{campaign.senderAccountId}</dd>
+                  <dt className="text-text-muted">Email sender</dt>
+                  <dd className="break-words text-text-primary">
+                    {emailSenderId
+                      ? emailAccounts.data?.find(account => account.id === emailSenderId)?.email ?? (emailAccounts.isPending ? 'Checking…' : 'Sender unavailable')
+                      : 'Assigned or available email account'}
+                  </dd>
+                </>
+              )}
+              {usesWhatsApp && (
+                <>
+                  <dt className="text-text-muted">WhatsApp sender</dt>
+                  <dd className="break-words text-text-primary">
+                    {whatsappSenderId
+                      ? whatsappAccounts.data?.find(account => account.id === whatsappSenderId)?.name ?? (whatsappAccounts.isPending ? 'Checking…' : 'Sender unavailable')
+                      : 'Assigned or available WhatsApp account'}
+                  </dd>
                 </>
               )}
               {campaign.emailSubject && (
@@ -324,6 +373,18 @@ export function CampaignDetailDrawer({
           </Panel>
         </div>
       </div>
+      <ConfirmDialog
+        open={confirmDiscard}
+        onOpenChange={setConfirmDiscard}
+        title="Discard this draft?"
+        description="The draft and its prepared audience will be removed."
+        confirmLabel="Discard draft"
+        destructive
+        isLoading={remove.isPending}
+        onConfirm={() => remove.mutate()}
+      >
+        {remove.error && <p role="alert" className="text-sm text-danger">{remove.error.message}</p>}
+      </ConfirmDialog>
     </DrawerShell>
   )
 }

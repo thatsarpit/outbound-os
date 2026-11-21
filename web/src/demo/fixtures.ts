@@ -1903,6 +1903,10 @@ const FIXTURE_RESPONSES: Array<[RegExp, FixtureValue]> = [
         page: 1,
         pages: 1,
         campaignUpdatedAt: findFixtureCampaign(id)?.updatedAt ?? null,
+        launchReview: findFixtureCampaign(id) ? {
+          token: fixtureLaunchToken(findFixtureCampaign(id)!),
+          recipientCount: (fixtureCampaignAudience.get(id) ?? FIXTURE_LEADS.slice(0, 5)).length,
+        } : null,
       }
     },
   ],
@@ -2230,6 +2234,10 @@ function previewFixtureAudience(filter: Record<string, unknown>, channel: string
   return { leads, matchedCount: matching.length, excludedCount: matching.length - leads.length, exclusionCounts: exclusions }
 }
 
+function fixtureLaunchToken(campaign: { id: number; updatedAt?: string }) {
+  return `demo:${campaign.id}:${campaign.updatedAt}`
+}
+
 function handleFixtureSchedule(id: number, method: string, body: RequestInit['body']) {
   const json = (value: unknown, status = 200) =>
     new Response(JSON.stringify(value), {
@@ -2252,12 +2260,12 @@ function handleFixtureSchedule(id: number, method: string, body: RequestInit['bo
   if (!['draft', 'scheduled'].includes(campaign.status) || campaign.totalLeads === 0) {
     return json({ error: 'Choose a populated sample campaign that has yet to start.' }, 409)
   }
-  const { scheduledAt, timezone, review } = JSON.parse(String(body ?? '{}')) as {
+  const { scheduledAt, timezone, reviewToken } = JSON.parse(String(body ?? '{}')) as {
     scheduledAt?: string
     timezone?: string
-    review?: { updatedAt: string; recipientCount: number }
+    reviewToken?: string
   }
-  if (review?.updatedAt !== campaign.updatedAt || review.recipientCount !== campaign.totalLeads) {
+  if (reviewToken !== fixtureLaunchToken(campaign)) {
     return json({ error: 'The campaign or audience changed. Review the recipients and schedule again.' }, 409)
   }
   const launch = Date.parse(scheduledAt ?? '')
@@ -2363,6 +2371,8 @@ function sampleListData(url: string, value: unknown): unknown {
 
 export function installFixtureFetch() {
   const original = window.fetch.bind(window)
+  let sendingPaused = false
+  const sampleSources = new Map<string, string>()
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
     if (!url.includes('/api/')) return original(input, init)
@@ -2454,8 +2464,6 @@ export function installFixtureFetch() {
     if (mcp) return mcp
     const mobileSales = handleMobileSalesRequest(url, init, FIXTURE_LEADS)
     if (mobileSales) return mobileSales
-    const connector = handleConnectorRequest(url, init)
-    if (connector) return connector
     const verification = handleEmailVerificationRequest(url, init)
     if (verification) return verification
     const receipt = handleEmailReceiptRequest(url, init)
@@ -2465,6 +2473,41 @@ export function installFixtureFetch() {
 
     const method = (init?.method || 'GET').toUpperCase()
     const pathname = new URL(url, location.origin).pathname
+    if (pathname === '/api/import/csv' && method === 'POST' && init?.body instanceof FormData) {
+      return init.body.get('preview') === '1'
+        ? Response.json({
+            success: true, reviewToken: 'sample-csv-review', totalRows: 3, imported: 1, skipped: 1, failed: 1,
+            columnMapping: { name: 'name', mobile: 'mobile', email: 'email' },
+            rowIssues: [{ record: 3, reason: 'Missing or invalid phone number' }],
+          })
+        : Response.json({ error: 'The sample workspace previews imports without changing records.' }, { status: 403 })
+    }
+    if (pathname === '/api/webhooks/sources/from-preset' && method === 'POST') {
+      const id = sampleSources.size + 1
+      const source = `sample-${id}`
+      const apiKey = `fixture-only-${id}`
+      const { name } = JSON.parse(String(init?.body ?? '{}'))
+      sampleSources.set(source, apiKey)
+      return Response.json({ id, name, source, apiKey, webhookUrl: `/api/webhooks/inbound/${source}` })
+    }
+    const sampleSource = pathname.match(/^\/api\/webhooks\/inbound\/(sample-\d+)$/)?.[1]
+    if (sampleSource && method === 'POST') {
+      const key = new Headers(init?.headers).get('x-api-key')
+      const payload = JSON.parse(String(init?.body ?? '{}'))
+      if (!key || sampleSources.get(sampleSource) !== key || payload.test !== true) {
+        return Response.json({ error: 'Use the fixture key and a test submission.' }, { status: 400 })
+      }
+      return Response.json({ ok: true, test: true, created: false, mapped: {
+        name: payload.name || 'Setup test', mobile: payload.phone || null, email: payload.email || null,
+      } })
+    }
+    const connector = handleConnectorRequest(url, init)
+    if (connector) return connector
+    if (pathname === '/api/system/outreach' && method === 'GET') return Response.json({ sendingPaused })
+    if (method === 'POST' && ['/api/system/pause', '/api/system/resume'].includes(pathname)) {
+      sendingPaused = pathname.endsWith('/pause')
+      return Response.json({ sendingPaused })
+    }
     if (pathname === '/api/campaigns' && method === 'GET') {
       const campaigns = fixtureCampaigns()
       return Response.json({ campaigns, total: campaigns.length, page: 1, pages: 1 })
@@ -2511,11 +2554,43 @@ export function installFixtureFetch() {
       campaign.updatedAt = new Date().toISOString()
       return Response.json({ added: Math.max(0, leads.length - previous), total: leads.length })
     }
+    const draftId = pathname.match(/^\/api\/campaigns\/(\d+)$/)?.[1]
+    if (draftId && ['PATCH', 'DELETE'].includes(method)) {
+      const campaign = findFixtureCampaign(Number(draftId))
+      if (!campaign || campaign.status !== 'draft') return Response.json({ error: 'Choose a sample draft.' }, { status: 409 })
+      if (method === 'DELETE') {
+        const campaigns = fixtureCampaigns()
+        campaigns.splice(campaigns.indexOf(campaign), 1)
+        fixtureCampaignAudience.delete(campaign.id)
+        return Response.json({ success: true, deleted: campaign.id })
+      }
+      const { editRevision, targetFilter, ...changes } = JSON.parse(String(init?.body ?? '{}'))
+      if (editRevision !== campaign.updatedAt) return Response.json({ error: 'This sample draft changed. Reopen it before editing.' }, { status: 409 })
+      const filter = targetFilter ? JSON.stringify(targetFilter) : null
+      if (filter !== campaign.targetFilter || ['channel', 'emailSenderAccountId', 'whatsappSenderAccountId'].some(key => key in changes && campaign[key as keyof typeof campaign] !== changes[key])) {
+        campaign.totalLeads = 0
+        fixtureCampaignAudience.set(campaign.id, [])
+      }
+      Object.assign(campaign, changes, { targetFilter: filter, updatedAt: new Date().toISOString() })
+      return Response.json(campaign)
+    }
     const scheduleId = pathname.match(
       /^\/api\/campaigns\/(\d+)\/schedule$/,
     )?.[1]
     if (scheduleId && (method === 'POST' || method === 'DELETE')) {
       return handleFixtureSchedule(Number(scheduleId), method, init?.body)
+    }
+    const startId = pathname.match(/^\/api\/campaigns\/(\d+)\/start$/)?.[1]
+    if (startId && method === 'POST') {
+      const campaign = findFixtureCampaign(Number(startId))
+      const { reviewToken } = JSON.parse(String(init?.body ?? '{}'))
+      if (sendingPaused || !campaign || !['draft', 'paused'].includes(campaign.status) ||
+        !campaign.totalLeads || reviewToken !== fixtureLaunchToken(campaign)) {
+        return Response.json({ error: 'Review the current draft and check that sample outreach is active.' }, { status: 409 })
+      }
+      campaign.status = 'running'
+      campaign.updatedAt = new Date().toISOString()
+      return Response.json({ status: 'running', pending: campaign.totalLeads })
     }
     if (method !== 'GET' && method !== 'HEAD') {
       const quiet = QUIET_WRITES.some((pattern) => pattern.test(url.split('?')[0]))

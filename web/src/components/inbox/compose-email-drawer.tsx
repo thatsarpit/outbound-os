@@ -174,7 +174,7 @@ export function ComposeEmailDrawer({
     if (!busy) onClose()
   }
   return (
-    <DrawerShell onClose={close} panelClassName="lg:max-w-2xl">
+    <DrawerShell title="New email" onClose={close} panelClassName="lg:max-w-2xl">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-5 py-4">
         <div className="flex items-center gap-3">

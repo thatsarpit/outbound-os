@@ -79,11 +79,13 @@ function useConversationViewport() {
 export function MobileConversation({
   leadId,
   initialChannel,
+  initialEmailAccountId,
   onClose,
   onChannelNavigate,
 }: {
   leadId: number
   initialChannel: string | null
+  initialEmailAccountId?: number | null
   onClose: () => void
   onChannelNavigate: (channel: InboxChannel) => void
 }) {
@@ -117,7 +119,7 @@ export function MobileConversation({
       : (loadDraft(dashboardScope, leadId)?.channel ?? null),
   )
   const [accountChoice, setAccount] = useState<number | null>(
-    () => loadDraft(dashboardScope, leadId)?.senderAccountId ?? null,
+    () => initialEmailAccountId ?? loadDraft(dashboardScope, leadId)?.senderAccountId ?? null,
   )
   const result = useQuery({
     refetchOnWindowFocus: true,
@@ -137,11 +139,11 @@ export function MobileConversation({
           ? 'telegram'
           : 'whatsapp')
   const accounts = thread?.availableSenderAccounts ?? []
+  const requestedSenderUnavailable = accountChoice === initialEmailAccountId &&
+    Boolean(initialEmailAccountId && !accounts.some(account => account.id === initialEmailAccountId))
   const accountId =
-    accounts.find((account) => account.id === accountChoice)?.id ??
-    accounts.find((account) => account.id === thread?.assignedEmailAccountId)?.id ??
-    accounts[0]?.id ??
-    null
+    requestedSenderUnavailable ? null : accounts.find((account) => account.id === accountChoice)?.id ??
+      accounts.find((account) => account.id === thread?.assignedEmailAccountId)?.id ?? accounts[0]?.id ?? null
   const hasThread = Boolean(thread)
   useEffect(() => {
     const readVisible = () => {
@@ -252,7 +254,7 @@ export function MobileConversation({
         </label>
       )}
       {channel === 'whatsapp' && !!thread && <WhatsAppReplyWindow key={leadId} thread={thread} />}
-      <ScheduledEmails emails={thread?.scheduledEmails} />
+      <ScheduledEmails emails={thread?.scheduledEmails} leadId={leadId} />
       <div
         ref={timeline}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3"

@@ -18,6 +18,7 @@ import {
   Webhook,
 } from 'lucide-react'
 import { ApiClientError } from '@/api/client'
+import { inboxApi } from '@/api/endpoints/inbox'
 import {
   onboardingApi,
   onboardingStatusQuery,
@@ -28,6 +29,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { ErrorState } from '@/components/ui/error-state'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { LoadingState } from '@/components/ui/loading-state'
 import { useAuthStore } from '@/stores/auth-store'
 import { toast } from '@/stores/toast-store'
@@ -467,6 +469,12 @@ function ChannelsStep({
   onNext: () => void
 }) {
   const connected = CHANNEL_CARDS.filter((c) => channels[c.id]).length
+  const readiness = useQuery({
+    queryKey: ['setup-channel-readiness'],
+    queryFn: () => inboxApi.channelHealth(),
+    retry: false,
+    meta: { silent: true },
+  })
   return (
     <div className="grid gap-5">
       <p className="text-[13px] leading-5 text-text-secondary">
@@ -476,6 +484,12 @@ function ChannelsStep({
         {CHANNEL_CARDS.map((card) => {
           const Icon = card.icon
           const isConnected = channels[card.id]
+          const health = readiness.data?.[card.id]
+          const check = card.id === 'email' && health
+            ? ('verified' in health && Number(health.verified) > 0 ? 'Sending verified' : 'Verify sending')
+            : card.id === 'whatsapp'
+              ? 'Configured'
+              : health?.status === 'ready' ? 'Connected' : 'Check connection'
           return (
             <div key={card.id} className="flex flex-col gap-3 rounded-md border border-border p-4">
               <div className="flex items-center justify-between gap-2">
@@ -484,12 +498,18 @@ function ChannelsStep({
                   {card.name}
                 </span>
                 {isConnected && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-success-muted px-2 py-0.5 text-[11px] font-medium text-success">
-                    <Check aria-hidden="true" className="h-3 w-3" /> Configured
+                  <span className="inline-flex items-center gap-1 rounded-full bg-surface-raised px-2 py-0.5 text-[11px] font-medium text-text-secondary">
+                    {check}
                   </span>
                 )}
               </div>
               <p className="flex-1 text-[12px] leading-5 text-text-secondary">{card.detail}</p>
+              {isConnected && card.id === 'whatsapp' && (
+                <p className="text-xs text-text-muted">Verify a webhook receipt and a test message in WhatsApp settings.</p>
+              )}
+              {isConnected && card.id === 'email' && (
+                <p className="text-xs text-text-muted">Check the last successful receive test in Email settings.</p>
+              )}
               <Button asChild variant={isConnected ? 'secondary' : 'primary'} size="sm">
                 <Link to={`${card.to}?setup=channels`}>
                   {isConnected ? `Manage ${card.name}` : `Connect ${card.name}`}
@@ -670,6 +690,18 @@ function CreatedSource({
   created: { card: (typeof SOURCE_CARDS)[number]; source: CreatedLeadSource }
   onAnother: () => void
 }) {
+  const [payload, setPayload] = useState(() => JSON.stringify({
+    name: 'Setup test', email: 'setup-test@example.test', message: 'Synthetic mapping test',
+  }, null, 2))
+  const mapping = useMutation({
+    mutationFn: async () => {
+      let parsed: unknown
+      try { parsed = JSON.parse(payload) } catch { throw new Error('Enter a valid JSON payload.') }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Enter a JSON object.')
+      return onboardingApi.testSource(created.source, parsed as Record<string, unknown>)
+    },
+    meta: { silent: true },
+  })
   const webhook = new URL(
     created.source.webhookUrl,
     created.source.webhookOrigin || window.location.origin,
@@ -705,8 +737,7 @@ function CreatedSource({
         what="Key"
       />
       <p className="text-[12px] leading-5 text-text-secondary">
-        Save this key privately. Send a test lead from the source and check that it appears in
-        Leads.
+        Save this key privately. Check how the source maps a synthetic payload before connecting your form.
       </p>
 
       {webhook.protocol !== 'https:' && (
@@ -736,6 +767,20 @@ function CreatedSource({
           </div>
         </div>
       )}
+
+      <details className="space-y-3 rounded-md border border-border bg-surface p-3">
+        <summary className="cursor-pointer text-sm font-medium">Test field mapping</summary>
+        <Textarea label="Synthetic JSON payload" value={payload} rows={5}
+          onChange={(event) => { mapping.reset(); setPayload(event.target.value) }} disabled={mapping.isPending} />
+        <Button size="sm" variant="secondary" pending={mapping.isPending} onClick={() => mapping.mutate()}>Test mapping</Button>
+        {mapping.error && <p role="alert" className="text-sm text-danger">{mapping.error.message}</p>}
+        {mapping.data && (
+          <div role="status" className="min-w-0 space-y-1 text-xs text-text-secondary">
+            <p>Mapping confirmed. Zero leads created and zero messages sent.</p>
+            <pre className="overflow-x-auto rounded-md bg-surface-raised p-2">{JSON.stringify(mapping.data, null, 2)}</pre>
+          </div>
+        )}
+      </details>
 
       <div>
         <Button size="sm" variant="ghost" onClick={onAnother}>

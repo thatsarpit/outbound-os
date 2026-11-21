@@ -46,7 +46,7 @@ export function registerSystemTools(server) {
   // ── system_pause_resume ──
   server.tool(
     'system_pause_resume',
-    'Pause or resume the automated message sending queue. When paused, no automated messages (followups, campaigns) are sent.',
+    'Pause or resume new automated outreach submissions. Incoming messages and manual replies remain available. In-flight submissions can finish.',
     {
       action: z.enum(['pause', 'resume']).describe('pause to stop sending, resume to restart'),
     },

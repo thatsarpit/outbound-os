@@ -3,6 +3,8 @@ import campaignEngine from './campaignEngine.js';
 import config from '../config.js';
 import logger from '../utils/logger.js';
 import { recordQueueScan } from './queueHealth.js';
+import { isOutreachPaused, OUTREACH_PAUSED } from './outreachPause.js';
+import { requireCampaignLaunchReview } from './campaignLaunchReview.js';
 import { isBusinessHours } from '../utils/delay.js';
 
 const fail = (message, statusCode = 400) => Object.assign(new Error(message), { statusCode });
@@ -31,10 +33,10 @@ export class CampaignScheduler {
     Object.assign(this, { db, engine, now, hours });
   }
 
-  async schedule(id, input) {
+  async schedule(id, input, { requireReview = false } = {}) {
     const date = validateSchedule(input, this.now(), this.hours());
     const review = input.review;
-    if (review !== undefined && (typeof review?.updatedAt !== 'string'
+    if (!requireReview && review !== undefined && (typeof review?.updatedAt !== 'string'
       || !Number.isFinite(Date.parse(review.updatedAt))
       || !Number.isSafeInteger(review.recipientCount) || review.recipientCount < 1)) {
       throw fail('Provide the campaign revision and recipient count from your review.');
@@ -43,16 +45,18 @@ export class CampaignScheduler {
       const campaign = await tx.campaign.findUnique({ where: { id } });
       if (!campaign) throw fail('Campaign not found.', 404);
       const staleReview = () => fail('The campaign or audience changed. Review the recipients and schedule again.', 409);
-      if (review && Date.parse(review.updatedAt) !== campaign.updatedAt.getTime()) throw staleReview();
+      const approval = requireReview ? await requireCampaignLaunchReview(tx, campaign, input.reviewToken) : null;
+      if (!requireReview && review && Date.parse(review.updatedAt) !== campaign.updatedAt.getTime()) throw staleReview();
       const missed = campaign.status === 'paused' && campaign.scheduleTimezone && campaign.scheduleError;
       if (!['draft', 'scheduled'].includes(campaign.status) && !missed) throw fail('Only an unstarted campaign can be scheduled.', 409);
       if (campaign.startedAt || await tx.message.count({ where: { campaignId: id } })) throw fail('This campaign already has send attempts. Review it before sending again.', 409);
       const recipients = await tx.campaignLead.count({ where: { campaignId: id } });
-      if (review && recipients !== review.recipientCount) throw staleReview();
+      if (!requireReview && review && recipients !== review.recipientCount) throw staleReview();
       const pending = await tx.campaignLead.count({ where: { campaignId: id, status: 'pending' } });
       if (!pending || pending !== recipients) throw fail('Populate and review an unstarted audience before scheduling.', 409);
       const updated = await tx.campaign.updateMany({ where: { id, status: campaign.status, updatedAt: campaign.updatedAt }, data: {
         status: 'scheduled', scheduledAt: date, scheduleTimezone: input.timezone, scheduleError: null,
+        reviewedAudienceHash: approval?.audienceHash ?? null,
       } });
       if (!updated.count) throw fail('Campaign changed. Refresh before scheduling.', 409);
       return tx.campaign.findUnique({ where: { id } });
@@ -61,7 +65,7 @@ export class CampaignScheduler {
 
   async cancel(id) {
     const result = await this.db.campaign.updateMany({ where: { id, status: 'scheduled' }, data: {
-      status: 'draft', scheduledAt: null, scheduleTimezone: null, scheduleError: null,
+      status: 'draft', scheduledAt: null, scheduleTimezone: null, scheduleError: null, reviewedAudienceHash: null,
     } });
     if (!result.count) throw fail('Schedule changed or launch already started. Refresh; pause a running campaign to stop remaining sends.', 409);
     return { status: 'draft' };
@@ -89,6 +93,7 @@ export class CampaignScheduler {
       take: 20,
     });
     await recordQueueScan('campaigns', this.db);
+    if (await isOutreachPaused(this.db)) return { checked: due.length };
     for (const campaign of due) {
       const identity = { id: campaign.id, status: 'scheduled', scheduledAt: campaign.scheduledAt, updatedAt: campaign.updatedAt };
       if (now - campaign.scheduledAt > LATE_WINDOW_MS) {
@@ -100,6 +105,7 @@ export class CampaignScheduler {
         // reschedule cannot reuse this stale due-work snapshot.
         await this.engine.startCampaign(campaign.id, { expectedSchedule: campaign });
       } catch (error) {
+        if (error.reason === OUTREACH_PAUSED) break;
         const paused = await this.db.campaign.updateMany({ where: identity, data: { status: 'paused', scheduleError: error.statusCode ? error.message : 'Scheduled launch could not start. Review campaign and sender readiness.' } });
         if (paused.count) logger.warn(`Scheduled campaign ${campaign.id} launch needs review.`);
       }

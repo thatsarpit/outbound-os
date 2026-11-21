@@ -57,6 +57,7 @@ export default function CampaignsPage() {
   const queryClient = useQueryClient()
   const [params, setParams] = useSearchParams()
   const [createOpen, setCreateOpen] = useState(false)
+  const [editingDraft, setEditingDraft] = useState<Campaign | null>(null)
   const showCreate = createOpen || params.get('create') === '1'
   const setShowCreate = (open: boolean) => {
     setCreateOpen(open)
@@ -191,17 +192,6 @@ export default function CampaignsPage() {
       queryClient.invalidateQueries({ queryKey: ['campaign-detail'] }),
     ])
 
-  const startMutation = useMutation({
-    mutationFn: (id: number) => campaignsApi.start(id),
-    onMutate: (id) => optimisticCampaignStatus(id, 'running'),
-    onSuccess: () => toast.success('Campaign started'),
-    onError: (error: Error, _id, ctx) => {
-      if (ctx) rollbackCampaignStatus(ctx)
-      toast.error(`Failed to start: ${error.message}`)
-    },
-    onSettled: invalidateCampaignQueries,
-  })
-
   const pauseMutation = useMutation({
     mutationFn: (id: number) => campaignsApi.pause(id),
     onMutate: (id) => optimisticCampaignStatus(id, 'paused'),
@@ -233,7 +223,7 @@ export default function CampaignsPage() {
         : { by: field, dir: field === 'name' || field === 'channel' ? 'asc' : 'desc' },
     )
 
-  const rowActions = (campaign: Campaign) => {
+  const rowActions = (campaign: Campaign, compact = false) => {
     const status = normalizeStatus(campaign.status)
     return (
       <div
@@ -256,10 +246,10 @@ export default function CampaignsPage() {
           <Button
             variant="ghost"
             size="sm"
-            pending={startMutation.isPending && startMutation.variables === campaign.id}
-            aria-label={`Start ${campaign.name}`}
-            title="Start campaign"
-            onClick={() => startMutation.mutate(campaign.id)}
+            id={`review-campaign-${campaign.id}-${compact ? 'card' : 'table'}`}
+            aria-label={`Review launch for ${campaign.name}`}
+            title="Review launch"
+            onClick={() => setDetailId(campaign.id)}
           >
             <Play aria-hidden="true" className="h-3.5 w-3.5" />
           </Button>
@@ -498,7 +488,7 @@ export default function CampaignsPage() {
                         </span>
                         <ProgressBar value={percent(sent, total)} />
                       </button>
-                      <div className="px-4 pb-2">{rowActions(campaign)}</div>
+                      <div className="px-4 pb-2">{rowActions(campaign, true)}</div>
                     </div>
                   )
                 })}
@@ -545,6 +535,9 @@ export default function CampaignsPage() {
       )}
 
       {showCreate && <CreateCampaignModal onClose={() => setShowCreate(false)} onCreated={id => setDetailId(id)} />}
+      {editingDraft && (
+        <CreateCampaignModal draft={editingDraft} onClose={() => setEditingDraft(null)} onCreated={setDetailId} />
+      )}
       {detailId && detailResult.isError && (
         <ErrorState
           title="Could not open this campaign"
@@ -552,11 +545,12 @@ export default function CampaignsPage() {
           onRetry={() => void detailResult.refetch()}
         />
       )}
-      {detailCampaign && (
+      {detailCampaign && !editingDraft && !showCreate && (
         <CampaignDetailDrawer
           key={detailCampaign.id}
           campaign={detailCampaign}
           onClose={closeDetail}
+          onEdit={() => setEditingDraft(detailCampaign)}
         />
       )}
     </div>

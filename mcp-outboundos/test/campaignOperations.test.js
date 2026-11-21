@@ -37,11 +37,14 @@ test('scheduling and cancellation forward explicit time and never launch immedia
     calls.push({ path: new URL(url).pathname, method: options.method, body: options.body && JSON.parse(options.body) });
     return Response.json({ status: options.method === 'DELETE' ? 'draft' : 'scheduled' });
   });
-  await invoke('schedule_campaign', { campaign_id: 7, scheduledAt: '2027-01-15T15:00:00Z', timezone: 'Europe/London' });
-  assert.deepEqual(calls[0], { path: '/api/campaigns/7/schedule', method: 'POST', body: { scheduledAt: '2027-01-15T15:00:00Z', timezone: 'Europe/London' } });
+  const reviewToken = 'a'.repeat(64);
+  await invoke('schedule_campaign', { campaign_id: 7, scheduledAt: '2027-01-15T15:00:00Z', timezone: 'Europe/London', reviewToken });
+  assert.deepEqual(calls[0], { path: '/api/campaigns/7/schedule', method: 'POST', body: { scheduledAt: '2027-01-15T15:00:00Z', timezone: 'Europe/London', reviewToken } });
   await invoke('cancel_campaign_schedule', { campaign_id: 7 });
   assert.equal(calls[1].path, '/api/campaigns/7/schedule');
   assert.equal(calls[1].method, 'DELETE');
+  await invoke('start_campaign', { campaign_id: 7, reviewToken });
+  assert.deepEqual(calls[2], { path: '/api/campaigns/7/start', method: 'POST', body: { reviewToken } });
 });
 
 test('email sender discovery exposes readiness and persona ID without returning account credentials', async t => {

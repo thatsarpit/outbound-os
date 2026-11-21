@@ -1,3 +1,4 @@
+import { isOutreachPaused, OUTREACH_PAUSED } from './outreachPause.js';
 import { recordQueueScan } from './queueHealth.js';
 import { createTransport } from 'nodemailer';
 import { ImapFlow } from 'imapflow';
@@ -553,7 +554,7 @@ class EmailService {
    * @param {object} options - { leadId, accountId, subject, body, htmlBody, inReplyTo, existingMessageId }
    * @returns {{ success: boolean, messageId?: string, error?: string }}
    */
-  async sendEmail({ leadId, accountId, subject, body, htmlBody, inReplyTo, existingMessageId, attachments, cc, bcc, scheduledQueue = false }) {
+  async sendEmail({ leadId, accountId, subject, body, htmlBody, inReplyTo, existingMessageId, attachments, cc, bcc, scheduledQueue = false, automated = false }) {
     const lead = await prisma.lead.findUnique({ where: { id: leadId } });
     if (!lead) throw new Error('Lead not found');
     if (!lead.email) throw new Error('Lead has no email address');
@@ -611,6 +612,22 @@ class EmailService {
     if (inReplyTo) {
       mailOptions.headers['In-Reply-To'] = inReplyTo;
       mailOptions.headers['References'] = inReplyTo;
+    }
+
+    // Release reserved capacity if a pause arrived during local preparation.
+    // Failure to read the flag also leaves capacity available for later work.
+    if (automated) {
+      let paused;
+      try {
+        paused = await isOutreachPaused();
+      } catch (error) {
+        await this._releaseSendCapacity(account.id).catch(() => {});
+        throw error;
+      }
+      if (paused) {
+        await this._releaseSendCapacity(account.id).catch(() => {});
+        return { success: false, reason: OUTREACH_PAUSED };
+      }
     }
 
     if (scheduledQueue) {
@@ -1206,15 +1223,16 @@ class EmailService {
     });
 
     if (!Array.isArray(messageIds)) await recordQueueScan('email');
-    if (pending.length === 0) return;
+    if (pending.length === 0 || await isOutreachPaused()) return;
     logger.info(`📧 Processing ${pending.length} queued email(s)...`);
 
     for (const msg of pending) {
+      if (await isOutreachPaused()) break;
       const isScheduledEmail = msg.manualSendKey?.startsWith(SCHEDULED_EMAIL_KEY_PREFIX);
       try {
         // Atomic claim
         const claimed = await prisma.message.updateMany({
-          where: { id: msg.id, status: 'queued' },
+          where: { id: msg.id, status: 'queued', updatedAt: msg.updatedAt, scheduledAt: msg.scheduledAt },
           data: {
             status: 'sending',
             ...(isScheduledEmail ? { providerStatusReason: SCHEDULED_EMAIL_PREPARING } : {}),
@@ -1341,11 +1359,19 @@ class EmailService {
           inReplyTo: msg.emailInReplyTo,
           existingMessageId: msg.id,
           scheduledQueue: isScheduledEmail,
+          automated: true,
           attachments,
           cc: msg.emailCc || undefined,
           bcc: msg.emailBcc || undefined,
         });
 
+        if (result.reason === OUTREACH_PAUSED) {
+          await prisma.message.updateMany({
+            where: { id: msg.id, status: 'sending' },
+            data: { status: 'queued', providerStatusReason: OUTREACH_PAUSED },
+          });
+          break;
+        }
         if (result.success || result.skipped) {
           continue;
         } else {
