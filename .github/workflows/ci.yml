@@ -142,7 +142,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Build
-        run: docker build -t outbound-os:ci .
+        run: docker build --build-arg "OUTBOUNDOS_BUILD_REVISION=$GITHUB_SHA" -t outbound-os:ci .
       - name: First boot from an untouched example config
         run: |
           cp .env.example .env
@@ -162,8 +162,12 @@ jobs:
             echo "First password setup could overwrite an initialized account"
             exit 1
           fi
-          curl -fsS -o /dev/null -H 'Content-Type: application/json' \
-            -d '{"email":"admin@example.com","password":"ci-only-operator-password"}' http://localhost:3001/api/auth/login
+          session=$(curl -fsS -H 'Content-Type: application/json' \
+            -d '{"email":"admin@example.com","password":"ci-only-operator-password"}' http://localhost:3001/api/auth/login |
+            jq -er '.token')
+          curl -fsS -H "Authorization: Bearer $session" http://localhost:3001/api/system/version |
+            jq -e --arg version "$(cat VERSION)" --arg revision "$GITHUB_SHA" \
+              '. == {version: $version, revision: $revision, channel: "development"}'
           if docker logs obos 2>&1 | grep -q 'ci-only-operator-password'; then
             echo "First admin password was written to the application logs"
             exit 1

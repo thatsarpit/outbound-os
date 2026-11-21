@@ -4,6 +4,7 @@ import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   CheckSquare,
   Inbox,
+  Info,
   LogOut,
   Monitor,
   Moon,
@@ -115,6 +116,12 @@ export function MobileShell() {
                     <Link to="/m/account">
                       <UserRound className="h-4 w-4" />
                       Account
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/m/account#about">
+                      <Info className="h-4 w-4" />
+                      About Outbound OS
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={toggleTheme}>

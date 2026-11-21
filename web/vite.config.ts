@@ -5,6 +5,7 @@ import tailwindcss from '@tailwindcss/vite'
 import fs from 'fs'
 import path from 'path'
 import type { Plugin } from 'vite'
+import { readBuildInfo } from '../shared/buildInfo.js'
 
 /**
  * Hosting rules for the public demo (demo.outboundos.space, a static site).
@@ -34,6 +35,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     define: {
+      __OUTBOUNDOS_BUILD__: JSON.stringify(readBuildInfo()),
       __PUSH_WORKER_VERSION__: JSON.stringify(
         createHash('sha256')
           .update(fs.readFileSync(path.resolve(import.meta.dirname, 'public/push-sw.js')))

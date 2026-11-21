@@ -155,8 +155,14 @@ valid_email "$email" && valid_port "$port" || fail 'Check ADMIN_EMAIL and OUTBOU
 if [[ $check == false ]]; then
   case $image in
     outbound-os:guided-*)
-      docker image inspect "$image" >/dev/null 2>&1 ||
-        compose build app || fail 'Could not build the app. Fix the build error and rerun to resume.'
+      if ! docker image inspect "$image" >/dev/null 2>&1; then
+        revision=
+        if [[ -e .git ]] && changes=$(git status --porcelain 2>/dev/null) && [[ -z $changes ]]; then
+          revision=$(git rev-parse HEAD 2>/dev/null || true)
+        fi
+        compose build --build-arg "OUTBOUNDOS_BUILD_REVISION=$revision" app ||
+          fail 'Could not build the app. Fix the build error and rerun to resume.'
+      fi
       ;;
     ghcr.io/thatsarpit/outbound-os@sha256:*)
       docker image inspect "$image" >/dev/null 2>&1 ||

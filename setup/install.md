@@ -98,6 +98,11 @@ readiness and webhook verification before sending. Do not use customer
 outreach as an installation test. Validate a restore with automation disabled
 and provider credentials removed, so restored queues cannot send messages.
 
+Open the account menu and choose **About Outbound OS** to see the dashboard
+and server versions and their source commits. Include **Copy version details**
+when reporting an issue or checking a rollout. Source archives built without
+a recorded commit show a local build.
+
 After an approved test send, open **Delivery review** as a manager or admin.
 Compare **Queue scans** with the **Provider receipts** timestamps for WhatsApp
 or Brevo. A new receipt shows that the instance recorded provider feedback.

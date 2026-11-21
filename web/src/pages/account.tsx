@@ -1,5 +1,6 @@
 import { DeviceNotifications } from '@/components/notifications/device-notifications'
 import { ClerkPasskeys } from '@/components/auth/clerk-passkeys'
+import { AboutOutboundOS } from '@/components/account/about-outbound-os'
 import { Link, useLocation } from 'react-router-dom'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useClerk, useReverification, useSession, useUser } from '@clerk/react'
@@ -8,6 +9,7 @@ import {
   ArrowUpRight,
   Bell,
   Check,
+  Info,
   Link2,
   LogOut,
   Monitor,
@@ -70,6 +72,7 @@ const ACCOUNT_SECTIONS = [
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'preferences', label: 'Preferences', icon: Moon },
   { id: 'access', label: 'Workspace access', icon: Link2 },
+  { id: 'about', label: 'About Outbound OS', icon: Info },
 ]
 
 export default function AccountPage() {
@@ -205,6 +208,9 @@ export default function AccountPage() {
                 senders and domain connections belong in Integrations.
               </p>
             </SectionCard>
+          </div>
+          <div id="about" className="scroll-mt-5">
+            <AboutOutboundOS />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-4">
             <div>

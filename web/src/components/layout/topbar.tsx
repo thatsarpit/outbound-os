@@ -3,7 +3,7 @@ import { useAuthStore } from '@/stores/auth-store'
 import { useUIStore } from '@/stores/ui-store'
 import { ROLE_EXPERIENCE } from '@/lib/role-shell'
 import { cn } from '@/lib/utils'
-import { Menu, LogOut, MessageCircleMore, ChevronDown, Search, UserCog } from 'lucide-react'
+import { Menu, LogOut, MessageCircleMore, ChevronDown, Info, Search, UserCog } from 'lucide-react'
 import { NotificationCenter } from './notification-center'
 import { ThemeToggle } from './theme-toggle'
 import { SUPPORT_URL } from '@/lib/branding'
@@ -41,6 +41,8 @@ const PAGE_TITLES: Array<{ route: string; title: string }> = [
 ]
 
 function UserMenu() {
+  const { pathname } = useLocation()
+  const accountPath = pathname.startsWith('/dev/shell') ? '/dev/shell/account' : '/account'
   const { user, logout } = useAuthStore()
   const experience = ROLE_EXPERIENCE[user?.role || 'viewer']
   const name = user?.name || 'User'
@@ -77,9 +79,15 @@ function UserMenu() {
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
-          <Link to="/account">
+          <Link to={accountPath}>
             <UserCog className="h-3.5 w-3.5" />
             Account settings
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link to={`${accountPath}#about`}>
+            <Info className="h-3.5 w-3.5" />
+            About Outbound OS
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>

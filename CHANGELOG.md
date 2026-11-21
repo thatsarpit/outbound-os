@@ -6,6 +6,10 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+- Show the dashboard and server version and source revision under **About
+  Outbound OS**. Label development builds and check that Docker release tags
+  match the product version.
+
 - Show the latest WhatsApp and Brevo webhook receipts on file and counts of
   unmatched receipts in Delivery review.
 

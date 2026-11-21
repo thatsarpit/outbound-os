@@ -1,4 +1,5 @@
 import deliveryReviewRoutes from './routes/deliveryReview.js';
+import systemVersionRoutes from './routes/systemVersion.js';
 import messageActionRoutes from './routes/messageActions.js';
 import { assertReplyTarget, nativeMessageId, messageAccount, reactionTarget } from './utils/messageActions.js';
 import websiteEnquiries from './routes/websiteEnquiries.js';
@@ -918,6 +919,7 @@ app.get('/api/events', async (req, res) => {
 });
 
 app.use('/api', requireRole('viewer'));
+app.use('/api', systemVersionRoutes);
 app.use('/api', connectorAdmin);
 app.use('/api', mcpSetup);
 app.use('/api/whatsapp', whatsappTemplateRoutes);

@@ -41,6 +41,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check the public release version
+        if: github.ref_type == 'tag'
+        run: test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
+
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
@@ -73,7 +77,10 @@ jobs:
           platforms: linux/amd64,linux/arm64
           outputs: type=image,name=${{ steps.registry.outputs.repository }},push-by-digest=true,name-canonical=true,push=true
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: CACHE_BUST=${{ github.sha }}
+          build-args: |
+            CACHE_BUST=${{ github.sha }}
+            OUTBOUNDOS_BUILD_REVISION=${{ github.sha }}
+            OUTBOUNDOS_RELEASE_TAG=${{ github.ref_type == 'tag' && github.ref_name || '' }}
           cache-from: type=gha,scope=${{ matrix.image }}
           cache-to: type=gha,scope=${{ matrix.image }},mode=max
 
@@ -133,6 +140,8 @@ jobs:
       - name: Rehearse install, upgrade and rollback on the staged images
         env:
           ARCH: ${{ matrix.arch }}
+          EXPECTED_APP_REVISION: ${{ github.sha }}
+          EXPECTED_APP_CHANNEL: ${{ github.ref_type == 'tag' && 'release' || 'development' }}
         run: |
           app=$(cat "$RUNNER_TEMP/staged-images/outbound-os.ref")
           mcp=$(cat "$RUNNER_TEMP/staged-images/outbound-os-mcp.ref")

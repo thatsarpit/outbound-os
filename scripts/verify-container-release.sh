@@ -103,6 +103,13 @@ done
 
 printf 'Checking a fresh app install.\n'
 start_app "$candidate" "$fresh"
+if [[ -n ${EXPECTED_APP_REVISION:-} ]]; then
+  docker exec "$app" curl -fsS --max-time 5 -H "Authorization: Bearer $session" \
+    http://127.0.0.1:3001/api/system/version |
+    jq -e --arg version "$(cat VERSION)" --arg revision "$EXPECTED_APP_REVISION" \
+      --arg channel "$EXPECTED_APP_CHANNEL" '. == {version: $version, revision: $revision, channel: $channel}'
+  docker exec "$app" grep -R -q -F "$EXPECTED_APP_REVISION" /app/web/dist/assets
+fi
 check_schema
 stop_app
 

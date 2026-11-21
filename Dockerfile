@@ -2,7 +2,7 @@
 # The dashboard is static files, identical on every CPU, so it is built on the
 # build machine's own platform — multi-arch images then emulate only stage 2.
 FROM --platform=$BUILDPLATFORM node:24-slim AS web-builder
-WORKDIR /web
+WORKDIR /app/web
 COPY web/package*.json ./
 RUN npm ci
 # CACHE_BUST is set by CI to the commit SHA so every push produces a unique
@@ -12,8 +12,11 @@ RUN npm ci
 ARG CACHE_BUST=local
 RUN echo "Web build cache bust: $CACHE_BUST"
 COPY web/ ./
-COPY shared/ /shared/
-RUN npm run build
+COPY VERSION /app/VERSION
+COPY shared/ /app/shared/
+ARG OUTBOUNDOS_BUILD_REVISION
+ARG OUTBOUNDOS_RELEASE_TAG
+RUN printf '%s\n%s\n' "$OUTBOUNDOS_BUILD_REVISION" "$OUTBOUNDOS_RELEASE_TAG" > /app/.outboundos-build && npm run build
 
 # ── Stage 2: Production runtime ──────────────────────────────────────────────────
 FROM node:24-slim
@@ -57,7 +60,8 @@ COPY shared ./shared
 COPY scripts ./scripts
 
 # Copy the pre-built React dashboard from the builder stage
-COPY --from=web-builder /web/dist ./web/dist
+COPY --from=web-builder /app/web/dist ./web/dist
+COPY --from=web-builder /app/VERSION /app/.outboundos-build ./
 
 # Create runtime dirs and hand ownership to the non-root user
 RUN mkdir -p logs backups data && \

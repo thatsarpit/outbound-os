@@ -17,6 +17,15 @@ npm run build --prefix web
 
 CI runs the same checks, plus the website build and a fresh Docker boot. Use focused commits, preserve unrelated working changes, and update issue status with the verification performed. Do not close an issue whose stated acceptance checks remain unverified.
 
+## Versioning a release
+
+`VERSION` is the public product version for the dashboard and server. When
+preparing a release, update it and the changelog together. Tag the reviewed
+release commit with the matching name, such as `v0.5.0` for `VERSION=0.5.0`.
+The Docker workflow verifies the tag and records its source commit in the
+image. Builds from untagged commits display a development build and its
+commit, so successive updates can be distinguished before the next release.
+
 ## Database changes
 
 Add a migration under `prisma/migrations/` (hand-written SQL is fine; SQLite

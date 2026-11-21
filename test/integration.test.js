@@ -168,6 +168,17 @@ test('compiled assets, dashboard navigation and service endpoints keep separate 
   }
 });
 
+test('the signed-in version endpoint returns the running server build', async () => {
+  const endpoint = '/api/system/version';
+  const ip = { 'X-Forwarded-For': '198.51.100.244' };
+  assert.equal((await request('GET', endpoint, { headers: ip })).status, 401);
+  const version = await request('GET', endpoint, { headers: { ...authHeader(), ...ip } });
+  assert.equal(version.status, 200);
+  assert.equal(version.headers['cache-control'], 'private, no-store');
+  const { readBuildInfo } = await import('../shared/buildInfo.js');
+  assert.deepEqual(version.body, readBuildInfo());
+});
+
 test('delivery review is manager-only and separates queue state from delivery', async () => {
   const { default: db } = await import('../src/utils/prismaClient.js');
   const { hashPassword } = await import('../src/auth/rbac.js');
