@@ -6,6 +6,7 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+- Update the Effect dependency used by Prisma to address GHSA-7589-6fvf-x4pw.
 - Filter Leads by recorded outbound acceptance independently of pipeline stage.
 - Restore a lead’s previous sales stage after an operator resumes its outreach.
   Record pause and resume actions in Activity.
