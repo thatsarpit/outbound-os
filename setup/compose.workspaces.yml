@@ -1,0 +1,20 @@
+# Layer this file over docker-compose.yml. Existing service and volumes retain
+# their names. Add another private runtime and volume for each workspace.
+services:
+  workspace-voyd:
+    image: "${OUTBOUNDOS_APP_IMAGE:-ghcr.io/thatsarpit/outbound-os:${OUTBOUNDOS_VERSION:-latest}}"
+    pull_policy: missing
+    restart: unless-stopped
+    stop_grace_period: 25s
+    env_file: .env.workspace-voyd
+    environment:
+      OUTBOUNDOS_WORKSPACE_ID: voyd
+      AUTH_PROVIDER: clerk
+      DATABASE_URL: file:/app/data/outboundos.db
+      API_PORT: "3001"
+      NODE_ENV: production
+    volumes:
+      - voyd-data:/app/data
+
+volumes:
+  voyd-data:

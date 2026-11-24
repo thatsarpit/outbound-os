@@ -1,3 +1,4 @@
+import { createWorkspaceRouter, workspaceConfig, workspaceRuntime } from './routes/workspaces.js';
 import deliveryReviewRoutes from './routes/deliveryReview.js';
 import systemVersionRoutes from './routes/systemVersion.js';
 import scheduledEmailRoutes from './routes/scheduledEmails.js';
@@ -119,7 +120,7 @@ import {
 import { localPasswordError } from '../shared/localPassword.js';
 import { hashPassword, requirePoolAccess, requireLeadAccess, getAccessiblePoolIds, userCanAccessPool } from './auth/rbac.js';
 import {
-  AUTH_PROVIDER, authMiddleware, requireRole, verifyStreamSession, clerkClient,
+  AUTH_PROVIDER, authMiddleware, requireRole, verifyStreamSession, clerkClient, clerkSession,
   localLogin, localChangePassword, publicAuthConfig,
 } from './auth/index.js';
 
@@ -483,6 +484,8 @@ activityLog.subscribe((event) => {
  * API Server for the Outbound OS Dashboard
  */
 const app = express();
+const workspaceId = process.env.OUTBOUNDOS_WORKSPACE_ID;
+const inboundLeadBase = workspaceId ? `/api/workspaces/${workspaceId}/webhooks/inbound` : '/api/webhooks/inbound';
 
 // Which proxies may say who the client is (X-Forwarded-For). Rate limits key
 // on that address, so trusting an arbitrary first hop would let anyone reset
@@ -517,6 +520,7 @@ const authLimiter = rateLimit({
 });
 const bulkLimiter = rateLimit({ windowMs: 60 * 1000, max: 5, message: { error: 'Too many bulk operations, try again in a minute' } });
 app.use('/api/', globalLimiter);
+app.use(['/api', '/webhook'], workspaceRuntime());
 const otpLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 10, message: { error: 'Too many code requests, try again shortly' } });
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/otp/request', otpLimiter);
@@ -560,6 +564,12 @@ app.use('/api', browserMutationGuard(ALLOWED_ORIGINS));
 // Populates req.auth() / getAuth(req) for every request below. requireRole()
 // reads from it; nothing else in the chain does the verification itself.
 app.use(authMiddleware());
+const workspaces = workspaceConfig();
+app.use('/api/workspaces', createWorkspaceRouter({
+  workspaces,
+  getSession: clerkSession,
+  getMemberships: options => clerkClient.users.getOrganizationMembershipList(options),
+}));
 app.use('/api/webhooks/email-ingress', emailIngressRoutes);
 // Retain the raw body so webhook signatures can be verified over the exact
 // bytes we received — re-serializing the parsed object would change key order
@@ -629,7 +639,7 @@ app.use(express.static(WEB_DIST));
 // Clerk. The dashboard asks /api/auth/config which one to render.
 
 app.get('/api/auth/config', (_req, res) => {
-  res.json(publicAuthConfig());
+  res.json({ ...publicAuthConfig(), ...(workspaces.length ? { workspacesEnabled: true } : {}) });
 });
 
 if (AUTH_PROVIDER === 'local') {
@@ -3078,7 +3088,7 @@ app.get('/api/onboarding/status', requireRole('manager'), async (_req, res) => {
     };
     res.json({
       dismissed,
-      complete: steps.profile && steps.channel && steps.leadSource,
+      complete: steps.profile && steps.leadSource && (Boolean(workspaceId) || steps.channel),
       steps,
       channels,
       counts: { leadSources, leads, users, outgoingWebhooks: subscriptions },
@@ -5653,7 +5663,7 @@ app.post('/api/webhooks/sources/from-preset', requireRole('admin'), async (req, 
     res.json({
       ...ws,
       apiKey, // return full key once
-      webhookUrl: `/api/webhooks/inbound/${slug}`,
+      webhookUrl: `${inboundLeadBase}/${slug}`,
       webhookOrigin,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }

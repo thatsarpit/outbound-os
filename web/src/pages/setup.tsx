@@ -1,3 +1,4 @@
+import { workspaceBase } from '@/lib/workspace-path'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -43,6 +44,7 @@ const STEPS = [
 ] as const
 
 type StepId = (typeof STEPS)[number]['id']
+const visibleSteps = workspaceBase ? STEPS.filter(step => step.id !== 'channels') : STEPS
 
 const OVERVIEW = '/overview?view=desktop'
 
@@ -66,11 +68,11 @@ export default function SetupPage() {
     sources: Boolean(status?.steps.leadSource),
     team: Boolean(status?.steps.team),
   }
-  const requested = STEPS.findIndex((item) => item.id === params.get('step'))
-  const firstIncomplete = STEPS.findIndex((item) => !doneByStep[item.id])
+  const requested = visibleSteps.findIndex((item) => item.id === params.get('step'))
+  const firstIncomplete = visibleSteps.findIndex((item) => !doneByStep[item.id])
   const stepIndex =
-    requested >= 0 ? requested : firstIncomplete < 0 ? STEPS.length - 1 : firstIncomplete
-  const step = STEPS[stepIndex]
+    requested >= 0 ? requested : firstIncomplete < 0 ? visibleSteps.length - 1 : firstIncomplete
+  const step = visibleSteps[stepIndex]
 
   useEffect(() => {
     if (status && requested < 0) setParams({ step: step.id }, { replace: true })
@@ -84,7 +86,7 @@ export default function SetupPage() {
   }, [step.id])
 
   const goTo = (index: number) => {
-    const next = STEPS[index]
+    const next = visibleSteps[index]
     if (!next || next.id === step.id) return
     moveFocus.current = true
     setParams({ step: next.id })
@@ -127,7 +129,7 @@ export default function SetupPage() {
       {status && (
         <>
           <ol className="grid grid-cols-2 gap-2 sm:grid-cols-4" aria-label="Setup steps">
-            {STEPS.map((s, index) => {
+            {visibleSteps.map((s, index) => {
               const Icon = s.icon
               const current = index === stepIndex
               const done = doneByStep[s.id]

@@ -1,3 +1,4 @@
+import { workspaceApiPath } from '@/lib/workspace-path'
 import { getSessionToken } from '@/stores/auth-store'
 import { api, apiFetch } from '../client'
 
@@ -62,7 +63,7 @@ export const importApi = {
     const query = params.toString()
     // Use raw fetch since response is a blob
     const token = await getSessionToken()
-    const res = await fetch(`/api/export/csv${query ? `?${query}` : ''}`, {
+    const res = await fetch(workspaceApiPath(`/export/csv${query ? `?${query}` : ''}`), {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
     if (!res.ok) throw new Error('Export failed')

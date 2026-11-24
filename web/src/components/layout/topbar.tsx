@@ -1,3 +1,4 @@
+import { WorkspaceSwitcher } from '@/components/auth/workspace-boundary'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth-store'
 import { useUIStore } from '@/stores/ui-store'
@@ -150,6 +151,7 @@ export function Topbar({ onOpenSearch }: { onOpenSearch: () => void }) {
           </kbd>
         </button>
 
+        <WorkspaceSwitcher className="max-w-36 lg:max-w-52" />
         <NotificationCenter />
         <ThemeToggle className="h-8 w-8 border-0 bg-transparent" />
         <UserMenu />

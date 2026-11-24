@@ -1,7 +1,7 @@
 import type { ApiError } from './types'
 import { getSessionToken, useAuthStore } from '@/stores/auth-store'
 
-const API_BASE = '/api'
+import { workspaceApiPath } from '@/lib/workspace-path'
 
 export class ApiClientError extends Error {
   status: number
@@ -40,7 +40,7 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
     headers['Content-Type'] = 'application/json'
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  const response = await fetch(`${workspaceApiPath(endpoint)}`, {
     ...options,
     headers,
   })
@@ -88,7 +88,7 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
 /** A file behind authentication, as a Blob (images, voice notes, PDFs). */
 export async function apiFetchBlob(endpoint: string, signal?: AbortSignal): Promise<Blob> {
   const token = await getSessionToken()
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  const response = await fetch(`${workspaceApiPath(endpoint)}`, {
     signal,
     cache: 'no-store',
     headers: token ? { Authorization: `Bearer ${token}` } : {},

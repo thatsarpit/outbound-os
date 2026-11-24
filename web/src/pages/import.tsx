@@ -1,3 +1,4 @@
+import { workspaceApiPath } from '@/lib/workspace-path'
 import { invalidateLeadSurfaceQueries } from '@/lib/lead-automation'
 import { getSessionToken } from '@/stores/auth-store'
 import { useState, useRef } from 'react'
@@ -168,7 +169,7 @@ export default function ImportPage() {
     setExportError(null)
     try {
       const token = await getSessionToken()
-      const res = await fetch('/api/export/csv', {
+      const res = await fetch(workspaceApiPath('/export/csv'), {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       if (!res.ok) throw new Error('Export failed with status: ' + res.status)

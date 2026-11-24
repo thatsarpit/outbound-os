@@ -12,7 +12,7 @@ import { useAuthStore } from '@/stores/auth-store'
  *
  * Mount once, inside <ClerkProvider>, above the router.
  */
-export function ClerkAuthBridge() {
+export function ClerkAuthBridge({ pinOrganization = false }: { pinOrganization?: boolean }) {
   const { isLoaded: authLoaded, isSignedIn, orgRole, orgId, signOut, getToken } = useAuth()
   const { user, isLoaded: userLoaded } = useUser()
   const { organization } = useOrganization()
@@ -38,9 +38,9 @@ export function ClerkAuthBridge() {
       signOut: () => {
         void signOut()
       },
-      getToken: () => getToken(),
+      getToken: () => getToken(pinOrganization && orgId ? { organizationId: orgId } : undefined),
     })
-  }, [authLoaded, userLoaded, isSignedIn, user, orgId, orgRole, organization, signOut, getToken])
+  }, [authLoaded, userLoaded, isSignedIn, user, orgId, orgRole, organization, signOut, getToken, pinOrganization])
 
   return null
 }

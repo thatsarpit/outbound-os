@@ -1,3 +1,4 @@
+import { workspaceApiPath } from '@/lib/workspace-path'
 import { queryOptions } from '@tanstack/react-query'
 import { api } from '../client'
 
@@ -30,7 +31,7 @@ export const onboardingApi = {
   createSource: (presetId: string, name?: string) =>
     api.post<CreatedLeadSource>('/webhooks/sources/from-preset', { presetId, name }),
   testSource: async (source: CreatedLeadSource, payload: Record<string, unknown>) => {
-    const response = await fetch(`/api/webhooks/inbound/${encodeURIComponent(source.source)}`, {
+    const response = await fetch(workspaceApiPath(`/webhooks/inbound/${encodeURIComponent(source.source)}`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': source.apiKey },
       body: JSON.stringify({ ...payload, test: true }),

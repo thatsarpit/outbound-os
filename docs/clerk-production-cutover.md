@@ -1,8 +1,8 @@
 # Clerk production cutover
 
-Outbound OS is one shared CRM workspace per installation. Clerk organization IDs
-are not a tenant partition for leads, messages, orders or other CRM rows.
-Set `CLERK_ORGANIZATION_ID` to the intended organization when using production
+The primary CRM runtime serves one Clerk organization. Additional
+[workspaces](workspaces.md) use separate data volumes and runtimes. Set
+`CLERK_ORGANIZATION_ID` to the intended organization when using production
 Clerk keys. HTTP and SSE reject other organizations and production keys without
 that setting. The existing trusted MCP service token remains a separate
 server-to-server administrator identity; never give it to browser clients.

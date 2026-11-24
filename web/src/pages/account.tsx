@@ -1,3 +1,4 @@
+import { workspaceBase } from '@/lib/workspace-path'
 import { DeviceNotifications } from '@/components/notifications/device-notifications'
 import { ClerkPasskeys } from '@/components/auth/clerk-passkeys'
 import { AboutOutboundOS } from '@/components/account/about-outbound-os'
@@ -145,7 +146,11 @@ export default function AccountPage() {
             )}
           </div>
           <div id="notifications" className="scroll-mt-5">
-            <DeviceNotifications />
+            {workspaceBase
+              ? <SectionCard title="Device notifications">
+                  <p className="text-sm text-text-secondary">Conversation updates appear in the activity center while the dashboard is open.</p>
+                </SectionCard>
+              : <DeviceNotifications />}
           </div>
           <div id="preferences" className="scroll-mt-5">
             <SectionCard
