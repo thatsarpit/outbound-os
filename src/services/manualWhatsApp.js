@@ -41,6 +41,7 @@ export async function whatsappReplyContext(lead, requestedAccountId = null) {
     ...whatsappSession(inbound, account?.id || null),
     senderName: account?.name || null,
     senderPhone: account?.phone || null,
+    recipientAvailable: Boolean(whatsappAddress(lead)),
   };
 }
 export async function requireWhatsAppWindow(lead, accountId) {
@@ -59,12 +60,16 @@ export async function requireWhatsAppWindow(lead, accountId) {
       createdAt: true,
     },
   });
-  if (!whatsappSession(inbound, accountId).isOpen)
-    throw fail(
-      'The 24-hour WhatsApp reply window is closed. Send an approved template and wait for the customer to reply.',
-      409,
-      're_engagement_required',
-    );
+  const session = whatsappSession(inbound, accountId);
+  if (session.isOpen) return;
+  const reason = session.reason === 'no_customer_message'
+    ? 'No incoming WhatsApp message for this sender yet.'
+    : 'The 24-hour WhatsApp reply window expired.';
+  throw fail(
+    `${reason} Free-text messages become available after the customer messages this number. Use an approved template to reach out.`,
+    409,
+    're_engagement_required',
+  );
 }
 
 /** Store every manual attempt before network I/O. Never retry an uncertain send automatically. */

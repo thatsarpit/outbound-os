@@ -391,7 +391,7 @@ async function sendManualWhatsAppMessage(payload) {
   if (!result.success) {
     const rejected = ['failed', 'permanently_failed'].includes(result.message?.status);
     const quotaError = whatsappQuotaMessage(result.reason);
-    const error = new Error(quotaError || (result.reason === 're_engagement_required' ? 'The WhatsApp reply window is closed. Use an approved template.'
+    const error = new Error(quotaError || (result.reason === 're_engagement_required' ? 'WhatsApp requires an approved template for this message.'
       : result.reason === 'thread_not_owned' ? 'Another app controls this WhatsApp conversation. Set the connected provider as the primary responder in Meta conversation routing before retrying.'
       : rejected && result.message?.providerErrorMessage ? `WhatsApp rejected this message: ${result.message.providerErrorMessage}`
       : 'This message was not confirmed sent. Review its status in the conversation before retrying.'));

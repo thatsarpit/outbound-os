@@ -1,3 +1,4 @@
+import { leadPhoneHref } from '../../../../shared/leadPhone.js'
 import { useAuthStore } from '@/stores/auth-store'
 import { useOnlineStatus } from '@/hooks/use-online-status'
 import { useWorkspaceTimezone } from '@/hooks/use-workspace-timezone'
@@ -199,9 +200,9 @@ export function LeadContextPanel({
 
       {/* Contact + commercial detail */}
       <div className="space-y-2 border-b border-border px-4 py-3.5">
-        {thread.leadMobile && /^\+?[\d\s()-]{7,20}$/.test(thread.leadMobile) && (
+        {thread.leadMobile && leadPhoneHref(thread.leadMobile) && (
           <Row icon={Phone}>
-            <a href={`tel:${thread.leadMobile}`} className="hover:text-text-primary">
+            <a href={leadPhoneHref(thread.leadMobile) ?? undefined} className="hover:text-text-primary">
               {thread.leadMobile}
             </a>
           </Row>

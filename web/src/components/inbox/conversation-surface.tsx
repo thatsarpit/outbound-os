@@ -7,7 +7,7 @@ import { ReplyPreview, MessageInteractions } from './message-interactions'
  * props and owns no cross-cutting state, which is why it could be lifted out
  * cleanly while the rest of that file could not.
  */
-import { WhatsAppReplyWindow, isWhatsAppWindowClosed } from './whatsapp-reply-window'
+import { WhatsAppReplyWindow, canSendWhatsAppFreeText } from './whatsapp-reply-window'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useConversationRead } from '@/hooks/use-conversation-read'
 import { type EmailTemplate } from '@/api/endpoints/templates'
@@ -195,7 +195,7 @@ export function ConversationSurface({
   const availableSenderAccounts = activeThread?.availableSenderAccounts ?? []
   const sendDisabled =
     replyPending ||
-    (composerChannel === 'whatsapp' && isWhatsAppWindowClosed(activeThread)) ||
+    (composerChannel === 'whatsapp' && !canSendWhatsAppFreeText(activeThread)) ||
     // On WhatsApp, files alone are a message; the text becomes their caption.
     (!replyText.trim() && !(composerChannel === 'whatsapp' && attachments.length > 0)) ||
     Boolean(replyDisabledReason) ||
@@ -221,7 +221,7 @@ export function ConversationSurface({
       />
 
       {composerChannel === 'whatsapp' && activeThread && (
-        <WhatsAppReplyWindow key={activeThread.leadId} thread={activeThread} />
+        <WhatsAppReplyWindow key={`${activeThread.leadId}:${activeThread.whatsappSession?.accountId}`} thread={activeThread} />
       )}
       <ScheduledEmails emails={activeThread?.scheduledEmails} leadId={activeThread?.leadId} />
       <div

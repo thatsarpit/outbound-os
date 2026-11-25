@@ -25,7 +25,7 @@ const REASONS = new Map([
   ['auth_failed', 'Check the sending account credentials.'],
   ['not_on_whatsapp', 'Check whether the recipient can receive WhatsApp messages.'],
   ['invalid_phone', 'Check the recipient’s phone number and country code.'],
-  ['re_engagement_required', 'The WhatsApp reply window closed. Review approved templates.'],
+  ['re_engagement_required', 'WhatsApp required an approved template for this message.'],
   ['thread_not_owned', 'Check conversation routing for the connected WhatsApp provider.'],
   ['template_invalid', 'Review the provider’s approved template and its variables.'],
   ['marketing_limit', 'The provider restricted marketing delivery. Check the recipient’s eligibility in the provider console.'],

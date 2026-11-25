@@ -308,6 +308,10 @@ const MESSAGES: InboxMessage[] = [
   ),
   message(3, 'inbound', 122, 'Perfect, shipping docs received. We will confirm payment on Monday.'),
 
+  message(4, 'outbound', 200, 'Thanks for your enquiry. Let me know when you are free to discuss delivery.', {
+    channel: 'whatsapp', waAccount: 1, senderAccountId: 1, status: 'sent',
+    senderDisplay: SENDERS.whatsapp.senderName,
+  }),
   message(
     4,
     'inbound',
@@ -383,11 +387,14 @@ function demoSession(leadId: number) {
   const expiresAt = last
     ? new Date(Date.parse(last.sentAt || last.createdAt) + 24 * 60 * 60_000).toISOString()
     : null
+  const isOpen = Boolean(expiresAt && Date.parse(expiresAt) > Date.now())
   return {
     accountId: 1,
     lastInboundAt: last?.sentAt || null,
     expiresAt,
-    isOpen: Boolean(expiresAt && Date.parse(expiresAt) > Date.now()),
+    isOpen,
+    reason: isOpen ? 'open' : last ? 'expired' : 'no_customer_message',
+    recipientAvailable: Boolean(THREADS.find(thread => thread.leadId === leadId)?.leadMobile),
     senderName: 'Acme Sales',
     senderPhone: '+1 555 010 0000',
   }
@@ -793,7 +800,7 @@ export async function handleInboxRequest(
       : String(body.text ?? body.body ?? '').trim()
     if (body.channel === 'whatsapp' && !approved && !demoSession(thread.leadId).isOpen)
       return json(
-        { error: 'The 24-hour reply window is closed. Choose an approved template.' },
+        { error: 'WhatsApp requires an approved template for this message.' },
         409,
       )
     if (text.includes('[demo-fail]'))

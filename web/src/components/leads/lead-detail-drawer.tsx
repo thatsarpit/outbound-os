@@ -1,3 +1,4 @@
+import { LeadCallLink } from './lead-call-link'
 /** The lead detail drawer. Extracted from leads.tsx. */
 import { useState, useEffect } from 'react'
 import { useAuthStore } from '@/stores/auth-store'
@@ -334,6 +335,7 @@ export function LeadDetailDrawer({
                           </p>
                         )}
                     </div>
+                    <LeadCallLink phone={lead.mobile} />
                   </div>
                   {lead.waUsername && (
                     <div className="flex items-center gap-3 text-sm">

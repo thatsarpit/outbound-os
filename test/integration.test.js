@@ -3853,9 +3853,23 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
   cloud.listApprovedTemplates = async () => ({ ok: true, templates: [{ name: 'reconnect_fixture', language: 'en_GB', category: 'MARKETING', status: 'APPROVED', body: 'Hello {{1}}, still interested?', bodyVariables: ['1'], manualSupported: true }] });
   const send = (body) => request('POST', '/api/inbox/send', { headers, body: { leadId: lead.id, channel: 'whatsapp', ...body } });
   try {
+    await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', waAccount: account.id, content: 'Initial template', status: 'sent', sentAt: new Date() } });
+    const waiting = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+    assert.equal(waiting.body.whatsappSession.reason, 'no_customer_message');
+    assert.equal(waiting.body.whatsappSession.recipientAvailable, true);
+    assert.equal(waiting.body.whatsappSession.expiresAt, null);
+    const neverOpened = await send({ text: 'Free text before the first reply' });
+    assert.equal(neverOpened.status, 409);
+    assert.match(neverOpened.body.error, /No incoming WhatsApp message/);
+    assert.equal(neverOpened.body.reason, 're_engagement_required');
+    assert.equal(sends, 0);
+
     await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'inbound', waAccount: account.id, content: 'Old enquiry', status: 'delivered', sentAt: new Date('2026-01-01'), createdAt: new Date() } });
     const blocked = await send({ text: 'A normal reply' });
     assert.equal(blocked.status, 409); assert.equal(blocked.body.reason, 're_engagement_required'); assert.equal(sends, 0);
+    assert.match(blocked.body.error, /reply window expired/);
+    const expired = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+    assert.equal(expired.body.whatsappSession.reason, 'expired');
     const template = { name: 'reconnect_fixture', language: 'en_GB', parameters: ['Buyer'] };
     assert.equal((await send({ whatsappTemplate: { ...template, parameters: [] } })).status, 400);
     const accepted = await send({ whatsappTemplate: template, clientMessageId: 'fixture-template-00001' });
@@ -3873,6 +3887,8 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
     assert.equal(explained.status, 400);
 
     await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'inbound', waAccount: account.id, content: 'Yes, please', status: 'delivered', sentAt: new Date() } });
+    const open = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+    assert.equal(open.body.whatsappSession.reason, 'open');
     const body = { text: 'Here are the details', clientMessageId: 'fixture-message-00001' };
     const sent = await send(body); assert.equal(sent.status, 200);
     assert.equal(sent.body.message.waMessageId, 'wamid.MANUAL-FIXTURE');

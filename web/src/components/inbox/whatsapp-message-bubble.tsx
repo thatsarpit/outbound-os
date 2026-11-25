@@ -136,7 +136,7 @@ export function MessageBubble({
                 className="rounded-md bg-warning-muted px-3 py-2 text-xs leading-5 text-warning"
               >
                 {reason === 're_engagement_required'
-                  ? 'Not delivered: the 24-hour reply window closed. Use an approved template and wait for a customer reply.'
+                  ? 'Not delivered. WhatsApp required an approved template for this message.'
                   : reason === 'thread_not_owned'
                     ? 'Not delivered. Your administrator needs to reconnect this conversation. See Message info.'
                     : message.status === 'unconfirmed' && message.channel === 'whatsapp'

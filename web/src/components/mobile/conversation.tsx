@@ -4,7 +4,7 @@ import { ReplyPreview, MessageInteractions } from '@/components/inbox/message-in
 import { ApiClientError } from '@/api/client'
 import {
   WhatsAppReplyWindow,
-  isWhatsAppWindowClosed,
+  canSendWhatsAppFreeText,
 } from '@/components/inbox/whatsapp-reply-window'
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -23,6 +23,8 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { LeadCallLink } from '@/components/leads/lead-call-link'
+import { leadPhoneHref } from '../../../../shared/leadPhone.js'
 import { MobileLeadPanel } from './lead-panel'
 import { MobileError, mobileInput, mobileButton } from './mobile-shared'
 import { useAuthStore } from '@/stores/auth-store'
@@ -181,13 +183,14 @@ export function MobileConversation({
           type="button"
           className="min-h-14 min-w-0 flex-1 py-2 text-left"
           onClick={() => setDetails(true)}
+          aria-label={thread ? `Lead details for ${thread.leadName || thread.name || 'this conversation'}` : undefined}
           disabled={!thread}
         >
           <span className="block truncate text-base font-semibold">
             {thread?.leadName || thread?.name || 'Conversation'}
           </span>
           <span className="block truncate text-xs text-text-muted">
-            {CHANNELS[channel].label}
+            Reply via {CHANNELS[channel].label}
             {IS_DEMO ? ' · Sample data' : ''}
             {thread?.replyNeeded ? ' · Needs reply' : ''}
           </span>
@@ -201,15 +204,19 @@ export function MobileConversation({
         >
           <Search className="h-5 w-5" />
         </button>
-        <button
-          type="button"
-          className="flex h-11 w-11 shrink-0 items-center justify-center text-text-secondary"
-          aria-label="Lead details and follow-ups"
-          onClick={() => setDetails(true)}
-          disabled={!thread}
-        >
-          <Info className="h-5 w-5" />
-        </button>
+        {leadPhoneHref(thread?.leadMobile) ? (
+          <LeadCallLink phone={thread?.leadMobile} iconOnly />
+        ) : (
+          <button
+            type="button"
+            className="flex h-11 w-11 shrink-0 items-center justify-center text-text-secondary"
+            aria-label="Lead details and follow-ups"
+            onClick={() => setDetails(true)}
+            disabled={!thread}
+          >
+            <Info className="h-5 w-5" aria-hidden="true" />
+          </button>
+        )}
         <button
           type="button"
           className="min-h-11 shrink-0 rounded-md px-2 text-xs text-text-secondary disabled:opacity-40"
@@ -253,7 +260,7 @@ export function MobileConversation({
           )}
         </label>
       )}
-      {channel === 'whatsapp' && !!thread && <WhatsAppReplyWindow key={leadId} thread={thread} />}
+      {channel === 'whatsapp' && !!thread && <WhatsAppReplyWindow key={`${leadId}:${thread.whatsappSession?.accountId}`} thread={thread} />}
       <ScheduledEmails emails={thread?.scheduledEmails} leadId={leadId} />
       <div
         ref={timeline}
@@ -567,7 +574,7 @@ function MobileReplyComposer({
   })
   const canSend =
     !disabledReason &&
-    !(channel === 'whatsapp' && isWhatsAppWindowClosed(thread)) &&
+    !(channel === 'whatsapp' && !canSendWhatsAppFreeText(thread)) &&
     !send.isPending &&
     !apply.isPending &&
     !uploading &&

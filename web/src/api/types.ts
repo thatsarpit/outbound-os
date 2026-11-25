@@ -623,6 +623,7 @@ export interface InboxThreadDetail extends InboxThreadSummary {
     accountId: number | null
     senderName: string | null
     senderPhone: string | null
+    recipientAvailable?: boolean
     isOpen: boolean
     expiresAt: string | null
     lastInboundAt: string | null
