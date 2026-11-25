@@ -60,6 +60,7 @@ import inboxReadStateRoutes from './routes/inboxReadState.js';
 import { inboxViewerKey, inboxThreadState, inboxMessagePreview, inboxMessageContent } from './utils/inboxState.js';
 import { sortConversationMessages, messageEventTime } from './utils/messageTimeline.js';
 import { INBOX_VISIBLE_MESSAGE_WHERE, inboxMessageHeads } from './utils/inboxMessageHeads.js';
+import { inboxOutreachChannels } from './utils/inboxOutreach.js';
 import config from './config.js';
 import logger from './utils/logger.js';
 import activityLog, { EVENT_TYPES } from './utils/activityLog.js';
@@ -3355,7 +3356,7 @@ app.get('/api/inbox/threads', async (req, res) => {
     const total = queue.length;
     const ids = queue.slice((page - 1) * limit, page * limit).map((lead) => lead.id);
     const previewIds = queue.slice((page - 1) * limit, page * limit).map((lead) => lead.messages[0]?.id).filter(Boolean);
-    const [leads, emailAccounts, telegramSenderAccounts] = await Promise.all([
+    const [leads, emailAccounts, telegramSenderAccounts, outreachByLead] = await Promise.all([
       prisma.lead.findMany({
         where: { id: { in: ids } },
         include: {
@@ -3366,12 +3367,19 @@ app.get('/api/inbox/threads', async (req, res) => {
       }),
       prisma.emailAccount.findMany({ where: { enabled: true }, orderBy: { id: 'asc' } }),
       prisma.telegramAccount.findMany({ where: { enabled: true }, select: { id: true, name: true, displayName: true }, orderBy: { id: 'asc' } }),
+      inboxOutreachChannels(prisma, ids),
     ]);
     const emailAccountsById = Object.fromEntries(emailAccounts.map((account) => [account.id, account]));
     const telegramAccountsById = Object.fromEntries(telegramSenderAccounts.map((account) => [account.id, account]));
-    const byId = new Map(leads.map((lead) => [lead.id, lead]));
+    const byId = new Map(leads.map(lead => [lead.id, lead]));
     const actionableById = new Map(queue.map(lead => [lead.id, lead.lastActionableMessage]));
-    const threads = ids.filter((id) => byId.has(id)).map((id) => buildInboxThreadSummary(byId.get(id), emailAccountsById, telegramAccountsById, actionableById.get(id), { lastReadMessageId: readByLead.get(id), latestInboundMessageId: inboundByLead.get(id) }));
+    const threads = ids.filter(id => byId.has(id)).map(id => ({
+      ...buildInboxThreadSummary(byId.get(id), emailAccountsById, telegramAccountsById, actionableById.get(id), {
+        lastReadMessageId: readByLead.get(id),
+        latestInboundMessageId: inboundByLead.get(id),
+      }),
+      outreachChannels: outreachByLead.get(id) || [],
+    }));
     const counts = { all: scopedQueue.length, needsReply: scopedQueue.filter(lead => lead.threadState === 'needs_reply').length, waiting: scopedQueue.filter(lead => lead.threadState !== 'resolved' && lead.lastActionableMessage?.direction === 'outbound').length, resolved: scopedQueue.filter(lead => lead.threadState === 'resolved').length };
     const unread = scopedQueue.filter(lead => (inboundByLead.get(lead.id) || 0) > (readByLead.get(lead.id) || 0)).length;
     res.json({ threads, total, page, pages: Math.ceil(total / limit), counts, needsReply: counts.needsReply, unread });
@@ -3403,7 +3411,7 @@ async function sendInboxThreadDetail(req, res) {
 
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
-    const [emailAccounts, availableSenderAccounts, telegramSenderAccounts, scheduledEmails] = await Promise.all([
+    const [emailAccounts, availableSenderAccounts, telegramSenderAccounts, scheduledEmails, outreachByLead] = await Promise.all([
       prisma.emailAccount.findMany({
         where: {
           id: {
@@ -3432,6 +3440,7 @@ async function sendInboxThreadDetail(req, res) {
         take: 10,
         select: { id: true, emailSubject: true, status: true, scheduledAt: true, providerStatusReason: true },
       }),
+      inboxOutreachChannels(prisma, [leadId]),
     ]);
 
     const emailAccountsById = Object.fromEntries(emailAccounts.map((account) => [account.id, account]));
@@ -3457,6 +3466,7 @@ async function sendInboxThreadDetail(req, res) {
 
     res.json({
       ...summary,
+      outreachChannels: outreachByLead.get(leadId) || [],
       messages: mappedMessages,
       scheduledEmails,
       whatsappSession: await whatsappReplyContext(lead),

@@ -548,6 +548,8 @@ export interface InboxThreadSummary {
   threadState?: InboxThreadState
   assignmentState?: 'assigned' | 'unassigned' | 'assigned_to_me'
   channel: InboxChannel
+  /** Outbound channels with at least one accepted send and no known failure for that send. */
+  outreachChannels?: InboxChannel[]
   threadKey: string
   subject: string | null
   senderDisplay: string | null

@@ -2320,6 +2320,56 @@ test('Inbox filters before pagination and returns stable queue totals', async ()
   }
 });
 
+test('Inbox reports successful outreach channels across the full history of each visible lead', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.73' };
+  const earlier = new Date('2026-01-03T10:00:00Z');
+  const latest = new Date('2026-01-04T10:00:00Z');
+  const later = new Date('2026-01-05T10:00:00Z');
+  const message = (channel, status, date, extra = {}) =>
+    ({ channel, status, sentAt: date, createdAt: date, direction: 'outbound', content: 'Outreach fixture', ...extra });
+  const createLead = (suffix, messages) => prisma.lead.create({
+    data: { name: `Outreach Badge Fixture ${suffix}`, mobile: `no-phone:outreach-badges-${suffix}`, source: 'manual', messages: { create: messages } },
+  });
+  const ids = [];
+  try {
+    const mixed = await createLead('Mixed', [
+      message('whatsapp', 'read', earlier),
+      message('whatsapp', 'sent', earlier),
+      message('email', 'sent', latest),
+      message('imessage', 'queued', later),
+      message('telegram', 'unconfirmed', later),
+    ]);
+    ids.push(mixed.id);
+    const single = await createLead('Single', [
+      message('whatsapp', 'delivered', earlier),
+      message('email', 'failed', latest),
+      message('email', 'sent', latest, { providerDeliveryStatus: 'soft_bounce' }),
+      message('email', 'permanently_failed', latest, { providerDeliveryStatus: 'hard_bounce' }),
+      message('telegram', 'delivered', later, { direction: 'inbound' }),
+    ]);
+    ids.push(single.id);
+    const inboundOnly = await createLead('Inbound', [message('email', 'synced', earlier, { direction: 'inbound' })]);
+    ids.push(inboundOnly.id);
+
+    const all = await request('GET', '/api/inbox/threads?search=Outreach%20Badge%20Fixture', { headers });
+    assert.equal(all.status, 200);
+    assert.deepEqual(all.body.threads.find(thread => thread.leadId === mixed.id).outreachChannels, ['email', 'whatsapp']);
+    assert.deepEqual(all.body.threads.find(thread => thread.leadId === single.id).outreachChannels, ['whatsapp']);
+    assert.deepEqual(all.body.threads.find(thread => thread.leadId === inboundOnly.id).outreachChannels, []);
+    const filtered = await request('GET', `/api/inbox/threads?channel=email&leadId=${mixed.id}&limit=1`, { headers });
+    assert.equal(filtered.status, 200);
+    assert.equal(filtered.body.threads[0].channel, 'email');
+    assert.deepEqual(filtered.body.threads[0].outreachChannels, ['email', 'whatsapp']);
+
+    const detail = await request('GET', `/api/inbox/threads/${mixed.id}`, { headers });
+    assert.equal(detail.status, 200);
+    assert.deepEqual(detail.body.outreachChannels, ['email', 'whatsapp']);
+  } finally {
+    await prisma.lead.deleteMany({ where: { id: { in: ids } } });
+  }
+});
+
 test('Mobile follow-ups validate edits, enforce lead ownership, and paginate workspace tasks', async () => {
   const { default: prisma } = await import('../src/utils/prismaClient.js');
   const { signToken } = await import('../src/auth/rbac.js');

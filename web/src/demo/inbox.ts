@@ -1,3 +1,4 @@
+import { hasConfirmedOutreach } from '../../../shared/inboxOutreach.js'
 import type { DeliveryReviewFilter, DeliveryReviewItem, QueueWorkerStatus, ReceiptActivity } from '@/api/endpoints/inbox'
 import { queryClient } from '@/lib/query-client'
 import { notificationActions } from '@/stores/notification-store'
@@ -246,6 +247,11 @@ for (const thread of THREADS.filter((row) => row.channel === 'email')) {
 }
 
 const MESSAGES: InboxMessage[] = [
+  message(1, 'outbound', 110, 'I emailed the specification sheet for your enquiry.', {
+    channel: 'email', subject: 'Specification sheet', senderAccountId: 2,
+    senderDisplay: SENDERS.email.senderName, emailAccountId: 2, waAccount: null,
+    status: 'sent',
+  }),
   message(
     1,
     'outbound',
@@ -396,6 +402,7 @@ function summary(thread: Thread) {
     last?.mediaType && !last.mediaCaption ? `[${last.mediaFilename}]` : (last?.content ?? '')
   return {
     ...thread,
+    outreachChannels: [...new Set(own.filter(hasConfirmedOutreach).map(message => message.channel))],
     name: thread.leadName,
     senderDisplay:
       thread.channel === 'email'
@@ -742,7 +749,7 @@ export async function handleInboxRequest(
     const state = path.searchParams.get('state')
     const search = (path.searchParams.get('search') || '').toLowerCase()
     const threads = THREADS.map(summary)
-      .filter((t) => !channel || t.channel === channel)
+      .filter(t => !channel || MESSAGES.some(m => m.leadId === t.leadId && m.channel === channel))
       .filter(
         (t) => path.searchParams.get('assigned') !== 'false' || t.assignmentState === 'unassigned',
       )

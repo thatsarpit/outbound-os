@@ -1,6 +1,6 @@
 import type { InboxThreadSummary } from '@/api/types'
 import { cn, formatRelativeTime } from '@/lib/utils'
-import { getChannel, getThreadSubtitle } from '@/lib/channels'
+import { CHANNEL_ORDER, getChannel, getThreadSubtitle } from '@/lib/channels'
 
 function getInitials(name?: string) {
   const label = (name || '?').trim()
@@ -17,10 +17,8 @@ function getInitials(name?: string) {
  * above a two-line preview — roughly 160px each, so about four conversations
  * fitted on screen and every row repeated what the one above it said.
  *
- * This is three lines in a fixed rhythm: who, what they said, and when. Channel
- * lives in a coloured rule down the left edge plus a small glyph, so a mixed
- * list stays scannable instead of becoming a column of coloured pills. Details
- * that used to be chips belong in the lead context panel, which has room.
+ * Keep provider-accepted outreach compact so the row still has room for the
+ * lead's name, timestamp and latest message on mobile.
  */
 export function ThreadListItem({
   thread,
@@ -33,8 +31,12 @@ export function ThreadListItem({
   onSelect: () => void
   mobile?: boolean
 }) {
-  const meta = getChannel(thread.channel)
-  const Icon = meta.icon
+  const outreach = thread.outreachChannels
+  const channels = outreach
+    ? CHANNEL_ORDER.filter(channel => outreach.includes(channel)).map(getChannel)
+    : [getChannel(thread.channel)]
+  const channelNames = channels.map(channel => channel.label).join(', ')
+  const channelLabel = outreach ? `Outreach sent via ${channelNames}` : `Latest message via ${channelNames}`
   const preview = thread.lastMessagePreview || thread.lastMessage || 'No messages yet'
   const subtitle = getThreadSubtitle(thread)
   const name = thread.leadName || thread.name || 'Unknown'
@@ -50,9 +52,9 @@ export function ThreadListItem({
         selected ? 'bg-surface-raised' : 'hover:bg-surface-raised/60',
       )}
     >
-      {/* Channel rule. Reads as a colour gutter down the list, so the channel
-          mix is visible at a glance without a chip on every row. */}
-      <span aria-hidden="true" className={cn('absolute inset-y-0 left-0 w-0.5', meta.rule)} />
+      {selected && (
+        <span aria-hidden="true" className="absolute inset-y-0 left-0 w-0.5 bg-accent" />
+      )}
 
       {/* Unread marker sits in its own narrow column so names stay aligned. */}
       <span className="flex w-1.5 shrink-0 items-center justify-center pt-1.5">
@@ -80,7 +82,14 @@ export function ThreadListItem({
           >
             {name}
           </span>
-          <Icon aria-label={meta.label} className={cn('h-3 w-3 shrink-0 self-center', meta.text)} />
+          {channels.length > 0 && (
+            <span className="inline-flex shrink-0 items-center gap-1.5 self-center" title={channelLabel}>
+              <span className="sr-only">{channelLabel}</span>
+              {channels.map(({ id, icon: Icon, text }) => (
+                <Icon key={id} aria-hidden="true" className={cn('size-3.5', text)} />
+              ))}
+            </span>
+          )}
           <span className="shrink-0 text-[11px] tabular-nums text-text-muted">
             {formatRelativeTime(thread.lastMessageAt)}
           </span>
