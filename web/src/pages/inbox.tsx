@@ -603,8 +603,10 @@ function InboxInner() {
 
   return (
     <div className="animate-fade-in space-y-3">
-      <ChannelHealthStrip health={channelHealth} />
-      <OtherEmail />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0 flex-1 basis-64"><ChannelHealthStrip health={channelHealth} /></div>
+        <OtherEmail />
+      </div>
       <div className="flex min-h-[calc(100vh-11rem)] flex-col gap-4 lg:h-[calc(100dvh-9.5rem)] lg:flex-row">
         <div className="glass flex w-full shrink-0 flex-col overflow-hidden rounded-lg border border-border lg:w-80 xl:w-[22rem] lg:min-h-0">
           <div className="border-b border-border px-3 py-3">
@@ -827,21 +829,21 @@ function InboxInner() {
             ) : (
               <>
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <div className="mb-2 flex justify-end">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      aria-expanded={showContext}
-                      onClick={() => setShowContext(!showContext)}
-                      leftIcon={<PanelRight className="h-4 w-4" />}
-                    >
-                      {showContext ? 'Hide details' : 'Lead details'}
-                    </Button>
-                  </div>
                   <ConversationSurface
                     activeThread={activeThread ?? null}
                     threadLoading={threadLoading}
                     threadError={resolvedThreadError}
+                    headerActions={
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        aria-expanded={showContext}
+                        onClick={() => setShowContext(value => !value)}
+                        leftIcon={<PanelRight className="size-4" aria-hidden="true" />}
+                      >
+                        {showContext ? 'Hide details' : 'Lead details'}
+                      </Button>
+                    }
                     replyText={replyText}
                     setReplyText={setReplyText}
                     htmlBody={htmlBody}

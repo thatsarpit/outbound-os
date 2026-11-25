@@ -1,7 +1,7 @@
 import { WorkspaceSwitcher } from '@/components/auth/workspace-boundary'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth-store'
-import { useUIStore } from '@/stores/ui-store'
+import { DialogTrigger } from '@/components/ui/dialog'
 import { ROLE_EXPERIENCE } from '@/lib/role-shell'
 import { cn } from '@/lib/utils'
 import { Menu, LogOut, MessageCircleMore, ChevronDown, Info, Search, UserCog } from 'lucide-react'
@@ -111,20 +111,17 @@ function UserMenu() {
 
 export function Topbar({ onOpenSearch }: { onOpenSearch: () => void }) {
   const location = useLocation()
-  const { toggleSidebar } = useUIStore()
   const pathname = location.pathname.replace(/^\/dev\/shell(?:\/|$)/, '/') || '/overview'
   const page = PAGE_TITLES.find((item) => (pathname === '/' ? '/overview' : pathname).startsWith(item.route))
 
   return (
     <header className="sticky top-0 z-30 flex min-h-12 pt-[env(safe-area-inset-top)] shrink-0 items-center gap-2 border-b border-border bg-surface px-3 sm:px-4">
-      <button
-        type="button"
-        onClick={toggleSidebar}
-        aria-label="Open navigation"
-        className="-ml-1 rounded-md p-1.5 text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary lg:hidden"
-      >
-        <Menu className="h-4 w-4" aria-hidden="true" />
-      </button>
+      <DialogTrigger asChild>
+        <button type="button" aria-label="Open navigation"
+          className="-ml-1 grid size-11 shrink-0 place-items-center rounded-md text-text-secondary hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus lg:hidden">
+          <Menu className="h-4 w-4" aria-hidden="true" />
+        </button>
+      </DialogTrigger>
 
       <h1 className="shrink-0 text-sm font-semibold tracking-tight">
         {page?.title || 'Dashboard'}

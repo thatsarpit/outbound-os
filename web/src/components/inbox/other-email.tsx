@@ -4,6 +4,8 @@ import { api } from '@/api/client'
 import type { EmailAccount } from '@/api/types'
 import { useAuthStore } from '@/stores/auth-store'
 import { Button } from '@/components/ui'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { Mail } from 'lucide-react'
 import { EmailReceipts } from '@/components/integrations/email-receipts'
 
 /** Unlinked mail belongs in the inbox too, without creating sales contacts. */
@@ -27,22 +29,21 @@ export function OtherEmail() {
   })
   if (!allowed) return null
   return (
-    <section className="space-y-3" aria-label="Other received email">
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-surface px-4 py-3">
-        <div>
-          <p className="text-sm font-medium">Other email{receipts.data ? ` (${receipts.data.total})` : ''}</p>
-          <p className="mt-1 text-xs text-text-muted">
-            Received mail without a sales conversation, including account notices and unmatched senders.
-          </p>
-          {receipts.isError && <p role="status" className="mt-1 text-xs text-warning">Could not check other mail. Open it to retry.</p>}
-        </div>
-        <Button variant="secondary" aria-expanded={open} onClick={() => setOpen(value => !value)}>
-          {open ? 'Hide other email' : 'Open other email'}
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button size="sm" variant="secondary" className="min-h-11 lg:min-h-8" leftIcon={<Mail aria-hidden="true" className="size-4" />}>
+          Other email{receipts.data ? ` (${receipts.data.total})` : ''}
         </Button>
-      </div>
-      {open && <div className="max-h-[70dvh] overflow-y-auto">
-        <EmailReceipts accounts={accounts.data || []} />
-      </div>}
-    </section>
+      </DialogTrigger>
+      <DialogContent size="2xl" className="flex max-h-[90dvh] flex-col">
+        <DialogHeader className="shrink-0 pr-12">
+          <DialogTitle>Other email</DialogTitle>
+          <DialogDescription>Account notices and mail without a linked sales conversation.</DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 overflow-y-auto p-3 sm:p-4">
+          <EmailReceipts accounts={accounts.data || []} />
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

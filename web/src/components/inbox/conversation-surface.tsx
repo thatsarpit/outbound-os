@@ -8,7 +8,7 @@ import { ReplyPreview, MessageInteractions } from './message-interactions'
  * cleanly while the rest of that file could not.
  */
 import { WhatsAppReplyWindow, isWhatsAppWindowClosed } from './whatsapp-reply-window'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useConversationRead } from '@/hooks/use-conversation-read'
 import { type EmailTemplate } from '@/api/endpoints/templates'
 import type { InboxChannel, InboxThreadDetail, InboxMessage, MediaFile } from '@/api/types'
@@ -103,6 +103,7 @@ export interface ConversationSurfaceProps {
   activeThread?: InboxThreadDetail | null
   threadLoading: boolean
   threadError: Error | null
+  headerActions?: ReactNode
   replyText: string
   setReplyText: (value: string) => void
   htmlBody: string
@@ -143,6 +144,7 @@ export function ConversationSurface({
   activeThread,
   threadLoading,
   threadError,
+  headerActions,
   replyText,
   setReplyText,
   htmlBody,
@@ -209,6 +211,7 @@ export function ConversationSurface({
       <ThreadHeader
         thread={activeThread}
         activeChannel={composerChannel}
+        actions={headerActions}
         drawer={drawer}
         onClose={onClose}
         onResolve={onResolve}
