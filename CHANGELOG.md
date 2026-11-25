@@ -6,6 +6,22 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+## [0.5.0] — 26 November 2026
+
+- Show confirmed outbound channels in each inbox row and keep the selected reply
+  channel explicit in the conversation.
+- Call a lead using the device’s dialer from a conversation or lead details.
+- Distinguish WhatsApp first contact and waiting for a reply from a window that
+  actually expired. Keep email composition independent.
+- Preserve mobile inbox filters and email reply context in links. Require the
+  original mailbox for a quoted email, and show email options in a dialog.
+- Improve keyboard navigation, expose an accessible order action, and require
+  a confirmation before starting a Google Sheets backfill.
+- Add opt-in Clerk workspaces in one Compose project with separate data
+  volumes and runtimes. See [workspace setup](docs/workspaces.md).
+- Add read-only, paginated inbox and follow-up triage tools to MCP.
+- Update Next.js to 16.4.5.
+
 - Update the Effect dependency used by Prisma to address GHSA-7589-6fvf-x4pw.
 - Filter Leads by recorded outbound acceptance independently of pipeline stage.
 - Restore a lead’s previous sales stage after an operator resumes its outreach.
