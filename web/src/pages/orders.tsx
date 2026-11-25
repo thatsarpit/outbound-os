@@ -343,7 +343,11 @@ export default function OrdersPage() {
                       className="cursor-pointer border-b border-border-subtle transition-colors hover:bg-surface-raised"
                     >
                       <td className="px-3 py-2 font-mono text-[12px] tabular-nums">
-                        {o.orderNumber}
+                        <button type="button" aria-label={`Open order ${o.orderNumber}`}
+                          onClick={(event) => { event.stopPropagation(); setOpenOrderId(o.id) }}
+                          className="min-h-8 rounded-sm text-text-primary underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+                          {o.orderNumber}
+                        </button>
                       </td>
                       <td className="px-3 py-2">
                         {o.customerId ? (

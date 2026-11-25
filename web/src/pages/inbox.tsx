@@ -1,5 +1,5 @@
 import { ApiClientError } from '@/api/client'
-import { isReplyableEmail } from '@/lib/email-delivery'
+import { inboxEmailContext } from '@/lib/email-delivery'
 import {
   useCallback,
   useDeferredValue,
@@ -150,7 +150,8 @@ function InboxInner() {
       templateId: null,
     })
   }
-  const setComposerChannel = (channel: InboxChannel) => updateRoute({ channel })
+  const setComposerChannel = (channel: InboxChannel, emailAccountId?: number | null) =>
+    updateRoute(emailAccountId ? { channel, accountId: String(emailAccountId) } : { channel })
   const setSenderAccountId = (accountId: number | null) =>
     updateRoute({ accountId: accountId ? String(accountId) : null })
 
@@ -210,17 +211,9 @@ function InboxInner() {
   })
 
   const composerChannel = routedChannel ?? activeThread?.channel ?? 'whatsapp'
-  const availableSenders = activeThread?.availableSenderAccounts ?? []
-  const chosenSender = availableSenders.find((account) => account.id === routedAccountId)
-  const senderAccountId =
-    routedAccountId
-      ? chosenSender?.id ?? null
-      : activeThread?.senderAccount?.id ?? availableSenders[0]?.id ?? null
-
-  const latestEmailMessage =
-    activeThread?.messages?.slice().reverse().find(message =>
-      isReplyableEmail(message) && (!routedAccountId || message.emailAccountId === senderAccountId),
-    ) || null
+  const {
+    accountId: senderAccountId, latestEmail: latestEmailMessage, unavailableSender,
+  } = inboxEmailContext(activeThread || null, routedAccountId)
 
   const { data: templates = [], isLoading: templatesLoading } = useQuery({
     queryKey: EMAIL_TEMPLATE_LIST_QUERY_KEY,
@@ -248,7 +241,7 @@ function InboxInner() {
     setCc(draft?.cc ?? '')
     setBcc(draft?.bcc ?? '')
     setComposerSubject(
-      draft?.subject ?? buildReplySubject(latestEmailMessage?.subject || activeThread.subject),
+      draft?.subject ?? buildReplySubject(latestEmailMessage?.subject),
     )
     setAttachments([])
     setHydratedContext(draftContext)
@@ -303,7 +296,7 @@ function InboxInner() {
           : composerChannel === 'email'
             ? !activeThread.leadEmail
               ? 'This lead does not have an email address yet.'
-              : routedAccountId && !chosenSender
+              : unavailableSender
                 ? 'The original sender is unavailable. Choose a sender to write a reply.'
                 : activeThread.availableSenderAccounts?.length
                   ? null
@@ -363,7 +356,7 @@ function InboxInner() {
         if (replyDisabledReason) throw new Error(replyDisabledReason)
         const subject =
           composerSubject.trim() ||
-          buildReplySubject(latestEmailMessage?.subject || activeThread?.subject)
+          buildReplySubject(latestEmailMessage?.subject)
 
         const emailHtml = htmlBody.trim()
         return send({
@@ -447,7 +440,7 @@ function InboxInner() {
       }
       updateRoute({ channel: 'email', templateId: null })
       setComposerSubject(
-        data.subject || buildReplySubject(latestEmailMessage?.subject || activeThread?.subject),
+        data.subject || buildReplySubject(latestEmailMessage?.subject),
       )
       const plainText = getRenderedTemplateText(data)
       setReplyText(plainText)
@@ -558,7 +551,7 @@ function InboxInner() {
       const emailHtml = htmlBody.trim()
       const subjectLine =
         composerSubject.trim() ||
-        buildReplySubject(latestEmailMessage?.subject || activeThread?.subject)
+        buildReplySubject(latestEmailMessage?.subject)
       const { fingerprint, request } = scheduledEmailRequest(
         {
           leadId: selectedLeadId,
@@ -760,10 +753,12 @@ function InboxInner() {
                     persistCurrentDraft()
                     startTransition(() => {
                       const draft = loadDraft(dashboardScope, thread.leadId)
+                      const accountId = draft?.senderAccountId ??
+                        (thread.channel === 'email' ? thread.senderAccountId : null)
                       updateRoute({
                         leadId: String(thread.leadId),
                         channel: draft?.channel ?? thread.channel,
-                        accountId: draft?.senderAccountId ? String(draft.senderAccountId) : null,
+                        accountId: accountId ? String(accountId) : null,
                         threadKey: thread.threadKey,
                         templateId: null,
                       })

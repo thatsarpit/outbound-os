@@ -109,7 +109,7 @@ export interface ConversationSurfaceProps {
   htmlBody: string
   setHtmlBody: (value: string) => void
   composerChannel: InboxChannel
-  setComposerChannel: (value: InboxChannel) => void
+  setComposerChannel: (value: InboxChannel, emailAccountId?: number | null) => void
   composerSubject: string
   setComposerSubject: (value: string) => void
   senderAccountId: number | null
@@ -182,7 +182,8 @@ export function ConversationSurface({
 }: ConversationSurfaceProps) {
   const [selectedReply, setSelectedReply] = useState<InboxMessage | null>(null)
   const replyTarget =
-    selectedReply?.leadId === activeThread?.leadId && selectedReply?.channel === composerChannel
+    selectedReply?.leadId === activeThread?.leadId && selectedReply?.channel === composerChannel &&
+    (selectedReply.channel !== 'email' || selectedReply.emailAccountId === senderAccountId)
       ? selectedReply
       : null
 
@@ -273,7 +274,7 @@ export function ConversationSurface({
                   message={message}
                   onReply={(m) => {
                     setSelectedReply({ ...m })
-                    setComposerChannel(m.channel)
+                    setComposerChannel(m.channel, m.channel === 'email' ? m.emailAccountId : undefined)
                   }}
                 >
                   <EmailMessageCard
@@ -292,7 +293,7 @@ export function ConversationSurface({
                   showChannel={showChannel}
                   onReply={(m) => {
                     setSelectedReply({ ...m })
-                    setComposerChannel(m.channel)
+                    setComposerChannel(m.channel, m.channel === 'email' ? m.emailAccountId : undefined)
                   }}
                   quotedMessage={all.find((m) => m.id === message.replyToMessageId)}
                   showDate={

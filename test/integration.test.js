@@ -2864,6 +2864,7 @@ test('scheduled inbox email keeps the original payload and holds missing files o
   const originalReply = await db.message.create({ data: {
     leadId: lead.id, channel: 'email', direction: 'inbound', status: 'received',
     content: 'Reply already in the thread', emailMessageId: '<previous-reply@example.test>',
+    emailAccountId: account.id,
   } });
   const filename = 'schedule-fixture-' + crypto.randomUUID() + '.txt';
   const filePath = path.join(MEDIA_DIR, filename);
@@ -2888,6 +2889,9 @@ test('scheduled inbox email keeps the original payload and holds missing files o
       assert.equal((await send({ scheduledAt })).status, 400);
     }
     const date = new Date(Date.now() + 60 * 60_000).toISOString();
+    const wrongMailbox = await send({ accountId: account.id + 1, scheduledAt: date, inReplyTo: '<override@example.test>' });
+    assert.equal(wrongMailbox.status, 409);
+    assert.match(wrongMailbox.body.error, /original mailbox/);
     assert.equal((await send({ channel: 'whatsapp', scheduledAt: date })).status, 400);
     assert.equal(await db.message.count({ where: { leadId: lead.id, direction: 'outbound' } }), 0);
     assert.equal(transport.mock.callCount(), 0);

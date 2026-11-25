@@ -22,6 +22,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
+  DialogTrigger,
 } from '@/components/ui/dialog'
 import { LeadCallLink } from '@/components/leads/lead-call-link'
 import { leadPhoneHref } from '../../../../shared/leadPhone.js'
@@ -32,7 +33,7 @@ import { useOnlineStatus } from '@/hooks/use-online-status'
 import { CHANNELS, CHANNEL_ORDER } from '@/lib/channels'
 import { buildReplySubject, getRenderedTemplateText } from '@/lib/email-compose'
 import { clearSubmittedDraft, loadDraft, saveDraft, type EmailDraft } from '@/lib/email-drafts'
-import { isReplyableEmail } from '@/lib/email-delivery'
+import { inboxEmailContext, isReplyableEmail } from '@/lib/email-delivery'
 import { IS_DEMO } from '@/demo/demo-chrome'
 import { useConversationRead } from '@/hooks/use-conversation-read'
 import { toast } from '@/stores/toast-store'
@@ -80,16 +81,18 @@ function useConversationViewport() {
 
 export function MobileConversation({
   leadId,
-  initialChannel,
-  initialEmailAccountId,
+  selectedChannel,
+  selectedEmailAccountId,
+  selectedEmailReplyId,
   onClose,
-  onChannelNavigate,
+  onReplyContextChange,
 }: {
   leadId: number
-  initialChannel: string | null
-  initialEmailAccountId?: number | null
+  selectedChannel: string | null
+  selectedEmailAccountId: number | null
+  selectedEmailReplyId: number | null
   onClose: () => void
-  onChannelNavigate: (channel: InboxChannel) => void
+  onReplyContextChange: (context: { channel: InboxChannel; accountId?: number | null; replyMessageId?: number }) => void
 }) {
   const { dashboardScope } = useAuthStore()
   const frame = useConversationViewport()
@@ -100,8 +103,13 @@ export function MobileConversation({
   const [showLatest, setShowLatest] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const [messageSearch, setMessageSearch] = useState('')
+  const searchInput = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (searchOpen) searchInput.current?.focus()
+  }, [searchOpen])
   const [details, setDetails] = useState(false)
-  const [replyTarget, setReplyTarget] = useState<InboxMessage | null>(null)
+  const [localReply, setLocalReply] = useState<InboxMessage | null>(null)
+  const [emailOptions, setEmailOptions] = useState(false)
   const queryClient = useQueryClient()
   const user = useAuthStore((state) => state.user)
   const resolve = useMutation({
@@ -115,14 +123,6 @@ export function MobileConversation({
     },
     onError: (error: Error) => toast.error(error.message),
   })
-  const [channelChoice, setChannel] = useState<InboxChannel | null>(
-    CHANNEL_ORDER.includes(initialChannel as InboxChannel)
-      ? (initialChannel as InboxChannel)
-      : (loadDraft(dashboardScope, leadId)?.channel ?? null),
-  )
-  const [accountChoice, setAccount] = useState<number | null>(
-    () => initialEmailAccountId ?? loadDraft(dashboardScope, leadId)?.senderAccountId ?? null,
-  )
   const result = useQuery({
     refetchOnWindowFocus: true,
     queryKey: ['inbox-thread', leadId, dashboardScope],
@@ -131,21 +131,30 @@ export function MobileConversation({
   })
   const thread = result.data
   const markRead = useConversationRead(thread || null)
-  const channel =
-    channelChoice ??
-    (thread?.messages.length
+  const channel = CHANNEL_ORDER.includes(selectedChannel as InboxChannel)
+    ? selectedChannel as InboxChannel
+    : thread?.messages.length
       ? thread.channel
       : thread?.leadEmail
         ? 'email'
         : thread?.leadTelegramPeer
           ? 'telegram'
-          : 'whatsapp')
-  const accounts = thread?.availableSenderAccounts ?? []
-  const requestedSenderUnavailable = accountChoice === initialEmailAccountId &&
-    Boolean(initialEmailAccountId && !accounts.some(account => account.id === initialEmailAccountId))
-  const accountId =
-    requestedSenderUnavailable ? null : accounts.find((account) => account.id === accountChoice)?.id ??
-      accounts.find((account) => account.id === thread?.assignedEmailAccountId)?.id ?? accounts[0]?.id ?? null
+          : 'whatsapp'
+  const emailContext = inboxEmailContext(thread || null, selectedEmailAccountId)
+  const replyTarget = channel === 'email'
+    ? thread?.messages.find(message => message.id === selectedEmailReplyId && isReplyableEmail(message)) ?? null
+    : localReply?.channel === channel ? localReply : null
+  const quotedEmailUnavailable = channel === 'email' && selectedEmailReplyId !== null &&
+    (!replyTarget?.emailMessageId || replyTarget.emailAccountId !== emailContext.accountId)
+
+  function clearReply() {
+    setLocalReply(null)
+    if (channel === 'email') onReplyContextChange({ channel })
+  }
+  const searchTerm = messageSearch.trim().toLocaleLowerCase()
+  const searchMatches = searchOpen && searchTerm
+    ? thread?.messages.filter(message => message.content.toLocaleLowerCase().includes(searchTerm)) ?? []
+    : []
   const hasThread = Boolean(thread)
   useEffect(() => {
     const readVisible = () => {
@@ -227,38 +236,37 @@ export function MobileConversation({
         </button>
       </header>
       {searchOpen && (
-        <label className="shrink-0 border-b border-border bg-surface p-3">
-          <span className="sr-only">Search message text</span>
+        <div className="shrink-0 border-b border-border bg-surface p-3">
           <input
             type="search"
+            ref={searchInput}
+            aria-label="Search message text"
             placeholder="Find in this conversation"
             value={messageSearch}
             onChange={(event) => setMessageSearch(event.target.value)}
             className={mobileInput}
           />
-          {messageSearch && (
+          {messageSearch.trim() && (
             <div className="max-h-36 overflow-auto">
-              {thread?.messages
-                .filter((m) =>
-                  m.content.toLocaleLowerCase().includes(messageSearch.toLocaleLowerCase()),
-                )
-                .map((m) => (
-                  <button
-                    type="button"
-                    key={m.id}
-                    className="block min-h-11 w-full truncate text-left text-sm"
-                    onClick={() =>
-                      document
-                        .getElementById(`message-${m.id}`)
-                        ?.scrollIntoView({ block: 'center' })
-                    }
-                  >
-                    {m.content}
-                  </button>
-                ))}
+              <p role="status" className="py-1 text-xs text-text-muted">
+                {searchMatches.length ? `${searchMatches.length} matches` : 'No matching messages'}
+              </p>
+              {searchMatches.map(message => (
+                <button
+                  type="button"
+                  key={message.id}
+                  className="block min-h-11 w-full truncate text-left text-sm"
+                  onClick={() => {
+                    stick.current = false
+                    document.getElementById(`message-${message.id}`)?.scrollIntoView({ block: 'center' })
+                  }}
+                >
+                  {message.content}
+                </button>
+              ))}
             </div>
           )}
-        </label>
+        </div>
       )}
       {channel === 'whatsapp' && !!thread && <WhatsAppReplyWindow key={`${leadId}:${thread.whatsappSession?.accountId}`} thread={thread} />}
       <ScheduledEmails emails={thread?.scheduledEmails} leadId={leadId} />
@@ -307,9 +315,10 @@ export function MobileConversation({
                   key={message.id}
                   message={message}
                   onReply={(m) => {
-                    setReplyTarget(m)
-                    setChannel(m.channel)
-                    onChannelNavigate(m.channel)
+                    onReplyContextChange({ channel: 'email', accountId: m.emailAccountId, replyMessageId: m.id })
+                    requestAnimationFrame(() =>
+                      document.querySelector<HTMLElement>('[aria-label="Email message"]')?.focus(),
+                    )
                   }}
                 >
                   <EmailMessageCard
@@ -322,9 +331,8 @@ export function MobileConversation({
                   key={message.id}
                   message={message}
                   onReply={(m) => {
-                    setReplyTarget(m)
-                    setChannel(m.channel)
-                    onChannelNavigate(m.channel)
+                    setLocalReply(m)
+                    onReplyContextChange({ channel: m.channel })
                     requestAnimationFrame(() =>
                       document
                         .querySelector<HTMLTextAreaElement>('textarea[aria-label="Reply message"]')
@@ -361,18 +369,21 @@ export function MobileConversation({
       )}
       {!!thread && (
         <MobileReplyComposer
-          key={`${channel}:${channel === 'email' ? accountId : 'default'}`}
+          key={`${channel}:${channel === 'email' ? emailContext.accountId : 'default'}`}
           thread={thread}
           replyTarget={replyTarget}
-          clearReply={() => setReplyTarget(null)}
+          clearReply={clearReply}
           channel={channel}
-          accountId={channel === 'email' ? accountId : null}
+          emailContext={emailContext}
+          quotedEmailUnavailable={quotedEmailUnavailable}
+          options={emailOptions}
+          setOptions={setEmailOptions}
           onChannelChange={(next) => {
-            setReplyTarget(null)
-            setChannel(next)
-            onChannelNavigate(next)
+            setLocalReply(null)
+            setEmailOptions(false)
+            onReplyContextChange({ channel: next })
           }}
-          onAccountChange={setAccount}
+          onAccountChange={accountId => onReplyContextChange({ channel: 'email', accountId })}
           onSent={() => {
             stick.current = true
           }}
@@ -402,7 +413,10 @@ export function MobileConversation({
 function MobileReplyComposer({
   thread,
   channel,
-  accountId,
+  emailContext,
+  quotedEmailUnavailable,
+  options,
+  setOptions,
   onChannelChange,
   onAccountChange,
   onSent,
@@ -411,7 +425,10 @@ function MobileReplyComposer({
 }: {
   thread: InboxThreadDetail
   channel: InboxChannel
-  accountId: number | null
+  emailContext: ReturnType<typeof inboxEmailContext>
+  quotedEmailUnavailable: boolean
+  options: boolean
+  setOptions: (open: boolean) => void
   onChannelChange: (channel: InboxChannel) => void
   onAccountChange: (id: number | null) => void
   onSent: () => void
@@ -421,9 +438,11 @@ function MobileReplyComposer({
   const { dashboardScope, user } = useAuthStore()
   const online = useOnlineStatus()
   const client = useQueryClient()
-  const latestEmail = [...thread.messages].reverse().find(isReplyableEmail)
+  const { sender, latestEmail, unavailableSender } = emailContext
+  const accountId = channel === 'email' ? emailContext.accountId : null
+  const suggestedSubject = buildReplySubject(replyTarget?.subject || latestEmail?.subject)
   const empty = (): Omit<EmailDraft, 'savedAt'> => ({
-    subject: buildReplySubject(latestEmail?.subject || thread.subject),
+    subject: '',
     plainBody: '',
     htmlBody: '',
     channel,
@@ -434,7 +453,6 @@ function MobileReplyComposer({
   const [draft, setDraft] = useState<Omit<EmailDraft, 'savedAt'>>(
     () => loadDraft(dashboardScope, thread.leadId, channel, accountId) ?? empty(),
   )
-  const [options, setOptions] = useState(false)
   const [storageFailed, setStorageFailed] = useState(false)
   const [attachments, setAttachments] = useState<MediaFile[]>([])
   const [templateId, setTemplateId] = useState('')
@@ -462,7 +480,6 @@ function MobileReplyComposer({
     queryFn: templatesApi.list,
     enabled: channel === 'email' && options,
   })
-  const sender = thread.availableSenderAccounts?.find((account) => account.id === accountId)
   const disabledReason = !online
     ? 'Offline. Your text draft stays here; reconnect to send.'
     : user?.role === 'viewer'
@@ -470,9 +487,13 @@ function MobileReplyComposer({
       : channel === 'email'
         ? !thread.leadEmail
           ? 'This lead has no email address.'
-          : !sender
-            ? 'No permitted sender is available.'
-            : null
+          : unavailableSender
+            ? 'The original sender is unavailable. Choose a sender to continue.'
+            : quotedEmailUnavailable
+              ? 'This reply target is unavailable. Clear the quote to start a new email.'
+              : !sender
+                ? 'No permitted sender is available.'
+                : null
         : channel === 'telegram'
           ? !thread.leadTelegramPeer
             ? 'This lead has no Telegram contact.'
@@ -516,7 +537,7 @@ function MobileReplyComposer({
             ? {
                 body: draft.plainBody.trim(),
                 htmlBody: draft.htmlBody || undefined,
-                subject: draft.subject.trim(),
+                subject: draft.subject.trim() || suggestedSubject,
                 accountId,
                 replyToMessageId:
                   replyTarget?.id || (latestEmail?.emailMessageId ? latestEmail.id : undefined),
@@ -581,242 +602,242 @@ function MobileReplyComposer({
     !recordingBusy &&
     !(replyTarget && attachments.length) &&
     (draft.plainBody.trim() || (channel === 'whatsapp' && attachments.length)) &&
-    (channel !== 'email' || draft.subject.trim())
+    (channel !== 'email' || draft.subject.trim() || suggestedSubject)
   return (
-    <section
-      aria-label="Reply composer"
-      className="max-h-[calc(var(--conversation-height,100dvh)-4rem-env(safe-area-inset-top))] shrink-0 overflow-y-auto border-t border-border bg-surface px-3 pt-2 pb-[max(.5rem,env(safe-area-inset-bottom))]"
-    >
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <label className="min-w-0">
-          <span className="sr-only">Reply channel</span>
-          <select
-            value={channel}
-            disabled={send.isPending || uploading || apply.isPending}
-            className="h-11 max-w-full rounded-lg bg-surface-raised px-2 text-base"
-            onChange={(event) => onChannelChange(event.target.value as InboxChannel)}
-          >
-            {CHANNEL_ORDER.map((id) => (
-              <option key={id} value={id}>
-                {CHANNELS[id].label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          type="button"
-          aria-expanded={options}
-          disabled={uploading}
-          onClick={() => setOptions(!options)}
-          className={`${mobileButton} min-w-0 border-0 text-text-secondary`}
-        >
-          <span className="truncate">
-            {channel === 'email'
-              ? sender?.senderName || sender?.name || 'Email options'
-              : 'Options'}
-          </span>
-          <ChevronDown className="h-4 w-4 shrink-0" />
-        </button>
-      </div>
-      <div className="flex flex-wrap items-center gap-1">
-        {channel === 'whatsapp' && (
-          <VoiceRecorder
-            disabled={send.isPending || !!disabledReason || !!replyTarget}
-            onBusy={setRecordingBusy}
-            onAdd={(file) => setAttachments((previous) => [...previous, file])}
-          />
-        )}
-        {channel !== 'email' && (
-          <div>
-            <button
-              type="button"
-              aria-expanded={emojiOpen}
-              className="min-h-11 rounded-xl px-3 text-sm text-text-secondary"
-              onClick={() => setEmojiOpen(!emojiOpen)}
+    <Dialog open={channel === 'email' && options} onOpenChange={setOptions}>
+      <section
+        aria-label="Reply composer"
+        className="max-h-[calc(var(--conversation-height,100dvh)-4rem-env(safe-area-inset-top))] shrink-0 overflow-y-auto border-t border-border bg-surface px-3 pt-2 pb-[max(.5rem,env(safe-area-inset-bottom))]"
+      >
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <label className="min-w-0">
+            <span className="sr-only">Reply channel</span>
+            <select
+              value={channel}
+              disabled={send.isPending || uploading || apply.isPending}
+              className="h-11 max-w-full rounded-lg bg-surface-raised px-2 text-base"
+              onChange={(event) => onChannelChange(event.target.value as InboxChannel)}
             >
-              Emoji
-            </button>
-            {emojiOpen && (
-              <div className="flex flex-wrap gap-1">
-                {['😀', '😊', '👍', '❤️', '🙏', '✅', '👋', '🎉'].map((value) => (
-                  <button
-                    type="button"
-                    key={value}
-                    className="h-11 w-11 text-2xl"
-                    aria-label={`Insert ${value}`}
-                    disabled={send.isPending}
-                    onClick={() => updateDraft({ plainBody: draft.plainBody + value })}
-                  >
-                    {value}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        {replyTarget && attachments.length > 0 && (
-          <p role="status" className="text-sm text-warning">
-            Remove the quote or attachments before sending.
+              {CHANNEL_ORDER.map((id) => (
+                <option key={id} value={id}>
+                  {CHANNELS[id].label}
+                </option>
+              ))}
+            </select>
+          </label>
+          {channel === 'email' && (
+            <DialogTrigger asChild>
+              <button type="button" disabled={uploading} className={`${mobileButton} min-w-0 text-text-secondary`}>
+                <span className="truncate">Email options</span>
+                <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+              </button>
+            </DialogTrigger>
+          )}
+        </div>
+        {channel === 'email' && sender && (
+          <p className="mb-2 truncate text-xs text-text-muted" title={sender.email || sender.name}>
+            From {sender.email || sender.name}
           </p>
         )}
-        {replyTarget && <ReplyPreview message={replyTarget} onCancel={clearReply} />}
-        {(channel === 'email' || channel === 'whatsapp') && (
-          <AttachmentPicker
-            attachments={attachments}
-            onUploadingChange={setUploading}
-            onAdd={(file) => setAttachments((previous) => [...previous, file])}
-            onRemove={(id) =>
-              setAttachments((previous) => previous.filter((file) => file.id !== id))
-            }
-            disabled={send.isPending || !!disabledReason || !!replyTarget}
-          />
-        )}
-      </div>
-      {options && (
-        <div className="mb-3 max-h-[min(35dvh,max(3rem,calc(var(--conversation-height,100dvh)-16rem)))] space-y-3 overflow-y-auto rounded-lg border border-border p-3">
-          {channel === 'email' && (
-            <>
-              <p className="break-all text-xs text-text-muted">
-                To: {thread.leadEmail || 'No email address'}
-              </p>
-              <label className="block text-xs text-text-secondary">
-                From
-                <select
-                  className={`${mobileInput} mt-1`}
-                  value={accountId ?? ''}
-                  disabled={send.isPending || uploading || apply.isPending}
-                  onChange={(event) => onAccountChange(Number(event.target.value) || null)}
-                >
-                  {!sender && <option value="">No sender available</option>}
-                  {thread.availableSenderAccounts?.map((account) => (
-                    <option key={account.id} value={account.id}>
-                      {account.senderName || account.name} · {account.email}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-xs text-text-secondary">
-                Subject
-                <input
-                  className={`${mobileInput} mt-1`}
-                  value={draft.subject}
-                  disabled={send.isPending || uploading || apply.isPending}
-                  onChange={(event) => updateDraft({ subject: event.target.value })}
-                />
-              </label>
-              <label className="block text-xs text-text-secondary">
-                CC
-                <input
-                  className={`${mobileInput} mt-1`}
-                  inputMode="email"
-                  value={draft.cc}
-                  disabled={send.isPending || uploading || apply.isPending}
-                  onChange={(event) => updateDraft({ cc: event.target.value })}
-                />
-              </label>
-              <label className="block text-xs text-text-secondary">
-                BCC
-                <input
-                  className={`${mobileInput} mt-1`}
-                  inputMode="email"
-                  value={draft.bcc}
-                  disabled={send.isPending || uploading || apply.isPending}
-                  onChange={(event) => updateDraft({ bcc: event.target.value })}
-                />
-              </label>
-              <label className="block text-xs text-text-secondary">
-                Template
-                <select
-                  className={`${mobileInput} mt-1`}
-                  value={templateId}
-                  onChange={(event) => setTemplateId(event.target.value)}
-                >
-                  <option value="">
-                    {templates.isPending ? 'Loading templates…' : 'Choose template'}
-                  </option>
-                  {Array.isArray(templates.data) &&
-                    templates.data.map((template) => (
-                      <option key={template.id} value={template.id}>
-                        {template.name}
-                      </option>
-                    ))}
-                </select>
-              </label>
+        <div className="flex flex-wrap items-center gap-1">
+          {channel === 'whatsapp' && (
+            <VoiceRecorder
+              disabled={send.isPending || !!disabledReason || !!replyTarget}
+              onBusy={setRecordingBusy}
+              onAdd={(file) => setAttachments((previous) => [...previous, file])}
+            />
+          )}
+          {channel !== 'email' && (
+            <div>
               <button
                 type="button"
-                className={`${mobileButton} w-full`}
-                disabled={
-                  !templateId || send.isPending || uploading || apply.isPending || !!disabledReason
-                }
-                onClick={() => apply.mutate()}
+                aria-expanded={emojiOpen}
+                className="min-h-11 rounded-xl px-3 text-sm text-text-secondary"
+                onClick={() => setEmojiOpen(!emojiOpen)}
               >
-                {apply.isPending ? 'Applying…' : 'Apply template'}
+                Emoji
               </button>
-            </>
+              {emojiOpen && (
+                <div className="flex flex-wrap gap-1">
+                  {['😀', '😊', '👍', '❤️', '🙏', '✅', '👋', '🎉'].map((value) => (
+                    <button
+                      type="button"
+                      key={value}
+                      className="h-11 w-11 text-2xl"
+                      aria-label={`Insert ${value}`}
+                      disabled={send.isPending}
+                      onClick={() => updateDraft({ plainBody: draft.plainBody + value })}
+                    >
+                      {value}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
-          <p className="text-xs leading-5 text-text-muted">
-            Text drafts are saved on this device, separately for each channel and sender. Reattach
-            files after reopening a conversation.
+          {replyTarget && attachments.length > 0 && (
+            <p role="status" className="text-sm text-warning">
+              Remove the quote or attachments before sending.
+            </p>
+          )}
+          {replyTarget && <ReplyPreview message={replyTarget} onCancel={clearReply} />}
+          {!replyTarget && quotedEmailUnavailable && (
+            <button type="button" className={mobileButton} onClick={clearReply}>Clear quote</button>
+          )}
+          {(channel === 'email' || channel === 'whatsapp') && (
+            <AttachmentPicker
+              attachments={attachments}
+              onUploadingChange={setUploading}
+              onAdd={(file) => setAttachments((previous) => [...previous, file])}
+              onRemove={(id) =>
+                setAttachments((previous) => previous.filter((file) => file.id !== id))
+              }
+              disabled={send.isPending || !!disabledReason || !!replyTarget}
+            />
+          )}
+        </div>
+        {channel === 'email' && (
+          <DialogContent className="max-h-[85dvh] overflow-y-auto space-y-3 p-4" size="sm">
+              <DialogTitle>Email options</DialogTitle>
+              <DialogDescription className="break-all">
+                To: {thread.leadEmail || 'No email address'}
+              </DialogDescription>
+                <label className="block text-xs text-text-secondary">
+                  From
+                  <select
+                    className={`${mobileInput} mt-1`}
+                    value={accountId ?? ''}
+                    disabled={send.isPending || uploading || apply.isPending}
+                    onChange={(event) => onAccountChange(Number(event.target.value) || null)}
+                  >
+                    {!sender && <option value="">No sender available</option>}
+                    {thread.availableSenderAccounts?.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.senderName || account.name} · {account.email}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-xs text-text-secondary">
+                  Subject
+                  <input
+                    className={`${mobileInput} mt-1`}
+                    value={draft.subject}
+                    placeholder={suggestedSubject}
+                    disabled={send.isPending || uploading || apply.isPending}
+                    onChange={(event) => updateDraft({ subject: event.target.value })}
+                  />
+                </label>
+                <label className="block text-xs text-text-secondary">
+                  CC
+                  <input
+                    className={`${mobileInput} mt-1`}
+                    inputMode="email"
+                    value={draft.cc}
+                    disabled={send.isPending || uploading || apply.isPending}
+                    onChange={(event) => updateDraft({ cc: event.target.value })}
+                  />
+                </label>
+                <label className="block text-xs text-text-secondary">
+                  BCC
+                  <input
+                    className={`${mobileInput} mt-1`}
+                    inputMode="email"
+                    value={draft.bcc}
+                    disabled={send.isPending || uploading || apply.isPending}
+                    onChange={(event) => updateDraft({ bcc: event.target.value })}
+                  />
+                </label>
+                <label className="block text-xs text-text-secondary">
+                  Template
+                  <select
+                    className={`${mobileInput} mt-1`}
+                    value={templateId}
+                    onChange={(event) => setTemplateId(event.target.value)}
+                  >
+                    <option value="">
+                      {templates.isPending ? 'Loading templates…' : 'Choose template'}
+                    </option>
+                    {Array.isArray(templates.data) &&
+                      templates.data.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className={`${mobileButton} w-full`}
+                  disabled={
+                    !templateId || send.isPending || uploading || apply.isPending || !!disabledReason
+                  }
+                  onClick={() => apply.mutate()}
+                >
+                  {apply.isPending ? 'Applying…' : 'Apply template'}
+                </button>
+            <p className="text-xs text-text-muted">Drafts are saved separately for each sender.</p>
+            <DialogClose className={mobileButton}>Done</DialogClose>
+          </DialogContent>
+        )}
+        {send.isPending && (
+          <p
+            role="status"
+            className="mb-3 ml-auto max-w-[85%] whitespace-pre-wrap rounded-2xl bg-accent-muted p-3 text-sm"
+          >
+            {draft.plainBody}
+            <span className="mt-1 block text-xs text-text-secondary">Submitting…</span>
           </p>
+        )}
+        <div className="flex items-end gap-2">
+          <div className="min-w-0 flex-1">
+            {channel === 'email' ? (
+              <EmailEditor
+                compact
+                content={draft.htmlBody}
+                onContentChange={(htmlBody, plainBody) => updateDraft({ htmlBody, plainBody })}
+                disabled={send.isPending || user?.role === 'viewer'}
+                placeholder="Write your reply…"
+              />
+            ) : (
+              <textarea
+                aria-label="Reply message"
+                className={`${mobileInput} max-h-36 resize-none`}
+                rows={2}
+                value={draft.plainBody}
+                onChange={(event) => {
+                  event.target.style.height = 'auto'
+                  event.target.style.height = `${Math.min(event.target.scrollHeight, 144)}px`
+                  updateDraft({ plainBody: event.target.value })
+                }}
+                disabled={send.isPending || user?.role === 'viewer'}
+                placeholder="Write your reply…"
+              />
+            )}
+          </div>
+          <button
+            type="button"
+            aria-label="Send reply"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-fg disabled:opacity-40"
+            disabled={!canSend}
+            onClick={() => send.mutate()}
+          >
+            <Send className="h-5 w-5" />
+          </button>
         </div>
-      )}
-      {send.isPending && (
-        <p
-          role="status"
-          className="mb-3 ml-auto max-w-[85%] whitespace-pre-wrap rounded-2xl bg-accent-muted p-3 text-sm"
-        >
-          {draft.plainBody}
-          <span className="mt-1 block text-xs text-text-secondary">Submitting…</span>
-        </p>
-      )}
-      <div className="flex items-end gap-2">
-        <div className="min-w-0 flex-1">
-          {channel === 'email' ? (
-            <EmailEditor
-              compact
-              content={draft.htmlBody}
-              onContentChange={(htmlBody, plainBody) => updateDraft({ htmlBody, plainBody })}
-              disabled={send.isPending || user?.role === 'viewer'}
-              placeholder="Write your reply…"
-            />
-          ) : (
-            <textarea
-              aria-label="Reply message"
-              className={`${mobileInput} max-h-36 resize-none`}
-              rows={2}
-              value={draft.plainBody}
-              onChange={(event) => {
-                event.target.style.height = 'auto'
-                event.target.style.height = `${Math.min(event.target.scrollHeight, 144)}px`
-                updateDraft({ plainBody: event.target.value })
-              }}
-              disabled={send.isPending || user?.role === 'viewer'}
-              placeholder="Write your reply…"
-            />
-          )}
-        </div>
-        <button
-          type="button"
-          aria-label="Send reply"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-fg disabled:opacity-40"
-          disabled={!canSend}
-          onClick={() => send.mutate()}
-        >
-          <Send className="h-5 w-5" />
-        </button>
-      </div>
-      {uploading && (
-        <p role="status" className="mt-2 text-xs text-text-muted">
-          Uploading attachment…
-        </p>
-      )}
-      {(disabledReason || send.error || storageFailed) && (
-        <p role="status" className="mt-2 max-h-16 overflow-y-auto text-xs leading-5 text-warning">
-          {send.error?.message ||
-            disabledReason ||
-            'Device storage is unavailable. Keep this conversation open to retain your draft.'}
-        </p>
-      )}
-    </section>
+        {uploading && (
+          <p role="status" className="mt-2 text-xs text-text-muted">
+            Uploading attachment…
+          </p>
+        )}
+        {(disabledReason || send.error || storageFailed) && (
+          <p role="status" className="mt-2 max-h-16 overflow-y-auto text-xs leading-5 text-warning">
+            {send.error?.message ||
+              disabledReason ||
+              'Device storage is unavailable. Keep this conversation open to retain your draft.'}
+          </p>
+        )}
+      </section>
+    </Dialog>
   )
 }

@@ -327,13 +327,14 @@ async function resolveEmailSenderAccount({ leadId, requestedAccountId, user }) {
   return permittedAccounts[0] || null;
 }
 
-async function resolveEmailReplyContext({ leadId, replyToMessageId, inReplyTo }) {
-  if (inReplyTo) {
+async function resolveEmailReplyContext({ leadId, replyToMessageId, inReplyTo, accountId }) {
+  if (inReplyTo && replyToMessageId == null) {
     return { inReplyTo: String(inReplyTo), replyMessage: null };
   }
 
   const parentId = parsePositiveInt(replyToMessageId);
   if (!parentId) {
+    if (replyToMessageId != null) throw Object.assign(new Error('Choose a valid email reply target.'), { statusCode: 400 });
     return { inReplyTo: null, replyMessage: null };
   }
 
@@ -353,7 +354,11 @@ async function resolveEmailReplyContext({ leadId, replyToMessageId, inReplyTo })
   });
 
   if (!replyMessage?.emailMessageId) {
-    throw new Error('Reply target not found');
+    throw Object.assign(new Error('Email reply target not found.'), { statusCode: 404 });
+  }
+  const requestedAccount = parsePositiveInt(accountId);
+  if (requestedAccount && replyMessage.emailAccountId && requestedAccount !== replyMessage.emailAccountId) {
+    throw Object.assign(new Error('Choose the original mailbox to reply, or start a new email.'), { statusCode: 409 });
   }
 
   return { inReplyTo: replyMessage.emailMessageId, replyMessage };
@@ -3972,6 +3977,7 @@ app.post('/api/inbox/send', requireRole('agent'), async (req, res) => {
       leadId,
       replyToMessageId: req.body?.replyToMessageId,
       inReplyTo: req.body?.inReplyTo,
+      accountId: req.body?.accountId,
     });
     const emailAccount = await resolveEmailSenderAccount({
       leadId,
@@ -4113,6 +4119,7 @@ app.post('/api/leads/:id/email/send', requireRole('agent'), async (req, res) => 
       leadId,
       replyToMessageId,
       inReplyTo,
+      accountId,
     });
     const emailAccount = await resolveEmailSenderAccount({
       leadId,
@@ -5148,6 +5155,7 @@ app.post('/api/leads/:id/email/send-template', requireRole('agent'), async (req,
       leadId,
       replyToMessageId,
       inReplyTo,
+      accountId,
     });
     const emailAccount = await resolveEmailSenderAccount({
       leadId,
