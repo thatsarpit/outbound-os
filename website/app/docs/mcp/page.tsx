@@ -74,10 +74,11 @@ export default function McpDoc() {
 
       <h2 id="approvals">5. Decide what needs approval</h2>
       <p>
-        Every tool acts with the MCP server&rsquo;s service credential, so a
-        connected client can do what an admin can through those tools. Most
-        clients can ask before each call; keep that on for anything that
-        changes state:
+        A legacy connection acts through the MCP server&rsquo;s shared service
+        credential. With personal authorization enabled, administrators can
+        grant <code>mcp:read</code> for inspection or grant write access.
+        Authentication does not approve each individual action. Use client
+        confirmation for tools that change data or send messages.
       </p>
       <div className="table-wrap">
         <table>
@@ -113,7 +114,8 @@ export default function McpDoc() {
               <td>Read only</td>
               <td>
                 <code>list_leads</code>, <code>get_lead</code>,{' '}
-                <code>lead_timeline</code>, <code>list_messages</code>, analytics
+                <code>lead_timeline</code>, <code>list_messages</code>,{' '}
+                <code>list_inbox_threads</code>, <code>list_follow_up_tasks</code>, analytics
                 and status tools
               </td>
             </tr>

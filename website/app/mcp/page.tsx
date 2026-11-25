@@ -143,12 +143,12 @@ export default function McpPage() {
               <span className="mcp-jobs__number">01 / Read</span>
               <h3>Get back into a conversation.</h3>
               <p>
-                Find the lead, read message history and inspect the timeline before writing a reply.
+                Find replies that need attention and follow-ups that are due. Open the relevant message history before writing a reply.
               </p>
               <div>
-                <code>list_leads</code>
+                <code>list_inbox_threads</code>
+                <code>list_follow_up_tasks</code>
                 <code>list_messages</code>
-                <code>lead_timeline</code>
               </div>
             </article>
             <article>

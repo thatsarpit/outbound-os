@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { MCP_READ_OPERATIONS, MCP_WRITE_OPERATIONS } from '../../shared/mcpOperations.js';
 
 const serverPath = fileURLToPath(new URL('../src/server.js', import.meta.url));
 
@@ -26,7 +27,10 @@ test('personal MCP filters writes and isolates concurrent clients through operat
       if (req.body.token.endsWith('w')) {
         assert.equal(req.body.tool, 'create_campaign'); assert.equal(req.body.method, 'POST'); assert.equal(req.body.path, '/api/campaigns');
       } else {
-        assert.equal(req.body.tool, 'system_status'); assert.equal(req.body.method, 'GET'); assert.equal(req.body.path, '/api/system/status');
+        const paths = { system_status: '/api/system/status', list_inbox_threads: '/api/inbox/threads', list_follow_up_tasks: '/api/tasks' };
+        assert.ok(Object.hasOwn(paths, req.body.tool));
+        assert.equal(req.body.method, 'GET');
+        assert.equal(req.body.path, paths[req.body.tool]);
       }
       await new Promise(resolve => setTimeout(resolve, req.body.token.endsWith('a') ? 25 : 2));
       return res.json({ assertion: `fixture-delegation-${req.body.token.slice(-1)}` });
@@ -36,6 +40,16 @@ test('personal MCP filters writes and isolates concurrent clients through operat
   backend.get('/api/system/status', (req, res) => {
     calls.push(req.headers.authorization);
     res.json({ fixtureActor: req.headers.authorization.slice(-1) });
+  });
+  backend.get('/api/inbox/threads', (req, res) => {
+    calls.push(req.headers.authorization);
+    assert.equal(req.query.assignedToMe, 'true');
+    res.json({ threads: [{ leadId: 2, leadName: 'Inbox fixture', unread: true }], page: 1, pages: 1, total: 1, unread: 1 });
+  });
+  backend.get('/api/tasks', (req, res) => {
+    calls.push(req.headers.authorization);
+    assert.equal(req.query.scope, 'mine');
+    res.json({ tasks: [{ id: 3, leadId: 2, title: 'Fixture callback' }], page: 1, pages: 1, total: 1 });
   });
   backend.post('/api/campaigns', (req, res) => { calls.push(req.headers.authorization); res.json({ id: 7, name: req.body.name, status: 'draft' }); });
   const apiServer = backend.listen(0, '127.0.0.1');
@@ -71,13 +85,23 @@ test('personal MCP filters writes and isolates concurrent clients through operat
       requestInit: { headers: { Authorization: `Bearer mcp_personal_${['a','b','w'][index]}` } },
     }))));
     const catalogue = await clients[0].listTools();
-    assert.equal(catalogue.tools.length, 22);
+    assert.deepEqual(catalogue.tools.map(tool => tool.name).sort(), Object.keys(MCP_READ_OPERATIONS).sort());
     assert.ok(catalogue.tools.every(tool => !['send_whatsapp', 'send_email', 'start_campaign', 'create_lead', 'system_pause_resume'].includes(tool.name)));
     const results = await Promise.all(clients.slice(0,2).map(client => client.callTool({ name: 'system_status', arguments: {} })));
     assert.deepEqual(results.map(result => JSON.parse(result.content[0].text).fixtureActor), ['a', 'b']);
     assert.deepEqual(new Set(calls), new Set(['Bearer fixture-delegation-a', 'Bearer fixture-delegation-b']));
+    const inbox = catalogue.tools.find(tool => tool.name === 'list_inbox_threads');
+    const tasks = catalogue.tools.find(tool => tool.name === 'list_follow_up_tasks');
+    assert.equal(inbox.annotations.readOnlyHint, true);
+    assert.equal(tasks.annotations.readOnlyHint, true);
+    const triage = await Promise.all([
+      clients[0].callTool({ name: inbox.name, arguments: { assignment: 'mine' } }),
+      clients[1].callTool({ name: tasks.name, arguments: { scope: 'mine' } }),
+    ]);
+    assert.equal(JSON.parse(triage[0].content[0].text).threads[0].unread, true);
+    assert.equal(JSON.parse(triage[1].content[0].text).tasks[0].title, 'Fixture callback');
     const writeTools = await clients[2].listTools();
-    assert.equal(writeTools.tools.length, 43);
+    assert.deepEqual(writeTools.tools.map(tool => tool.name).sort(), [...Object.keys(MCP_READ_OPERATIONS), ...Object.keys(MCP_WRITE_OPERATIONS)].sort());
     assert.ok(writeTools.tools.some(tool => tool.name === 'schedule_campaign'));
     assert.ok(!catalogue.tools.some(tool => tool.name === 'schedule_campaign'));
     const written = await clients[2].callTool({ name: 'create_campaign', arguments: { name: 'Synthetic write test', messageTemplate: 'Synthetic message' } });
@@ -85,7 +109,7 @@ test('personal MCP filters writes and isolates concurrent clients through operat
     assert.equal(calls.at(-1), 'Bearer fixture-delegation-w');
     const denied = await clients[0].callTool({ name: 'send_whatsapp', arguments: { lead_id: 1, message: 'Never sent' } });
     assert.equal(denied.isError, true);
-    assert.equal(calls.length, 3, 'direct calls to hidden writes cannot reach the backend');
+    assert.equal(calls.length, 5, 'direct calls to hidden writes cannot reach the backend');
   } finally {
     await Promise.all(clients.map(client => client.close().catch(() => {})));
     const exited = once(child, 'exit');

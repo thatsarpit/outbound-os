@@ -31,6 +31,19 @@ See [device notification setup](notifications/web-push.md). Server-side and simu
 Unit and isolated API tests cover provider/import timestamps, per-number windows, template validation, failure visibility, concurrent request claims, uncertain sends, crash recovery, exact account matching, early/duplicate/out-of-order receipts and provider retry responses. The demo includes an expired conversation with a failed attempt, approved-template preview and a recent open conversation. No real customer messages are sent by these tests.
 
 
+## MCP inbox and follow-up triage
+
+- `list_inbox_threads` defaults to conversations needing a reply. Filter by
+  channel, assignment, search or queue state. The latest message channel and
+  successful outreach channels are separate fields. Previews are off by
+  default and limited to 240 characters when requested.
+- `list_follow_up_tasks` lists pending tasks with overdue, today, upcoming or
+  unscheduled filters. Date filters use the dashboard's workspace calendar.
+
+Both tools read one page from the dashboard API with a maximum of 50 rows and
+work with the personal `mcp:read` scope. Mine and personal unread state require
+a personal connection. The tools do not mark conversations read or update tasks.
+
 ## MCP delivery diagnostics
 
 The `list_messages` tool preserves failed/unconfirmed attempts and includes provider status reasons, sending-account/message IDs, delivery acknowledgements, media metadata and Meta's pricing flags. Acceptance remains distinct from delivery. Fields are explicitly selected; raw account credentials and push endpoints are not returned.
