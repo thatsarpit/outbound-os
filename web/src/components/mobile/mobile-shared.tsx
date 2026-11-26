@@ -9,22 +9,32 @@ export const mobileButton =
 export function MobileRefresh({
   updatedAt,
   refreshing,
+  stale,
+  retry,
 }: {
   updatedAt: number
   refreshing: boolean
+  stale?: boolean
+  retry?: () => void
 }) {
   const online = useOnlineStatus()
   return (
     <div className="flex items-center justify-between gap-3">
       <p className="text-xs text-text-muted" role="status">
         {!online
-          ? 'Offline · showing loaded data'
-          : refreshing
-            ? 'Syncing…'
+          ? updatedAt ? 'Offline · showing loaded data' : 'Offline · reconnect to load this list'
+          : stale
+            ? 'Refresh failed · showing loaded data'
             : updatedAt
               ? `Synced ${new Date(updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
               : 'Waiting for updates'}
       </p>
+      {online && stale && retry && (
+        <button type="button" className={mobileButton} onClick={retry} disabled={refreshing}>
+          <RefreshCw className={refreshing ? 'h-4 w-4 motion-safe:animate-spin' : 'h-4 w-4'} aria-hidden="true" />
+          Retry refresh
+        </button>
+      )}
     </div>
   )
 }
@@ -95,4 +105,13 @@ export function mobileDueDate(value: string | null, timeZone = 'UTC') {
 export function mobileLeadId(value: string | null): number | null {
   const id = Number(value)
   return Number.isSafeInteger(id) && id > 0 ? id : null
+}
+
+export function mobileSearchParams(current: URLSearchParams, values: Record<string, string | null>) {
+  const next = new URLSearchParams(current)
+  for (const [key, value] of Object.entries(values)) {
+    if (value === null) next.delete(key)
+    else next.set(key, value)
+  }
+  return next
 }

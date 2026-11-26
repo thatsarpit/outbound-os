@@ -10,7 +10,7 @@ The three mobile destinations are:
   search and paginated results. A conversation opens full-screen. Email sender,
   subject, CC/BCC, templates and attachments are behind Options. Lead details,
   notes and follow-ups are available from the conversation header.
-- **Tasks:** pending/all workspace follow-ups, overdue counts, completion/reopening and links
+- **Tasks:** pending/all follow-ups, workspace and assigned-lead filters, overdue counts, completion/reopening and links
   to their leads. Open a lead to add another follow-up.
 - **Leads:** searchable contacts, contact details, conversation access, phone
   calls, notes and follow-ups.
@@ -36,10 +36,11 @@ for offline use. Pending uploads block Send and sender/channel changes.
 An internet connection is required. Writes fail immediately when disconnected;
 there is no offline send queue or background transmission. Visible queries
 refresh on foreground/reconnect, with periodic inbox refresh while the app is
-open. Background push notifications are not implemented.
+open.
 
-Inbox, Leads and Tasks show their last refresh and provide a manual Refresh
-button. Inbox filters and lead searches survive opening and closing a contact.
+Inbox, Leads and Tasks show their last successful sync. If a refresh fails
+after rows have loaded, the list stays visible and offers Retry refresh. Inbox
+filters, lead search and follow-up filters are stored in their URLs.
 Long conversations provide a Latest messages shortcut without pulling you away
 from older messages. The mobile header uses the same brand mark as desktop.
 
@@ -53,7 +54,7 @@ user to choose another time.
 Open the HTTPS app in Safari, choose Share → Add to Home Screen, leave Open as
 Web App enabled when shown, and open the new icon. The manifest starts at
 `/m/inbox`; normal sign-in and permissions still apply. No service worker caches
-authenticated CRM data.
+authenticated CRM data. Pinch zoom is available in the installed app.
 
 If an older Home Screen shortcut displays a generic letter, remove that shortcut,
 reload the deployed app in Safari and add it again. The release checks validate

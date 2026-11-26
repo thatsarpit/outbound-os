@@ -20,11 +20,13 @@ CI runs the same checks, plus the website build and a fresh Docker boot. Use foc
 ## Versioning a release
 
 `VERSION` is the public product version for the dashboard and server. When
-preparing a release, update it and the changelog together. Tag the reviewed
-release commit with the matching name, such as `v0.5.0` for `VERSION=0.5.0`.
-The Docker workflow verifies the tag and records its source commit in the
-image. Builds from untagged commits display a development build and its
-commit, so successive updates can be distinguished before the next release.
+promoting a new revision to production, bump `VERSION` and add the matching
+changelog entry. Use a patch for fixes and compatible polish, a minor for
+features, and a major for a new incompatible release. Tag the reviewed commit
+with the matching name, such as `v0.5.1` for `VERSION=0.5.1`. The Docker release
+workflow checks the version against existing tags, and the production dashboard
+deploy command verifies the tagged source and the built asset. Builds from
+untagged commits display a development build and its source revision.
 
 ## Database changes
 

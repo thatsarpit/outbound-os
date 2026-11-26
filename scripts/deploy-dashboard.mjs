@@ -1,9 +1,12 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { isDeepStrictEqual } from 'node:util';
+import { checkReleaseVersion } from './check-release-version.mjs';
 
 const web = fileURLToPath(new URL('../web/', import.meta.url));
+const productionOrigin = 'https://app.outboundos.space';
 export function dashboardDeployment(input) {
   const args = [...input];
   const at = args.indexOf('--verify-url');
@@ -33,11 +36,36 @@ export async function verifyDashboard(origin, fetcher = fetch) {
   }
 }
 
+export function verifyDashboardBuild(actual, expected) {
+  if (!isDeepStrictEqual(actual, expected)) {
+    throw new Error('Dashboard build does not match the tagged release. Build it again from the release checkout.');
+  }
+}
+
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const plan = dashboardDeployment(process.argv.slice(2));
   if (!existsSync(path.join(plan.cwd, 'dist/index.html'))) throw new Error('Build the production dashboard before deploying.');
+  const projectName = plan.args[plan.args.indexOf('--project-name') + 1];
+  const branchAt = plan.args.indexOf('--branch');
+  const publicProduction = projectName === 'outboundos-app' &&
+    (branchAt < 0 || plan.args[branchAt + 1] === 'main');
+  const release = publicProduction ? checkReleaseVersion() : null;
+  if (release) {
+    const hashAt = plan.args.indexOf('--commit-hash');
+    if (hashAt < 0 || plan.args[hashAt + 1] !== release.revision || plan.origin !== productionOrigin) {
+      throw new Error('Pass the tagged source revision as --commit-hash and verify the production dashboard.');
+    }
+    verifyDashboardBuild(JSON.parse(readFileSync(path.join(plan.cwd, 'dist/outboundos-build.json'), 'utf8')), release);
+  }
   const deployed = spawnSync('wrangler', plan.args, { cwd: plan.cwd, stdio: 'inherit' });
   if (deployed.status !== 0) process.exit(deployed.status || 1);
   await verifyDashboard(plan.origin);
+  if (release) {
+    const url = new URL('/outboundos-build.json', plan.origin);
+    url.searchParams.set('revision', release.revision);
+    const response = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(10000) });
+    if (!response.ok) throw new Error('The production dashboard did not return its build details.');
+    verifyDashboardBuild(await response.json(), release);
+  }
   console.log('Dashboard deployed with its Pages API function; public and protected API checks passed.');
 }

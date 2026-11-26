@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Check, ChevronRight } from 'lucide-react'
 import { tasksApi } from '@/api/endpoints/tasks'
 import { useWorkspaceTimezone } from '@/hooks/use-workspace-timezone'
@@ -13,6 +13,8 @@ import {
   MobileRefresh,
   mobileButton,
   mobileDueDate,
+  mobileLeadId,
+  mobileSearchParams,
 } from '@/components/mobile/mobile-shared'
 
 export default function MobileTasksPage() {
@@ -20,18 +22,24 @@ export default function MobileTasksPage() {
   const online = useOnlineStatus()
   const { timezone } = useWorkspaceTimezone()
   const client = useQueryClient()
-  const [ownership, setOwnership] = useState<'mine' | 'workspace'>('workspace')
-  const [showAll, setShowAll] = useState(false)
-  const [page, setPage] = useState(1)
+  const [params, setParams] = useSearchParams()
+  const ownership = params.get('scope') === 'mine' && user?.role !== 'viewer' ? 'mine' : 'workspace'
+  const showAll = params.get('show') === 'all'
+  const page = mobileLeadId(params.get('page')) ?? 1
+  const setFilters = (values: Record<string, string | null>) => {
+    setParams(current => mobileSearchParams(current, values), { replace: true, preventScrollReset: true })
+  }
   const result = useQuery({
     refetchOnWindowFocus: true,
     queryKey: ['mobile-tasks', dashboardScope, page, showAll, ownership],
     queryFn: () => tasksApi.listTeamTasks({ page, limit: 25, done: showAll, scope: ownership }),
     refetchInterval: 30_000,
   })
+  const pages = Math.max(1, result.data?.pages ?? 1)
   useEffect(() => {
-    if (result.data) setPage((current) => Math.min(current, Math.max(1, result.data?.pages ?? 1)))
-  }, [result.data])
+    if (!result.data || page <= pages) return
+    setParams(mobileSearchParams(params, { page: pages === 1 ? null : String(pages) }), { replace: true })
+  }, [page, pages, params, result.data, setParams])
 
   const complete = useMutation({
     networkMode: 'always',
@@ -54,10 +62,7 @@ export default function MobileTasksPage() {
             type="button"
             key={String(all)}
             aria-pressed={showAll === all}
-            onClick={() => {
-              setShowAll(all)
-              setPage(1)
-            }}
+            onClick={() => setFilters({ show: all ? 'all' : null, page: null })}
             className={`min-h-11 flex-1 rounded-md text-sm ${showAll === all ? 'bg-accent-muted font-medium text-accent' : 'text-text-muted'}`}
           >
             {all ? 'All follow-ups' : 'Pending'}
@@ -69,22 +74,20 @@ export default function MobileTasksPage() {
         <select
           id="task-ownership"
           value={ownership}
-          onChange={(event) => {
-            setOwnership(event.target.value as 'mine' | 'workspace')
-            setPage(1)
-          }}
+          onChange={(event) => setFilters({ scope: event.target.value === 'mine' ? 'mine' : null, page: null })}
           className="min-h-11 rounded-md border border-border bg-surface px-3 text-sm text-text-primary"
         >
           <option value="workspace">Workspace leads</option>
           {user?.role !== 'viewer' && <option value="mine">My assigned leads</option>}
         </select>
       </div>
-      <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching} />
-      {result.isPending ? (
+      <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching}
+        stale={result.isRefetchError} retry={() => void result.refetch()} />
+      {result.isPending && result.fetchStatus !== 'paused' ? (
         <p role="status" className="py-10 text-center text-sm text-text-muted">
           Loading follow-ups…
         </p>
-      ) : result.error ? (
+      ) : result.fetchStatus === 'paused' && !result.data ? null : result.isLoadingError ? (
         <MobileError message="Could not load follow-ups." retry={() => result.refetch()} />
       ) : (
         <>
@@ -148,7 +151,8 @@ export default function MobileTasksPage() {
               </Link>
             </div>
           )}
-          <MobilePagination page={page} pages={result.data?.pages ?? 1} onChange={setPage} />
+          <MobilePagination page={page} pages={pages}
+            onChange={next => setFilters({ page: next === 1 ? null : String(next) })} />
         </>
       )}
     </div>

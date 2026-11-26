@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useState } from 'react'
+import { useDeferredValue, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { ArrowLeft, ChevronRight, Search } from 'lucide-react'
@@ -12,22 +12,19 @@ import {
   mobileButton,
   mobileInput,
   mobileLeadId,
+  mobileSearchParams,
 } from '@/components/mobile/mobile-shared'
 
 export default function MobileLeadsPage() {
   const { dashboardScope } = useAuthStore()
   const [params, setParams] = useSearchParams()
-  const [status, setStatus] = useState(params.get('status') || '')
-  const [search, setSearch] = useState(params.get('search') || '')
-  const [page, setPage] = useState(Math.max(1, Number(params.get('page')) || 1))
+  const status = params.get('status') || ''
+  const search = params.get('search') || ''
+  const page = mobileLeadId(params.get('page')) ?? 1
   const deferred = useDeferredValue(search.trim())
   const selected = mobileLeadId(params.get('leadId'))
-  const listParams = () => {
-    const next = new URLSearchParams()
-    if (search.trim()) next.set('search', search.trim())
-    if (status) next.set('status', status)
-    if (page > 1) next.set('page', String(page))
-    return next
+  const setFilters = (values: Record<string, string | null>) => {
+    setParams(current => mobileSearchParams(current, values), { replace: true, preventScrollReset: true })
   }
   const result = useQuery({
     refetchOnWindowFocus: true,
@@ -36,14 +33,16 @@ export default function MobileLeadsPage() {
     enabled: !selected,
     refetchInterval: 30_000,
   })
+  const pages = Math.max(1, result.data?.pages ?? 1)
   useEffect(() => {
-    if (result.data) setPage((current) => Math.min(current, Math.max(1, result.data?.pages ?? 1)))
-  }, [result.data])
+    if (selected || !result.data || page <= pages) return
+    setParams(mobileSearchParams(params, { page: pages === 1 ? null : String(pages) }), { replace: true })
+  }, [page, pages, params, result.data, selected, setParams])
 
   if (selected)
     return (
       <div className="space-y-3">
-        <button type="button" className={mobileButton} onClick={() => setParams(listParams())}>
+        <button type="button" className={mobileButton} onClick={() => setFilters({ leadId: null })}>
           <ArrowLeft className="h-4 w-4" />
           Back to leads
         </button>
@@ -52,7 +51,8 @@ export default function MobileLeadsPage() {
     )
   return (
     <div className="space-y-4">
-      <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching} />
+      <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching}
+        stale={result.isRefetchError} retry={() => void result.refetch()} />
       <label className="relative block">
         <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-text-muted" />
         <span className="sr-only">Search leads</span>
@@ -60,10 +60,7 @@ export default function MobileLeadsPage() {
           type="search"
           className={`${mobileInput} pl-9`}
           value={search}
-          onChange={(event) => {
-            setSearch(event.target.value)
-            setPage(1)
-          }}
+          onChange={(event) => setFilters({ search: event.target.value || null, page: null })}
           placeholder="Search name, email or phone"
         />
       </label>
@@ -73,10 +70,7 @@ export default function MobileLeadsPage() {
           aria-label="Filter lead status"
           className={`${mobileInput} mt-2`}
           value={status}
-          onChange={(event) => {
-            setStatus(event.target.value)
-            setPage(1)
-          }}
+          onChange={(event) => setFilters({ status: event.target.value || null, page: null })}
         >
           <option value="">All statuses</option>
           {[
@@ -95,11 +89,11 @@ export default function MobileLeadsPage() {
           ))}
         </select>
       </label>
-      {result.isPending ? (
+      {result.isPending && result.fetchStatus !== 'paused' ? (
         <p role="status" className="py-10 text-center text-sm text-text-muted">
           Loading leads…
         </p>
-      ) : result.error ? (
+      ) : result.fetchStatus === 'paused' && !result.data ? null : result.isLoadingError ? (
         <MobileError message="Could not load leads." retry={() => result.refetch()} />
       ) : (
         <>
@@ -110,11 +104,7 @@ export default function MobileLeadsPage() {
                 <button
                   type="button"
                   key={lead.id}
-                  onClick={() => {
-                    const next = listParams()
-                    next.set('leadId', String(lead.id))
-                    setParams(next)
-                  }}
+                  onClick={() => setParams(mobileSearchParams(params, { leadId: String(lead.id) }))}
                   className="flex min-h-20 w-full items-center gap-3 border-b border-border-subtle px-4 py-3 text-left last:border-0"
                 >
                   <span className="min-w-0 flex-1">
@@ -142,7 +132,8 @@ export default function MobileLeadsPage() {
               </p>
             )}
           </div>
-          <MobilePagination page={page} pages={result.data?.pages ?? 1} onChange={setPage} />
+          <MobilePagination page={page} pages={pages}
+            onChange={next => setFilters({ page: next === 1 ? null : String(next) })} />
         </>
       )}
     </div>

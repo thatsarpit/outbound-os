@@ -10,6 +10,7 @@ import {
   MobileError,
   MobilePagination,
   MobileRefresh,
+  mobileSearchParams,
   mobileInput,
   mobileLeadId,
 } from '@/components/mobile/mobile-shared'
@@ -35,14 +36,7 @@ export default function MobileInboxPage() {
   const queue = ['all', 'needs_reply', 'waiting', 'resolved'].includes(queueValue) ? queueValue : 'needs_reply'
   const page = mobileLeadId(params.get('page')) ?? 1
   const updateParams = (values: Record<string, string | null>, replace = true) => {
-    setParams(current => {
-      const next = new URLSearchParams(current)
-      for (const [key, value] of Object.entries(values)) {
-        if (value == null) next.delete(key)
-        else next.set(key, value)
-      }
-      return next
-    }, { replace, preventScrollReset: true })
+    setParams(current => mobileSearchParams(current, values), { replace, preventScrollReset: true })
   }
   const result = useQuery({
     refetchOnWindowFocus: true,
@@ -97,7 +91,8 @@ export default function MobileInboxPage() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching} />
+        <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching}
+          stale={result.isRefetchError} retry={() => void result.refetch()} />
         {hasCapability('page.campaigns') && (
           <Button asChild size="sm" variant="secondary" className="min-h-11">
             <Link to="/delivery">
@@ -157,11 +152,11 @@ export default function MobileInboxPage() {
           ))}
         </select>
       </label>
-      {result.isPending ? (
+      {result.isPending && result.fetchStatus !== 'paused' ? (
         <p role="status" className="py-10 text-center text-sm text-text-muted">
           Loading conversations…
         </p>
-      ) : result.error ? (
+      ) : result.fetchStatus === 'paused' && !result.data ? null : result.isLoadingError ? (
         <MobileError message="Could not load conversations." retry={() => result.refetch()} />
       ) : (
         <>
@@ -197,11 +192,13 @@ export default function MobileInboxPage() {
             <div className="rounded-xl border border-border bg-surface p-8 text-center">
               <Inbox className="mx-auto h-8 w-8 text-accent" />
               <h2 className="mt-3 font-medium">
-                {deferred
+                {deferred || channel !== 'all'
                   ? 'No matching conversations'
                   : queue === 'needs_reply'
                     ? 'All caught up'
-                    : 'No conversations yet'}
+                    : queue === 'waiting'
+                      ? 'No conversations waiting for a reply'
+                      : queue === 'resolved' ? 'No resolved conversations' : 'No conversations yet'}
               </h2>
               <p className="mt-2 text-sm leading-6 text-text-muted">
                 {deferred
