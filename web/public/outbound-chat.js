@@ -41,7 +41,7 @@
     frame.title = 'Customer conversation';
     frame.src = target.href;
     frame.referrerPolicy = 'no-referrer';
-    frame.sandbox.value = 'allow-scripts allow-same-origin allow-forms';
+    frame.sandbox.value = 'allow-scripts allow-same-origin allow-forms allow-downloads';
     Object.assign(frame.style, { width: '100%', height: 'calc(100% - 44px)', display: 'block', border: '0' });
     dialog.append(bar, frame);
     dialog.addEventListener('close', () => {
