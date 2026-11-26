@@ -1,7 +1,7 @@
 # Website chat
 
 Use the same Inbox for website enquiries, support and staff invitations.
-Website visitors start a chat by providing a name and their first message.
+Website visitors start a chat by providing a name and their first message or attachment.
 They can share an optional email address or international phone for follow-up.
 The agent sees these details on the conversation, marked unverified.
 They are kept separate from contact matching and automated outreach.
@@ -55,7 +55,7 @@ customers when possible. Send any public traffic through HTTPS.
 ## Customer history
 
 On the same browser the widget resumes the conversation when storage is
-available. **Save your return link** gives the customer a way back across
+available. **Save your private return link** gives the customer a way back across
 devices or when an embed cannot access browser storage. It expires 90 days
 after creation and can be revoked by staff. It gives access to one Browser
 chat transcript. Share it privately. The CRM retains the history after
@@ -65,9 +65,23 @@ Staff can still create a private, revocable 24-hour invitation for an
 existing lead. Use those links for individual guest access to the invitation
 conversation.
 
-The initial public chat supports text, anonymous visitors and the primary
-workspace. Signed-in customer identity and account-wide support history
-require a separate identity integration.
+Website chat is available on the primary workspace. Signed-in customer
+identity and account-wide support history require an identity integration.
+
+## Photos and files
+
+Visitors and agents can attach one file per message. The limit is 5 MB per
+upload. JPEG, PNG and WebP photos up to 16 megapixels are decoded and
+re-encoded as WebP, stripping metadata. Plain-text UTF-8 files are
+download-only and limited to 256 KiB. PDFs, archives, Office documents,
+SVG, animated images and executable formats are rejected.
+
+The server encrypts attachment bytes in SQLite with the instance
+encryption key. Use the standard instance backup and protect its database
+and secrets. Downloads are checked against the individual chat link or
+staff permissions and have a 90-day lifetime. Expiry clears the stored
+bytes while preserving the transcript and attachment name. Apply your
+backup retention policy to expire copies in older backups.
 
 
 ## Further work for a support rollout
@@ -75,7 +89,7 @@ require a separate identity integration.
 - Connect signed-in customer identity to verified account history. Anonymous
   chat sessions retain their own transcripts and never aggregate by email.
 - Add configurable team routing and support hours, then handoff and escalation.
-- Add notifications with assignment checks, consent-aware attachments, a
-  retention policy, and delivery and response-time reporting.
+- Add queue and response-time reporting, per-widget retention settings,
+  and a quarantined scanning pipeline before accepting broader file types.
 - Add per-workspace widget configuration, transcript exports, and branding
   controls once same-origin and access boundaries are validated.

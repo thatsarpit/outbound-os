@@ -1,3 +1,4 @@
+import { pruneBrowserChatFiles } from './utils/browserChatFiles.js';
 import { recoverCampaignRuns, reconcileCampaignCounters } from './services/campaignMetrics.js';
 import { startWebPush, stopWebPush } from './services/webPush.js';
 import cron from 'node-cron';
@@ -179,6 +180,11 @@ async function main() {
       try { await imessageService.processQueue(); }
       catch (error) { logger.error(`iMessage queue processing error: ${error.message}`); }
     });
+
+    cron.schedule('*/15 * * * *', async () => {
+      try { await pruneBrowserChatFiles(prisma); }
+      catch (error) { logger.error(`Website chat file cleanup failed: ${error.message}`); }
+    }, { noOverlap: true });
 
     // Prune ActivityLog rows older than 30 days (03:00 workspace time)
     cron.schedule('0 3 * * *', async () => {

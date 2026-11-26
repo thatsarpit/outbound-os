@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Copy, Mail, MessagesSquare, Phone } from 'lucide-react'
-import { api } from '@/api/client'
+import { api, apiFetch } from '@/api/client'
+import { BrowserChatFilePicker, browserChatMessageBody } from './browser-chat-file'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { useAuthStore } from '@/stores/auth-store'
@@ -81,16 +82,22 @@ export function BrowserChat({ leadId }: { leadId: number }) {
 
 function ChatReply({ leadId, chatId, disabled = false }: { leadId: number; chatId: number; disabled?: boolean }) {
   const [body, setBody] = useState('')
-  const attempt = useRef<{ key: string; content: string } | null>(null)
+  const [file, setFile] = useState<File | null>(null)
+  const attempt = useRef<{ key: string; content: string; file: File | null } | null>(null)
   const queryClient = useQueryClient()
   const send = useMutation({
     mutationFn: (content: string) => {
-      if (attempt.current?.content !== content) attempt.current = { key: crypto.randomUUID(), content }
-      return api.post(`/browser-chats/${leadId}/${chatId}/messages`, { content, clientMessageId: attempt.current.key })
+      if (attempt.current?.content !== content || attempt.current.file !== file) {
+        attempt.current = { key: crypto.randomUUID(), content, file }
+      }
+      return apiFetch(`/browser-chats/${leadId}/${chatId}/messages`, {
+        method: 'POST', body: browserChatMessageBody({ content, clientMessageId: attempt.current.key }, file),
+      })
     },
     onSuccess: () => {
       attempt.current = null
       setBody('')
+      setFile(null)
       void queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
       void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
     },
@@ -99,12 +106,17 @@ function ChatReply({ leadId, chatId, disabled = false }: { leadId: number; chatI
   return (
     <form className="space-y-2" onSubmit={event => {
       event.preventDefault()
-      if (body.trim() && !busy) send.mutate(body.trim())
+      if ((body.trim() || file) && !busy) send.mutate(body.trim())
     }}>
       <textarea aria-label="Browser chat reply" disabled={busy} value={body} maxLength={4000} rows={2}
         onChange={event => setBody(event.target.value)} placeholder="Write a Browser chat reply"
         className="w-full resize-none rounded-lg border border-border bg-background p-3 text-base" />
-      <Button type="submit" disabled={busy || !body.trim()}>Send to Browser chat</Button>
+      <div className="flex items-start justify-between gap-2">
+        <BrowserChatFilePicker file={file} onChange={setFile} disabled={busy} />
+        <Button type="submit" className="min-h-11 shrink-0" disabled={busy || (!body.trim() && !file)}>
+          {send.isPending ? 'Sending…' : 'Send reply'}
+        </Button>
+      </div>
       {send.error && <p role="alert" className="text-sm text-danger">{send.error.message}</p>}
     </form>
   )

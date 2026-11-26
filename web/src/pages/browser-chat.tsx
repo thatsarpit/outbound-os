@@ -1,8 +1,10 @@
+import type { BrowserChatAttachment } from '@/api/types'
+import { BrowserChatFile, BrowserChatFilePicker, browserChatMessageBody } from '@/components/inbox/browser-chat-file'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Check, ChevronDown, Copy, MessagesSquare, Send } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
-type ChatMessage = { id: number; direction: 'inbound' | 'outbound'; content: string; createdAt: string }
+type ChatMessage = { id: number; direction: 'inbound' | 'outbound'; content: string; createdAt: string; browserChatAttachment?: BrowserChatAttachment | null }
 type Transcript = { messages: ChatMessage[]; nextBefore: number | null; expiresAt: string; resolved: boolean }
 type WidgetConfig = { title: string; welcome: string; accent: string }
 const guestApi = '/api/guest/browser-chat'
@@ -53,6 +55,7 @@ export default function BrowserChatPage({ fragment, widgetKey }: { fragment: str
   const [token, setToken] = useState(() => restoreToken(fragment, widgetKey))
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
+  const [file, setFile] = useState<File | null>(null)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
@@ -66,7 +69,7 @@ export default function BrowserChatPage({ fragment, widgetKey }: { fragment: str
   const [nextBefore, setNextBefore] = useState<number | null>(null)
   const [expiresAt, setExpiresAt] = useState('')
   const [resolved, setResolved] = useState(false)
-  const attempt = useRef<{ key: string; content: string; token: string; name: string } | null>(null)
+  const attempt = useRef<{ key: string; content: string; token: string; name: string; file: File | null } | null>(null)
   const timeline = useRef<HTMLDivElement>(null)
   const followLatest = useRef(true)
   const haveHistory = useRef(false)
@@ -163,9 +166,9 @@ export default function BrowserChatPage({ fragment, widgetKey }: { fragment: str
     event.preventDefault()
     const content = draft.trim()
     const startsChat = Boolean(widgetKey && !token)
-    if (pending || expired || !content || (!startsChat && !connected) || (startsChat && !name.trim())) return
-    if (attempt.current?.content !== content || attempt.current.name !== name.trim()) {
-      attempt.current = { key: crypto.randomUUID(), content, token: token || attempt.current?.token || newGuestToken(), name: name.trim() }
+    if (pending || expired || (!content && !file) || (!startsChat && !connected) || (startsChat && !name.trim())) return
+    if (attempt.current?.content !== content || attempt.current.name !== name.trim() || attempt.current.file !== file) {
+      attempt.current = { key: crypto.randomUUID(), content, token: token || attempt.current?.token || newGuestToken(), name: name.trim(), file }
     }
     const submission = attempt.current
     setPending(true)
@@ -173,9 +176,9 @@ export default function BrowserChatPage({ fragment, widgetKey }: { fragment: str
     try {
       const response = await fetch(startsChat ? `${base}/start` : endpoint, {
         method: 'POST', credentials: 'omit', cache: 'no-store',
-        headers: { Authorization: `Bearer ${submission.token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: submission.name, content, clientMessageId: submission.key,
-          ...(startsChat ? { email, phone } : {}) }),
+        headers: { Authorization: `Bearer ${submission.token}`, ...(!file ? { 'Content-Type': 'application/json' } : {}) },
+        body: browserChatMessageBody({ name: submission.name, content, clientMessageId: submission.key,
+          ...(startsChat ? { email, phone } : {}) }, file),
       })
       if (response.status === 404 && !startsChat) {
         setExpired(true)
@@ -185,7 +188,7 @@ export default function BrowserChatPage({ fragment, widgetKey }: { fragment: str
       }
       if (!response.ok) {
         const error: { error?: string } = await response.json().catch(() => ({}))
-        setSendError(response.status === 400 && error.error ? error.error : 'Could not send your message. Try again.')
+        setSendError([400, 413, 429].includes(response.status) && error.error ? error.error : 'Could not send your message. Try again.')
         return
       }
       const { message } = await response.json() as { message: ChatMessage }
@@ -197,6 +200,7 @@ export default function BrowserChatPage({ fragment, widgetKey }: { fragment: str
       setMessages(previous => mergeMessages(previous, [message]))
       setResolved(false)
       setDraft('')
+      setFile(null)
       attempt.current = null
     } catch {
       setSendError('Could not send your message. Try again.')
@@ -255,7 +259,14 @@ export default function BrowserChatPage({ fragment, widgetKey }: { fragment: str
             {messages.map(message => (
               <div key={message.id} className={`max-w-[88%] break-words rounded-2xl border border-border px-3.5 py-2.5 ${message.direction === 'inbound' ? 'ml-auto rounded-br-sm bg-webchat-muted' : 'mr-auto rounded-bl-sm bg-surface'}`}>
                 <p className="text-xs font-medium text-text-muted">{message.direction === 'inbound' ? 'You' : widgetKey ? style.title : 'Sales team'}</p>
-                <p className="whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">{message.content}</p>
+                {message.content && <p className="whitespace-pre-wrap text-sm [overflow-wrap:anywhere]">{message.content}</p>}
+                {message.browserChatAttachment && <BrowserChatFile attachment={message.browserChatAttachment} load={async signal => {
+                  const response = await fetch(`${base}/attachments/${message.id}`, {
+                    headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', credentials: 'omit', signal,
+                  })
+                  if (!response.ok) throw new Error('Attachment unavailable')
+                  return response.blob()
+                }} />}
                 <time dateTime={message.createdAt} className="text-xs text-text-muted">
                   {new Date(message.createdAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
                 </time>
@@ -306,10 +317,11 @@ export default function BrowserChatPage({ fragment, widgetKey }: { fragment: str
               <textarea aria-label="Your message" value={draft} maxLength={4000} rows={2} disabled={pending}
                 onChange={event => setDraft(event.target.value)} placeholder="Write a message"
                 className="min-w-0 flex-1 resize-none rounded-lg border border-border bg-background p-3 text-base" />
-              <Button type="submit" className="min-h-11" disabled={pending || !draft.trim() || (startsChat ? !name.trim() : !connected)} leftIcon={<Send className="size-4" />}>
+              <Button type="submit" className="min-h-11" disabled={pending || (!draft.trim() && !file) || (startsChat ? !name.trim() : !connected)} leftIcon={<Send className="size-4" />}>
                 {pending ? 'Sending…' : 'Send'}
               </Button>
             </div>
+            <BrowserChatFilePicker file={file} onChange={setFile} disabled={pending || (!startsChat && !connected)} />
           </form>
         </>
       )}

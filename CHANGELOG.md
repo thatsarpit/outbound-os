@@ -20,6 +20,9 @@ include breaking changes, and they are called out here.
 - Add an embeddable website chat with adjustable branding, resumable
   transcripts, Inbox replies and resolved conversation reopening.
 - Add Website chat to Inbox filters, channel status and Integrations.
+- Allow both sides of Website chat to share photos and plain-text files.
+  Normalize photos, encrypt attachment storage and scope downloads to the
+  conversation and current permissions.
   Visitors can share optional contact details for agent follow-up.
 
 ## [0.5.2] — 26 November 2026

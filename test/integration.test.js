@@ -3699,6 +3699,20 @@ test('Web Push enforces personal device ownership and retries durable reply curs
     assert.equal(previews[0].url, `/m/inbox?leadId=${lead.id}&channel=telegram`);
     assert.ok(!previews[0].url.includes('Fixture'));
     assert.equal(previews[0].timestamp, previewMessage.createdAt.getTime());
+    subscription = await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } });
+    await prisma.message.create({ data: { leadId: lead.id, direction: 'inbound', channel: 'webchat', content: 'Website fixture', status: 'delivered' } });
+    const owner = { id: users[0].id, orgId: 'local', role: 'agent' };
+    process.env.OUTBOUNDOS_AGENT_INBOUND_SINCE = new Date().toISOString();
+    try {
+      await deliverDeviceReplies(subscription, async () => assert.fail('Private lead must not send a push'), owner);
+      await prisma.lead.update({ where: { id: lead.id }, data: { assignedToId: users[0].id } });
+      const assigned = [];
+      await deliverDeviceReplies(subscription, async (_device, payload) => assigned.push(payload), owner);
+      assert.equal(assigned.length, 1);
+      assert.equal(assigned[0].title, 'Push Reply Fixture · Website chat');
+      assert.equal(assigned[0].body, 'Website fixture');
+      assert.equal(assigned[0].url, `/m/inbox?leadId=${lead.id}&channel=webchat`);
+    } finally { delete process.env.OUTBOUNDOS_AGENT_INBOUND_SINCE; }
     assert.equal((await request('PATCH', `/api/push/subscriptions/${subscription.id}/preview`, { headers: headers(0), body: { previewMode: 'private' } })).status, 200);
     subscription = await prisma.webPushSubscription.findUnique({ where: { id: subscription.id } });
     const newer = await prisma.message.create({ data: { leadId: lead.id, direction: 'inbound', channel: 'whatsapp', content: 'Another question', status: 'delivered' } });
@@ -5193,6 +5207,96 @@ test('browser chat is opt-in, exposes only link-scoped messages and joins the au
     delete process.env.OUTBOUNDOS_BROWSER_CHAT;
     await db.lead.deleteMany({ where: { id: { in: leads.map(lead => lead.id) } } });
     await db.user.delete({ where: { id: admin.id } });
+  }
+});
+
+test('website chat attachments are normalized, encrypted, and limited to authorized conversations', async () => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const { pruneBrowserChatFiles } = await import('../src/utils/browserChatFiles.js');
+  const { default: sharp } = await import('sharp');
+  const users = await Promise.all(['admin', 'agent'].map(role => db.user.create({ data: {
+    name: 'Upload fixture', email: `upload-${role}@example.test`, role, passwordHash: 'fixture',
+  } })));
+  const auth = (token, ip) => ({ Authorization: `Bearer ${token}`, 'X-Forwarded-For': `192.0.2.${ip}` });
+  const staff = auth(signToken(users[0]), 190), agent = auth(signToken(users[1]), 191);
+  const leads = await Promise.all([1, 2].map(i => db.lead.create({ data: {
+    name: 'Upload fixture lead', mobile: `no-phone:browser-files-${i}`, assignedToId: users[0].id,
+  } })));
+  const base = '/api/guest/browser-chat';
+  const path = `/api/browser-chats/${leads[0].id}`;
+  const upload = (endpoint, headers, data, filename, clientMessageId) => {
+    const form = new FormData();
+    form.set('content', '');
+    form.set('clientMessageId', clientMessageId);
+    form.set('file', new Blob([data], { type: 'image/png' }), filename);
+    return fetch(new URL(endpoint, baseUrl), { method: 'POST', headers, body: form });
+  };
+  process.env.OUTBOUNDOS_BROWSER_CHAT = 'true';
+  process.env.OUTBOUNDOS_AGENT_INBOUND_SINCE = new Date().toISOString();
+  try {
+    const { body: invite } = await request('POST', path, { headers: staff });
+    const { body: other } = await request('POST', `/api/browser-chats/${leads[1].id}`, { headers: staff });
+    const guest = auth(invite.token, 192);
+    const spoof = await upload(`${base}/messages`, guest, '<svg onload="alert(1)"></svg>', 'fake.png', 'chat_fake_image_001');
+    assert.equal(spoof.status, 400);
+    const binary = await upload(`${base}/messages`, guest, Buffer.from([0, 255]), 'file.txt', 'chat_fake_text_001');
+    assert.equal(binary.status, 400);
+    const tooLarge = await upload(`${base}/messages`, guest, Buffer.alloc(5 * 1024 * 1024 + 1), 'huge.png', 'chat_huge_image_001');
+    assert.equal(tooLarge.status, 413);
+    assert.equal(await db.message.count({ where: { leadId: leads[0].id } }), 0);
+
+    const photo = await sharp({ create: { width: 32, height: 28, channels: 3, background: '#a34517' } })
+      .jpeg().withExif({ IFD0: { Artist: 'Private metadata fixture' } }).toBuffer();
+    assert.ok((await sharp(photo).metadata()).exif);
+    const first = () => upload(`${base}/messages`, guest, photo, 'fixture.jpg', 'chat_real_image_001');
+    const result = await first();
+    assert.equal(result.status, 201);
+    const { message } = await result.json();
+    assert.deepEqual(Object.keys(message.browserChatAttachment).sort(), ['contentType', 'expiresAt', 'filename', 'size']);
+    assert.equal(message.browserChatAttachment.filename, 'fixture.webp');
+    assert.equal((await first()).status, 200);
+    assert.equal((await upload(`${base}/messages`, guest, 'other', 'different.txt', 'chat_real_image_001')).status, 409);
+
+    const guestDownload = `${base}/attachments/${message.id}`;
+    const staffDownload = `${path}/attachments/${message.id}`;
+    assert.equal((await request('GET', guestDownload, { headers: auth(other.token, 193) })).status, 404);
+    assert.equal((await request('GET', staffDownload, { headers: agent })).status, 404);
+    assert.equal((await request('GET', `/api/browser-chats/${leads[1].id}/attachments/${message.id}`, { headers: staff })).status, 404);
+    const downloaded = await fetch(new URL(staffDownload, baseUrl), { headers: staff });
+    assert.equal(downloaded.status, 200);
+    assert.equal(downloaded.headers.get('cache-control'), 'no-store');
+    assert.equal(downloaded.headers.get('x-content-type-options'), 'nosniff');
+    assert.match(downloaded.headers.get('content-disposition'), /^attachment;/);
+    const bytes = Buffer.from(await downloaded.arrayBuffer());
+    assert.equal((await sharp(bytes).metadata()).format, 'webp');
+    assert.equal((await sharp(bytes).metadata()).exif, undefined);
+    const stored = await db.browserChatAttachment.findUniqueOrThrow({ where: { messageId: message.id } });
+    assert.equal(stored.payload.length, bytes.length + 28);
+    assert.equal(Buffer.from(stored.payload).includes(bytes), false);
+
+    const file = await upload(`${path}/${invite.chat.id}/messages`, staff, 'Sample note', 'notice.txt', 'chat_plain_text_001');
+    assert.equal(file.status, 201);
+    const { message: note } = await file.json();
+    const noteUrl = `${base}/attachments/${note.id}`;
+    const noteDownload = await fetch(new URL(noteUrl, baseUrl), { headers: guest });
+    assert.equal(noteDownload.headers.get('content-type'), 'application/octet-stream');
+    assert.equal(await noteDownload.text(), 'Sample note');
+    assert.ok((await request('GET', `/api/inbox/threads/${leads[0].id}`, { headers: staff })).body.messages.some(row =>
+      row.id === note.id && row.browserChatAttachment.filename === 'notice.txt' && !Object.hasOwn(row.browserChatAttachment, 'payload')));
+    await db.lead.update({ where: { id: leads[0].id }, data: { assignedToId: users[1].id } });
+    assert.equal((await fetch(new URL(staffDownload, baseUrl), { headers: agent })).status, 200);
+    await request('DELETE', `${path}/${invite.chat.id}`, { headers: staff });
+    assert.equal((await request('GET', noteUrl, { headers: guest })).status, 404);
+    await db.browserChatAttachment.update({ where: { messageId: note.id }, data: { expiresAt: new Date(0) } });
+    await pruneBrowserChatFiles(db);
+    assert.equal((await db.browserChatAttachment.findUniqueOrThrow({ where: { messageId: note.id } })).payload, null);
+    assert.equal((await request('GET', `${path}/attachments/${note.id}`, { headers: staff })).status, 404);
+  } finally {
+    delete process.env.OUTBOUNDOS_AGENT_INBOUND_SINCE;
+    delete process.env.OUTBOUNDOS_BROWSER_CHAT;
+    await db.lead.deleteMany({ where: { id: { in: leads.map(item => item.id) } } });
+    await db.user.deleteMany({ where: { id: { in: users.map(item => item.id) } } });
   }
 });
 

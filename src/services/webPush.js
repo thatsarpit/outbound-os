@@ -6,6 +6,7 @@ import { decryptPushSubscription, pushSubscriptionPreview } from '../utils/pushS
 import { buildMessagePush } from '../utils/pushMessage.js';
 import { AUTH_PROVIDER, clerkClient } from '../auth/index.js';
 import { clerkWorkspaceIdentity } from '../auth/clerkIdentity.js';
+import { isPrivateSalesAgent, salesAgentLeadScope } from '../auth/salesAgentAccess.js';
 
 export function pushConfig() {
   const publicKey = process.env.WEB_PUSH_PUBLIC_KEY || '';
@@ -22,21 +23,24 @@ export async function sendDevicePush(subscription, payload) {
   });
 }
 
-async function ownerStillHasAccess(subscription) {
+async function currentPushOwner(subscription) {
   if (AUTH_PROVIDER === 'local') {
     if (subscription.orgId !== 'local' || !/^\d+$/.test(subscription.userId)) return false;
     const user = await prisma.user.findUnique({ where: { id: Number(subscription.userId) }, select: { enabled: true, role: true } });
-    return Boolean(user?.enabled && ['admin', 'manager', 'agent', 'viewer'].includes(user.role));
+    return user?.enabled && ['admin', 'manager', 'agent', 'viewer'].includes(user.role)
+      ? { id: subscription.userId, orgId: 'local', role: user.role } : null;
   }
   const { data } = await clerkClient.organizations.getOrganizationMembershipList({ organizationId: subscription.orgId, userId: [subscription.userId], limit: 1 });
   const membership = data.find(row => row.publicUserData?.userId === subscription.userId);
-  return Boolean(clerkWorkspaceIdentity({ userId: subscription.userId, orgId: subscription.orgId, orgRole: membership?.role }));
+  const identity = clerkWorkspaceIdentity({ userId: subscription.userId, orgId: subscription.orgId, orgRole: membership?.role });
+  return identity ? { id: identity.userId, orgId: identity.orgId, role: identity.role } : null;
 }
 
 /** Durable per-device cursor; retries use the same notification tag after a restart. */
-export async function deliverDeviceReplies(subscription, send = sendDevicePush) {
+export async function deliverDeviceReplies(subscription, send = sendDevicePush, owner) {
+  const leadScope = isPrivateSalesAgent(owner) ? { lead: salesAgentLeadScope({ privateSalesAgent: true, user: owner }) } : {};
   const messages = await prisma.message.findMany({
-    where: { id: { gt: subscription.lastMessageId }, createdAt: { gte: subscription.createdAt }, ...HUMAN_REPLY_WHERE },
+    where: { id: { gt: subscription.lastMessageId }, createdAt: { gte: subscription.createdAt }, ...HUMAN_REPLY_WHERE, ...leadScope },
     orderBy: { id: 'asc' }, take: 25,
     select: { id: true, leadId: true, channel: true, content: true, mediaType: true, mediaCaption: true, createdAt: true, sentAt: true, providerCreatedAt: true, lead: { select: { name: true } } },
   });
@@ -70,11 +74,12 @@ export async function pollWebPush() {
     const subscriptions = await prisma.webPushSubscription.findMany({ where: { enabled: true, vapidKey: config.publicKey }, orderBy: { id: 'asc' } });
     for (const subscription of subscriptions) {
       try {
-        if (!(await ownerStillHasAccess(subscription))) {
+        const owner = await currentPushOwner(subscription);
+        if (!owner) {
           await prisma.webPushSubscription.deleteMany({ where: { id: subscription.id } });
           continue;
         }
-        await deliverDeviceReplies(subscription);
+        await deliverDeviceReplies(subscription, sendDevicePush, owner);
       } catch {
         logger.warn('Push access check unavailable; delivery deferred.');
       }

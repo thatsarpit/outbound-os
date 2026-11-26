@@ -55,6 +55,7 @@
     "nodemailer": "^10.2.1",
     "prisma": "^7.10.1",
     "sanitize-html": "^2.18.1",
+    "sharp": "0.35.5",
     "teleproto": "^1.230.0",
     "validator": "13.15.35",
     "web-push": "^3.6.7",

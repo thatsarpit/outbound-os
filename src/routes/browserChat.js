@@ -2,10 +2,16 @@ import { createHash, randomBytes } from 'node:crypto';
 import validator from 'validator';
 import { Router, json } from 'express';
 import rateLimit from 'express-rate-limit';
+import multer from 'multer';
 import prisma from '../utils/prismaClient.js';
 import { requireRole } from '../auth/index.js';
 import { chatWidget } from '../utils/chatWidgets.js';
 import { workspaceMemberIdentity } from '../utils/workspaceMember.js';
+import { salesAgentLeadScope } from '../auth/salesAgentAccess.js';
+import {
+  browserChatFileFields, browserChatFileLimit, browserChatFileRetention, checkBrowserChatFileCapacity,
+  openBrowserChatFile, prepareBrowserChatFile, sealedBrowserChatFile,
+} from '../utils/browserChatFiles.js';
 
 const identityPattern = /^[A-Za-z0-9_-]{43}$/;
 const requestPattern = /^[a-z0-9_-]{16,80}$/i;
@@ -13,28 +19,47 @@ const digest = secret => createHash('sha256').update(secret).digest('hex');
 const positive = value => /^[1-9]\d*$/.test(String(value)) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
 const active = (now) => ({ revokedAt: null, expiresAt: { gt: now } });
 const chatFields = { id: true, visitorEmail: true, visitorPhone: true, widgetKey: true, createdAt: true, expiresAt: true, revokedAt: true };
-const messageFields = { id: true, content: true, direction: true, createdAt: true };
+const messageFields = { id: true, content: true, direction: true, createdAt: true,
+  browserChatAttachment: { select: browserChatFileFields } };
+const readMultipart = multer({ storage: multer.memoryStorage(),
+  limits: { files: 1, fields: 5, parts: 7, fileSize: browserChatFileLimit, fieldSize: 18 * 1024, fieldNameSize: 32 } }).single('file');
 
 function noStore(_req, res, next) {
   res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' });
   next();
 }
 
-function validMessage(body) {
-  return typeof body?.content === 'string' && body.content.trim().length > 0 &&
+function validMessage(body, file) {
+  return typeof body?.content === 'string' && (body.content.trim().length > 0 || file) &&
     body.content.length <= 4000 && typeof body.clientMessageId === 'string' && requestPattern.test(body.clientMessageId);
 }
 
-async function saveMessage(tx, chat, direction, body, now) {
+async function saveMessage(tx, chat, direction, body, now, file, env) {
   const key = `browser-chat:${chat.id}:${direction}:${body.clientMessageId}`;
   const content = body.content.trim();
-  const prior = await tx.message.findUnique({ where: { manualSendKey: key }, select: messageFields });
-  if (prior) return prior.content === content ? { message: prior, duplicate: true } : { conflict: true };
+  const prior = await tx.message.findUnique({ where: { manualSendKey: key },
+    select: { ...messageFields, browserChatAttachment: { select: { ...browserChatFileFields, sha256: true } } } });
+  if (prior) {
+    const { browserChatAttachment: attachment, ...previous } = prior;
+    const { sha256, ...details } = attachment || {};
+    return prior.content === content && sha256 === file?.sha256 && details.filename === file?.filename
+      ? { message: { ...previous, browserChatAttachment: attachment ? details : null }, duplicate: true }
+      : { conflict: true };
+  }
+  if (file) await checkBrowserChatFileCapacity(tx, chat.id, file.size);
   const message = await tx.message.create({
     data: { leadId: chat.leadId, browserChatId: chat.id, channel: 'webchat', direction,
       content, status: 'delivered', sentAt: now, manualSendKey: key },
     select: messageFields,
   });
+  if (file) {
+    const { filename, contentType, size, sha256 } = file;
+    message.browserChatAttachment = await tx.browserChatAttachment.create({
+      data: { messageId: message.id, filename, contentType, size, sha256,
+        expiresAt: new Date(+now + browserChatFileRetention), payload: sealedBrowserChatFile(file, message.id, env) },
+      select: browserChatFileFields,
+    });
+  }
   await tx.lead.updateMany({
     where: { id: chat.leadId, OR: [{ lastMessageAt: null }, { lastMessageAt: { lt: now } }] },
     data: { lastMessageAt: now },
@@ -65,6 +90,12 @@ export function createBrowserChatRouters({ db = prisma, guard = requireRole, env
   const guest = Router();
   const staff = Router();
   const failure = (error, _req, res, _next) => {
+    if (error.chatFileError) return res.status(error.status).json({ error: error.message });
+    if (error instanceof multer.MulterError) {
+      return error.code === 'LIMIT_FILE_SIZE'
+        ? res.status(413).json({ error: 'Choose a file under 5 MB.' })
+        : res.status(400).json({ error: 'Attach one file per message.' });
+    }
     if (error.status === 413) return res.status(413).json({ error: 'The message is too large.' });
     if (error.status === 400) return res.status(400).json({ error: 'The message is invalid.' });
     return res.status(503).json({ error: 'Chat is temporarily unavailable. Try again.' });
@@ -90,18 +121,74 @@ export function createBrowserChatRouters({ db = prisma, guard = requireRole, env
     next();
   };
   const guestScope = (req, time) => ({ tokenHash: req.chatTokenHash, widgetKey: req.params.widget || null, ...active(time) });
-  const guestSend = handle(async (req, res) => {
-    if (!validMessage(req.body)) return res.status(400).json({ error: 'Enter a message up to 4,000 characters.' });
+  let activeUploads = 0;
+  const withMessage = (action, canUpload = async () => true) => handle(async (req, res) => {
+    if (!req.is('multipart/form-data')) return action(req, res, null);
+    if (!await canUpload(req)) return sendResult(res, null);
+    // Bound concurrent buffering and photo decoding across staff and public routes.
+    if (activeUploads >= 4) return res.status(429).json({ error: 'Uploads are busy. Try again shortly.' });
+    activeUploads += 1;
+    try {
+      const read = await new Promise((resolve, reject) => {
+        const finish = () => {
+          clearTimeout(deadline);
+          res.off('close', onClose);
+        };
+        const onClose = () => { finish(); resolve(false); };
+        const deadline = setTimeout(() => {
+          finish();
+          res.set('Connection', 'close').status(408).json({ error: 'Upload timed out. Try again.' });
+          resolve(false);
+        }, 20_000);
+        deadline.unref();
+        res.once('close', onClose);
+        readMultipart(req, res, error => {
+          finish();
+          if (error && !(error instanceof multer.MulterError)) {
+            return reject(Object.assign(new Error('Invalid file upload.'), { status: 400 }));
+          }
+          return error ? reject(error) : resolve(true);
+        });
+      });
+      if (!read || res.destroyed) return;
+      const result = await prepareBrowserChatFile(req.file);
+      if (!res.destroyed) return await action(req, res, result);
+    } finally {
+      activeUploads -= 1;
+    }
+  });
+  const canGuestUpload = async req => Boolean(await db.browserChat.findUnique({
+    where: guestScope(req, now()), select: { id: true },
+  }));
+  const guestSend = withMessage(async (req, res, file) => {
+    if (!validMessage(req.body, file)) return res.status(400).json({ error: 'Add a file or enter a message up to 4,000 characters.' });
     const time = now();
     const data = await db.$transaction(async tx => {
       const chat = await tx.browserChat.findUnique({ where: guestScope(req, time), select: { id: true, leadId: true, widgetKey: true } });
       if (!chat) return null;
-      const result = await saveMessage(tx, chat, 'inbound', req.body, time);
+      const result = await saveMessage(tx, chat, 'inbound', req.body, time, file, env);
       return { ...result, leadId: chat.leadId };
     });
     if (data?.message && !data.duplicate) notify(data.leadId);
     return sendResult(res, data && { message: data.message, duplicate: data.duplicate, conflict: data.conflict });
-  });
+  }, canGuestUpload);
+  async function download(req, res, message) {
+    const messageId = positive(req.params.messageId);
+    const file = messageId && await db.browserChatAttachment.findFirst({
+      where: { messageId, expiresAt: { gt: now() }, payload: { not: null }, message },
+      select: { messageId: true, filename: true, contentType: true, payload: true },
+    });
+    if (!file) return res.status(404).json({ error: 'This attachment is unavailable.' });
+    const photo = file.contentType === 'image/webp';
+    res.attachment(file.filename);
+    res.set({
+      'Content-Type': photo ? 'image/webp' : 'application/octet-stream',
+      'Content-Security-Policy': "sandbox; default-src 'none'; frame-ancestors 'none'",
+      'X-Download-Options': 'noopen',
+    });
+    return res.send(openBrowserChatFile(file, env));
+  }
+  const guestDownload = handle((req, res) => download(req, res, { channel: 'webchat', browserChat: guestScope(req, now()) }));
   const guestRead = handle(async (req, res) => {
     const before = req.query.before === undefined ? null : positive(req.query.before);
     if (req.query.before !== undefined && !before) return res.status(400).json({ error: 'Invalid history cursor.' });
@@ -119,17 +206,19 @@ export function createBrowserChatRouters({ db = prisma, guard = requireRole, env
 
   guest.use(noStore, feature, rateLimit({ windowMs: 60_000, limit: 90, standardHeaders: 'draft-8', legacyHeaders: false }));
   guest.get('/messages', guestIdentity, guestRead);
+  guest.get('/attachments/:messageId', guestIdentity, guestDownload);
   guest.post('/messages', guestIdentity, messageWriteLimit, chatJson, guestSend);
   guest.get('/widgets/:widget', widgetRequired, (req, res) => {
     const { title, welcome, accent } = req.chatWidget;
     res.json({ title, welcome, accent });
   });
   guest.get('/widgets/:widget/messages', widgetRequired, guestIdentity, guestRead);
+  guest.get('/widgets/:widget/attachments/:messageId', widgetRequired, guestIdentity, guestDownload);
   guest.post('/widgets/:widget/messages', widgetRequired, guestIdentity, messageWriteLimit, chatJson, guestSend);
-  guest.post('/widgets/:widget/start', widgetRequired, signupLimit, guestIdentity, chatJson, handle(async (req, res) => {
+  guest.post('/widgets/:widget/start', widgetRequired, signupLimit, guestIdentity, chatJson, withMessage(async (req, res, file) => {
     const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
-    if (!name || name.length > 80 || /[\p{Cc}\p{Cf}]/u.test(name) || !validMessage(req.body)) {
-      return res.status(400).json({ error: 'Enter your name and a message up to 4,000 characters.' });
+    if (!name || name.length > 80 || /[\p{Cc}\p{Cf}]/u.test(name) || !validMessage(req.body, file)) {
+      return res.status(400).json({ error: 'Enter your name and add a file or a message up to 4,000 characters.' });
     }
     const email = typeof req.body.email === 'string' ? req.body.email.trim() : '';
     const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
@@ -144,7 +233,7 @@ export function createBrowserChatRouters({ db = prisma, guard = requireRole, env
     const data = await db.$transaction(async tx => {
       const prior = await tx.browserChat.findUnique({ where: { tokenHash: req.chatTokenHash } });
       if (prior && (prior.widgetKey !== req.params.widget || prior.revokedAt || prior.expiresAt <= time)) return null;
-      if (prior) return { ...await saveMessage(tx, prior, 'inbound', req.body, time), leadId: prior.leadId };
+      if (prior) return { ...await saveMessage(tx, prior, 'inbound', req.body, time, file, env), leadId: prior.leadId };
       // The first message and lead are created together. Simply loading the
       // widget does not add a contact to the CRM.
       const lead = await tx.lead.create({ data: {
@@ -158,7 +247,7 @@ export function createBrowserChatRouters({ db = prisma, guard = requireRole, env
         visitorEmail: email || null, visitorPhone: normalizedPhone || null,
         createdBy: 'visitor', expiresAt: new Date(+time + 90 * 86400_000),
       } });
-      return { ...await saveMessage(tx, chat, 'inbound', req.body, time), leadId: lead.id };
+      return { ...await saveMessage(tx, chat, 'inbound', req.body, time, file, env), leadId: lead.id };
     });
     if (data?.message && !data.duplicate) notify(data.leadId);
     return sendResult(res, data && { message: data.message, duplicate: data.duplicate, conflict: data.conflict });
@@ -200,17 +289,31 @@ export function createBrowserChatRouters({ db = prisma, guard = requireRole, env
     const result = await db.browserChat.updateMany({ where: { id, leadId, ...active(now()) }, data: { revokedAt: now() } });
     res.json({ revoked: Boolean(result.count) });
   }));
-  staff.post('/:leadId/:chatId/messages', handle(async (req, res) => {
+  const staffChatScope = (req, time, leadId, id) => ({
+    id, leadId, ...active(time), lead: salesAgentLeadScope(req),
+  });
+  const canStaffUpload = async req => {
     const leadId = positive(req.params.leadId), id = positive(req.params.chatId);
-    if (!leadId || !id || !validMessage(req.body)) return res.status(400).json({ error: 'Choose a chat and enter a message up to 4,000 characters.' });
+    return Boolean(leadId && id && await db.browserChat.findUnique({
+      where: staffChatScope(req, now(), leadId, id), select: { id: true },
+    }));
+  };
+  staff.get('/:leadId/attachments/:messageId', handle((req, res) => {
+    const leadId = positive(req.params.leadId);
+    if (!leadId) return res.status(404).json({ error: 'This attachment is unavailable.' });
+    return download(req, res, { leadId, channel: 'webchat', lead: salesAgentLeadScope(req) });
+  }));
+  staff.post('/:leadId/:chatId/messages', withMessage(async (req, res, file) => {
+    const leadId = positive(req.params.leadId), id = positive(req.params.chatId);
+    if (!leadId || !id || !validMessage(req.body, file)) return res.status(400).json({ error: 'Choose a chat and add a file or a message up to 4,000 characters.' });
     const time = now();
     const data = await db.$transaction(async tx => {
-      const chat = await tx.browserChat.findUnique({ where: { id, leadId, ...active(time) }, select: { id: true, leadId: true } });
-      return chat ? saveMessage(tx, chat, 'outbound', req.body, time) : null;
+      const chat = await tx.browserChat.findUnique({ where: staffChatScope(req, time, leadId, id), select: { id: true, leadId: true } });
+      return chat ? saveMessage(tx, chat, 'outbound', req.body, time, file, env) : null;
     });
     if (data?.message && !data.duplicate) notify(leadId);
     return sendResult(res, data);
-  }));
+  }, canStaffUpload));
   staff.use(failure);
   return { guest, staff };
 }

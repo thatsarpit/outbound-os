@@ -582,7 +582,15 @@ export interface InboxThreadSummary {
   }>
 }
 
+export interface BrowserChatAttachment {
+  filename: string
+  contentType: 'image/webp' | 'text/plain'
+  size: number
+  expiresAt: string
+}
+
 export interface InboxMessage {
+  browserChatAttachment?: BrowserChatAttachment | null
   websiteLeadLabel?: string | null
   websiteSourceName?: string | null
   id: number

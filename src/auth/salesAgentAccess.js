@@ -56,7 +56,8 @@ export function privateSalesAccess({ db = prisma, env = process.env } = {}) {
     )) {
       id = browserChat[1];
     } else if (method === 'GET') {
-      id = path.match(/^\/inbox\/threads?\/([1-9]\d*)(?:\/messages)?$/)?.[1]
+      id = path.match(/^\/browser-chats\/([1-9]\d*)\/attachments\/[1-9]\d*$/)?.[1]
+        ?? path.match(/^\/inbox\/threads?\/([1-9]\d*)(?:\/messages)?$/)?.[1]
         ?? path.match(/^\/leads\/([1-9]\d*)(?:\/(?:notes|tasks|timeline|messages))?$/)?.[1];
       if (path === '/inbox/senders') id = req.query.leadId;
     } else if (method === 'POST') {

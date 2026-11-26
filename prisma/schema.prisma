@@ -216,6 +216,7 @@ model Message {
   websiteSourceName String?
   browserChatId     Int?
   browserChat       BrowserChat?     @relation(fields: [browserChatId], references: [id], onDelete: SetNull)
+  browserChatAttachment BrowserChatAttachment?
   waAccount         Int              @default(0) // WhatsApp account ID (0 if email)
   emailAccountId    Int? // FK to EmailAccount (null if whatsapp)
   imessageAccountId Int? // FK to IMessageAccount (null unless channel=imessage)
@@ -620,6 +621,21 @@ model BrowserChat {
   messages  Message[]
 
   @@index([leadId, createdAt])
+}
+
+// The message and its encrypted attachment commit together. Transcript queries
+// select metadata explicitly and never include the payload.
+model BrowserChatAttachment {
+  messageId   Int      @id
+  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  filename    String
+  contentType String
+  size        Int
+  sha256      String
+  payload     Bytes?
+  expiresAt   DateTime
+
+  @@index([expiresAt])
 }
 
 // A source enquiry is distinct from a contact. Replays resolve to this ledger

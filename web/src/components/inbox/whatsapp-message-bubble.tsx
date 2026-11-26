@@ -1,3 +1,5 @@
+import { apiFetchBlob } from '@/api/client'
+import { BrowserChatFile } from './browser-chat-file'
 import type { InboxMessage } from '@/api/types'
 import { cn } from '@/lib/utils'
 import { getChannel } from '@/lib/channels'
@@ -107,6 +109,10 @@ export function MessageBubble({
                 </p>
               )}
 
+              {message.browserChatAttachment && (
+                <BrowserChatFile attachment={message.browserChatAttachment}
+                  load={signal => apiFetchBlob(`/browser-chats/${message.leadId}/attachments/${message.id}`, signal)} />
+              )}
               {message.mediaUrl && (
                 <MessageMedia
                   messageId={message.id}

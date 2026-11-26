@@ -35,6 +35,7 @@ import prisma from './utils/prismaClient.js';
 import { createClerkTeamRouter } from './routes/clerkTeam.js';
 import { chatWidget, configuredChatWidgets } from './utils/chatWidgets.js';
 import { createBrowserChatRouters } from './routes/browserChat.js';
+import { browserChatFileFields } from './utils/browserChatFiles.js';
 import { claimableInboundWhere, isPrivateSalesAgent, privateSalesAccess, privateSalesEnabled, salesAgentLeadScope } from './auth/salesAgentAccess.js';
 import { configureLiveOwner, liveOwner } from './services/intakeAssignment.js';
 import { ACTIONABLE_CONVERSATION_WHERE, HUMAN_REPLY_WHERE, isActionableConversationMessage, isHumanReply } from './utils/emailInbound.js';
@@ -665,7 +666,7 @@ app.get('/chat/widget/:key', (req, res, next) => {
   res.set('Content-Security-Policy', [
     "default-src 'self'", "script-src 'self' 'unsafe-inline'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com", "object-src 'none'", "base-uri 'none'", "form-action 'self'",
-    "img-src 'self' data:", `frame-ancestors ${ancestors}`,
+    "img-src 'self' data: blob:", `frame-ancestors ${ancestors}`,
   ].join('; '));
   next();
 });
@@ -3473,6 +3474,7 @@ async function sendInboxThreadDetail(req, res) {
         assignedMember: true, assignedTo: { select: { name: true, role: true } },
         messages: {
           where: INBOX_VISIBLE_MESSAGE_WHERE,
+          include: { browserChatAttachment: { select: browserChatFileFields } },
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         },
         _count: {
