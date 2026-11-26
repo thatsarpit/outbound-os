@@ -791,11 +791,13 @@ export async function handleInboxRequest(
           `${t.leadName} ${t.leadCompany} ${t.lastMessage}`.toLowerCase().includes(search),
       )
       .sort((a, b) => String(b.lastMessageAt).localeCompare(String(a.lastMessageAt)))
+    const page = Math.max(1, Number(path.searchParams.get('page')) || 1)
+    const limit = Math.max(1, Number(path.searchParams.get('limit')) || 50)
     return json({
-      threads,
+      threads: threads.slice((page - 1) * limit, page * limit),
       total: threads.length,
-      page: 1,
-      pages: 1,
+      page,
+      pages: Math.ceil(threads.length / limit),
       unread: THREADS.filter((t) => t.unread).length,
       needsReply: THREADS.filter((t) => t.replyNeeded && t.threadState !== 'resolved').length,
     })

@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, RefreshCw } from 'lucide-react'
+import { ChevronDown, Loader2, RefreshCw } from 'lucide-react'
 import { useOnlineStatus } from '@/hooks/use-online-status'
 
 export const mobileInput =
@@ -22,7 +22,9 @@ export function MobileRefresh({
     <div className="flex items-center justify-between gap-3">
       <p className="text-xs text-text-muted" role="status">
         {!online
-          ? updatedAt ? 'Offline · showing loaded data' : 'Offline · reconnect to load this list'
+          ? updatedAt
+            ? 'Offline · showing loaded data'
+            : 'Offline · reconnect to load this list'
           : stale
             ? 'Refresh failed · showing loaded data'
             : updatedAt
@@ -31,7 +33,10 @@ export function MobileRefresh({
       </p>
       {online && stale && retry && (
         <button type="button" className={mobileButton} onClick={retry} disabled={refreshing}>
-          <RefreshCw className={refreshing ? 'h-4 w-4 motion-safe:animate-spin' : 'h-4 w-4'} aria-hidden="true" />
+          <RefreshCw
+            className={refreshing ? 'h-4 w-4 motion-safe:animate-spin' : 'h-4 w-4'}
+            aria-hidden="true"
+          />
           Retry refresh
         </button>
       )}
@@ -51,40 +56,54 @@ export function MobileError({ message, retry }: { message: string; retry: () => 
   )
 }
 
-export function MobilePagination({
-  page,
-  pages,
-  onChange,
+export function MobileLoadMore({
+  hasMore,
+  busy,
+  loading,
+  failed,
+  onLoad,
+  onStartOver,
 }: {
-  page: number
-  pages: number
-  onChange: (page: number) => void
+  hasMore: boolean
+  busy: boolean
+  loading: boolean
+  failed: boolean
+  onLoad: () => void
+  onStartOver?: () => void
 }) {
-  if (pages <= 1) return null
+  const online = useOnlineStatus()
+  if (!hasMore && !onStartOver) return null
+  const unavailable = busy || !online
   return (
-    <nav aria-label="Results pages" className="mt-4 flex items-center justify-between gap-2">
-      <button
-        type="button"
-        className={mobileButton}
-        disabled={page <= 1}
-        onClick={() => onChange(page - 1)}
-      >
-        <ArrowLeft className="h-4 w-4" />
-        Previous
-      </button>
-      <span className="text-xs tabular-nums text-text-muted">
-        {page} / {pages}
-      </span>
-      <button
-        type="button"
-        className={mobileButton}
-        disabled={page >= pages}
-        onClick={() => onChange(page + 1)}
-      >
-        Next
-        <ArrowRight className="h-4 w-4" />
-      </button>
-    </nav>
+    <div className="space-y-2 pb-2 text-center">
+      {hasMore && (
+        <button
+          type="button"
+          className={`${mobileButton} min-h-12 w-full rounded-xl text-accent active:bg-accent-muted aria-disabled:opacity-60`}
+          aria-disabled={unavailable}
+          onClick={() => {
+            if (!unavailable) onLoad()
+          }}
+        >
+          {loading ? (
+            <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" />
+          ) : (
+            <ChevronDown className="size-4" aria-hidden="true" />
+          )}
+          {loading ? 'Loading more…' : failed ? 'Retry loading more' : 'Load more'}
+        </button>
+      )}
+      {failed && (
+        <p className="text-xs text-danger" role="status">
+          Could not load more results.
+        </p>
+      )}
+      {onStartOver && (
+        <button type="button" className={`${mobileButton} w-full`} onClick={onStartOver}>
+          Start from the first result
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -107,7 +126,10 @@ export function mobileLeadId(value: string | null): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null
 }
 
-export function mobileSearchParams(values: Record<string, string | null>, current = new URLSearchParams(window.location.search)) {
+export function mobileSearchParams(
+  values: Record<string, string | null>,
+  current = new URLSearchParams(window.location.search),
+) {
   // History updates immediately. React can still be rendering the previous
   // location when the next control is tapped.
   const next = new URLSearchParams(current)

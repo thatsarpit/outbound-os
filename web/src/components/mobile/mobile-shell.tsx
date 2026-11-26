@@ -1,5 +1,5 @@
 import { WorkspaceSwitcher } from '@/components/auth/workspace-boundary'
-import { useEffect } from 'react'
+import { useEffect, useLayoutEffect } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   CheckSquare,
@@ -60,19 +60,19 @@ export function MobileShell() {
     return () => media.removeEventListener('change', sync)
   }, [setIsMobileViewport])
 
+  useLayoutEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'instant' })
+  }, [location.pathname])
+
   return (
     <div className="mobile-sales min-h-dvh bg-background">
       <div className="mx-auto flex min-h-dvh max-w-2xl flex-col bg-background">
         {!conversationOpen && (
-          <header className="sticky top-0 z-30 flex min-h-16 items-center justify-between gap-3 border-b border-border bg-surface px-4 pt-[env(safe-area-inset-top)]">
-            <div className="flex min-w-0 items-center gap-3 py-2">
-              <BrandMark className="h-9 w-9 shrink-0 text-text-primary" />
+          <header className="sticky top-0 z-30 flex min-h-[calc(4rem+env(safe-area-inset-top))] items-center justify-between gap-3 border-b border-border bg-surface/95 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
+            <div className="flex min-w-0 items-center gap-2.5 py-2">
+              <BrandMark className="size-9 shrink-0 text-accent" />
               <div className="min-w-0">
-                <p className="text-[11px] font-medium text-text-muted">
-                  {IS_DEMO ? 'Outbound OS · sample workspace' : 'Outbound OS'}
-                </p>
-                <WorkspaceSwitcher className="h-auto min-h-11 max-w-36 justify-start px-0" />
-                <h1 className="text-xl font-semibold tracking-tight">
+                <h1 className="truncate text-xl font-semibold tracking-tight">
                   {page?.label ??
                     (location.pathname === '/m/account'
                       ? 'Account'
@@ -80,6 +80,10 @@ export function MobileShell() {
                         ? 'Install app'
                         : 'Sales workspace')}
                 </h1>
+                {IS_DEMO && (
+                  <p className="text-[11px] font-medium text-text-muted">Sample workspace</p>
+                )}
+                <WorkspaceSwitcher className="block h-auto max-w-36 px-0 text-text-secondary [&:is(button)]:flex [&:is(button)]:min-h-11 [&:is(button)]:justify-start" />
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
@@ -109,7 +113,11 @@ export function MobileShell() {
                   <div className="px-3 py-2">
                     <p className="truncate text-sm font-semibold">{user?.name}</p>
                     <p className="text-xs text-text-muted">
-                      {user?.role === 'viewer' ? 'Read-only access' : privateSales ? 'Assigned leads and new inbounds' : 'Shared sales workspace'}
+                      {user?.role === 'viewer'
+                        ? 'Read-only access'
+                        : privateSales
+                          ? 'Assigned leads and new inbounds'
+                          : 'Shared sales workspace'}
                     </p>
                   </div>
                   <DropdownMenuSeparator />
@@ -173,7 +181,7 @@ export function MobileShell() {
         {!conversationOpen && (
           <nav
             aria-label="Sales navigation"
-            className="fixed inset-x-0 bottom-0 z-30 mx-auto flex max-w-2xl border-t border-border bg-surface/95 px-3 pt-1 pb-[env(safe-area-inset-bottom)]"
+            className="fixed inset-x-0 bottom-0 z-30 mx-auto flex max-w-2xl gap-1 border-t border-border bg-surface/95 px-3 pt-1.5 pb-[calc(0.25rem+env(safe-area-inset-bottom))]"
           >
             {destinations
               .filter((item) => !item.capability || hasCapability(item.capability))
@@ -183,12 +191,14 @@ export function MobileShell() {
                   to={to}
                   className={({ isActive }) =>
                     cn(
-                      'flex min-h-14 flex-1 flex-col items-center justify-center gap-1 rounded-lg text-[11px] font-medium focus-visible:outline-2 focus-visible:outline-focus',
-                      isActive ? 'text-accent' : 'text-text-muted',
+                      'group flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-focus active:bg-surface-raised',
+                      isActive ? 'font-semibold text-accent' : 'text-text-muted',
                     )
                   }
                 >
-                  <Icon className="h-5 w-5" aria-hidden="true" />
+                  <span className="grid h-7 w-14 max-w-full place-items-center rounded-full group-aria-[current=page]:bg-accent-muted">
+                    <Icon className="size-5" aria-hidden="true" />
+                  </span>
                   {label}
                 </NavLink>
               ))}
