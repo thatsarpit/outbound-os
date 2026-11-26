@@ -608,7 +608,7 @@ function MobileReplyComposer({
     <Dialog open={channel === 'email' && options} onOpenChange={setOptions}>
       <section
         aria-label="Reply composer"
-        className="flex max-h-[calc(var(--conversation-height,100dvh)-7rem-env(safe-area-inset-top))] shrink-0 flex-col overflow-hidden border-t border-border bg-surface px-3 pt-2 pb-[max(.5rem,env(safe-area-inset-bottom))]"
+        className="flex min-h-0 max-h-[max(min(7.5rem,50dvh),calc(var(--conversation-height,100dvh)-10rem-env(safe-area-inset-top)))] flex-col overflow-hidden border-t border-border bg-surface px-3 pt-2 pb-[max(.5rem,env(safe-area-inset-bottom))]"
       >
         <div className="min-h-0 overflow-y-auto overscroll-contain">
           <div className="mb-2 flex items-center justify-between gap-2">
