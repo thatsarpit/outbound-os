@@ -742,6 +742,10 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
     const payload = req.body || {};
     const fromHtmlForm = Boolean(req.is('application/x-www-form-urlencoded'));
 
+    if (payload.requireCaptureOnly === true && !ws.captureOnly) {
+      return res.status(409).json({ error: 'This source must operate in capture-only mode.' });
+    }
+
     // Spam trap: a hidden field humans never fill in (Formspree calls it
     // _gotcha). Bots fill every field, so a value here means a bot. Answer as
     // if it worked, so the bot learns nothing, and store nothing.

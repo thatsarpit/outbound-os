@@ -5113,14 +5113,17 @@ test('website source routing validates members, preserves existing ownership, an
   const endpoint = `/api/webhooks/inbound/${source.source}`;
   const submit = (body) => request('POST', endpoint, { headers: { 'x-api-key': source.apiKey, 'X-Forwarded-For': '192.0.2.154' }, body });
   try {
+    const blocked = await submit({ name: 'Blocked fixture', email: 'site-blocked@example.test', requireCaptureOnly: true });
+    assert.equal(blocked.status, 409);
+    assert.equal(await db.lead.count({ where: { email: 'site-blocked@example.test' } }), 0);
     const changed = await request('PATCH', `/api/webhooks/sources/${source.id}`, { headers: auth, body: { captureOnly: true, defaultAssigneeKey: key } });
     assert.equal(changed.status, 200);
     const sample = { name: 'New fixture', email: 'site-new@example.test' };
-    const dry = await submit({ ...sample, test: true });
+    const dry = await submit({ ...sample, requireCaptureOnly: true, test: true });
     assert.equal(dry.status, 200);
     assert.deepEqual(dry.body.routing, { captureOnly: true, defaultAssigneeKey: key });
     assert.equal(await db.lead.count({ where: { email: sample.email } }), 0);
-    const captured = await submit(sample);
+    const captured = await submit({ ...sample, requireCaptureOnly: true });
     assert.equal(captured.status, 200);
     assert.equal(captured.body.outreach.reason, 'capture_only');
     const lead = await db.lead.findUniqueOrThrow({ where: { id: captured.body.leadId } });
