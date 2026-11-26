@@ -34,8 +34,14 @@ test('a migrated empty database initializes once even when two processes start t
   });
   await Promise.all([initialize(), initialize()]);
   const file = path.join(directory, KEY_FILENAME);
-  const original = fs.readFileSync(file, 'utf8');
-  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  const descriptor = fs.openSync(file, 'r');
+  let original;
+  try {
+    assert.equal(fs.fstatSync(descriptor).mode & 0o777, 0o600);
+    original = fs.readFileSync(descriptor, 'utf8');
+  } finally {
+    fs.closeSync(descriptor);
+  }
   ensureInstanceSecrets(env);
   assert.equal(env.LEAD_SYNC_ENCRYPTION_KEY, JSON.parse(original).LEAD_SYNC_ENCRYPTION_KEY);
   assert.equal(fs.readFileSync(file, 'utf8'), original);
@@ -48,8 +54,7 @@ test('startup preserves corrupt keys and refuses to replace keys for an existing
   db.close();
   const file = path.join(directory, KEY_FILENAME);
   assert.throws(() => ensureInstanceSecrets(env), /Missing instance keys/);
-  assert.equal(fs.existsSync(file), false);
-  fs.writeFileSync(file, '{truncated');
+  fs.writeFileSync(file, '{truncated', { flag: 'wx' });
   assert.throws(() => ensureInstanceSecrets(env), /Invalid instance secret file/);
   assert.equal(fs.readFileSync(file, 'utf8'), '{truncated');
   ensureInstanceSecrets({ ...env, JWT_SECRET: fixtureKey, LEAD_SYNC_ENCRYPTION_KEY: fixtureKey });

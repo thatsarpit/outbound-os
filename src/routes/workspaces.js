@@ -70,7 +70,13 @@ function proxyWorkspace(req, res, workspace, { inbound = false } = {}) {
     headers['x-api-key'] = req.get('x-api-key');
     delete headers.authorization;
   }
-  const connection = request(new URL('/api' + req.url, workspace.origin), {
+  // Connect to the configured private origin. The incoming URL only supplies
+  // the path and query of the HTTP request on that connection.
+  const target = new URL(workspace.origin);
+  const connection = request({
+    hostname: target.hostname,
+    port: target.port || 80,
+    path: '/api' + req.url,
     method: req.method,
     headers,
   }, upstream => {

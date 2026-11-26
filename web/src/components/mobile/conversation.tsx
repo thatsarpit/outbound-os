@@ -6,7 +6,7 @@ import {
   WhatsAppReplyWindow,
   canSendWhatsAppFreeText,
 } from '@/components/inbox/whatsapp-reply-window'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowLeft, ChevronDown, Info, Send, Search } from 'lucide-react'
 import { inboxApi } from '@/api/endpoints/inbox'
@@ -438,6 +438,7 @@ function MobileReplyComposer({
   const { dashboardScope, user } = useAuthStore()
   const online = useOnlineStatus()
   const client = useQueryClient()
+  const fromId = useId()
   const { sender, latestEmail, unavailableSender } = emailContext
   const accountId = channel === 'email' ? emailContext.accountId : null
   const suggestedSubject = buildReplySubject(replyTarget?.subject || latestEmail?.subject)
@@ -607,189 +608,191 @@ function MobileReplyComposer({
     <Dialog open={channel === 'email' && options} onOpenChange={setOptions}>
       <section
         aria-label="Reply composer"
-        className="max-h-[calc(var(--conversation-height,100dvh)-4rem-env(safe-area-inset-top))] shrink-0 overflow-y-auto border-t border-border bg-surface px-3 pt-2 pb-[max(.5rem,env(safe-area-inset-bottom))]"
+        className="flex max-h-[calc(var(--conversation-height,100dvh)-7rem-env(safe-area-inset-top))] shrink-0 flex-col overflow-hidden border-t border-border bg-surface px-3 pt-2 pb-[max(.5rem,env(safe-area-inset-bottom))]"
       >
-        <div className="mb-2 flex items-center justify-between gap-2">
-          <label className="min-w-0">
-            <span className="sr-only">Reply channel</span>
-            <select
-              value={channel}
-              disabled={send.isPending || uploading || apply.isPending}
-              className="h-11 max-w-full rounded-lg bg-surface-raised px-2 text-base"
-              onChange={(event) => onChannelChange(event.target.value as InboxChannel)}
-            >
-              {CHANNEL_ORDER.map((id) => (
-                <option key={id} value={id}>
-                  {CHANNELS[id].label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {channel === 'email' && (
-            <DialogTrigger asChild>
-              <button type="button" disabled={uploading} className={`${mobileButton} min-w-0 text-text-secondary`}>
-                <span className="truncate">Email options</span>
-                <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
-              </button>
-            </DialogTrigger>
-          )}
-        </div>
-        {channel === 'email' && sender && (
-          <p className="mb-2 truncate text-xs text-text-muted" title={sender.email || sender.name}>
-            From {sender.email || sender.name}
-          </p>
-        )}
-        <div className="flex flex-wrap items-center gap-1">
-          {channel === 'whatsapp' && (
-            <VoiceRecorder
-              disabled={send.isPending || !!disabledReason || !!replyTarget}
-              onBusy={setRecordingBusy}
-              onAdd={(file) => setAttachments((previous) => [...previous, file])}
-            />
-          )}
-          {channel !== 'email' && (
-            <div>
-              <button
-                type="button"
-                aria-expanded={emojiOpen}
-                className="min-h-11 rounded-xl px-3 text-sm text-text-secondary"
-                onClick={() => setEmojiOpen(!emojiOpen)}
+        <div className="min-h-0 overflow-y-auto overscroll-contain">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <label className="min-w-0">
+              <span className="sr-only">Reply channel</span>
+              <select
+                value={channel}
+                disabled={send.isPending || uploading || apply.isPending}
+                className="h-11 max-w-full rounded-lg bg-surface-raised px-2 text-base"
+                onChange={(event) => onChannelChange(event.target.value as InboxChannel)}
               >
-                Emoji
-              </button>
-              {emojiOpen && (
-                <div className="flex flex-wrap gap-1">
-                  {['😀', '😊', '👍', '❤️', '🙏', '✅', '👋', '🎉'].map((value) => (
-                    <button
-                      type="button"
-                      key={value}
-                      className="h-11 w-11 text-2xl"
-                      aria-label={`Insert ${value}`}
-                      disabled={send.isPending}
-                      onClick={() => updateDraft({ plainBody: draft.plainBody + value })}
-                    >
-                      {value}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          {replyTarget && attachments.length > 0 && (
-            <p role="status" className="text-sm text-warning">
-              Remove the quote or attachments before sending.
+                {CHANNEL_ORDER.map((id) => (
+                  <option key={id} value={id}>
+                    {CHANNELS[id].label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {channel === 'email' && (
+              <DialogTrigger asChild>
+                <button type="button" disabled={uploading} className={`${mobileButton} min-w-0 text-text-secondary`}>
+                  <span className="truncate">Email options</span>
+                  <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" />
+                </button>
+              </DialogTrigger>
+            )}
+          </div>
+          {channel === 'email' && sender && (
+            <p className="mb-2 truncate text-xs text-text-muted" title={sender.email || sender.name}>
+              From {sender.email || sender.name}
             </p>
           )}
-          {replyTarget && <ReplyPreview message={replyTarget} onCancel={clearReply} />}
-          {!replyTarget && quotedEmailUnavailable && (
-            <button type="button" className={mobileButton} onClick={clearReply}>Clear quote</button>
-          )}
-          {(channel === 'email' || channel === 'whatsapp') && (
-            <AttachmentPicker
-              attachments={attachments}
-              onUploadingChange={setUploading}
-              onAdd={(file) => setAttachments((previous) => [...previous, file])}
-              onRemove={(id) =>
-                setAttachments((previous) => previous.filter((file) => file.id !== id))
-              }
-              disabled={send.isPending || !!disabledReason || !!replyTarget}
-            />
-          )}
-        </div>
-        {channel === 'email' && (
-          <DialogContent className="max-h-[85dvh] overflow-y-auto space-y-3 p-4" size="sm">
+          <div className="flex flex-wrap items-center gap-1">
+            {channel === 'whatsapp' && (
+              <VoiceRecorder
+                disabled={send.isPending || !!disabledReason || !!replyTarget}
+                onBusy={setRecordingBusy}
+                onAdd={(file) => setAttachments((previous) => [...previous, file])}
+              />
+            )}
+            {channel !== 'email' && (
+              <div>
+                <button
+                  type="button"
+                  aria-expanded={emojiOpen}
+                  className="min-h-11 rounded-xl px-3 text-sm text-text-secondary"
+                  onClick={() => setEmojiOpen(!emojiOpen)}
+                >
+                  Emoji
+                </button>
+                {emojiOpen && (
+                  <div className="flex flex-wrap gap-1">
+                    {['😀', '😊', '👍', '❤️', '🙏', '✅', '👋', '🎉'].map((value) => (
+                      <button
+                        type="button"
+                        key={value}
+                        className="h-11 w-11 text-2xl"
+                        aria-label={`Insert ${value}`}
+                        disabled={send.isPending}
+                        onClick={() => updateDraft({ plainBody: draft.plainBody + value })}
+                      >
+                        {value}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            {replyTarget && attachments.length > 0 && (
+              <p role="status" className="text-sm text-warning">
+                Remove the quote or attachments before sending.
+              </p>
+            )}
+            {replyTarget && <ReplyPreview message={replyTarget} onCancel={clearReply} />}
+            {!replyTarget && quotedEmailUnavailable && (
+              <button type="button" className={mobileButton} onClick={clearReply}>Clear quote</button>
+            )}
+            {(channel === 'email' || channel === 'whatsapp') && (
+              <AttachmentPicker
+                attachments={attachments}
+                onUploadingChange={setUploading}
+                onAdd={(file) => setAttachments((previous) => [...previous, file])}
+                onRemove={(id) =>
+                  setAttachments((previous) => previous.filter((file) => file.id !== id))
+                }
+                disabled={send.isPending || !!disabledReason || !!replyTarget}
+              />
+            )}
+          </div>
+          {channel === 'email' && (
+            <DialogContent className="max-h-[85dvh] overflow-y-auto space-y-3 p-4" size="sm">
               <DialogTitle>Email options</DialogTitle>
               <DialogDescription className="break-all">
                 To: {thread.leadEmail || 'No email address'}
               </DialogDescription>
-                <label className="block text-xs text-text-secondary">
-                  From
-                  <select
-                    className={`${mobileInput} mt-1`}
-                    value={accountId ?? ''}
-                    disabled={send.isPending || uploading || apply.isPending}
-                    onChange={(event) => onAccountChange(Number(event.target.value) || null)}
-                  >
-                    {!sender && <option value="">No sender available</option>}
-                    {thread.availableSenderAccounts?.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.senderName || account.name} · {account.email}
+              <div>
+                <label htmlFor={fromId} className="block text-xs text-text-secondary">From</label>
+                <select id={fromId}
+                  className={`${mobileInput} mt-1`}
+                  value={accountId ?? ''}
+                  disabled={send.isPending || uploading || apply.isPending}
+                  onChange={(event) => onAccountChange(Number(event.target.value) || null)}
+                >
+                  {!sender && <option value="">No sender available</option>}
+                  {thread.availableSenderAccounts?.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.senderName || account.name} · {account.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <label className="block text-xs text-text-secondary">
+                Subject
+                <input
+                  className={`${mobileInput} mt-1`}
+                  value={draft.subject}
+                  placeholder={suggestedSubject}
+                  disabled={send.isPending || uploading || apply.isPending}
+                  onChange={(event) => updateDraft({ subject: event.target.value })}
+                />
+              </label>
+              <label className="block text-xs text-text-secondary">
+                CC
+                <input
+                  className={`${mobileInput} mt-1`}
+                  inputMode="email"
+                  value={draft.cc}
+                  disabled={send.isPending || uploading || apply.isPending}
+                  onChange={(event) => updateDraft({ cc: event.target.value })}
+                />
+              </label>
+              <label className="block text-xs text-text-secondary">
+                BCC
+                <input
+                  className={`${mobileInput} mt-1`}
+                  inputMode="email"
+                  value={draft.bcc}
+                  disabled={send.isPending || uploading || apply.isPending}
+                  onChange={(event) => updateDraft({ bcc: event.target.value })}
+                />
+              </label>
+              <label className="block text-xs text-text-secondary">
+                Template
+                <select
+                  className={`${mobileInput} mt-1`}
+                  value={templateId}
+                  onChange={(event) => setTemplateId(event.target.value)}
+                >
+                  <option value="">
+                    {templates.isPending ? 'Loading templates…' : 'Choose template'}
+                  </option>
+                  {Array.isArray(templates.data) &&
+                    templates.data.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name}
                       </option>
                     ))}
-                  </select>
-                </label>
-                <label className="block text-xs text-text-secondary">
-                  Subject
-                  <input
-                    className={`${mobileInput} mt-1`}
-                    value={draft.subject}
-                    placeholder={suggestedSubject}
-                    disabled={send.isPending || uploading || apply.isPending}
-                    onChange={(event) => updateDraft({ subject: event.target.value })}
-                  />
-                </label>
-                <label className="block text-xs text-text-secondary">
-                  CC
-                  <input
-                    className={`${mobileInput} mt-1`}
-                    inputMode="email"
-                    value={draft.cc}
-                    disabled={send.isPending || uploading || apply.isPending}
-                    onChange={(event) => updateDraft({ cc: event.target.value })}
-                  />
-                </label>
-                <label className="block text-xs text-text-secondary">
-                  BCC
-                  <input
-                    className={`${mobileInput} mt-1`}
-                    inputMode="email"
-                    value={draft.bcc}
-                    disabled={send.isPending || uploading || apply.isPending}
-                    onChange={(event) => updateDraft({ bcc: event.target.value })}
-                  />
-                </label>
-                <label className="block text-xs text-text-secondary">
-                  Template
-                  <select
-                    className={`${mobileInput} mt-1`}
-                    value={templateId}
-                    onChange={(event) => setTemplateId(event.target.value)}
-                  >
-                    <option value="">
-                      {templates.isPending ? 'Loading templates…' : 'Choose template'}
-                    </option>
-                    {Array.isArray(templates.data) &&
-                      templates.data.map((template) => (
-                        <option key={template.id} value={template.id}>
-                          {template.name}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  className={`${mobileButton} w-full`}
-                  disabled={
-                    !templateId || send.isPending || uploading || apply.isPending || !!disabledReason
-                  }
-                  onClick={() => apply.mutate()}
-                >
-                  {apply.isPending ? 'Applying…' : 'Apply template'}
-                </button>
-            <p className="text-xs text-text-muted">Drafts are saved separately for each sender.</p>
-            <DialogClose className={mobileButton}>Done</DialogClose>
-          </DialogContent>
-        )}
-        {send.isPending && (
-          <p
-            role="status"
-            className="mb-3 ml-auto max-w-[85%] whitespace-pre-wrap rounded-2xl bg-accent-muted p-3 text-sm"
-          >
-            {draft.plainBody}
-            <span className="mt-1 block text-xs text-text-secondary">Submitting…</span>
-          </p>
-        )}
-        <div className="flex items-end gap-2">
+                </select>
+              </label>
+              <button
+                type="button"
+                className={`${mobileButton} w-full`}
+                disabled={
+                  !templateId || send.isPending || uploading || apply.isPending || !!disabledReason
+                }
+                onClick={() => apply.mutate()}
+              >
+                {apply.isPending ? 'Applying…' : 'Apply template'}
+              </button>
+              <p className="text-xs text-text-muted">Drafts are saved separately for each sender.</p>
+              <DialogClose className={mobileButton}>Done</DialogClose>
+            </DialogContent>
+          )}
+          {send.isPending && (
+            <p
+              role="status"
+              className="mb-3 ml-auto max-w-[85%] whitespace-pre-wrap rounded-2xl bg-accent-muted p-3 text-sm"
+            >
+              {draft.plainBody}
+              <span className="mt-1 block text-xs text-text-secondary">Submitting…</span>
+            </p>
+          )}
+        </div>
+        <div className="mt-1 flex shrink-0 items-end gap-2">
           <div className="min-w-0 flex-1">
             {channel === 'email' ? (
               <EmailEditor

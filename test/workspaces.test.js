@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { clerkMiddleware, getAuth } from '@clerk/express';
 import express from 'express';
+import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 import { clerkWorkspaceIdentity } from '../src/auth/clerkIdentity.js';
 import { createWorkspaceRouter, workspaceConfig, workspaceRuntime } from '../src/routes/workspaces.js';
@@ -60,6 +61,7 @@ test('signed Clerk sessions and source keys isolate reads, writes and lead intak
     const insert = db.prepare('INSERT INTO lead (name) VALUES (?)');
     insert.run(label);
     const app = express();
+    app.use(rateLimit({ windowMs: 60_000, limit: 100 }));
     app.use('/api', workspaceRuntime(env));
     app.use(clerk());
     function guard(req, res, next) {
