@@ -606,6 +606,8 @@ model WebhookSource {
 }
 
 model BrowserChat {
+  visitorEmail String?
+  visitorPhone String?
   widgetKey String? // null identifies a staff-created invitation
   id        Int       @id @default(autoincrement())
   leadId    Int

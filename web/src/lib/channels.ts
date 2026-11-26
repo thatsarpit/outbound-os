@@ -81,19 +81,21 @@ export const CHANNELS: Record<ConversationChannel, ChannelMeta> = {
   },
   webchat: {
     id: 'webchat',
-    label: 'Browser chat',
-    shortLabel: 'Browser',
+    label: 'Website chat',
+    shortLabel: 'Web chat',
     icon: MessagesSquare,
-    text: 'text-accent',
-    bg: 'bg-accent-muted',
-    rule: 'bg-accent',
-    border: 'border-accent/30',
-    sendVerb: 'Send to Browser chat',
+    text: 'text-webchat',
+    bg: 'bg-webchat-muted',
+    rule: 'bg-webchat',
+    border: 'border-webchat/30',
+    sendVerb: 'Send to Website chat',
   },
 }
 
 /** Display order wherever channels are listed together. */
 export const CHANNEL_ORDER: InboxChannel[] = ['whatsapp', 'email', 'imessage', 'telegram']
+
+export const CONVERSATION_CHANNELS: ConversationChannel[] = [...CHANNEL_ORDER, 'webchat']
 
 export function getChannel(channel: ConversationChannel | string | null | undefined): ChannelMeta {
   if (channel && channel in CHANNELS) return CHANNELS[channel as ConversationChannel]

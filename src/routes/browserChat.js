@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import validator from 'validator';
 import { Router, json } from 'express';
 import rateLimit from 'express-rate-limit';
 import prisma from '../utils/prismaClient.js';
@@ -11,7 +12,7 @@ const requestPattern = /^[a-z0-9_-]{16,80}$/i;
 const digest = secret => createHash('sha256').update(secret).digest('hex');
 const positive = value => /^[1-9]\d*$/.test(String(value)) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
 const active = (now) => ({ revokedAt: null, expiresAt: { gt: now } });
-const chatFields = { id: true, widgetKey: true, createdAt: true, expiresAt: true, revokedAt: true };
+const chatFields = { id: true, visitorEmail: true, visitorPhone: true, widgetKey: true, createdAt: true, expiresAt: true, revokedAt: true };
 const messageFields = { id: true, content: true, direction: true, createdAt: true };
 
 function noStore(_req, res, next) {
@@ -130,6 +131,15 @@ export function createBrowserChatRouters({ db = prisma, guard = requireRole, env
     if (!name || name.length > 80 || /[\p{Cc}\p{Cf}]/u.test(name) || !validMessage(req.body)) {
       return res.status(400).json({ error: 'Enter your name and a message up to 4,000 characters.' });
     }
+    const email = typeof req.body.email === 'string' ? req.body.email.trim() : '';
+    const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
+    if (email && (email.length > 254 || !validator.isEmail(email))) {
+      return res.status(400).json({ error: 'Enter a valid email address or leave it blank.' });
+    }
+    const normalizedPhone = phone.replace(/[ .()-]/g, '');
+    if (phone && (phone.length > 36 || !/^\+[1-9]\d{7,14}$/.test(normalizedPhone))) {
+      return res.status(400).json({ error: 'Use an international number starting with +, or leave it blank.' });
+    }
     const time = now();
     const data = await db.$transaction(async tx => {
       const prior = await tx.browserChat.findUnique({ where: { tokenHash: req.chatTokenHash } });
@@ -143,6 +153,9 @@ export function createBrowserChatRouters({ db = prisma, guard = requireRole, env
       } });
       const chat = await tx.browserChat.create({ data: {
         leadId: lead.id, widgetKey: req.params.widget, tokenHash: req.chatTokenHash,
+        // These are self-reported follow-up details. Keep them out of contact
+        // matching, provider routing and automated outreach.
+        visitorEmail: email || null, visitorPhone: normalizedPhone || null,
         createdBy: 'visitor', expiresAt: new Date(+time + 90 * 86400_000),
       } });
       return { ...await saveMessage(tx, chat, 'inbound', req.body, time), leadId: lead.id };

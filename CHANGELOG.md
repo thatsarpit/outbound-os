@@ -6,7 +6,7 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
-## [0.6.0] — release candidate
+## [0.6.0] — 26 November 2026
 
 - Offer private Sales workspaces where agents work only their assignments and
   can claim eligible new WhatsApp inbounds. Admins retain the full Inbox.
@@ -19,6 +19,8 @@ include breaking changes, and they are called out here.
   searchable source attribution on the incoming conversation.
 - Add an embeddable website chat with adjustable branding, resumable
   transcripts, Inbox replies and resolved conversation reopening.
+- Add Website chat to Inbox filters, channel status and Integrations.
+  Visitors can share optional contact details for agent follow-up.
 
 ## [0.5.2] — 26 November 2026
 

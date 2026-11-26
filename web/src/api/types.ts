@@ -499,6 +499,7 @@ export interface InboxChannelHealthItem {
 }
 
 export interface InboxChannelHealth {
+  webchat?: InboxChannelHealthItem
   whatsapp: InboxChannelHealthItem
   imessage: InboxChannelHealthItem
   email: InboxChannelHealthItem

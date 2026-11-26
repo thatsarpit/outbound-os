@@ -2,6 +2,9 @@
 
 Use the same Inbox for website enquiries, support and staff invitations.
 Website visitors start a chat by providing a name and their first message.
+They can share an optional email address or international phone for follow-up.
+The agent sees these details on the conversation, marked unverified.
+They are kept separate from contact matching and automated outreach.
 An unassigned conversation is visible in the admin Inbox. In private Sales
 mode the agent claim queue shows its channel and arrival time. The agent can
 read and reply once the lead is assigned. **Resolve** closes the work item.
@@ -23,7 +26,7 @@ preview uses a temporary SQLite database and listens on loopback.
 
 ## Install on a website
 
-Enable Browser chat on the API that serves the built dashboard and set a
+Enable Browser chat on the API and set a
 map of widget keys in the server environment. Use a distinct key per brand
 or department. The widget accepts a title, welcome message, six-digit hex
 accent, and a list of exact website origins allowed to embed it.
@@ -34,7 +37,8 @@ OUTBOUNDOS_CHAT_WIDGETS='{"support":{"title":"Customer support","welcome":"What 
 ```
 
 Add an accessible link and script to the website. Replace the hostname with
-the HTTPS origin of the Outbound OS API serving the built widget.
+the HTTPS origin of the Outbound OS dashboard serving the widget. Find
+configured hosted links and embed code under **Integrations → Website chat**.
 
 ```html
 <a href="https://crm.example.com/chat/widget/support" data-outbound-chat
@@ -64,3 +68,14 @@ conversation.
 The initial public chat supports text, anonymous visitors and the primary
 workspace. Signed-in customer identity and account-wide support history
 require a separate identity integration.
+
+
+## Further work for a support rollout
+
+- Connect signed-in customer identity to verified account history. Anonymous
+  chat sessions retain their own transcripts and never aggregate by email.
+- Add configurable team routing and support hours, then handoff and escalation.
+- Add notifications with assignment checks, consent-aware attachments, a
+  retention policy, and delivery and response-time reporting.
+- Add per-workspace widget configuration, transcript exports, and branding
+  controls once same-origin and access boundaries are validated.

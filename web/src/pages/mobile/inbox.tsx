@@ -4,7 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Inbox, ListChecks, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { inboxApi } from '@/api/endpoints/inbox'
-import type { InboxChannel, InboxThreadState } from '@/api/types'
+import type { ConversationChannel, InboxThreadState } from '@/api/types'
 import { ThreadListItem } from '@/components/inbox/thread-list-item'
 import { OtherEmail } from '@/components/inbox/other-email'
 import {
@@ -15,7 +15,7 @@ import {
   mobileInput,
   mobileLeadId,
 } from '@/components/mobile/mobile-shared'
-import { CHANNEL_ORDER, CHANNELS } from '@/lib/channels'
+import { CONVERSATION_CHANNELS, CHANNELS } from '@/lib/channels'
 import { loadDraft } from '@/lib/email-drafts'
 import { useAuthStore, usePrivateSalesAgent } from '@/stores/auth-store'
 import { ClaimableInbounds } from '@/components/inbox/claimable-inbounds'
@@ -33,8 +33,8 @@ export default function MobileInboxPage() {
   const selected = mobileLeadId(params.get('leadId'))
   const search = params.get('search') || ''
   const deferred = useDeferredValue(search.trim())
-  const channelValue = params.get('filterChannel') as InboxChannel
-  const channel = CHANNEL_ORDER.includes(channelValue) ? channelValue : 'all'
+  const channelValue = params.get('filterChannel') as ConversationChannel
+  const channel = CONVERSATION_CHANNELS.includes(channelValue) ? channelValue : 'all'
   const queueValue = params.get('state') as InboxThreadState
   const queue = ['all', 'needs_reply', 'waiting', 'resolved'].includes(queueValue) ? queueValue : 'needs_reply'
   const assignment = privateSales ? 'mine' : params.get('assignment') === 'everyone' ? 'everyone'
@@ -165,7 +165,7 @@ export default function MobileInboxPage() {
           onChange={(event) => updateParams({ filterChannel: event.target.value === 'all' ? null : event.target.value, page: null })}
         >
           <option value="all">All channels</option>
-          {CHANNEL_ORDER.map((id) => (
+          {CONVERSATION_CHANNELS.map((id) => (
             <option key={id} value={id}>
               {CHANNELS[id].label}
             </option>

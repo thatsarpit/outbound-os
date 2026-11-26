@@ -46,6 +46,7 @@ const IntegrationsLayout = lazy(() => import('@/pages/integrations/integrations-
 const WhatsAppIntegrationPage = lazy(() => import('@/pages/integrations/whatsapp'))
 const EmailIntegrationPage = lazy(() => import('@/pages/integrations/email'))
 const TelegramIntegrationPage = lazy(() => import('@/pages/integrations/telegram'))
+const WebsiteChatIntegrationPage = lazy(() => import('@/pages/integrations/website-chat'))
 const WebhooksIntegrationPage = lazy(() => import('@/pages/integrations/webhooks'))
 const SheetsIntegrationPage = lazy(() => import('@/pages/integrations/sheets'))
 const McpIntegrationPage = lazy(() => import('@/pages/integrations/mcp'))
@@ -167,6 +168,7 @@ const configurationRoutes = () => (
       </Route>
       <Route path="imessage" element={<PrimaryChannel><IMessageIntegrationPage /></PrimaryChannel>} />
       <Route path="telegram" element={<PrimaryChannel><TelegramIntegrationPage /></PrimaryChannel>} />
+      <Route path="website-chat" element={<PrimaryChannel><WebsiteChatIntegrationPage /></PrimaryChannel>} />
       <Route path="webhooks" element={<WebhooksIntegrationPage />} />
       <Route path="sheets" element={<SheetsIntegrationPage />} />
       <Route path="mcp" element={<PrimaryChannel><McpIntegrationPage /></PrimaryChannel>} />

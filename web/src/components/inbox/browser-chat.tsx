@@ -1,12 +1,12 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Copy, MessagesSquare } from 'lucide-react'
+import { Copy, Mail, MessagesSquare, Phone } from 'lucide-react'
 import { api } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { useAuthStore } from '@/stores/auth-store'
 
-type Invitation = { id: number; widgetKey?: string | null; createdAt: string; expiresAt: string; revokedAt: string | null }
+type Invitation = { id: number; widgetKey?: string | null; visitorEmail?: string | null; visitorPhone?: string | null; createdAt: string; expiresAt: string; revokedAt: string | null }
 
 export function BrowserChat({ leadId }: { leadId: number }) {
   const scope = useAuthStore(state => state.dashboardScope)
@@ -37,7 +37,7 @@ export function BrowserChat({ leadId }: { leadId: number }) {
   return (
     <Dialog open={open} onOpenChange={value => { if (!busy) setOpen(value) }}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="secondary" className="min-h-11 shrink-0 sm:min-h-8" leftIcon={<MessagesSquare className="size-4" />}>
+        <Button size="sm" variant="secondary" className="min-h-11 shrink-0 text-webchat sm:min-h-8" leftIcon={<MessagesSquare className="size-4" />}>
           Browser chat
         </Button>
       </DialogTrigger>
@@ -122,7 +122,18 @@ export function WebsiteChatReply({ leadId }: { leadId: number }) {
     <section aria-label="Website chat reply" className="shrink-0 border-t border-border bg-surface p-3">
       {query.isPending ? <p role="status" className="text-sm text-text-muted">Loading chat…</p> :
         query.isError ? <Button variant="secondary" onClick={() => void query.refetch()}>Retry loading chat</Button> :
-          chat ? <ChatReply key={chat.id} leadId={leadId} chatId={chat.id} /> :
+          chat ? <>
+            {(chat.visitorEmail || chat.visitorPhone) && (
+              <div className="mb-2 rounded-xl border border-border bg-surface-raised px-3 py-2">
+                <p className="text-xs font-medium text-text-secondary">Visitor supplied · unverified</p>
+                <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 break-all text-sm">
+                  {chat.visitorEmail && <span className="inline-flex items-center gap-1.5"><Mail aria-hidden="true" className="size-3.5 shrink-0 text-webchat" />{chat.visitorEmail}</span>}
+                  {chat.visitorPhone && <span className="inline-flex items-center gap-1.5"><Phone aria-hidden="true" className="size-3.5 shrink-0 text-webchat" />{chat.visitorPhone}</span>}
+                </div>
+              </div>
+            )}
+            <ChatReply key={chat.id} leadId={leadId} chatId={chat.id} />
+          </> :
             <p className="text-sm text-text-muted">The visitor’s chat session is closed.</p>}
     </section>
   )

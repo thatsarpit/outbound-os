@@ -5287,7 +5287,7 @@ test('website chat starts on first message, scopes guest history and reopens res
   const guest = { Authorization: `Bearer ${secret}`, 'X-Forwarded-For': '192.0.2.183' };
   const base = '/api/guest/browser-chat';
   const endpoint = `${base}/widgets/support-fixture`;
-  const body = { name: 'Website visitor fixture', content: 'Can you help with a sample order?', clientMessageId: 'website_start_fixture' };
+  const body = { name: 'Website visitor fixture', content: 'Can you help with a sample order?', clientMessageId: 'website_start_fixture', email: 'customer@example.test', phone: '+1 (555) 555-0121' };
   const count = () => db.lead.count({ where: { name: body.name } });
   process.env.OUTBOUNDOS_BROWSER_CHAT = 'true';
   process.env.OUTBOUNDOS_AGENT_INBOUND_SINCE = new Date(Date.now() - 5_000).toISOString();
@@ -5301,16 +5301,29 @@ test('website chat starts on first message, scopes guest history and reopens res
     assert.deepEqual(settings, { title: 'Northstar Help', welcome: 'How can we help?', accent: '#4455aa' });
     assert.equal((await request('GET', '/chat/widget/support-fixture', { headers: guest })).headers['content-security-policy'].split('; ').at(-1), 'frame-ancestors https://site.example.test');
     assert.equal((await request('GET', '/chat/widget/unknown-fixture', { headers: guest })).status, 404);
+    assert.equal((await request('POST', `${endpoint}/start`, { headers: guest, body: { ...body, email: 'invalid' } })).status, 400);
+    assert.equal((await request('POST', `${endpoint}/start`, { headers: guest, body: { ...body, phone: '123' } })).status, 400);
     assert.equal(await count(), 0);
     assert.equal((await request('POST', `${endpoint}/start`, { headers: guest, body })).status, 201);
     assert.equal((await request('POST', `${endpoint}/start`, { headers: guest, body })).status, 200);
     assert.equal(await count(), 1);
     const chat = await db.browserChat.findUniqueOrThrow({ where: { tokenHash: crypto.createHash('sha256').update(secret).digest('hex') } });
     leadId = chat.leadId;
+    assert.equal(chat.visitorEmail, body.email);
+    assert.equal(chat.visitorPhone, '+15555550121');
+    const isolatedContact = await db.lead.findUniqueOrThrow({ where: { id: leadId } });
+    assert.equal(isolatedContact.email, null);
+    assert.match(isolatedContact.mobile, /^no-phone:webchat:/);
+    const channel = await request('GET', '/api/inbox/channel-health', { headers: staff });
+    assert.equal(channel.body.webchat.status, 'ready');
+    const filtered = await request('GET', '/api/inbox/threads?channel=webchat', { headers: staff });
+    assert.ok(filtered.body.threads.some(thread => thread.leadId === leadId));
+    assert.ok(filtered.body.threads.every(thread => thread.channel === 'webchat'));
     for (const path of [`${base}/messages`, `${base}/widgets/other-fixture/messages`]) {
       assert.equal((await request('GET', path, { headers: guest })).status, 404);
     }
     assert.equal((await request('GET', `/api/inbox/threads/${leadId}`, { headers: agent })).status, 404);
+    assert.equal((await request('GET', `/api/browser-chats/${leadId}`, { headers: agent })).status, 404);
     const available = await request('GET', '/api/inbox/claimable', { headers: agent });
     assert.ok(available.body.leads.some(lead => lead.id === leadId && lead.source === 'browser_chat_widget'));
     assert.ok(available.body.leads.every(lead => !Object.hasOwn(lead, 'name')));
@@ -5322,6 +5335,7 @@ test('website chat starts on first message, scopes guest history and reopens res
     assert.equal((await request('POST', `/api/inbox/threads/${leadId}/resolve`, { headers: staff })).status, 200);
     const saved = await request('GET', `${endpoint}/messages`, { headers: guest });
     assert.equal(saved.body.resolved, true);
+    assert.ok(!JSON.stringify(saved.body).includes(body.email));
     assert.deepEqual(saved.body.messages.map(message => message.content), [body.content, 'Yes, this is the sample reply.']);
     await db.message.createMany({ data: Array.from({ length: 100 }, (_, index) => ({
       leadId, browserChatId: chat.id, channel: 'webchat', direction: 'outbound', content: `History fixture ${index}`, status: 'delivered',

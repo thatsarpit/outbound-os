@@ -33,7 +33,7 @@ import { createHash, randomUUID, randomBytes } from 'crypto';
 
 import prisma from './utils/prismaClient.js';
 import { createClerkTeamRouter } from './routes/clerkTeam.js';
-import { chatWidget } from './utils/chatWidgets.js';
+import { chatWidget, configuredChatWidgets } from './utils/chatWidgets.js';
 import { createBrowserChatRouters } from './routes/browserChat.js';
 import { claimableInboundWhere, isPrivateSalesAgent, privateSalesAccess, privateSalesEnabled, salesAgentLeadScope } from './auth/salesAgentAccess.js';
 import { configureLiveOwner, liveOwner } from './services/intakeAssignment.js';
@@ -1018,6 +1018,12 @@ app.put('/api/workspace/live-owner', requireRole('admin'), async (req, res) => {
     catch (error) { res.status(error.statusCode || 503).json({ error: error.statusCode ? error.message : 'Could not save the live outreach owner.' }); }
   });
 
+app.get('/api/integrations/website-chat', requireRole('manager'), (_req, res) => {
+  res.set('Cache-Control', 'no-store').json({
+    enabled: !workspaceId && process.env.OUTBOUNDOS_BROWSER_CHAT === 'true',
+    widgets: configuredChatWidgets(),
+  });
+});
 app.use('/api/browser-chats', browserChat.staff);
 app.use('/api', emailAttachmentRoutes);
 // Pool scoping runs after auth — platform admins bypass, every other user is
@@ -3264,7 +3270,16 @@ app.get('/api/inbox/channel-health', requireRole('agent'), async (_req, res) => 
     const telegramConnected = telegramAccounts.filter((account) => account.status === 'connected').length;
     const publicWebhookConfigured = Boolean(process.env.PUBLIC_URL || process.env.APP_PUBLIC_URL);
 
+    const websiteChatEnabled = !workspaceId && process.env.OUTBOUNDOS_BROWSER_CHAT === 'true';
+    const widgets = configuredChatWidgets().length;
     res.json({
+      webchat: {
+        status: websiteChatEnabled ? 'ready' : 'offline',
+        total: widgets,
+        detail: !websiteChatEnabled ? 'Website chat is disabled'
+          : widgets ? `${widgets} website chat ${widgets === 1 ? 'widget' : 'widgets'} configured`
+            : 'Staff invite links are available',
+      },
       whatsapp: {
         status: campaignReady > 0 ? 'ready' : 'offline',
         total: whatsappAccounts.length,

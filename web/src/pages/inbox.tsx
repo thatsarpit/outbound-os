@@ -15,7 +15,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { inboxApi } from '@/api/endpoints/inbox'
 import { EMAIL_TEMPLATE_LIST_QUERY_KEY, templatesApi } from '@/api/endpoints/templates'
-import type { InboxChannel, InboxThreadState, MediaFile } from '@/api/types'
+import type { ConversationChannel, InboxChannel, InboxThreadState, MediaFile } from '@/api/types'
 import { ChannelHealthStrip } from '@/components/inbox/channel-health-strip'
 import { OtherEmail } from '@/components/inbox/other-email'
 import { ComposeEmailDrawer } from '@/components/inbox/compose-email-drawer'
@@ -31,7 +31,7 @@ import {
 import { saveDraft, loadDraft, clearDraft, clearSubmittedDraft } from '@/lib/email-drafts'
 import { ROLE_EXPERIENCE } from '@/lib/role-shell'
 import { cn } from '@/lib/utils'
-import { CHANNELS, CHANNEL_ORDER } from '@/lib/channels'
+import { CHANNELS, CHANNEL_ORDER, CONVERSATION_CHANNELS } from '@/lib/channels'
 import { useOnlineStatus } from '@/hooks/use-online-status'
 import { useUIStore } from '@/stores/ui-store'
 import { useAuthStore, usePrivateSalesAgent } from '@/stores/auth-store'
@@ -93,7 +93,7 @@ function InboxInner() {
   const [page, setPage] = useState(1)
   const [searchQuery, setSearchQuery] = useState('')
   const deferredSearchQuery = useDeferredValue(searchQuery.trim())
-  const [channelFilter, setChannelFilter] = useState<'all' | InboxChannel>('all')
+  const [channelFilter, setChannelFilter] = useState<'all' | ConversationChannel>('all')
   const [threadStateFilter, setThreadStateFilter] = useState<InboxThreadState>('needs_reply')
   const [assignment, setAssignment] = useState('all')
   const [showContext, setShowContext] = useState(false)
@@ -658,7 +658,7 @@ function InboxInner() {
               >
                 All
               </button>
-              {CHANNEL_ORDER.map((id) => {
+              {CONVERSATION_CHANNELS.map((id) => {
                 const meta = CHANNELS[id]
                 const Icon = meta.icon
                 const active = channelFilter === id

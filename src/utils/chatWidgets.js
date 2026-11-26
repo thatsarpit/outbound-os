@@ -16,7 +16,7 @@ function validOrigin(value, env) {
 export function chatWidget(key, env = process.env) {
   if (!slug.test(key) || env.OUTBOUNDOS_WORKSPACE_ID || env.OUTBOUNDOS_BROWSER_CHAT !== 'true') return null;
   try {
-    const settings = JSON.parse(env.OUTBOUNDOS_CHAT_WIDGETS || '{}');
+    const settings = widgetSettings(env);
     if (!settings || !Object.hasOwn(settings, key)) return null;
     const widget = settings[key];
     if (!widget || typeof widget.title !== 'string' || !widget.title.trim() || widget.title.length > 64 ||
@@ -31,4 +31,20 @@ export function chatWidget(key, env = process.env) {
   } catch {
     return null;
   }
+}
+
+function widgetSettings(env) {
+  try {
+    const settings = JSON.parse(env.OUTBOUNDOS_CHAT_WIDGETS || '{}');
+    return settings && typeof settings === 'object' && !Array.isArray(settings) ? settings : {};
+  } catch {
+    return {};
+  }
+}
+
+export function configuredChatWidgets(env = process.env) {
+  return Object.keys(widgetSettings(env)).flatMap(key => {
+    const widget = chatWidget(key, env);
+    return widget ? [{ key, ...widget }] : [];
+  });
 }
