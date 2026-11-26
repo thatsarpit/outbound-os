@@ -1,5 +1,4 @@
 import { WorkspaceSwitcher } from '@/components/auth/workspace-boundary'
-import { useInstalledViewport } from '@/hooks/use-installed-viewport'
 import { useEffect } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
@@ -38,11 +37,10 @@ const destinations = [
   { to: '/m/inbox', label: 'Inbox', icon: Inbox, capability: 'page.inbox' },
   { to: '/m/tasks', label: 'Tasks', icon: CheckSquare, capability: 'page.leads' },
   { to: '/m/leads', label: 'Leads', icon: Users, capability: 'page.leads' },
-  { to: '/m/account', label: 'More', icon: UserRound, capability: null },
+  { to: '/m/account', label: 'Account', icon: UserRound, capability: null },
 ]
 
 export function MobileShell() {
-  useInstalledViewport()
   const location = useLocation()
   const { user, logout, hasCapability } = useAuthStore()
   const { toggleTheme, theme, setIsMobileViewport } = useUIStore()

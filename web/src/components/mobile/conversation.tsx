@@ -46,20 +46,16 @@ function useConversationViewport() {
     const viewport = window.visualViewport
     const update = () => {
       if (!ref.current) return
-      ref.current.style.height = `${viewport?.height ?? window.innerHeight}px`
-      ref.current.style.setProperty(
-        '--conversation-height',
-        `${viewport?.height ?? window.innerHeight}px`,
-      )
-      ref.current.style.top = `${viewport?.offsetTop ?? 0}px`
-      document.documentElement.style.setProperty(
-        '--mobile-viewport-height',
-        `${viewport?.height ?? window.innerHeight}px`,
-      )
-      document.documentElement.style.setProperty(
-        '--mobile-viewport-top',
-        `${viewport?.offsetTop ?? 0}px`,
-      )
+      // At normal scale, follow the keyboard. At zoomed scales, keep the
+      // layout stable so the browser can pan across it without reflowing it.
+      const atLayoutScale = !viewport || Math.abs(viewport.scale - 1) < 0.01
+      const height = atLayoutScale ? viewport?.height ?? window.innerHeight : window.innerHeight
+      const top = atLayoutScale ? viewport?.offsetTop ?? 0 : 0
+      ref.current.style.height = `${height}px`
+      ref.current.style.setProperty('--conversation-height', `${height}px`)
+      ref.current.style.top = `${top}px`
+      document.documentElement.style.setProperty('--mobile-viewport-height', `${height}px`)
+      document.documentElement.style.setProperty('--mobile-viewport-top', `${top}px`)
     }
     update()
     viewport?.addEventListener('resize', update)

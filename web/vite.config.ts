@@ -32,10 +32,11 @@ function demoHosting(): Plugin {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
+  const build = readBuildInfo()
 
   return {
     define: {
-      __OUTBOUNDOS_BUILD__: JSON.stringify(readBuildInfo()),
+      __OUTBOUNDOS_BUILD__: JSON.stringify(build),
       __PUSH_WORKER_VERSION__: JSON.stringify(
         createHash('sha256')
           .update(fs.readFileSync(path.resolve(import.meta.dirname, 'public/push-sw.js')))
@@ -43,7 +44,18 @@ export default defineConfig(({ mode }) => {
           .slice(0, 16),
       ),
     },
-    plugins: [react(), tailwindcss(), ...(mode === 'demo' ? [demoHosting()] : [])],
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        name: 'outboundos-build-info',
+        apply: 'build',
+        generateBundle() {
+          this.emitFile({ type: 'asset', fileName: 'outboundos-build.json', source: JSON.stringify(build) })
+        },
+      },
+      ...(mode === 'demo' ? [demoHosting()] : []),
+    ],
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, './src'),

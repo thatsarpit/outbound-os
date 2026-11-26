@@ -6,6 +6,16 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+## [0.5.1] — 26 November 2026
+
+- Allow pinch zoom in the Home Screen app. Keep the conversation layout stable
+  while zooming and follow the keyboard at normal scale.
+- Preserve lead searches and follow-up filters in mobile URLs. Keep loaded
+  Inbox, Leads and Tasks visible when a refresh fails and offer a retry.
+- Show Account in the phone navigation and distinguish empty inbox queues.
+- Require a matching, current release tag and built dashboard for production
+  publishing.
+
 ## [0.5.0] — 26 November 2026
 
 - Show confirmed outbound channels in each inbox row and keep the selected reply

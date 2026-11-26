@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import { dashboardDeployment, verifyDashboard } from '../scripts/deploy-dashboard.mjs';
+import { dashboardDeployment, verifyDashboard, verifyDashboardBuild } from '../scripts/deploy-dashboard.mjs';
 
 test('dashboard deployment selects the directory containing Pages functions and requires an explicit verification origin', () => {
   const plan = dashboardDeployment(['--project-name', 'synthetic-app', '--branch', 'main', '--verify-url', 'https://app.example.test']);
@@ -21,6 +21,14 @@ test('dashboard verification rejects a successful SPA fallback in place of API J
     ? Response.json({ provider: 'clerk' })
     : Response.json({ error: 'Unauthorized' }, { status: 401 }));
   assert.equal(calls, 2);
+});
+
+test('the production dashboard accepts only the tagged version, revision and channel', () => {
+  const expected = { version: '0.5.1', revision: 'a'.repeat(40), channel: 'release' };
+  verifyDashboardBuild({ ...expected }, expected);
+  for (const difference of [{ version: '0.5.0' }, { revision: 'b'.repeat(40) }, { channel: 'development' }]) {
+    assert.throws(() => verifyDashboardBuild({ ...expected, ...difference }, expected), /does not match the tagged release/);
+  }
 });
 
 test('archived builds use their build stamp and reject a mismatched release tag', async t => {

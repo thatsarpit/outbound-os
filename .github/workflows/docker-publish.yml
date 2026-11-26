@@ -39,11 +39,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Check the public release version
         if: github.ref_type == 'tag'
-        run: test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
+        run: node scripts/check-release-version.mjs "$GITHUB_REF_NAME"
 
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3

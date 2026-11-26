@@ -8,6 +8,8 @@
   Cache-Control: no-cache
 /manifest.webmanifest
   Cache-Control: no-cache
+/outboundos-build.json
+  Cache-Control: no-cache, must-revalidate
 /apple-touch-icon.png
   Cache-Control: public, max-age=3600, must-revalidate
 /app-icon-192.png
