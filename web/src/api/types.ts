@@ -24,6 +24,8 @@ export interface AssignedWorkspaceMember {
 }
 
 export interface Lead {
+  websiteLeadLabel?: string | null
+  websiteSourceName?: string | null
   customer?: {
     id: number
     name: string
@@ -580,6 +582,8 @@ export interface InboxThreadSummary {
 }
 
 export interface InboxMessage {
+  websiteLeadLabel?: string | null
+  websiteSourceName?: string | null
   id: number
   leadId: number
   channel: ConversationChannel

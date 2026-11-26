@@ -1,3 +1,5 @@
+import websiteWhatsAppHandoff from './routes/whatsappWebsiteHandoff.js';
+import { handoffDestination } from './services/whatsappWebsiteHandoff.js';
 import { createWorkspaceRouter, workspaceConfig, workspaceRuntime } from './routes/workspaces.js';
 import deliveryReviewRoutes from './routes/deliveryReview.js';
 import systemVersionRoutes from './routes/systemVersion.js';
@@ -545,6 +547,7 @@ app.use('/api/config/env', bulkLimiter);
 // Public website intake has its own opt-in origin and rate-limit boundary.
 app.use('/api/public/request-access', websiteEnquiries);
 app.use('/api/webhooks/connector', connectorIntake);
+app.use('/api/webhooks/whatsapp-handoff', websiteWhatsAppHandoff);
 app.use('/api/webhooks/indiamart', indiamartIntake);
 
 // Browsers only need CORS when the dashboard is served from a different origin
@@ -862,6 +865,7 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
         name, mobile: mobileValue, email, company, product, country, quantity,
         ...consent,
         source: req.params.source, status: ws.captureOnly ? 'paused' : 'new',
+        ...(ws.websiteLeadLabel ? { websiteLeadLabel: ws.websiteLeadLabel, websiteSourceName: ws.name } : {}),
         ...memberAssignmentData(defaultOwner),
         externalId: submission.externalId,
         consumedAt: submission.consumedAt || now, leadTier: 'HOT',
@@ -1739,6 +1743,8 @@ app.get('/api/leads', async (req, res) => {
       andClauses.push({
         OR: [
           { name: { contains: search } },
+          { websiteLeadLabel: { contains: search } },
+          { websiteSourceName: { contains: search } },
           { company: { contains: search } },
           { product: { contains: search } },
           { mobile: { contains: search } },
@@ -3312,6 +3318,8 @@ app.get('/api/inbox/threads', async (req, res) => {
     if (search) {
       where.OR = [
         { name: { contains: search } },
+        { websiteLeadLabel: { contains: search } },
+        { websiteSourceName: { contains: search } },
         { company: { contains: search } },
         { mobile: { contains: search } },
         { email: { contains: search } },
@@ -3322,6 +3330,8 @@ app.get('/api/inbox/threads', async (req, res) => {
               OR: [
                 { content: { contains: search } },
                 { emailSubject: { contains: search } },
+                { websiteLeadLabel: { contains: search } },
+                { websiteSourceName: { contains: search } },
               ],
             },
           },
@@ -5762,7 +5772,7 @@ app.post('/api/webhooks/sources', requireRole('admin'), async (req, res) => {
 
 app.patch('/api/webhooks/sources/:id', requireRole('admin'), async (req, res) => {
   try {
-    const { name, fieldMap, enabled, poolId, captureOnly, defaultAssigneeKey } = req.body;
+    const { name, fieldMap, enabled, poolId, captureOnly, defaultAssigneeKey, whatsappHandoffAccountId, websiteLeadLabel } = req.body;
     const data = {};
     if (name !== undefined) data.name = name;
     if (enabled !== undefined) data.enabled = Boolean(enabled);
@@ -5774,6 +5784,19 @@ app.patch('/api/webhooks/sources/:id', requireRole('admin'), async (req, res) =>
     }
     if (defaultAssigneeKey !== undefined) {
       data.defaultAssigneeKey = defaultAssigneeKey === null ? null : (await workspaceMembers.resolve(req.user, defaultAssigneeKey)).key;
+    }
+    if (websiteLeadLabel !== undefined) {
+      if (websiteLeadLabel !== null && (typeof websiteLeadLabel !== 'string' || !/^[\p{L}\p{N} -]{1,48}$/u.test(websiteLeadLabel.trim()))) {
+        return res.status(400).json({ error: 'Enter a website label up to 48 characters.' });
+      }
+      data.websiteLeadLabel = websiteLeadLabel?.trim() || null;
+    }
+    if (whatsappHandoffAccountId !== undefined) {
+      if (whatsappHandoffAccountId !== null &&
+        (!Number.isSafeInteger(whatsappHandoffAccountId) || !handoffDestination(await prisma.whatsAppAccount.findUnique({ where: { id: whatsappHandoffAccountId } })))) {
+        return res.status(400).json({ error: 'Choose an enabled WhatsApp account with an international number.' });
+      }
+      data.whatsappHandoffAccountId = whatsappHandoffAccountId;
     }
     const ws = await prisma.webhookSource.update({ where: { id: parseInt(req.params.id) }, data });
     res.json({ ...ws, apiKey: ws.apiKey.slice(0, 8) + '••••••••' });

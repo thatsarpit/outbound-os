@@ -5192,3 +5192,81 @@ test('browser chat is opt-in, exposes only link-scoped messages and joins the au
     await db.user.delete({ where: { id: admin.id } });
   }
 });
+
+test('website WhatsApp handoff attributes signed replies once and preserves earlier lead ownership', async () => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const source = await db.webhookSource.create({ data: {
+    name: 'Fixture storefront', source: 'fixture-storefront-whatsapp', apiKey: 'fixture-storefront-private-key',
+    websiteLeadLabel: 'PharmaEcom', captureOnly: true,
+  } });
+  const account = await db.whatsAppAccount.create({ data: {
+    name: 'Fixture destination', provider: 'meta', phone: '+15555550120', cloudApiPhoneId: 'fixture-store-destination', enabled: true,
+  } });
+  const otherAccount = await db.whatsAppAccount.create({ data: {
+    name: 'Other fixture destination', provider: 'meta', phone: '+15555550121', cloudApiPhoneId: 'other-fixture-destination', enabled: true,
+  } });
+  const endpoint = `/api/webhooks/whatsapp-handoff/${source.source}`;
+  const header = { 'X-Forwarded-For': '192.0.2.172' };
+  const mint = () => request('POST', endpoint, { headers: { ...header, 'x-api-key': source.apiKey }, body: {} });
+  const number = '15555550122';
+  const oldNumber = '15555550123';
+  const otherNumber = '15555550124';
+  const old = await db.lead.create({ data: { name: 'Original IndiaMART lead', source: 'indiamart_live', mobile: oldNumber } });
+  const deliver = (id, from, body, to = account.cloudApiPhoneId, authenticated = true) => {
+    const payload = { entry: [{ changes: [{ field: 'messages', value: {
+      metadata: { phone_number_id: to },
+      messages: [{ id, from, type: 'text', text: { body }, timestamp: String(Math.floor(Date.now() / 1000)) }],
+    } }] }] };
+    const proof = crypto.createHmac('sha256', 'test-meta-app-secret').update(JSON.stringify(payload)).digest('hex');
+    return request('POST', '/webhook/meta', { body: payload, headers: {
+      ...header, ...(authenticated ? { 'X-Hub-Signature-256': 'sha256=' + proof } : {}),
+    } });
+  };
+  try {
+    assert.equal((await mint()).status, 404);
+    const config = await request('PATCH', `/api/webhooks/sources/${source.id}`, {
+      headers: { ...header, ...authHeader() }, body: { whatsappHandoffAccountId: account.id },
+    });
+    assert.equal(config.status, 200);
+    const rejected = await request('POST', endpoint, { headers: header, body: {} });
+    assert.equal(rejected.status, 401);
+    const issued = await mint();
+    assert.equal(issued.status, 200);
+    assert.equal(issued.headers['cache-control'], 'no-store');
+    const url = new URL(issued.body.url);
+    assert.equal(url.origin + url.pathname, 'https://wa.me/15555550120');
+    const text = url.searchParams.get('text');
+    assert.ok(text.includes('Ref: OS1-'));
+    assert.equal(await db.lead.count({ where: { mobile: number } }), 0, 'Opening WhatsApp is not a lead');
+    assert.equal((await deliver('fixture-store-unsigned', number, text, account.cloudApiPhoneId, false)).status, 401);
+    assert.equal((await deliver('fixture-wrong-account', otherNumber, text, otherAccount.cloudApiPhoneId)).status, 200);
+    assert.equal((await db.lead.findFirstOrThrow({ where: { mobile: otherNumber } })).websiteLeadLabel, null);
+    assert.equal((await deliver('fixture-store-received', number, text)).status, 200);
+    assert.equal((await deliver('fixture-store-received', number, text)).status, 200);
+    const lead = await db.lead.findFirstOrThrow({ where: { mobile: number }, include: { messages: true } });
+    assert.equal(lead.websiteLeadLabel, 'PharmaEcom');
+    assert.equal(lead.websiteSourceName, source.name);
+    assert.equal(lead.messages.length, 1);
+    assert.equal(lead.messages[0].websiteLeadLabel, 'PharmaEcom');
+    assert.doesNotMatch(lead.messages[0].content, /Ref: OS1/);
+    assert.equal(lead.messages[0].direction, 'inbound');
+    assert.equal((await deliver('fixture-reused-reference', oldNumber, text)).status, 200);
+    const second = new URL((await mint()).body.url).searchParams.get('text');
+    assert.equal((await deliver('fixture-returning-website', oldNumber, second)).status, 200);
+    const returning = await db.lead.findUniqueOrThrow({ where: { id: old.id }, include: { messages: { orderBy: { id: 'asc' } } } });
+    assert.equal(returning.source, 'indiamart_live');
+    assert.equal(returning.websiteLeadLabel, null);
+    assert.deepEqual(returning.messages.map(message => message.websiteLeadLabel), [null, 'PharmaEcom']);
+    const verifiedConversation = await request('GET', `/api/inbox/threads/${lead.id}`, { headers: { ...header, ...authHeader() } });
+    assert.equal(verifiedConversation.body.messages[0].websiteSourceName, source.name);
+    const findLeads = await request('GET', '/api/leads?search=PharmaEcom', { headers: { ...header, ...authHeader() } });
+    assert.ok(findLeads.body.leads.some(row => row.id === lead.id));
+    const findConversations = await request('GET', '/api/inbox/threads?search=PharmaEcom', { headers: { ...header, ...authHeader() } });
+    assert.ok(findConversations.body.threads.some(row => row.leadId === returning.id));
+
+  } finally {
+    await db.lead.deleteMany({ where: { mobile: { in: [number, otherNumber, oldNumber] } } });
+    await db.webhookSource.delete({ where: { id: source.id } });
+    await db.whatsAppAccount.deleteMany({ where: { id: { in: [account.id, otherAccount.id] } } });
+  }
+});

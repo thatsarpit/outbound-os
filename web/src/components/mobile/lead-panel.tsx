@@ -126,6 +126,9 @@ export function MobileLeadPanel({
           {data.status.replace(/_/g, ' ')}
           {data.leadTier ? ` · ${data.leadTier.toLowerCase()}` : ''}
         </p>
+        {data.websiteLeadLabel && <p className="mt-2 text-xs font-medium text-accent">
+          {data.websiteLeadLabel}{data.websiteSourceName && ` · ${data.websiteSourceName}`}
+        </p>}
         {data.product && (
           <p className="mt-3 text-sm text-text-secondary">
             {data.product}

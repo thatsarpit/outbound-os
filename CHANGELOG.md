@@ -15,6 +15,8 @@ include breaking changes, and they are called out here.
 - Record closed deals from mobile Lead details.
 - Add optional expiring Browser chat links and show their messages alongside
   existing channels in the Inbox.
+- Add an optional storefront WhatsApp widget handoff with verified,
+  searchable source attribution on the incoming conversation.
 
 ## [0.5.2] — 26 November 2026
 

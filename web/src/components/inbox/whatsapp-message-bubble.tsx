@@ -57,6 +57,11 @@ export function MessageBubble({
       <MessageInteractions message={message} onReply={onReply}>
         <div className={cn('flex w-full', isInbound ? 'justify-start' : 'justify-end')}>
           <div className={cn('flex max-w-[85%] flex-col gap-1 sm:max-w-[76%]', className)}>
+            {message.websiteLeadLabel && (
+              <p className="px-0.5 text-xs font-medium text-accent">
+                {message.websiteLeadLabel}{message.websiteSourceName && ` · ${message.websiteSourceName}`}
+              </p>
+            )}
             {showChannel && (
               <ChannelBadge
                 channel={message.channel}

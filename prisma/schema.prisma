@@ -68,6 +68,9 @@ model Lead {
   importReceipts ConnectorReceipt[]
   importBatchId Int?
 
+  websiteLeadLabel String?
+  websiteSourceName String?
+
   // Pipeline state
   status String @default("new")
   // new | wa_unavailable | wa_undelivered | contacted | replied | engaged | closed | paused
@@ -179,6 +182,7 @@ model Lead {
   @@index([convertedAt])
   @@index([source])
   @@index([originSupplierId])
+  @@index([websiteLeadLabel])
   @@index([assignedAccount])
   @@index([assignedToId])
   @@index([assignedMemberKey])
@@ -207,6 +211,9 @@ model Message {
   direction         String // outbound | inbound
   channel           String           @default("whatsapp") // whatsapp | email | imessage
   content           String
+  websiteHandoffKey String? @unique
+  websiteLeadLabel  String?
+  websiteSourceName String?
   browserChatId     Int?
   browserChat       BrowserChat?     @relation(fields: [browserChatId], references: [id], onDelete: SetNull)
   waAccount         Int              @default(0) // WhatsApp account ID (0 if email)
@@ -587,6 +594,8 @@ model WebhookSource {
   enabled        Boolean   @default(true)
   captureOnly    Boolean   @default(false)
   defaultAssigneeKey String?
+  whatsappHandoffAccountId Int?
+  websiteLeadLabel String?
   importSupplierId Int?
   importSupplier Supplier? @relation("ConnectorSourceSupplier", fields: [importSupplierId], references: [id], onDelete: Restrict)
   importTags String @default("")

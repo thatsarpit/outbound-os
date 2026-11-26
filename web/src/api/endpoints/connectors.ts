@@ -9,6 +9,8 @@ export interface WebhookSource {
   importSupplierId: number | null
   importTags: string
   captureOnly?: boolean
+  websiteLeadLabel?: string | null
+  whatsappHandoffAccountId?: number | null
   defaultAssigneeKey?: string | null
 }
 

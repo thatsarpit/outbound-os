@@ -143,7 +143,7 @@ export function createWorkspaceRouter({ workspaces, getSession, getMemberships }
       return res.status(404).json({ error: 'This route is unavailable in this workspace.' });
     }
 
-    if (/^\/webhooks\/inbound\/[a-z0-9_-]+$/i.test(pathname) && req.method === 'POST') {
+    if (/^\/webhooks\/(?:inbound|whatsapp-handoff)\/[a-z0-9_-]+$/i.test(pathname) && req.method === 'POST') {
       if (!req.is('application/json')) return res.status(415).json({ error: 'Send a JSON webhook payload.' });
       if (!req.get('x-api-key')) return res.status(401).json({ error: 'Provide the workspace source key in the x-api-key header.' });
       return proxyWorkspace(req, res, workspace, { inbound: true });

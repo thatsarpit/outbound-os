@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { WebhookSource } from '@/api/endpoints/connectors'
 import { workspaceMembersApi } from '@/api/endpoints/workspace-members'
+import { whatsappApi } from '@/api/endpoints/whatsapp'
 import { salesApi } from '@/api/endpoints/sales'
 import { Button, Input, ConfirmDialog } from '@/components/ui'
 import {
@@ -283,9 +284,18 @@ function SourceRoutingDialog({ source, onClose }: { source: WebhookSource; onClo
   const scope = useAuthStore(state => state.dashboardScope)
   const [assignee, setAssignee] = useState(source.defaultAssigneeKey || '')
   const [captureOnly, setCaptureOnly] = useState(source.captureOnly === true)
+  const [websiteLabel, setWebsiteLabel] = useState(source.websiteLeadLabel || '')
+  const [whatsAppAccount, setWhatsAppAccount] = useState(source.whatsappHandoffAccountId?.toString() || '')
+  const accounts = useQuery({ queryKey: ['whatsapp-accounts', scope], queryFn: whatsappApi.list })
   const directory = useQuery({ queryKey: ['workspace-members', scope], queryFn: workspaceMembersApi.list })
   const save = useMutation({
-    mutationFn: () => api.patch(`/webhooks/sources/${source.id}`, { defaultAssigneeKey: assignee || null, captureOnly }),
+    mutationFn: () => api.patch(`/webhooks/sources/${source.id}`, {
+      defaultAssigneeKey: assignee || null,
+      captureOnly,
+      websiteLeadLabel: websiteLabel.trim() || null,
+      ...(whatsAppAccount !== (source.whatsappHandoffAccountId?.toString() || '')
+        ? { whatsappHandoffAccountId: Number(whatsAppAccount) || null } : {}),
+    }),
     onSuccess: () => {
       void client.invalidateQueries({ queryKey: ['webhook-sources'] })
       onClose()
@@ -313,12 +323,29 @@ function SourceRoutingDialog({ source, onClose }: { source: WebhookSource; onClo
             <input type="checkbox" checked={captureOnly} onChange={event => setCaptureOnly(event.target.checked)} />
             Capture leads with outreach paused
           </label>
+          <label className="block space-y-1 text-sm">
+            <span>Website lead label</span>
+            <Input value={websiteLabel} maxLength={48} onChange={event => setWebsiteLabel(event.target.value)} placeholder="For example, PharmaEcom" />
+          </label>
+          <label className="block space-y-1 text-sm">
+            <span>WhatsApp widget destination</span>
+            <select value={whatsAppAccount} onChange={event => setWhatsAppAccount(event.target.value)}
+              disabled={accounts.isPending || accounts.isError || save.isPending}
+              className="block min-h-11 w-full rounded-lg border border-border bg-surface-raised px-3 text-base">
+              <option value="">Widget disabled</option>
+              {whatsAppAccount && !(accounts.data || []).some(account => account.enabled && String(account.id) === whatsAppAccount) && (
+                <option value={whatsAppAccount}>Current destination unavailable</option>
+              )}
+              {(accounts.data || []).filter(account => account.enabled).map(account => <option key={account.id} value={account.id}>{account.name}</option>)}
+            </select>
+          </label>
+          {accounts.isError && <p className="text-sm text-danger">Could not load WhatsApp destinations.</p>}
           <p className="text-sm text-text-muted">Existing contacts keep their current owner.</p>
           {(directory.error || save.error) && <p role="alert" className="text-sm text-danger">{(directory.error || save.error)?.message}</p>}
         </DialogBody>
         <DialogFooter>
           <Button variant="secondary" disabled={save.isPending} onClick={onClose}>Cancel</Button>
-          <Button disabled={!directory.isSuccess || save.isPending} onClick={() => save.mutate()}>Save routing</Button>
+          <Button disabled={!directory.isSuccess || save.isPending || Boolean(whatsAppAccount && !websiteLabel.trim())} onClick={() => save.mutate()}>Save routing</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

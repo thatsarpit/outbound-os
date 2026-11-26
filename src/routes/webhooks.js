@@ -124,7 +124,7 @@ router.post('/webhook/meta', async (req, res) => {
           logger.info(`📥 Meta inbound from ${who} (type=${msg.type || 'text'})`);
           const media = await storeMetaInboundMedia(msg, accountId);
           await replyDetector.handleReply(String(phone), text, accountId, {
-            source: 'meta',
+            source: 'meta', websiteHandoff: account?.provider === 'meta',
             media: media || undefined,
             messageId: msg.id,
             timestamp: Number.isFinite(sentAt) && sentAt > 0 ? new Date(sentAt * 1000).toISOString() : undefined,

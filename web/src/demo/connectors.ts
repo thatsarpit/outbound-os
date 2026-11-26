@@ -130,6 +130,8 @@ export function handleConnectorRequest(url: string, init?: RequestInit): Respons
       })
     }
     if (typeof body.enabled === 'boolean') source.enabled = body.enabled
+    if (typeof body.websiteLeadLabel === 'string' || body.websiteLeadLabel === null) source.websiteLeadLabel = body.websiteLeadLabel
+    if (typeof body.whatsappHandoffAccountId === 'number' || body.whatsappHandoffAccountId === null) source.whatsappHandoffAccountId = body.whatsappHandoffAccountId
     if (typeof body.captureOnly === 'boolean') source.captureOnly = body.captureOnly
     if (body.defaultAssigneeKey === null || typeof body.defaultAssigneeKey === 'string') source.defaultAssigneeKey = body.defaultAssigneeKey
     return json(source)
