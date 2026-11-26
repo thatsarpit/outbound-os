@@ -33,6 +33,7 @@ import { createHash, randomUUID, randomBytes } from 'crypto';
 
 import prisma from './utils/prismaClient.js';
 import { createClerkTeamRouter } from './routes/clerkTeam.js';
+import { chatWidget } from './utils/chatWidgets.js';
 import { createBrowserChatRouters } from './routes/browserChat.js';
 import { claimableInboundWhere, isPrivateSalesAgent, privateSalesAccess, privateSalesEnabled, salesAgentLeadScope } from './auth/salesAgentAccess.js';
 import { configureLiveOwner, liveOwner } from './services/intakeAssignment.js';
@@ -647,8 +648,25 @@ const dashboardLimiter = rateLimit({
   message: { error: 'Too many dashboard requests. Please try again shortly.' },
 });
 app.use(dashboardLimiter);
+app.get('/outbound-chat.js', (_req, res, next) => {
+  res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+});
 app.get(['/chat', '/chat/'], (_req, res, next) => {
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex', 'X-Frame-Options': 'DENY' });
+  next();
+});
+app.get('/chat/widget/:key', (req, res, next) => {
   res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' });
+  const widget = chatWidget(req.params.key);
+  if (!widget) return res.status(404).type('text').send('Chat is unavailable.');
+  const ancestors = widget.origins.length ? widget.origins.join(' ') : "'none'";
+  res.removeHeader('X-Frame-Options');
+  res.set('Content-Security-Policy', [
+    "default-src 'self'", "script-src 'self' 'unsafe-inline'", "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com", "object-src 'none'", "base-uri 'none'", "form-action 'self'",
+    "img-src 'self' data:", `frame-ancestors ${ancestors}`,
+  ].join('; '));
   next();
 });
 app.use(express.static(WEB_DIST));
@@ -3590,7 +3608,7 @@ app.get('/api/inbox/claimable', requireRole('agent'), async (_req, res) => {
   try {
     const leads = await prisma.lead.findMany({
       where: claimableInboundWhere(),
-      select: { id: true, name: true, createdAt: true },
+      select: { id: true, source: true, createdAt: true },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 50,
     });

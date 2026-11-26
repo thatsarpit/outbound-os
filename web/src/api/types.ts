@@ -629,6 +629,7 @@ export interface ScheduledInboxEmail {
 }
 
 export interface InboxThreadDetail extends InboxThreadSummary {
+  source?: string
   browserChatEnabled?: boolean
   whatsappSession?: {
     accountId: number | null

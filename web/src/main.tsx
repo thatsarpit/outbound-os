@@ -11,9 +11,11 @@ import App from './App'
 import { initSentry, captureError } from './lib/sentry'
 import './styles/globals.css'
 
-const isGuestChat = /^\/chat\/?$/.test(window.location.pathname)
+const widgetKey = /^\/chat\/widget\/([a-z][a-z0-9-]{0,39})\/?$/.exec(window.location.pathname)?.[1]
+const isGuestChat = Boolean(widgetKey) || /^\/chat\/?$/.test(window.location.pathname)
+const guestPath = widgetKey ? `/chat/widget/${widgetKey}` : '/chat'
 const guestFragment = isGuestChat ? window.location.hash.slice(1) : ''
-if (guestFragment) history.replaceState(null, '', '/chat')
+if (guestFragment) history.replaceState(null, '', guestPath)
 if (!isGuestChat) initSentry()
 
 /**
@@ -110,16 +112,15 @@ if (rootEl) {
   // sign-in. The import is behind a build-time constant, so ordinary builds
   // leave the sample data out.
   if (isGuestChat) {
-    void import('./pages/browser-chat').then(({ default: BrowserChatPage, loadGuestToken }) => {
+    void import('./pages/browser-chat').then(({ default: BrowserChatPage }) => {
       const mountChat = (fragment: string) => {
-        const token = loadGuestToken(fragment)
-        root.render(<BrowserChatPage key={token} token={token} />)
+        root.render(<BrowserChatPage key={fragment || guestPath} fragment={fragment} widgetKey={widgetKey} />)
       }
       mountChat(guestFragment)
       window.addEventListener('hashchange', () => {
         const fragment = window.location.hash.slice(1)
         if (!fragment) return
-        history.replaceState(null, '', '/chat')
+        history.replaceState(null, '', guestPath)
         mountChat(fragment)
       })
     })

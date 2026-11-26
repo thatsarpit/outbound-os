@@ -5071,7 +5071,7 @@ test('private Sales agents start empty, can atomically claim new WhatsApp inboun
     assert.equal((await request('GET', '/api/tasks?scope=workspace', { headers: agent })).body.total, 0);
     const available = await request('GET', '/api/inbox/claimable', { headers: agent });
     assert.deepEqual(available.body.leads.map(lead => lead.id), [fresh.id]);
-    assert.deepEqual(Object.keys(available.body.leads[0]).sort(), ['createdAt', 'id', 'name']);
+    assert.deepEqual(Object.keys(available.body.leads[0]).sort(), ['createdAt', 'id', 'source']);
     for (const path of ['/customers', '/orders', '/analytics', '/activity', '/notifications']) {
       assert.equal((await request('GET', `/api${path}`, { headers: agent })).status, 403);
     }
@@ -5271,5 +5271,76 @@ test('website WhatsApp handoff attributes signed replies once and preserves earl
     await db.lead.deleteMany({ where: { mobile: { in: [number, otherNumber, oldNumber] } } });
     await db.webhookSource.delete({ where: { id: source.id } });
     await db.whatsAppAccount.deleteMany({ where: { id: { in: [account.id, otherAccount.id] } } });
+  }
+});
+
+test('website chat starts on first message, scopes guest history and reopens resolved work', async () => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const users = await Promise.all(['admin', 'agent'].map(role => db.user.create({ data: {
+    name: 'Fixture chat operator', email: `widget-${role}@example.test`, role, passwordHash: 'fixture',
+  } })));
+  const headers = (user, ip) => ({ Authorization: `Bearer ${signToken(user)}`, 'X-Forwarded-For': `192.0.2.${ip}` });
+  const staff = headers(users[0], 181);
+  const agent = headers(users[1], 182);
+  const secret = crypto.randomBytes(32).toString('base64url');
+  const guest = { Authorization: `Bearer ${secret}`, 'X-Forwarded-For': '192.0.2.183' };
+  const base = '/api/guest/browser-chat';
+  const endpoint = `${base}/widgets/support-fixture`;
+  const body = { name: 'Website visitor fixture', content: 'Can you help with a sample order?', clientMessageId: 'website_start_fixture' };
+  const count = () => db.lead.count({ where: { name: body.name } });
+  process.env.OUTBOUNDOS_BROWSER_CHAT = 'true';
+  process.env.OUTBOUNDOS_AGENT_INBOUND_SINCE = new Date(Date.now() - 5_000).toISOString();
+  process.env.OUTBOUNDOS_CHAT_WIDGETS = JSON.stringify({
+    'support-fixture': { title: 'Northstar Help', welcome: 'How can we help?', accent: '#4455aa', origins: ['https://site.example.test'] },
+    'other-fixture': { title: 'Another department', origins: [] },
+  });
+  let leadId;
+  try {
+    const { body: settings } = await request('GET', endpoint, { headers: guest });
+    assert.deepEqual(settings, { title: 'Northstar Help', welcome: 'How can we help?', accent: '#4455aa' });
+    assert.equal((await request('GET', '/chat/widget/support-fixture', { headers: guest })).headers['content-security-policy'].split('; ').at(-1), 'frame-ancestors https://site.example.test');
+    assert.equal((await request('GET', '/chat/widget/unknown-fixture', { headers: guest })).status, 404);
+    assert.equal(await count(), 0);
+    assert.equal((await request('POST', `${endpoint}/start`, { headers: guest, body })).status, 201);
+    assert.equal((await request('POST', `${endpoint}/start`, { headers: guest, body })).status, 200);
+    assert.equal(await count(), 1);
+    const chat = await db.browserChat.findUniqueOrThrow({ where: { tokenHash: crypto.createHash('sha256').update(secret).digest('hex') } });
+    leadId = chat.leadId;
+    for (const path of [`${base}/messages`, `${base}/widgets/other-fixture/messages`]) {
+      assert.equal((await request('GET', path, { headers: guest })).status, 404);
+    }
+    assert.equal((await request('GET', `/api/inbox/threads/${leadId}`, { headers: agent })).status, 404);
+    const available = await request('GET', '/api/inbox/claimable', { headers: agent });
+    assert.ok(available.body.leads.some(lead => lead.id === leadId && lead.source === 'browser_chat_widget'));
+    assert.ok(available.body.leads.every(lead => !Object.hasOwn(lead, 'name')));
+    assert.equal((await request('POST', `/api/inbox/threads/${leadId}/assign-self`, { headers: agent })).status, 200);
+    const reply = await request('POST', `/api/browser-chats/${leadId}/${chat.id}/messages`, {
+      headers: agent, body: { content: 'Yes, this is the sample reply.', clientMessageId: 'website_staff_fixture' },
+    });
+    assert.equal(reply.status, 201);
+    assert.equal((await request('POST', `/api/inbox/threads/${leadId}/resolve`, { headers: staff })).status, 200);
+    const saved = await request('GET', `${endpoint}/messages`, { headers: guest });
+    assert.equal(saved.body.resolved, true);
+    assert.deepEqual(saved.body.messages.map(message => message.content), [body.content, 'Yes, this is the sample reply.']);
+    await db.message.createMany({ data: Array.from({ length: 100 }, (_, index) => ({
+      leadId, browserChatId: chat.id, channel: 'webchat', direction: 'outbound', content: `History fixture ${index}`, status: 'delivered',
+    })) });
+    const latest = await request('GET', `${endpoint}/messages`, { headers: guest });
+    assert.equal(latest.body.messages.length, 100);
+    const earlier = await request('GET', `${endpoint}/messages?before=${latest.body.nextBefore}`, { headers: guest });
+    assert.deepEqual(earlier.body.messages.map(message => message.content), [body.content, 'Yes, this is the sample reply.']);
+    const followup = await request('POST', `${endpoint}/messages`, { headers: guest, body: { content: 'Another question.', clientMessageId: 'website_followup_fixture' } });
+    assert.equal(followup.status, 201);
+    assert.equal((await request('GET', `${endpoint}/messages`, { headers: guest })).body.resolved, false);
+    assert.equal((await request('DELETE', `/api/browser-chats/${leadId}/${chat.id}`, { headers: staff })).status, 200);
+    assert.equal((await request('GET', `${endpoint}/messages`, { headers: guest })).status, 404);
+  } finally {
+    delete process.env.OUTBOUNDOS_CHAT_WIDGETS;
+    delete process.env.OUTBOUNDOS_BROWSER_CHAT;
+    delete process.env.OUTBOUNDOS_AGENT_INBOUND_SINCE;
+    await db.lead.deleteMany({ where: { name: body.name } });
+    await db.workspaceMember.deleteMany({ where: { externalId: { in: users.map(user => String(user.id)) }, provider: 'local' } });
+    await db.user.deleteMany({ where: { id: { in: users.map(user => user.id) } } });
   }
 });

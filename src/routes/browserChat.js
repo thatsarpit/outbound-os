@@ -3,6 +3,7 @@ import { Router, json } from 'express';
 import rateLimit from 'express-rate-limit';
 import prisma from '../utils/prismaClient.js';
 import { requireRole } from '../auth/index.js';
+import { chatWidget } from '../utils/chatWidgets.js';
 import { workspaceMemberIdentity } from '../utils/workspaceMember.js';
 
 const identityPattern = /^[A-Za-z0-9_-]{43}$/;
@@ -10,7 +11,7 @@ const requestPattern = /^[a-z0-9_-]{16,80}$/i;
 const digest = secret => createHash('sha256').update(secret).digest('hex');
 const positive = value => /^[1-9]\d*$/.test(String(value)) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
 const active = (now) => ({ revokedAt: null, expiresAt: { gt: now } });
-const chatFields = { id: true, createdAt: true, expiresAt: true, revokedAt: true };
+const chatFields = { id: true, widgetKey: true, createdAt: true, expiresAt: true, revokedAt: true };
 const messageFields = { id: true, content: true, direction: true, createdAt: true };
 
 function noStore(_req, res, next) {
@@ -38,6 +39,9 @@ async function saveMessage(tx, chat, direction, body, now) {
     data: { lastMessageAt: now },
   });
   if (direction === 'inbound') {
+    if (chat.widgetKey) {
+      await tx.lead.updateMany({ where: { id: chat.leadId, inboxResolvedAt: { not: null } }, data: { inboxResolvedAt: null } });
+    }
     await tx.lead.updateMany({ where: { id: chat.leadId, status: { in: ['new', 'contacted', 'wa_unavailable', 'wa_undelivered'] } }, data: { status: 'replied', repliedAt: now } });
     await tx.message.updateMany({
       where: { leadId: chat.leadId, direction: 'outbound', status: 'queued', OR: [
@@ -68,33 +72,83 @@ export function createBrowserChatRouters({ db = prisma, guard = requireRole, env
   const feature = (_req, res, next) => !env.OUTBOUNDOS_WORKSPACE_ID && env.OUTBOUNDOS_BROWSER_CHAT === 'true'
     ? next() : res.status(404).json({ error: 'Browser chat is unavailable.' });
 
-  guest.use(noStore, feature, rateLimit({ windowMs: 60_000, limit: 90, standardHeaders: 'draft-8', legacyHeaders: false }));
-  guest.use((req, res, next) => {
+  const messageWriteLimit = rateLimit({ windowMs: 60_000, limit: 12,
+    keyGenerator: req => req.chatTokenHash, standardHeaders: 'draft-8', legacyHeaders: false });
+  const signupLimit = rateLimit({ windowMs: 60_000, limit: 6, standardHeaders: 'draft-8', legacyHeaders: false });
+  const chatJson = json({ limit: '24kb' });
+  const widgetRequired = (req, res, next) => {
+    const widget = chatWidget(req.params.widget, env);
+    if (!widget) return res.status(404).json({ error: 'This chat is unavailable.' });
+    req.chatWidget = widget;
+    next();
+  };
+  const guestIdentity = (req, res, next) => {
     const token = req.get('authorization')?.match(/^Bearer (\S+)$/)?.[1];
     if (!token || !identityPattern.test(token)) return res.status(404).json({ error: 'This chat link is no longer available.' });
     req.chatTokenHash = digest(token);
     next();
-  });
-  guest.post('/messages', rateLimit({ windowMs: 60_000, limit: 12,
-    keyGenerator: req => req.chatTokenHash, standardHeaders: 'draft-8', legacyHeaders: false }), json({ limit: '20kb' }), handle(async (req, res) => {
+  };
+  const guestScope = (req, time) => ({ tokenHash: req.chatTokenHash, widgetKey: req.params.widget || null, ...active(time) });
+  const guestSend = handle(async (req, res) => {
     if (!validMessage(req.body)) return res.status(400).json({ error: 'Enter a message up to 4,000 characters.' });
     const time = now();
     const data = await db.$transaction(async tx => {
-      const chat = await tx.browserChat.findUnique({ where: { tokenHash: req.chatTokenHash, ...active(time) }, select: { id: true, leadId: true } });
+      const chat = await tx.browserChat.findUnique({ where: guestScope(req, time), select: { id: true, leadId: true, widgetKey: true } });
       if (!chat) return null;
       const result = await saveMessage(tx, chat, 'inbound', req.body, time);
       return { ...result, leadId: chat.leadId };
     });
     if (data?.message && !data.duplicate) notify(data.leadId);
     return sendResult(res, data && { message: data.message, duplicate: data.duplicate, conflict: data.conflict });
-  }));
-  guest.get('/messages', handle(async (req, res) => {
+  });
+  const guestRead = handle(async (req, res) => {
+    const before = req.query.before === undefined ? null : positive(req.query.before);
+    if (req.query.before !== undefined && !before) return res.status(400).json({ error: 'Invalid history cursor.' });
     const chat = await db.browserChat.findUnique({
-      where: { tokenHash: req.chatTokenHash, ...active(now()) },
-      select: { messages: { orderBy: { id: 'desc' }, take: 100, select: messageFields } },
+      where: guestScope(req, now()),
+      select: { lead: { select: { inboxResolvedAt: true } }, expiresAt: true,
+        messages: { ...(before ? { where: { id: { lt: before } } } : {}),
+          orderBy: { id: 'desc' }, take: 101, select: messageFields } },
     });
     if (!chat) return res.status(404).json({ error: 'This chat link is no longer available.' });
-    res.json({ messages: chat.messages.reverse() });
+    const messages = chat.messages.slice(0, 100).reverse();
+    res.json({ messages, nextBefore: chat.messages.length > 100 ? messages[0].id : null,
+      expiresAt: chat.expiresAt, resolved: Boolean(chat.lead.inboxResolvedAt) });
+  });
+
+  guest.use(noStore, feature, rateLimit({ windowMs: 60_000, limit: 90, standardHeaders: 'draft-8', legacyHeaders: false }));
+  guest.get('/messages', guestIdentity, guestRead);
+  guest.post('/messages', guestIdentity, messageWriteLimit, chatJson, guestSend);
+  guest.get('/widgets/:widget', widgetRequired, (req, res) => {
+    const { title, welcome, accent } = req.chatWidget;
+    res.json({ title, welcome, accent });
+  });
+  guest.get('/widgets/:widget/messages', widgetRequired, guestIdentity, guestRead);
+  guest.post('/widgets/:widget/messages', widgetRequired, guestIdentity, messageWriteLimit, chatJson, guestSend);
+  guest.post('/widgets/:widget/start', widgetRequired, signupLimit, guestIdentity, chatJson, handle(async (req, res) => {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    if (!name || name.length > 80 || /[\p{Cc}\p{Cf}]/u.test(name) || !validMessage(req.body)) {
+      return res.status(400).json({ error: 'Enter your name and a message up to 4,000 characters.' });
+    }
+    const time = now();
+    const data = await db.$transaction(async tx => {
+      const prior = await tx.browserChat.findUnique({ where: { tokenHash: req.chatTokenHash } });
+      if (prior && (prior.widgetKey !== req.params.widget || prior.revokedAt || prior.expiresAt <= time)) return null;
+      if (prior) return { ...await saveMessage(tx, prior, 'inbound', req.body, time), leadId: prior.leadId };
+      // The first message and lead are created together. Simply loading the
+      // widget does not add a contact to the CRM.
+      const lead = await tx.lead.create({ data: {
+        name, mobile: `no-phone:webchat:${randomBytes(18).toString('hex')}`, source: 'browser_chat_widget',
+        status: 'replied', repliedAt: time,
+      } });
+      const chat = await tx.browserChat.create({ data: {
+        leadId: lead.id, widgetKey: req.params.widget, tokenHash: req.chatTokenHash,
+        createdBy: 'visitor', expiresAt: new Date(+time + 90 * 86400_000),
+      } });
+      return { ...await saveMessage(tx, chat, 'inbound', req.body, time), leadId: lead.id };
+    });
+    if (data?.message && !data.duplicate) notify(data.leadId);
+    return sendResult(res, data && { message: data.message, duplicate: data.duplicate, conflict: data.conflict });
   }));
   guest.use(failure);
 
@@ -119,7 +173,7 @@ export function createBrowserChatRouters({ db = prisma, guard = requireRole, env
     const token = randomBytes(32).toString('base64url');
     const time = now();
     const chat = await db.$transaction(async tx => {
-      await tx.browserChat.updateMany({ where: { leadId, ...active(time) }, data: { revokedAt: time } });
+      await tx.browserChat.updateMany({ where: { leadId, widgetKey: null, ...active(time) }, data: { revokedAt: time } });
       return tx.browserChat.create({
         data: { leadId, tokenHash: digest(token), createdBy: req.chatStaff, expiresAt: new Date(+time + 24 * 3600_000) },
         select: chatFields,

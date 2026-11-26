@@ -1,4 +1,4 @@
-import { BrowserChat } from './browser-chat'
+import { BrowserChat, WebsiteChatReply } from './browser-chat'
 import { ScheduledEmails } from './scheduled-emails'
 import { ReplyPreview, MessageInteractions } from './message-interactions'
 /**
@@ -194,6 +194,7 @@ export function ConversationSurface({
     replyPending,
     markRead,
   )
+  const websiteChat = activeThread?.source === 'browser_chat_widget' && activeThread.browserChatEnabled
   const availableSenderAccounts = activeThread?.availableSenderAccounts ?? []
   const sendDisabled =
     replyPending ||
@@ -212,7 +213,7 @@ export function ConversationSurface({
     >
       <ThreadHeader
         thread={activeThread}
-        activeChannel={composerChannel}
+        activeChannel={websiteChat ? 'webchat' : composerChannel}
         actions={<>
           {activeThread?.browserChatEnabled && <BrowserChat key={activeThread.leadId} leadId={activeThread.leadId} />}
           {headerActions}
@@ -225,7 +226,7 @@ export function ConversationSurface({
         isMutating={threadActionPending}
       />
 
-      {composerChannel === 'whatsapp' && activeThread && (
+      {!websiteChat && composerChannel === 'whatsapp' && activeThread && (
         <WhatsAppReplyWindow key={`${activeThread.leadId}:${activeThread.whatsappSession?.accountId}`} thread={activeThread} />
       )}
       <ScheduledEmails emails={activeThread?.scheduledEmails} leadId={activeThread?.leadId} />
@@ -327,6 +328,7 @@ export function ConversationSurface({
           <ReplyPreview message={replyTarget} onCancel={() => setSelectedReply(null)} />
         </div>
       )}
+      {websiteChat && activeThread ? <WebsiteChatReply key={activeThread.leadId} leadId={activeThread.leadId} /> : (
       <ComposerBar
         key={`${activeThread?.leadId ?? 'none'}:${composerChannel}:${senderAccountId ?? 'default'}`}
         channel={composerChannel}
@@ -380,7 +382,8 @@ export function ConversationSurface({
         disabled={replyPending || replyDisabledReason?.startsWith('Read-only')}
       />
 
-      {(replyError || replyDisabledReason) && (
+      )}
+      {!websiteChat && (replyError || replyDisabledReason) && (
         <div
           className={cn(
             'mx-4 mb-3 flex items-center gap-2 rounded-lg p-2.5 text-xs animate-slide-up sm:mx-5',

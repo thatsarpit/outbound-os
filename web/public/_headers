@@ -40,3 +40,12 @@
   Referrer-Policy: no-referrer
   Content-Security-Policy: frame-ancestors 'none'
   X-Frame-Options: DENY
+
+/outbound-chat.js
+  Cross-Origin-Resource-Policy: cross-origin
+
+/chat/widget/*
+  Cache-Control: no-store
+  Referrer-Policy: no-referrer
+  Content-Security-Policy: frame-ancestors 'none'
+  X-Frame-Options: DENY

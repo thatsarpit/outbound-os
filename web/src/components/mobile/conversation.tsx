@@ -30,7 +30,7 @@ import { MobileLeadPanel } from './lead-panel'
 import { MobileError, mobileInput, mobileButton } from './mobile-shared'
 import { useAuthStore, usePrivateSalesAgent } from '@/stores/auth-store'
 import { useOnlineStatus } from '@/hooks/use-online-status'
-import { BrowserChat } from '@/components/inbox/browser-chat'
+import { BrowserChat, WebsiteChatReply } from '@/components/inbox/browser-chat'
 import { CHANNELS, CHANNEL_ORDER } from '@/lib/channels'
 import { buildReplySubject, getRenderedTemplateText } from '@/lib/email-compose'
 import { clearSubmittedDraft, loadDraft, saveDraft, type EmailDraft } from '@/lib/email-drafts'
@@ -128,6 +128,7 @@ export function MobileConversation({
     refetchInterval: 10_000,
   })
   const thread = result.data
+  const websiteChat = thread?.source === 'browser_chat_widget' && thread.browserChatEnabled
   const markRead = useConversationRead(thread || null)
   const availableChannels = privateSales ? (['whatsapp', 'email'] satisfies InboxChannel[]) : CHANNEL_ORDER
   const channel = availableChannels.includes(selectedChannel as InboxChannel)
@@ -198,7 +199,7 @@ export function MobileConversation({
             {thread?.leadName || thread?.name || 'Conversation'}
           </span>
           <span className="block truncate text-xs text-text-muted">
-            Reply via {CHANNELS[channel].label}
+            Reply via {CHANNELS[websiteChat ? 'webchat' : channel].label}
             {IS_DEMO ? ' · Sample data' : ''}
             {thread?.replyNeeded ? ' · Needs reply' : ''}
           </span>
@@ -270,7 +271,7 @@ export function MobileConversation({
       {thread?.browserChatEnabled && <div className="shrink-0 border-b border-border px-3 py-1">
         <BrowserChat key={leadId} leadId={leadId} />
       </div>}
-      {channel === 'whatsapp' && !!thread && <WhatsAppReplyWindow key={`${leadId}:${thread.whatsappSession?.accountId}`} thread={thread} />}
+      {!websiteChat && channel === 'whatsapp' && !!thread && <WhatsAppReplyWindow key={`${leadId}:${thread.whatsappSession?.accountId}`} thread={thread} />}
       <ScheduledEmails emails={thread?.scheduledEmails} leadId={leadId} />
       <div
         ref={timeline}
@@ -373,7 +374,7 @@ export function MobileConversation({
           Latest messages
         </button>
       )}
-      {!!thread && (
+      {websiteChat ? <WebsiteChatReply key={leadId} leadId={leadId} /> : !!thread && (
         <MobileReplyComposer
           key={`${channel}:${channel === 'email' ? emailContext.accountId : 'default'}`}
           thread={thread}

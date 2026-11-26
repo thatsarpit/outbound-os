@@ -16,9 +16,9 @@
 Admins keep their existing sales actions and workspace-wide views. Agents
 can see their Inbox, Leads and Tasks, and record a closed deal in mobile
 Lead details. The server also scopes lead-specific actions. **Unclaimed
-WhatsApp** shows the name and arrival time of eligible new contacts. Claiming
+inbounds** shows the channel and arrival time of eligible new contacts. Claiming
 takes an atomic ownership update before the transcript becomes available.
-Eligibility requires a new lead created by WhatsApp inbound, no owner,
+Eligibility requires a new lead created by WhatsApp inbound or Website chat, no owner,
 an inbound message and an open conversation with no prior outbound.
 
 The live owner handles new first-touch leads when enabled. New live
@@ -63,6 +63,6 @@ invitation. The team sees Browser chat messages in the lead's existing
 timeline and sends replies from the Browser chat panel. A replacement
 invitation opens a fresh guest conversation. Use HTTPS for a hosted pilot.
 
-The pilot covers text and periodic refresh. Keep automatic link sending,
-public site widgets and customer identity verification out of the initial
-rollout. The same lead assignment boundary applies to the staff chat API.
+Staff invitations and website conversations support text and periodic refresh.
+See [Website chat](website-chat.md) to enable visitor-initiated conversations.
+The same lead assignment boundary applies to the staff chat API.

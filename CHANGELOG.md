@@ -17,6 +17,8 @@ include breaking changes, and they are called out here.
   existing channels in the Inbox.
 - Add an optional storefront WhatsApp widget handoff with verified,
   searchable source attribution on the incoming conversation.
+- Add an embeddable website chat with adjustable branding, resumable
+  transcripts, Inbox replies and resolved conversation reopening.
 
 ## [0.5.2] — 26 November 2026
 

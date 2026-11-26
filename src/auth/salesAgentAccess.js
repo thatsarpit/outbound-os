@@ -15,11 +15,14 @@ export function claimableInboundWhere(env = process.env) {
   if (!Number.isFinite(cutoff)) return { id: { in: [] } };
   return {
     ...leadAssignmentWhere(false),
-    source: 'whatsapp_inbound',
     createdAt: { gte: new Date(cutoff) },
     inboxResolvedAt: null,
     status: { notIn: ['closed', 'paused', 'lost'] },
-    messages: { some: { channel: 'whatsapp', direction: 'inbound' }, none: { direction: 'outbound' } },
+    messages: { none: { direction: 'outbound' } },
+    OR: [
+      { source: 'whatsapp_inbound', messages: { some: { channel: 'whatsapp', direction: 'inbound' } } },
+      { source: 'browser_chat_widget', messages: { some: { channel: 'webchat', direction: 'inbound' } } },
+    ],
   };
 }
 

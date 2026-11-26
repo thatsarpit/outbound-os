@@ -606,6 +606,7 @@ model WebhookSource {
 }
 
 model BrowserChat {
+  widgetKey String? // null identifies a staff-created invitation
   id        Int       @id @default(autoincrement())
   leadId    Int
   lead      Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)

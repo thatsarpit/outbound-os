@@ -6,15 +6,13 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { useAuthStore } from '@/stores/auth-store'
 
-type Invitation = { id: number; createdAt: string; expiresAt: string; revokedAt: string | null }
+type Invitation = { id: number; widgetKey?: string | null; createdAt: string; expiresAt: string; revokedAt: string | null }
 
 export function BrowserChat({ leadId }: { leadId: number }) {
   const scope = useAuthStore(state => state.dashboardScope)
   const [open, setOpen] = useState(false)
   const [inviteLink, setInviteLink] = useState<{ id: number; url: string } | null>(null)
   const [copied, setCopied] = useState(false)
-  const [draft, setDraft] = useState<{ id: number; content: string } | null>(null)
-  const attempt = useRef<{ key: string; content: string; chatId: number } | null>(null)
   const queryClient = useQueryClient()
   const path = `/browser-chats/${leadId}`
   const queryKey = ['browser-chats', scope, leadId]
@@ -24,7 +22,6 @@ export function BrowserChat({ leadId }: { leadId: number }) {
   })
   const current = invitations.data?.chats.find(chat => !chat.revokedAt && Date.parse(chat.expiresAt) > Date.now())
   const link = inviteLink?.id === current?.id ? inviteLink?.url : undefined
-  const body = draft?.id === current?.id ? draft?.content || '' : ''
   const revise = useMutation({
     mutationFn: (chatId: number | null) => chatId
       ? api.delete<unknown>(`${path}/${chatId}`).then(() => null)
@@ -35,22 +32,7 @@ export function BrowserChat({ leadId }: { leadId: number }) {
       void queryClient.invalidateQueries({ queryKey })
     },
   })
-  const send = useMutation({
-    mutationFn: ({ chatId, content }: { chatId: number; content: string }) => {
-      if (attempt.current?.content !== content || attempt.current.chatId !== chatId) {
-        attempt.current = { key: crypto.randomUUID(), content, chatId }
-      }
-      return api.post(`${path}/${chatId}/messages`, { content, clientMessageId: attempt.current.key })
-    },
-    onSuccess: () => {
-      attempt.current = null
-      setDraft(null)
-      void queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
-      void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
-    },
-    onError: () => { void queryClient.invalidateQueries({ queryKey }) },
-  })
-  const busy = revise.isPending || send.isPending
+  const busy = revise.isPending
 
   return (
     <Dialog open={open} onOpenChange={value => { if (!busy) setOpen(value) }}>
@@ -77,7 +59,7 @@ export function BrowserChat({ leadId }: { leadId: number }) {
             <>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <p className="text-xs text-text-secondary">Expires {new Date(current.expiresAt).toLocaleString()}</p>
-                <Button size="sm" variant="secondary" disabled={busy} onClick={() => revise.mutate(current.id)}>Revoke link</Button>
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => revise.mutate(current.id)}>{current.widgetKey ? 'Revoke visitor access' : 'Revoke link'}</Button>
               </div>
               {link && <div className="flex min-w-0 gap-2">
                 <input aria-label="Invite link" readOnly value={link} onFocus={event => event.target.select()}
@@ -86,20 +68,62 @@ export function BrowserChat({ leadId }: { leadId: number }) {
                   void navigator.clipboard.writeText(link).then(() => setCopied(true)).catch(() => setCopied(false))
                 }}>{copied ? 'Copied' : 'Copy'}</Button>
               </div>}
-              <form className="space-y-2" onSubmit={event => {
-                event.preventDefault()
-                if (body.trim() && !busy) send.mutate({ chatId: current.id, content: body.trim() })
-              }}>
-                <textarea aria-label="Browser chat reply" disabled={busy} value={body} maxLength={4000} rows={3}
-                  onChange={event => setDraft({ id: current.id, content: event.target.value })} placeholder="Write a Browser chat reply"
-                  className="w-full rounded-lg border border-border bg-background p-3 text-base" />
-                <Button type="submit" disabled={busy || !body.trim()}>Send to Browser chat</Button>
-              </form>
+              {!current.widgetKey && <ChatReply key={current.id} leadId={leadId} chatId={current.id} disabled={busy} />}
             </>
           )}
-          {(revise.error || send.error) && <p role="alert" className="text-sm text-danger">{(revise.error || send.error)?.message}</p>}
+          {revise.error && <p role="alert" className="text-sm text-danger">{revise.error.message}</p>}
         </DialogBody>
       </DialogContent>
     </Dialog>
+  )
+}
+
+
+function ChatReply({ leadId, chatId, disabled = false }: { leadId: number; chatId: number; disabled?: boolean }) {
+  const [body, setBody] = useState('')
+  const attempt = useRef<{ key: string; content: string } | null>(null)
+  const queryClient = useQueryClient()
+  const send = useMutation({
+    mutationFn: (content: string) => {
+      if (attempt.current?.content !== content) attempt.current = { key: crypto.randomUUID(), content }
+      return api.post(`/browser-chats/${leadId}/${chatId}/messages`, { content, clientMessageId: attempt.current.key })
+    },
+    onSuccess: () => {
+      attempt.current = null
+      setBody('')
+      void queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
+      void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
+    },
+  })
+  const busy = disabled || send.isPending
+  return (
+    <form className="space-y-2" onSubmit={event => {
+      event.preventDefault()
+      if (body.trim() && !busy) send.mutate(body.trim())
+    }}>
+      <textarea aria-label="Browser chat reply" disabled={busy} value={body} maxLength={4000} rows={2}
+        onChange={event => setBody(event.target.value)} placeholder="Write a Browser chat reply"
+        className="w-full resize-none rounded-lg border border-border bg-background p-3 text-base" />
+      <Button type="submit" disabled={busy || !body.trim()}>Send to Browser chat</Button>
+      {send.error && <p role="alert" className="text-sm text-danger">{send.error.message}</p>}
+    </form>
+  )
+}
+
+export function WebsiteChatReply({ leadId }: { leadId: number }) {
+  const scope = useAuthStore(state => state.dashboardScope)
+  const query = useQuery({
+    queryKey: ['browser-chats', scope, leadId],
+    queryFn: () => api.get<{ chats: Invitation[] }>(`/browser-chats/${leadId}`),
+    refetchInterval: 15_000,
+  })
+  const chat = query.data?.chats.find(item => item.widgetKey && !item.revokedAt && Date.parse(item.expiresAt) > Date.now())
+  return (
+    <section aria-label="Website chat reply" className="shrink-0 border-t border-border bg-surface p-3">
+      {query.isPending ? <p role="status" className="text-sm text-text-muted">Loading chat…</p> :
+        query.isError ? <Button variant="secondary" onClick={() => void query.refetch()}>Retry loading chat</Button> :
+          chat ? <ChatReply key={chat.id} leadId={leadId} chatId={chat.id} /> :
+            <p className="text-sm text-text-muted">The visitor’s chat session is closed.</p>}
+    </section>
   )
 }
