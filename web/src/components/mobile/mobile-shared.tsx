@@ -107,7 +107,9 @@ export function mobileLeadId(value: string | null): number | null {
   return Number.isSafeInteger(id) && id > 0 ? id : null
 }
 
-export function mobileSearchParams(current: URLSearchParams, values: Record<string, string | null>) {
+export function mobileSearchParams(values: Record<string, string | null>, current = new URLSearchParams(window.location.search)) {
+  // History updates immediately. React can still be rendering the previous
+  // location when the next control is tapped.
   const next = new URLSearchParams(current)
   for (const [key, value] of Object.entries(values)) {
     if (value === null) next.delete(key)

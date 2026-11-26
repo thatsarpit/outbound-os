@@ -36,7 +36,7 @@ export default function MobileInboxPage() {
   const queue = ['all', 'needs_reply', 'waiting', 'resolved'].includes(queueValue) ? queueValue : 'needs_reply'
   const page = mobileLeadId(params.get('page')) ?? 1
   const updateParams = (values: Record<string, string | null>, replace = true) => {
-    setParams(current => mobileSearchParams(current, values), { replace, preventScrollReset: true })
+    setParams(mobileSearchParams(values), { replace, preventScrollReset: true })
   }
   const result = useQuery({
     refetchOnWindowFocus: true,
@@ -55,6 +55,7 @@ export default function MobileInboxPage() {
   const totalPages = Math.max(1, result.data?.pages ?? 1)
   useEffect(() => {
     if (selected || !result.data || page <= totalPages) return
+    if (new URLSearchParams(window.location.search).toString() !== params.toString()) return
     const next = new URLSearchParams(params)
     if (totalPages > 1) next.set('page', String(totalPages))
     else next.delete('page')

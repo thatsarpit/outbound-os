@@ -27,7 +27,7 @@ export default function MobileTasksPage() {
   const showAll = params.get('show') === 'all'
   const page = mobileLeadId(params.get('page')) ?? 1
   const setFilters = (values: Record<string, string | null>) => {
-    setParams(current => mobileSearchParams(current, values), { replace: true, preventScrollReset: true })
+    setParams(mobileSearchParams(values), { replace: true, preventScrollReset: true })
   }
   const result = useQuery({
     refetchOnWindowFocus: true,
@@ -38,7 +38,8 @@ export default function MobileTasksPage() {
   const pages = Math.max(1, result.data?.pages ?? 1)
   useEffect(() => {
     if (!result.data || page <= pages) return
-    setParams(mobileSearchParams(params, { page: pages === 1 ? null : String(pages) }), { replace: true })
+    if (new URLSearchParams(window.location.search).toString() !== params.toString()) return
+    setParams(mobileSearchParams({ page: pages === 1 ? null : String(pages) }, params), { replace: true })
   }, [page, pages, params, result.data, setParams])
 
   const complete = useMutation({
