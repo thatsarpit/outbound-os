@@ -1,7 +1,9 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useAuth, useOrganizationList } from '@clerk/react'
 import { Check, ChevronsUpDown, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -80,9 +82,9 @@ export function ClerkWorkspaceBoundary({ children }: { children: ReactNode }) {
 
   function switchTo(workspace: Workspace) {
     if (!setActive || switching) return
-    const mobile = window.location.pathname.slice(workspaceBase.length).startsWith('/m/') ||
-      window.matchMedia('(max-width: 767px)').matches
-    const destination = workspaceHome(workspace.id, mobile)
+    const currentPath = window.location.pathname.slice(workspaceBase.length)
+    const mobile = currentPath.startsWith('/m/') || window.matchMedia('(max-width: 767px)').matches
+    const destination = workspaceHome(workspace.id, mobile, currentPath)
     setSwitching(true)
     setError(false)
     void setActive({
@@ -124,13 +126,59 @@ export function ClerkWorkspaceBoundary({ children }: { children: ReactNode }) {
   )
 }
 
-export function WorkspaceSwitcher({ className }: { className?: string }) {
+function MobileWorkspacePicker({ active, workspaces, switchTo, className }: {
+  active: Workspace
+  workspaces: Workspace[]
+  switchTo: (workspace: Workspace) => void
+  className?: string
+}) {
+  const title = useRef<HTMLHeadingElement>(null)
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <button type="button"
+          aria-label={`Switch workspace, current workspace ${active.name}`}
+          className={cn('flex min-h-11 min-w-0 max-w-full items-center gap-1.5 rounded-lg text-left text-xs font-medium text-text-secondary focus-visible:outline-2 focus-visible:outline-focus active:bg-surface-raised', className)}>
+          <span className="min-w-0 truncate">{active.name}</span>
+          <ChevronsUpDown className="size-3.5 shrink-0 text-text-muted" aria-hidden="true" />
+        </button>
+      </DialogTrigger>
+      <DialogContent className="mobile-sales mobile-sheet flex flex-col overflow-hidden" aria-describedby={undefined}
+        onOpenAutoFocus={event => { event.preventDefault(); title.current?.focus() }}>
+        <DialogHeader>
+          <DialogTitle ref={title} tabIndex={-1} className="focus:outline-none">Switch workspace</DialogTitle>
+        </DialogHeader>
+        <ul role="list" className="min-h-0 divide-y divide-border-subtle overflow-y-auto p-2">
+          {workspaces.map(workspace => (
+            <li key={workspace.id}>
+              {workspace.id === active.id ? (
+                <div aria-current="true" className="flex min-h-14 items-center gap-3 px-3 py-2">
+                  <span className="min-w-0 flex-1 text-sm font-semibold">{workspace.name}</span>
+                  <span className="shrink-0 text-xs text-text-secondary">Current</span>
+                  <Check className="size-4 shrink-0 text-accent" aria-hidden="true" />
+                </div>
+              ) : (
+                <button type="button" onClick={() => switchTo(workspace)}
+                  className="min-h-14 w-full rounded-lg px-3 py-2 text-left text-sm font-medium focus-visible:outline-2 focus-visible:outline-focus active:bg-surface-raised">
+                  {workspace.name}
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export function WorkspaceSwitcher({ className, mobile = false }: { className?: string; mobile?: boolean }) {
   const directory = useContext(WorkspaceContext)
   if (!directory) return null
   const { active, workspaces, switchTo } = directory
   if (workspaces.length < 2) {
-    return <span className={className}><span className="block truncate text-sm font-medium">{active.name}</span></span>
+    return <span className={cn('block truncate font-medium text-text-secondary', mobile ? 'text-xs' : 'text-sm', className)}>{active.name}</span>
   }
+  if (mobile) return <MobileWorkspacePicker {...directory} className={className} />
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

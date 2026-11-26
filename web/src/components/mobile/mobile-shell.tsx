@@ -82,7 +82,7 @@ export function MobileShell() {
                 {IS_DEMO && (
                   <p className="text-[11px] font-medium text-text-muted">Sample workspace</p>
                 )}
-                <WorkspaceSwitcher className="block h-auto max-w-36 px-0 text-text-secondary [&:is(button)]:flex [&:is(button)]:min-h-11 [&:is(button)]:justify-start" />
+                <WorkspaceSwitcher mobile />
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">

@@ -3,6 +3,10 @@
 The web dashboard includes a focused phone workspace at `/m/inbox`. Phone visits
 to Overview, Inbox and Leads open it automatically. The profile menu links to
 the full dashboard, account preferences and Home Screen instructions.
+For accounts with several workspaces, tap the workspace name in the header
+to open the mobile picker. The switch keeps the main tab and opens it in the
+selected workspace. Conversation IDs, filters and search terms stay scoped to
+their original workspace.
 
 The four mobile tabs are:
 

@@ -145,6 +145,7 @@ export default function MobileInboxPage() {
   const total = firstPage?.total ?? rows.length
   const activeFilters = Number(channel !== 'all') +
     Number(!privateSales && assignment !== (user?.role === 'agent' ? 'mine' : 'everyone'))
+  const emptyInbox = firstPage?.counts?.all === 0 && !deferred && activeFilters === 0
   return (
     <div className="space-y-2.5">
       <label className="relative block">
@@ -331,9 +332,11 @@ export default function MobileInboxPage() {
             <div className="rounded-2xl border border-border bg-surface p-8 text-center">
               <Inbox className="mx-auto h-8 w-8 text-accent" aria-hidden="true" />
               <h2 className="mt-3 font-medium">
-                {deferred || channel !== 'all'
+                {deferred || activeFilters > 0
                   ? 'No matching conversations'
-                  : queue === 'needs_reply'
+                  : emptyInbox
+                    ? 'No conversations yet'
+                    : queue === 'needs_reply'
                     ? 'All caught up'
                     : queue === 'waiting'
                       ? 'No conversations waiting for a reply'
@@ -344,9 +347,13 @@ export default function MobileInboxPage() {
               <p className="mt-2 text-sm leading-6 text-text-muted">
                 {deferred
                   ? 'Try another name or clear the search.'
-                  : queue === 'needs_reply'
-                    ? 'Switch to All to review your conversation history.'
-                    : 'Replies will appear here when a lead gets in touch.'}
+                  : activeFilters > 0
+                    ? 'Change your filters to see more conversations.'
+                    : emptyInbox
+                      ? 'New conversations will appear here.'
+                      : queue === 'needs_reply'
+                        ? 'Switch to All to review your conversation history.'
+                        : 'Replies will appear here when a lead gets in touch.'}
               </p>
             </div>
           )}
