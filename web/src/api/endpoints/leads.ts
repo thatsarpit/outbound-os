@@ -35,6 +35,7 @@ interface LeadListResponse {
 }
 
 export const leadsApi = {
+  closeDeal: (leadId: number, dealValue: number) => api.patch(`/leads/${leadId}/deal`, { dealValue }),
   /** Distinct lead tags with counts, derived from the data rather than hardcoded. */
   getTags: () => api.get<{ tags: Array<{ tag: string; count: number }> }>('/leads/tags'),
 

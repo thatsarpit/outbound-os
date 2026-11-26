@@ -24,7 +24,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useAuthStore } from '@/stores/auth-store'
+import { useAuthStore, usePrivateSalesAgent } from '@/stores/auth-store'
 import { useUIStore } from '@/stores/ui-store'
 import { useOnlineStatus } from '@/hooks/use-online-status'
 import { getFirstAccessibleRoute } from '@/lib/role-shell'
@@ -41,6 +41,7 @@ const destinations = [
 ]
 
 export function MobileShell() {
+  const privateSales = usePrivateSalesAgent()
   const location = useLocation()
   const { user, logout, hasCapability } = useAuthStore()
   const { toggleTheme, theme, setIsMobileViewport } = useUIStore()
@@ -82,7 +83,7 @@ export function MobileShell() {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
-              <NotificationCenter />
+              {!privateSales && <NotificationCenter />}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -108,7 +109,7 @@ export function MobileShell() {
                   <div className="px-3 py-2">
                     <p className="truncate text-sm font-semibold">{user?.name}</p>
                     <p className="text-xs text-text-muted">
-                      {user?.role === 'viewer' ? 'Read-only access' : 'Shared sales workspace'}
+                      {user?.role === 'viewer' ? 'Read-only access' : privateSales ? 'Assigned leads and new inbounds' : 'Shared sales workspace'}
                     </p>
                   </div>
                   <DropdownMenuSeparator />

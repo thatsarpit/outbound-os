@@ -1,6 +1,6 @@
 import type { AuthProvider } from '@/stores/auth-store'
 
-export type AuthConfig = { provider: AuthProvider; clerkPublishableKey?: string; workspacesEnabled?: boolean }
+export type AuthConfig = { provider: AuthProvider; clerkPublishableKey?: string; workspacesEnabled?: boolean; privateSalesAgents?: boolean }
 
 /**
  * Ask the server which sign-in to render. The same built dashboard then works
@@ -21,9 +21,10 @@ export async function loadAuthConfig(): Promise<AuthConfig> {
           provider: 'clerk',
           clerkPublishableKey: data.clerkPublishableKey || buildTimeClerkKey || '',
           workspacesEnabled: data.workspacesEnabled === true,
+          privateSalesAgents: data.privateSalesAgents === true,
         }
       }
-      if (data.provider === 'local') return { provider: 'local' }
+      if (data.provider === 'local') return { provider: 'local', privateSalesAgents: data.privateSalesAgents === true }
     }
   } catch {
     // Fall through to the build-time default.

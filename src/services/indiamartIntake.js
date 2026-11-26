@@ -1,6 +1,7 @@
 import prisma from '../utils/prismaClient.js';
 import freshLeadOutreach from './freshLeadOutreach.js';
 import { importConnectorRecords } from './connectorImport.js';
+import { liveOwner } from './intakeAssignment.js';
 import logger from '../utils/logger.js';
 
 export const INDIAMART_SOURCE = 'indiamart_live';
@@ -24,7 +25,10 @@ export class IndiamartIntake {
     if (initialPair) policy.sellerId = String(sellerId);
     if (!policy.sellerId || String(sellerId) !== policy.sellerId) throw new Error('Seller account is not configured for this source.');
     if (mode === 'live' && !policy.armedAt) throw new Error('Complete the initial baseline first.');
-    const results = await importConnectorRecords(this.db, source, records, { intakeMode: mode, liveAfter: policy.armedAt, maxAgeHours: policy.maxPurchaseAgeHours });
+    const ownerKey = mode === 'live' ? await liveOwner(this.db) : null;
+    const results = await importConnectorRecords(this.db, source, records, {
+      intakeMode: mode, liveAfter: policy.armedAt, maxAgeHours: policy.maxPurchaseAgeHours, ownerKey,
+    });
     if (mode === 'baseline' && !policy.armedAt) {
       policy.armedAt = new Date().toISOString();
       policy.allowInitialPairing = false;

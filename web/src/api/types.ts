@@ -482,6 +482,7 @@ export interface InboxThread {
 }
 
 export type InboxChannel = 'whatsapp' | 'email' | 'imessage' | 'telegram'
+export type ConversationChannel = InboxChannel | 'webchat'
 
 export interface InboxChannelHealthItem {
   status: 'ready' | 'limited' | 'offline'
@@ -552,7 +553,7 @@ export interface InboxThreadSummary {
   status?: LeadStatus | string
   threadState?: InboxThreadState
   assignmentState?: 'assigned' | 'unassigned' | 'assigned_to_me'
-  channel: InboxChannel
+  channel: ConversationChannel
   /** Outbound channels with at least one accepted send and no known failure for that send. */
   outreachChannels?: InboxChannel[]
   threadKey: string
@@ -581,7 +582,7 @@ export interface InboxThreadSummary {
 export interface InboxMessage {
   id: number
   leadId: number
-  channel: InboxChannel
+  channel: ConversationChannel
   direction: 'outbound' | 'inbound'
   content: string
   subject: string | null
@@ -624,6 +625,7 @@ export interface ScheduledInboxEmail {
 }
 
 export interface InboxThreadDetail extends InboxThreadSummary {
+  browserChatEnabled?: boolean
   whatsappSession?: {
     accountId: number | null
     senderName: string | null

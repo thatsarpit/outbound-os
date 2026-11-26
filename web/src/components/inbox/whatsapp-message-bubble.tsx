@@ -1,4 +1,4 @@
-import type { InboxChannel, InboxMessage } from '@/api/types'
+import type { InboxMessage } from '@/api/types'
 import { cn } from '@/lib/utils'
 import { getChannel } from '@/lib/channels'
 import { ChannelBadge } from './channel-badge'
@@ -59,7 +59,7 @@ export function MessageBubble({
           <div className={cn('flex max-w-[85%] flex-col gap-1 sm:max-w-[76%]', className)}>
             {showChannel && (
               <ChannelBadge
-                channel={message.channel as InboxChannel}
+                channel={message.channel}
                 variant="inline"
                 className={cn('px-0.5', isInbound ? 'self-start' : 'self-end')}
               />

@@ -5042,3 +5042,153 @@ describe('Message interaction identity and reaction boundaries', () => {
     }
   });
 });
+
+test('private Sales agents start empty, can atomically claim new WhatsApp inbounds and can’t read prior history', async () => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const people = await Promise.all(['admin', 'agent', 'agent'].map((role, i) => db.user.create({ data: {
+    name: `Private desk ${i}`, email: `private-desk-${i}@example.test`, passwordHash: 'fixture', role,
+  } })));
+  const [admin, agent, other] = people.map((user, i) => ({
+    Authorization: `Bearer ${signToken(user)}`, 'X-Forwarded-For': `192.0.2.${150 + i}`,
+  }));
+  const since = new Date(Date.now() + 60_000);
+  const leads = await Promise.all([
+    { source: 'whatsapp_inbound', assignedToId: people[0].id },
+    { source: 'whatsapp_inbound', createdAt: new Date(+since - 1000) },
+    { source: 'indiamart_live' },
+    { source: 'whatsapp_inbound', createdAt: new Date(+since + 10) },
+  ].map((input, i) => db.lead.create({ data: {
+    ...input, name: `Private desk inbound ${i}`, mobile: `no-phone:desk-${i}`,
+    leadTasks: { create: { title: 'Private follow-up' } },
+    messages: { create: { direction: 'inbound', channel: 'whatsapp', content: 'Restricted transcript', status: 'delivered' } },
+  } })));
+  const [history, stale, indiaMart, fresh] = leads;
+  process.env.OUTBOUNDOS_AGENT_INBOUND_SINCE = since.toISOString();
+  try {
+    assert.equal((await request('GET', '/api/leads?search=Private+desk', { headers: agent })).body.total, 0);
+    assert.equal((await request('GET', '/api/inbox/threads', { headers: agent })).body.total, 0);
+    assert.equal((await request('GET', '/api/tasks?scope=workspace', { headers: agent })).body.total, 0);
+    const available = await request('GET', '/api/inbox/claimable', { headers: agent });
+    assert.deepEqual(available.body.leads.map(lead => lead.id), [fresh.id]);
+    assert.deepEqual(Object.keys(available.body.leads[0]).sort(), ['createdAt', 'id', 'name']);
+    for (const path of ['/customers', '/orders', '/analytics', '/activity', '/notifications']) {
+      assert.equal((await request('GET', `/api${path}`, { headers: agent })).status, 403);
+    }
+    for (const path of [`/inbox/threads/${history.id}`, `/inbox/thread/${history.id}`, `/leads/${history.id}/notes`,
+      `/leads/${history.id}/messages`, `/browser-chats/${history.id}`]) {
+      assert.equal((await request('GET', `/api${path}`, { headers: agent })).status, 404);
+    }
+    assert.equal((await request('POST', '/api/inbox/send', { headers: agent,
+      body: { leadId: history.id, channel: 'whatsapp', text: 'Private' } })).status, 404);
+    for (const lead of [history, stale, indiaMart]) {
+      assert.equal((await request('POST', `/api/inbox/threads/${lead.id}/assign-self`, { headers: agent })).status, 409);
+    }
+    const attempts = await Promise.all([agent, other].map(headers =>
+      request('POST', `/api/inbox/threads/${fresh.id}/assign-self`, { headers })));
+    assert.deepEqual(attempts.map(result => result.status).sort(), [200, 409]);
+    const winner = attempts[0].status === 200 ? agent : other;
+    assert.equal((await request('GET', `/api/inbox/threads/${fresh.id}`, { headers: winner })).body.messages[0].content, 'Restricted transcript');
+    assert.equal((await request('GET', '/api/tasks?scope=workspace', { headers: winner })).body.total, 1);
+    assert.equal((await request('PATCH', `/api/leads/${fresh.id}/deal`, { headers: winner, body: { dealValue: 125 } })).status, 200);
+    assert.equal((await request('GET', `/api/leads/${fresh.id}`, { headers: admin })).body.dealValue, 125);
+    assert.equal((await request('GET', `/api/inbox/threads/${history.id}`, { headers: admin })).status, 200);
+  } finally {
+    delete process.env.OUTBOUNDOS_AGENT_INBOUND_SINCE;
+    await db.lead.deleteMany({ where: { id: { in: leads.map(lead => lead.id) } } });
+    await db.workspaceMember.deleteMany({ where: { externalId: { in: people.map(user => String(user.id)) }, provider: 'local' } });
+    await db.user.deleteMany({ where: { id: { in: people.map(user => user.id) } } });
+  }
+});
+
+test('website source routing validates members, preserves existing ownership, and captures without outreach', async () => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const admin = await db.user.create({ data: { name: 'Site owner fixture', email: 'site-owner@example.test', passwordHash: 'fixture', role: 'admin' } });
+  const agent = await db.user.create({ data: { name: 'Site agent fixture', email: 'site-agent@example.test', passwordHash: 'fixture', role: 'agent' } });
+  const auth = { Authorization: `Bearer ${signToken(admin)}`, 'X-Forwarded-For': '192.0.2.153' };
+  const source = await db.webhookSource.create({ data: { source: 'fixture-store-routing', name: 'Fixture store', apiKey: 'fixture-store-key' } });
+  const other = await db.lead.create({ data: { name: 'Existing customer', mobile: 'no-phone:site-existing', email: 'site-existing@example.test', assignedToId: admin.id } });
+  const key = `local:local:${agent.id}`;
+  const endpoint = `/api/webhooks/inbound/${source.source}`;
+  const submit = (body) => request('POST', endpoint, { headers: { 'x-api-key': source.apiKey, 'X-Forwarded-For': '192.0.2.154' }, body });
+  try {
+    const changed = await request('PATCH', `/api/webhooks/sources/${source.id}`, { headers: auth, body: { captureOnly: true, defaultAssigneeKey: key } });
+    assert.equal(changed.status, 200);
+    const sample = { name: 'New fixture', email: 'site-new@example.test' };
+    const dry = await submit({ ...sample, test: true });
+    assert.equal(dry.status, 200);
+    assert.deepEqual(dry.body.routing, { captureOnly: true, defaultAssigneeKey: key });
+    assert.equal(await db.lead.count({ where: { email: sample.email } }), 0);
+    const captured = await submit(sample);
+    assert.equal(captured.status, 200);
+    assert.equal(captured.body.outreach.reason, 'capture_only');
+    const lead = await db.lead.findUniqueOrThrow({ where: { id: captured.body.leadId } });
+    assert.equal(lead.assignedMemberKey, key);
+    assert.equal(lead.status, 'paused');
+    assert.equal(await db.message.count({ where: { leadId: lead.id } }), 0);
+    const resumed = await db.lead.update({ where: { id: lead.id }, data: { status: 'new' } });
+    const { default: outreach } = await import('../src/services/freshLeadOutreach.js');
+    assert.deepEqual(await outreach.queue(resumed), { skipped: true, reason: 'capture_only' });
+
+    const matched = await submit({ name: 'Known fixture', email: other.email });
+    assert.equal(matched.body.leadId, other.id);
+    assert.equal((await db.lead.findUniqueOrThrow({ where: { id: other.id } })).assignedToId, admin.id);
+  } finally {
+    await db.lead.deleteMany({ where: { OR: [{ source: source.source }, { id: other.id }] } });
+    await db.webhookSource.delete({ where: { id: source.id } });
+    await db.workspaceMember.deleteMany({ where: { key } });
+    await db.user.deleteMany({ where: { id: { in: [admin.id, agent.id] } } });
+  }
+});
+
+test('browser chat is opt-in, exposes only link-scoped messages and joins the authenticated lead timeline', async () => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const { signToken } = await import('../src/auth/rbac.js');
+  const admin = await db.user.create({ data: { name: 'Chat admin fixture', email: 'chat-owner@example.test', passwordHash: 'fixture', role: 'admin' } });
+  const auth = { Authorization: `Bearer ${signToken(admin)}`, 'X-Forwarded-For': '192.0.2.155' };
+  const leads = await Promise.all([1, 2].map(i => db.lead.create({ data: {
+    name: 'Browser lead fixture', mobile: `no-phone:browser-chat-${i}`, status: 'contacted',
+    messages: { create: { direction: 'outbound', channel: 'email', content: 'Private email', status: 'sent' } },
+  } })));
+  const path = `/api/browser-chats/${leads[0].id}`;
+  const guestPath = '/api/guest/browser-chat/messages';
+  const browser = (token) => ({ Authorization: `Bearer ${token}`, 'X-Forwarded-For': '192.0.2.156' });
+  try {
+    assert.equal((await request('POST', path, { headers: auth })).status, 404);
+    process.env.OUTBOUNDOS_BROWSER_CHAT = 'true';
+    assert.equal((await request('POST', path, { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.157' } })).status, 403);
+    const { body: invite, status } = await request('POST', path, { headers: auth });
+    assert.equal(status, 201);
+    assert.match(invite.token, /^[A-Za-z0-9_-]{43}$/);
+    const stored = await db.browserChat.findUniqueOrThrow({ where: { id: invite.chat.id } });
+    assert.equal(stored.tokenHash, crypto.createHash('sha256').update(invite.token).digest('hex'));
+    assert.deepEqual((await request('GET', guestPath, { headers: browser(invite.token) })).body.messages, []);
+    assert.equal((await request('POST', `/api/browser-chats/${leads[1].id}/${invite.chat.id}/messages`, {
+      headers: auth, body: { content: 'Cross-thread', clientMessageId: 'cross_thread_fixture' },
+    })).status, 404);
+    const body = { content: '<b>Hello from browser</b>', clientMessageId: 'browser_message_fixture' };
+    const inbound = await request('POST', guestPath, { headers: browser(invite.token), body });
+    assert.equal(inbound.status, 201);
+    assert.equal((await request('POST', guestPath, { headers: browser(invite.token), body })).status, 200);
+    assert.equal((await request('POST', guestPath, { headers: browser(invite.token), body: { ...body, content: 'Changed' } })).status, 409);
+    const detail = await request('GET', `/api/inbox/threads/${leads[0].id}`, { headers: auth });
+    assert.ok(detail.body.messages.some(message => message.channel === 'webchat' && message.content === body.content && message.replyToMessageId === null));
+    assert.equal(detail.body.threadState, 'needs_reply');
+    assert.equal((await request('POST', `${path}/${invite.chat.id}/messages`, {
+      headers: auth, body: { content: 'Staff reply', clientMessageId: 'browser_staff_fixture' },
+    })).status, 201);
+    const transcript = await request('GET', guestPath, { headers: browser(invite.token) });
+    assert.equal(transcript.headers['cache-control'], 'no-store');
+    assert.deepEqual(transcript.body.messages.map(message => message.content), [body.content, 'Staff reply']);
+    const rotated = await request('POST', path, { headers: auth });
+    assert.equal((await request('GET', guestPath, { headers: browser(invite.token) })).status, 404);
+    assert.deepEqual((await request('GET', guestPath, { headers: browser(rotated.body.token) })).body.messages, []);
+    await db.browserChat.update({ where: { id: rotated.body.chat.id }, data: { expiresAt: new Date(0) } });
+    assert.equal((await request('GET', guestPath, { headers: browser(rotated.body.token) })).status, 404);
+  } finally {
+    delete process.env.OUTBOUNDOS_BROWSER_CHAT;
+    await db.lead.deleteMany({ where: { id: { in: leads.map(lead => lead.id) } } });
+    await db.user.delete({ where: { id: admin.id } });
+  }
+});

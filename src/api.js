@@ -31,6 +31,9 @@ import { createHash, randomUUID, randomBytes } from 'crypto';
 
 import prisma from './utils/prismaClient.js';
 import { createClerkTeamRouter } from './routes/clerkTeam.js';
+import { createBrowserChatRouters } from './routes/browserChat.js';
+import { claimableInboundWhere, isPrivateSalesAgent, privateSalesAccess, privateSalesEnabled, salesAgentLeadScope } from './auth/salesAgentAccess.js';
+import { configureLiveOwner, liveOwner } from './services/intakeAssignment.js';
 import { ACTIONABLE_CONVERSATION_WHERE, HUMAN_REPLY_WHERE, isActionableConversationMessage, isHumanReply } from './utils/emailInbound.js';
 import salesRoutes from './routes/sales.js';
 import analyticsViewRoutes from './routes/analyticsViews.js';
@@ -570,6 +573,8 @@ app.use(cookieParser());
 app.use('/api', browserMutationGuard(ALLOWED_ORIGINS));
 // Populates req.auth() / getAuth(req) for every request below. requireRole()
 // reads from it; nothing else in the chain does the verification itself.
+const browserChat = createBrowserChatRouters({ notify: leadId => broadcastEvent('message_received', { leadId, channel: 'webchat' }) });
+app.use('/api/guest/browser-chat', browserChat.guest);
 app.use(authMiddleware());
 const workspaces = workspaceConfig();
 app.use('/api/workspaces', createWorkspaceRouter({
@@ -639,6 +644,10 @@ const dashboardLimiter = rateLimit({
   message: { error: 'Too many dashboard requests. Please try again shortly.' },
 });
 app.use(dashboardLimiter);
+app.get(['/chat', '/chat/'], (_req, res, next) => {
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Robots-Tag': 'noindex' });
+  next();
+});
 app.use(express.static(WEB_DIST));
 
 // ======================== AUTHENTICATION ========================
@@ -646,7 +655,7 @@ app.use(express.static(WEB_DIST));
 // Clerk. The dashboard asks /api/auth/config which one to render.
 
 app.get('/api/auth/config', (_req, res) => {
-  res.json({ ...publicAuthConfig(), ...(workspaces.length ? { workspacesEnabled: true } : {}) });
+  res.json({ ...publicAuthConfig(), ...(workspaces.length ? { workspacesEnabled: true } : {}), ...(privateSalesEnabled() ? { privateSalesAgents: true } : {}) });
 });
 
 if (AUTH_PROVIDER === 'local') {
@@ -763,6 +772,7 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
         test: true,
         created: false,
         mapped: { name, mobile: mapped.mobile, email, company, product, country, quantity },
+        routing: { captureOnly: ws.captureOnly, defaultAssigneeKey: ws.defaultAssigneeKey },
       });
     }
 
@@ -826,6 +836,9 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
         }
       : {};
 
+    const defaultOwner = !existingLead && ws.defaultAssigneeKey
+      ? await prisma.workspaceMember.findUnique({ where: { key: ws.defaultAssigneeKey } })
+      : null;
     const lead = existingLead
       ? await prisma.lead.update({
           where: { id: existingLead.id },
@@ -848,7 +861,8 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
           data: {
         name, mobile: mobileValue, email, company, product, country, quantity,
         ...consent,
-        source: req.params.source, status: 'new',
+        source: req.params.source, status: ws.captureOnly ? 'paused' : 'new',
+        ...memberAssignmentData(defaultOwner),
         externalId: submission.externalId,
         consumedAt: submission.consumedAt || now, leadTier: 'HOT',
         poolId: webhookPoolId,
@@ -871,8 +885,8 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
     // idempotent (automationKey per lead+channel) and must never be able to
     // fail the ingest. Losing the lead because an outreach account is at its
     // daily cap would be far worse than a delayed first touch.
-    let outreach = null;
-    try {
+    let outreach = ws.captureOnly ? { skipped: true, reason: 'capture_only' } : null;
+    if (!ws.captureOnly) try {
       const { default: freshLeadOutreach } = await import('./services/freshLeadOutreach.js');
       outreach = await freshLeadOutreach.queue(lead);
       // Then send it, rather than leaving it for the two-minute cron. A lead
@@ -880,7 +894,7 @@ app.post('/api/webhooks/inbound/:source', async (req, res) => {
       // and the whole promise is immediate contact. Failures are logged, never
       // fatal: the lead and its queue rows are already durable, so the cron
       // remains the safety net.
-      await freshLeadOutreach.dispatchNow(lead);
+      if (!outreach.skipped) await freshLeadOutreach.dispatchNow(lead);
     } catch (err) {
       logger.error(`Webhook lead ${lead.id}: outreach failed - ${err.message}`);
     }
@@ -915,6 +929,7 @@ app.get('/api/events', async (req, res) => {
   const session = await verifyStreamSession(token);
   const remaining = session?.expiresAt - Date.now();
   if (!Number.isFinite(remaining) || remaining <= 0) return res.status(401).end();
+  if (isPrivateSalesAgent(session)) return res.status(403).end();
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-store');
@@ -941,6 +956,7 @@ app.get('/api/events', async (req, res) => {
 });
 
 app.use('/api', requireRole('viewer'));
+app.use('/api', privateSalesAccess());
 app.use('/api', systemVersionRoutes);
 app.use('/api', outreachPauseRoutes);
 app.use('/api', connectorAdmin);
@@ -967,6 +983,16 @@ app.use('/api', emailVerificationRoutes);
 app.use('/api', notificationRoutes);
 app.use('/api', activityRecordRoutes);
 app.use('/api', workspaceMemberRoutes);
+app.get('/api/workspace/live-owner', requireRole('admin'), async (_req, res) => {
+    try { res.json({ memberKey: await liveOwner() }); }
+    catch { res.status(503).json({ error: 'Could not load the live outreach owner.' }); }
+  });
+app.put('/api/workspace/live-owner', requireRole('admin'), async (req, res) => {
+    try { res.json({ memberKey: await configureLiveOwner(req.user) }); }
+    catch (error) { res.status(error.statusCode || 503).json({ error: error.statusCode ? error.message : 'Could not save the live outreach owner.' }); }
+  });
+
+app.use('/api/browser-chats', browserChat.staff);
 app.use('/api', emailAttachmentRoutes);
 // Pool scoping runs after auth — platform admins bypass, every other user is
 // 403'd if they reference a poolId they don't have a UserPool row for.
@@ -1642,7 +1668,7 @@ app.get('/api/leads', async (req, res) => {
     } = req.query;
 
     // Build the where clause with AND composition so search and statusFilter can coexist
-    const andClauses = [];
+    const andClauses = [salesAgentLeadScope(req)];
 
     // Pool scoping: explicit ?poolId narrows to that pool (membership already
     // verified by requirePoolAccess middleware); otherwise default to every
@@ -2029,6 +2055,11 @@ app.post('/api/leads/:id/assign', requireRole('manager'), async (req, res) => {
     }
     if (key === undefined) return res.status(400).json({ error: 'Choose a member, or null to unassign.' });
     const member = key === null ? null : await workspaceMembers.resolve(req.user, key);
+    const source = await prisma.lead.findUnique({ where: { id }, select: { source: true } });
+    if (source?.source === 'indiamart_live') {
+      const pinned = await liveOwner();
+      if (pinned && pinned !== member?.key) return res.status(409).json({ error: 'Live IndiaMART belongs to the first-touch owner.' });
+    }
     const lead = await prisma.lead.update({ where: { id }, data: memberAssignmentData(member), include: { assignedMember: true } });
     broadcastEvent('lead_assigned', { leadId: id });
     res.json({ id, assignedToId: lead.assignedToId, assignedMemberKey: lead.assignedMemberKey, assignedMember: leadAssignedMember(lead) });
@@ -3247,7 +3278,7 @@ app.get('/api/inbox/threads', async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
     const search = String(req.query.query || req.query.search || '').trim();
-    const channel = ['whatsapp', 'email', 'imessage', 'telegram'].includes(String(req.query.channel || ''))
+    const channel = ['whatsapp', 'email', 'imessage', 'telegram', 'webchat'].includes(String(req.query.channel || ''))
       ? String(req.query.channel)
       : null;
     const state = String(req.query.state || '').trim().toLowerCase();
@@ -3274,8 +3305,9 @@ app.get('/api/inbox/threads', async (req, res) => {
       if (accessiblePools !== null) where.poolId = { in: accessiblePools };
     }
     if (leadId) where.id = leadId;
-    if (assignedToMe) where.AND = [memberAssignmentWhere(req.user)];
-    else if (assigned !== null) where.AND = [leadAssignmentWhere(assigned)];
+    where.AND = [salesAgentLeadScope(req)];
+    if (assignedToMe) where.AND.push(memberAssignmentWhere(req.user));
+    else if (assigned !== null) where.AND.push(leadAssignmentWhere(assigned));
 
     if (search) {
       where.OR = [
@@ -3445,7 +3477,9 @@ async function sendInboxThreadDetail(req, res) {
     const reactions = reactionTargets.length ? await prisma.messageReaction.findMany({ where: { OR: reactionTargets, emoji: { not: '' } } }) : [];
     const mappedMessages = orderedMessages.map((message) => ({
       ...buildInboxMessage(message, emailAccountsById, telegramAccountsById),
-      replyToMessageId: message.quotedMessageId || orderedMessages.find(m => m.channel === message.channel && messageAccount(m) === messageAccount(message) && nativeMessageId(m) === message.quotedRemoteId)?.id || null,
+      replyToMessageId: message.quotedMessageId || (message.quotedRemoteId
+        ? orderedMessages.find(m => m.channel === message.channel && messageAccount(m) === messageAccount(message) && nativeMessageId(m) === message.quotedRemoteId)?.id
+        : null) || null,
       canReply: Boolean(nativeMessageId(message) && ['whatsapp', 'telegram', 'email'].includes(message.channel)),
       canReact: Boolean(nativeMessageId(message) && ['whatsapp', 'telegram'].includes(message.channel) && (message.channel !== 'whatsapp' || Date.now() - new Date(message.sentAt || message.createdAt).getTime() < 30 * 86400000)),
       reactions: reactions.filter(r => r.channel === message.channel && r.accountId === messageAccount(message) && r.targetId === reactionTarget(message)).map(r => ({ emoji: r.emoji, own: r.actorKey === 'business' })),
@@ -3463,6 +3497,8 @@ async function sendInboxThreadDetail(req, res) {
       ...summary,
       outreachChannels: outreachByLead.get(leadId) || [],
       messages: mappedMessages,
+      browserChatEnabled: !workspaceId && process.env.OUTBOUNDOS_BROWSER_CHAT === 'true' &&
+        ['agent', 'manager', 'admin'].includes(req.user?.role) && !req.user?.delegated,
       scheduledEmails,
       whatsappSession: await whatsappReplyContext(lead),
       senderAccount: lead.assignedEmailAccountId ? sanitizeSenderAccount(emailAccountsById[lead.assignedEmailAccountId]) : null,
@@ -3536,6 +3572,20 @@ app.post('/api/inbox/threads/:leadId/reopen', requireRole('agent'), async (req, 
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
+app.get('/api/inbox/claimable', requireRole('agent'), async (_req, res) => {
+  try {
+    const leads = await prisma.lead.findMany({
+      where: claimableInboundWhere(),
+      select: { id: true, name: true, createdAt: true },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 50,
+    });
+    res.json({ leads });
+  } catch {
+    res.status(503).json({ error: 'Could not load available inbounds.' });
+  }
+});
+
 // POST /api/inbox/threads/:leadId/assign-self — assign thread to the current user
 app.post('/api/inbox/threads/:leadId/assign-self', requireRole('agent'), async (req, res) => {
   try {
@@ -3543,13 +3593,21 @@ app.post('/api/inbox/threads/:leadId/assign-self', requireRole('agent'), async (
     if (!leadId) return res.status(400).json({ error: 'Valid lead ID required' });
 
     const member = await workspaceMembers.self(req.user);
-    const lead = await prisma.lead.findUnique({ where: { id: leadId } });
-    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    if (!req.privateSalesAgent) {
+      const lead = await prisma.lead.findUnique({ where: { id: leadId } });
+      if (!lead) return res.status(404).json({ error: 'Lead not found' });
+      if (lead.source === 'indiamart_live') {
+        const pinned = await liveOwner();
+        if (pinned && pinned !== member.key) return res.status(409).json({ error: 'Live IndiaMART belongs to the first-touch owner.' });
+      }
+    }
     // Claim unassigned work atomically; sales agents cannot silently take a
     // teammate's conversation if two people open it at the same time.
-    const ownership = member.role === 'agent' ? { OR: [memberAssignmentWhere(req.user), leadAssignmentWhere(false)] } : {};
+    const ownership = req.privateSalesAgent ? { OR: [memberAssignmentWhere(req.user), claimableInboundWhere()] } : member.role === 'agent' ? { OR: [memberAssignmentWhere(req.user), leadAssignmentWhere(false)] } : {};
     const claimed = await prisma.lead.updateMany({ where: { id: leadId, ...ownership }, data: memberAssignmentData(member) });
-    if (!claimed.count) return res.status(409).json({ error: 'This lead already belongs to a teammate. Ask a manager to reassign it.' });
+    if (!claimed.count) return res.status(409).json({ error: req.privateSalesAgent
+      ? 'This inbound is no longer available to claim.'
+      : 'This lead already belongs to a teammate. Ask a manager to reassign it.' });
     const updated = await prisma.lead.findUnique({ where: { id: leadId }, include: { assignedMember: true } });
     broadcastEvent('lead_assigned', { leadId });
     const history = await prisma.message.findMany({ where: { leadId, AND: [INBOX_VISIBLE_MESSAGE_WHERE, ACTIONABLE_CONVERSATION_WHERE] } });
@@ -4685,13 +4743,18 @@ app.get('/api/analytics/email-performance', async (req, res) => {
 app.patch('/api/leads/:id/deal', requireRole('agent'), async (req, res) => {
   try {
     const { dealValue, convertedAt } = req.body;
-    if (dealValue == null) return res.status(400).json({ error: 'dealValue required' });
+    const amount = (typeof dealValue === 'number' || (typeof dealValue === 'string' && dealValue.trim()))
+      ? Number(dealValue) : NaN;
+    const closedAt = convertedAt ? new Date(convertedAt) : new Date();
+    if (!Number.isFinite(amount) || amount < 0 || Number.isNaN(+closedAt)) {
+      return res.status(400).json({ error: 'Enter a valid deal value and closing date.' });
+    }
 
     const lead = await prisma.lead.update({
       where: { id: parseInt(req.params.id) },
       data: {
-        dealValue: parseFloat(dealValue),
-        convertedAt: convertedAt ? new Date(convertedAt) : new Date(),
+        dealValue: amount,
+        convertedAt: closedAt,
         status: 'closed',
       },
     });
@@ -5699,15 +5762,22 @@ app.post('/api/webhooks/sources', requireRole('admin'), async (req, res) => {
 
 app.patch('/api/webhooks/sources/:id', requireRole('admin'), async (req, res) => {
   try {
-    const { name, fieldMap, enabled, poolId } = req.body;
+    const { name, fieldMap, enabled, poolId, captureOnly, defaultAssigneeKey } = req.body;
     const data = {};
     if (name !== undefined) data.name = name;
     if (enabled !== undefined) data.enabled = Boolean(enabled);
     if (fieldMap !== undefined) data.fieldMap = JSON.stringify(fieldMap);
     if (poolId !== undefined) data.poolId = poolId ? parseInt(poolId) : null;
+    if (captureOnly !== undefined) {
+      if (typeof captureOnly !== 'boolean') return res.status(400).json({ error: 'Choose whether this source captures leads only.' });
+      data.captureOnly = captureOnly;
+    }
+    if (defaultAssigneeKey !== undefined) {
+      data.defaultAssigneeKey = defaultAssigneeKey === null ? null : (await workspaceMembers.resolve(req.user, defaultAssigneeKey)).key;
+    }
     const ws = await prisma.webhookSource.update({ where: { id: parseInt(req.params.id) }, data });
     res.json({ ...ws, apiKey: ws.apiKey.slice(0, 8) + '••••••••' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { res.status(e.statusCode || 500).json({ error: e.message }); }
 });
 
 app.delete('/api/webhooks/sources/:id', requireRole('admin'), async (req, res) => {

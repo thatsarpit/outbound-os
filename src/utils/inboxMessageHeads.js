@@ -14,7 +14,7 @@ const eventTime = `CASE WHEN direction = 'inbound' THEN COALESCE(${milliseconds(
 export async function inboxMessageHeads(db, leadIds, channel = null) {
   if (!leadIds.length) return { visible: new Map(), actionable: new Map() };
   if (leadIds.length > 400 || leadIds.some(id => !Number.isSafeInteger(id) || id <= 0)) throw new Error('Invalid inbox head batch');
-  if (channel !== null && !['whatsapp', 'email', 'imessage', 'telegram'].includes(channel)) throw new Error('Invalid inbox channel');
+  if (channel !== null && !['whatsapp', 'email', 'imessage', 'telegram', 'webchat'].includes(channel)) throw new Error('Invalid inbox channel');
   const rows = await db.$queryRawUnsafe(`WITH visible AS (
     SELECT id, leadId, ${eventTime} AS eventAt,
       CASE WHEN (direction = 'outbound' AND status IN ('sent', 'delivered', 'read'))

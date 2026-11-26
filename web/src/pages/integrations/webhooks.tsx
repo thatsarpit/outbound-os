@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { WebhookSource } from '@/api/endpoints/connectors'
+import { workspaceMembersApi } from '@/api/endpoints/workspace-members'
 import { salesApi } from '@/api/endpoints/sales'
 import { Button, Input, ConfirmDialog } from '@/components/ui'
 import {
@@ -30,6 +31,7 @@ export default function WebhooksSection() {
   const [showAdd, setShowAdd] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState<WebhookSource | null>(null)
   const [configureSource, setConfigureSource] = useState<WebhookSource | null>(null)
+  const [routingSource, setRoutingSource] = useState<WebhookSource | null>(null)
   const [reviewSource, setReviewSource] = useState<WebhookSource | null>(null)
   const { data: suppliers } = useQuery({ queryKey: ['suppliers'], queryFn: salesApi.listSuppliers })
 
@@ -176,7 +178,7 @@ export default function WebhooksSection() {
                 <p className="text-xs text-text-muted mb-1">
                   {src.importSupplierId
                     ? 'Historical import URL · no outreach queued'
-                    : 'Live inbound URL · outreach rules apply'}
+                    : src.captureOnly ? 'Capture only · no automatic first touch' : 'Live inbound URL · outreach rules apply'}
                 </p>
                 <p className="break-all text-xs font-mono text-accent">{workspaceApiPath(`/webhooks/${src.importSupplierId ? 'connector' : 'inbound'}/${src.source}`)}</p>
               </div>
@@ -189,6 +191,9 @@ export default function WebhooksSection() {
                 </p>
               )}
               <div className="mt-3 flex flex-wrap gap-2">
+                {canEdit && !src.importSupplierId && (
+                  <Button variant="secondary" size="sm" onClick={() => setRoutingSource(src)}>Lead routing</Button>
+                )}
                 {canEdit && (
                   <Button variant="secondary" size="sm" onClick={() => setConfigureSource(src)}>
                     {src.importSupplierId ? 'Edit attribution' : 'Configure imports'}
@@ -246,6 +251,7 @@ export default function WebhooksSection() {
       {configureSource && (
         <ConnectorSourceDialog source={configureSource} onClose={() => setConfigureSource(null)} />
       )}
+      {routingSource && <SourceRoutingDialog source={routingSource} onClose={() => setRoutingSource(null)} />}
       {reviewSource && (
         <ConnectorReceiptsDialog source={reviewSource} onClose={() => setReviewSource(null)} />
       )}
@@ -271,6 +277,54 @@ export default function WebhooksSection() {
     </div>
   )
 }
+
+function SourceRoutingDialog({ source, onClose }: { source: WebhookSource; onClose: () => void }) {
+  const client = useQueryClient()
+  const scope = useAuthStore(state => state.dashboardScope)
+  const [assignee, setAssignee] = useState(source.defaultAssigneeKey || '')
+  const [captureOnly, setCaptureOnly] = useState(source.captureOnly === true)
+  const directory = useQuery({ queryKey: ['workspace-members', scope], queryFn: workspaceMembersApi.list })
+  const save = useMutation({
+    mutationFn: () => api.patch(`/webhooks/sources/${source.id}`, { defaultAssigneeKey: assignee || null, captureOnly }),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: ['webhook-sources'] })
+      onClose()
+    },
+  })
+  return (
+    <Dialog open onOpenChange={open => { if (!open && !save.isPending) onClose() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Lead routing</DialogTitle>
+          <DialogDescription>{source.name}</DialogDescription>
+        </DialogHeader>
+        <DialogBody className="space-y-4">
+          <label className="block space-y-1 text-sm">
+            <span>Assign new leads to</span>
+            <select value={assignee} onChange={event => setAssignee(event.target.value)}
+              disabled={directory.isPending || directory.isError || save.isPending}
+              className="block min-h-11 w-full rounded-lg border border-border bg-surface-raised px-3 text-base">
+              <option value="">Leave unassigned</option>
+              {assignee && !directory.data?.some(member => member.key === assignee) && <option value={assignee}>Current owner unavailable</option>}
+              {directory.data?.map(member => <option key={member.key} value={member.key}>{member.name}</option>)}
+            </select>
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={captureOnly} onChange={event => setCaptureOnly(event.target.checked)} />
+            Capture leads with outreach paused
+          </label>
+          <p className="text-sm text-text-muted">Existing contacts keep their current owner.</p>
+          {(directory.error || save.error) && <p role="alert" className="text-sm text-danger">{(directory.error || save.error)?.message}</p>}
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="secondary" disabled={save.isPending} onClick={onClose}>Cancel</Button>
+          <Button disabled={!directory.isSuccess || save.isPending} onClick={() => save.mutate()}>Save routing</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 
 function AddWebhookModal({
   onClose,

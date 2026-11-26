@@ -33,9 +33,12 @@ import { appRoleFromOrgRole } from '@/lib/clerk-role'
  * by Clerk) that should replace it — separate piece of work, not done here.
  */
 
-function resolveCapabilities(role: AppRole): Record<string, boolean> {
+function resolveCapabilities(role: AppRole, privateSalesAgents: boolean): Record<string, boolean> {
   const resolved: Record<string, boolean> = {}
-  for (const capability of ROLE_PAGE_CAPABILITIES[role] || []) resolved[capability] = true
+  const pages = privateSalesAgents && role === 'agent'
+    ? ['page.inbox', 'page.leads', 'page.account']
+    : ROLE_PAGE_CAPABILITIES[role] || []
+  for (const capability of pages) resolved[capability] = true
   return resolved
 }
 
@@ -81,6 +84,7 @@ type LocalSessionUser = { id: number | string; name: string; email: string; role
 interface AuthState {
   /** Which sign-in system the server uses. Set once at boot. */
   provider: AuthProvider
+  privateSalesAgents: boolean
   dashboardScope: string
   user: User | null
   capabilities: Record<string, boolean>
@@ -98,7 +102,7 @@ interface AuthState {
   checkAuth: () => Promise<void>
 
   /** Internal: called once at boot with the server's provider. */
-  setProvider: (provider: AuthProvider) => void
+  setProvider: (provider: AuthProvider, privateSalesAgents?: boolean) => void
   /** Internal: called by LocalAuthBridge and the built-in sign-in form. */
   setFromLocal: (session: { user: LocalSessionUser; token: string } | null) => void
   /** Internal: called only by ClerkAuthBridge. */
@@ -111,6 +115,7 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   provider: 'local',
+  privateSalesAgents: false,
   dashboardScope: 'signed-out',
   user: null,
   capabilities: {},
@@ -149,7 +154,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
   checkAuth: async () => {},
 
-  setProvider: (provider) => set({ provider }),
+  setProvider: (provider, privateSalesAgents = false) => set({ provider, privateSalesAgents }),
 
   setFromLocal: (session) => {
     if (!session) {
@@ -182,7 +187,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({
       user,
       dashboardScope: `local:${session.user.id}`,
-      capabilities: resolveCapabilities(role),
+      capabilities: resolveCapabilities(role, get().privateSalesAgents),
       isAuthenticated: true,
       isLoading: false,
       unrecognizedRole: false,
@@ -242,7 +247,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({
       user,
       dashboardScope: `clerk:${payload.orgId}:${payload.clerkUserId}`,
-      capabilities: resolveCapabilities(role),
+      capabilities: resolveCapabilities(role, get().privateSalesAgents),
       isAuthenticated: true,
       isLoading: false,
       unrecognizedRole: false,
@@ -258,3 +263,5 @@ export async function getSessionToken(): Promise<string | null> {
   if (!getToken) return null
   return getToken()
 }
+
+export const usePrivateSalesAgent = () => useAuthStore(state => state.privateSalesAgents && state.user?.role === 'agent')

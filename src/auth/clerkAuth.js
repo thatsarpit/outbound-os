@@ -86,7 +86,8 @@ export async function verifyStreamSession(token) {
   if (typeof token !== 'string' || !token) return null;
   try {
     const claims = await verifyToken(token, { secretKey: process.env.CLERK_SECRET_KEY });
-    return clerkSessionIdentity(claims) ? { expiresAt: claims.exp * 1000 } : null;
+    const identity = clerkSessionIdentity(claims);
+    return identity ? { expiresAt: claims.exp * 1000, role: identity.role } : null;
   } catch (error) {
     logger.warn(`SSE token verification failed: ${error.message}`);
     return null;

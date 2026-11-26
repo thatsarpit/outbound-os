@@ -17,7 +17,8 @@ import {
 } from '@/components/mobile/mobile-shared'
 import { CHANNEL_ORDER, CHANNELS } from '@/lib/channels'
 import { loadDraft } from '@/lib/email-drafts'
-import { useAuthStore } from '@/stores/auth-store'
+import { useAuthStore, usePrivateSalesAgent } from '@/stores/auth-store'
+import { ClaimableInbounds } from '@/components/inbox/claimable-inbounds'
 
 const MobileConversation = lazy(() =>
   import('@/components/mobile/conversation').then((module) => ({
@@ -26,7 +27,8 @@ const MobileConversation = lazy(() =>
 )
 
 export default function MobileInboxPage() {
-  const { dashboardScope, hasCapability } = useAuthStore()
+  const privateSales = usePrivateSalesAgent()
+  const { dashboardScope, hasCapability, user } = useAuthStore()
   const [params, setParams] = useSearchParams()
   const selected = mobileLeadId(params.get('leadId'))
   const search = params.get('search') || ''
@@ -35,18 +37,23 @@ export default function MobileInboxPage() {
   const channel = CHANNEL_ORDER.includes(channelValue) ? channelValue : 'all'
   const queueValue = params.get('state') as InboxThreadState
   const queue = ['all', 'needs_reply', 'waiting', 'resolved'].includes(queueValue) ? queueValue : 'needs_reply'
+  const assignment = privateSales ? 'mine' : params.get('assignment') === 'everyone' ? 'everyone'
+    : params.get('assignment') === 'unassigned' ? 'unassigned'
+      : user?.role !== 'viewer' && (params.get('assignment') === 'mine' || user?.role === 'agent') ? 'mine' : 'everyone'
   const page = mobileLeadId(params.get('page')) ?? 1
   const updateParams = (values: Record<string, string | null>, replace = true) => {
     setParams(mobileSearchParams(values), { replace, preventScrollReset: true })
   }
   const result = useQuery({
     refetchOnWindowFocus: true,
-    queryKey: ['inbox-threads', 'mobile', dashboardScope, deferred, channel, queue, page],
+    queryKey: ['inbox-threads', 'mobile', dashboardScope, deferred, channel, queue, assignment, page],
     queryFn: () =>
       inboxApi.listThreads({
         channel: channel === 'all' ? undefined : channel,
         state: queue === 'all' ? undefined : queue,
         search: deferred || undefined,
+        assignedToMe: assignment === 'mine' || undefined,
+        assigned: assignment === 'unassigned' ? false : undefined,
         page,
         limit: 25,
       }),
@@ -95,6 +102,7 @@ export default function MobileInboxPage() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching}
           stale={result.isRefetchError} retry={() => void result.refetch()} />
+        {privateSales && <ClaimableInbounds onClaim={leadId => updateParams({ leadId: String(leadId), channel: 'whatsapp', accountId: null, replyMessageId: null, threadKey: null }, false)} />}
         <OtherEmail />
         {hasCapability('page.campaigns') && (
           <Button asChild size="sm" variant="secondary" className="min-h-11">
@@ -116,6 +124,15 @@ export default function MobileInboxPage() {
           placeholder="Search conversations"
         />
       </label>
+      {!privateSales && <label className="flex items-center justify-between gap-2 text-sm text-text-secondary">
+        Assigned to
+        <select aria-label="Conversation assignment" className="min-h-11 rounded-lg bg-surface px-3 text-base"
+          value={assignment} onChange={event => updateParams({ assignment: event.target.value, page: null })}>
+          <option value="everyone">Everyone</option>
+          {user?.role !== 'viewer' && <option value="mine">Me</option>}
+          <option value="unassigned">Unassigned</option>
+        </select>
+      </label>}
       <div
         aria-label="Conversation status"
         className="flex rounded-lg border border-border bg-surface p-1"

@@ -1,3 +1,4 @@
+import { BrowserChat } from './browser-chat'
 import { ScheduledEmails } from './scheduled-emails'
 import { ReplyPreview, MessageInteractions } from './message-interactions'
 /**
@@ -212,7 +213,10 @@ export function ConversationSurface({
       <ThreadHeader
         thread={activeThread}
         activeChannel={composerChannel}
-        actions={headerActions}
+        actions={<>
+          {activeThread?.browserChatEnabled && <BrowserChat key={activeThread.leadId} leadId={activeThread.leadId} />}
+          {headerActions}
+        </>}
         drawer={drawer}
         onClose={onClose}
         onResolve={onResolve}
@@ -273,6 +277,7 @@ export function ConversationSurface({
                   key={message.id}
                   message={message}
                   onReply={(m) => {
+                    if (m.channel === 'webchat') return
                     setSelectedReply({ ...m })
                     setComposerChannel(m.channel, m.channel === 'email' ? m.emailAccountId : undefined)
                   }}
@@ -292,6 +297,7 @@ export function ConversationSurface({
                   message={message}
                   showChannel={showChannel}
                   onReply={(m) => {
+                    if (m.channel === 'webchat') return
                     setSelectedReply({ ...m })
                     setComposerChannel(m.channel, m.channel === 'email' ? m.emailAccountId : undefined)
                   }}

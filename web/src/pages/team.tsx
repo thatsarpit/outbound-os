@@ -3,6 +3,7 @@ import { localPasswordError, MIN_PASSWORD_LENGTH } from '../../../shared/localPa
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
+import { workspaceMembersApi } from '@/api/endpoints/workspace-members'
 import { usersApi } from '@/api/endpoints/users'
 import { toast } from '@/stores/toast-store'
 import { cn, formatDate, formatRelativeTime } from '@/lib/utils'
@@ -61,8 +62,42 @@ const ROLE_ICONS: Record<string, React.ElementType> = {
 
 export default function TeamPage() {
   const authProvider = useAuthStore((state) => state.provider)
-  return authProvider === 'clerk' ? <ClerkTeamPanel /> : <LocalTeamPanel />
+  return <div className="space-y-6">
+    {authProvider === 'clerk' ? <ClerkTeamPanel /> : <LocalTeamPanel />}
+    <LiveOutreachOwner />
+  </div>
 }
+
+function LiveOutreachOwner() {
+  const dashboardScope = useAuthStore(state => state.dashboardScope)
+  const queryClient = useQueryClient()
+  const queryKey = ['workspace-live-owner', dashboardScope]
+  const current = useQuery({
+    queryKey,
+    queryFn: async () => {
+      const [setting, members] = await Promise.all([
+        api.get<{ memberKey: string | null }>('/workspace/live-owner'), workspaceMembersApi.list(),
+      ])
+      return setting?.memberKey ? members.find(member => member.key === setting.memberKey)?.name || 'Owner unavailable' : 'No default owner'
+    },
+  })
+  const save = useMutation({
+    mutationFn: () => api.put('/workspace/live-owner', {}),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
+  })
+  return (
+    <section className="glass flex flex-wrap items-center justify-between gap-3 rounded-lg p-5">
+      <div>
+        <h2 className="text-sm font-semibold">Live outreach owner</h2>
+        <p className="text-sm text-text-secondary">{current.data || 'Checking owner…'}</p>
+        <p className="mt-1 text-xs text-text-muted">Automated first touch requires this admin. Live IndiaMART stays with this owner.</p>
+        {(save.error || current.error) && <p role="alert" className="text-sm text-danger">{(save.error || current.error)?.message}</p>}
+      </div>
+      <Button variant="secondary" disabled={!current.isSuccess || save.isPending} onClick={() => save.mutate()}>Use my account</Button>
+    </section>
+  )
+}
+
 
 function LocalTeamPanel() {
   const queryClient = useQueryClient()

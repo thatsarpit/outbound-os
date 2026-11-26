@@ -6,6 +6,16 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+## [0.6.0] — release candidate
+
+- Offer private Sales workspaces where agents work only their assignments and
+  can claim eligible new WhatsApp inbounds. Admins retain the full Inbox.
+- Allow an admin to own automated first touch and retain live IndiaMART leads.
+  Route newly captured website enquiries by source with outreach paused.
+- Record closed deals from mobile Lead details.
+- Add optional expiring Browser chat links and show their messages alongside
+  existing channels in the Inbox.
+
 ## [0.5.2] — 26 November 2026
 
 - Separate email sending verification from receiving. Show the last incoming

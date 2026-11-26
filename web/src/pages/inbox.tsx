@@ -34,7 +34,8 @@ import { cn } from '@/lib/utils'
 import { CHANNELS, CHANNEL_ORDER } from '@/lib/channels'
 import { useOnlineStatus } from '@/hooks/use-online-status'
 import { useUIStore } from '@/stores/ui-store'
-import { useAuthStore } from '@/stores/auth-store'
+import { useAuthStore, usePrivateSalesAgent } from '@/stores/auth-store'
+import { ClaimableInbounds } from '@/components/inbox/claimable-inbounds'
 import { toast } from '@/stores/toast-store'
 import { AlertCircle, MessageSquare, PenSquare, Search, PanelRight } from 'lucide-react'
 import { ConversationSurface } from '@/components/inbox/conversation-surface'
@@ -84,6 +85,7 @@ function InboxInner() {
   const isMobileViewport = useUIStore((state) => state.isMobileViewport)
   const online = useOnlineStatus()
   const { user, dashboardScope } = useAuthStore()
+  const privateSales = usePrivateSalesAgent()
   const role = user?.role || 'viewer'
   const experience = ROLE_EXPERIENCE[role]
   const [searchParams, setSearchParams] = useSearchParams()
@@ -103,7 +105,7 @@ function InboxInner() {
     return () => media.removeEventListener('change', sync)
   }, [])
   const [replyText, setReplyText] = useState('')
-  const assignmentAvailable = Boolean(user && user.role !== 'viewer')
+  const assignmentAvailable = Boolean(user && user.role !== 'viewer' && !privateSales)
   const requestIds = useRef(new Map<string, string>())
   const pendingFingerprint = useRef<string | null>(null)
   const [htmlBody, setHtmlBody] = useState('')
@@ -210,7 +212,10 @@ function InboxInner() {
     refetchInterval: 10_000,
   })
 
-  const composerChannel = routedChannel ?? activeThread?.channel ?? 'whatsapp'
+  const latestChannel = activeThread?.channel
+  const composerChannel = routedChannel ?? (latestChannel === 'webchat'
+    ? activeThread?.leadEmail ? 'email' : 'whatsapp'
+    : latestChannel ?? 'whatsapp')
   const {
     accountId: senderAccountId, latestEmail: latestEmailMessage, unavailableSender,
   } = inboxEmailContext(activeThread || null, routedAccountId)
@@ -598,6 +603,7 @@ function InboxInner() {
     <div className="animate-fade-in space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <div className="min-w-0 flex-1 basis-64"><ChannelHealthStrip health={channelHealth} /></div>
+        {privateSales && <ClaimableInbounds onClaim={leadId => updateRoute({ leadId: String(leadId), channel: 'whatsapp', accountId: null, templateId: null, threadKey: null })} />}
         <OtherEmail />
       </div>
       <div className="flex min-h-[calc(100vh-11rem)] flex-col gap-4 lg:h-[calc(100dvh-9.5rem)] lg:flex-row">
@@ -610,14 +616,14 @@ function InboxInner() {
                   <span className="tabular-nums">{threadListData?.needsReply ?? 0}</span> need reply
                 </p>
               </div>
-              <Button
+              {!privateSales && <Button
                 size="sm"
                 disabled={role === 'viewer'}
                 onClick={() => setShowCompose(true)}
                 leftIcon={<PenSquare className="h-3.5 w-3.5" />}
               >
                 Compose
-              </Button>
+              </Button>}
             </div>
 
             <div className="relative mt-3">

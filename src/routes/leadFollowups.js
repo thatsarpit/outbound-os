@@ -2,6 +2,7 @@ import { Router } from 'express';
 import prisma from '../utils/prismaClient.js';
 import { requireRole } from '../auth/index.js';
 import { memberAssignmentWhere } from '../utils/workspaceMember.js';
+import { salesAgentLeadScope } from '../auth/salesAgentAccess.js';
 import { taskQueueWhere } from '../utils/taskQueue.js';
 
 const router = Router();
@@ -101,7 +102,8 @@ router.get('/tasks', async (req, res) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
     const showDone = req.query.done === 'true';
     if (req.query.scope && !['mine', 'workspace'].includes(req.query.scope)) return res.status(400).json({ error: 'Choose Mine or Workspace tasks.' });
-    const ownership = req.query.scope === 'mine' ? { lead: memberAssignmentWhere(req.user) } : {};
+    const ownership = req.query.scope === 'mine' || req.privateSalesAgent
+      ? { lead: req.privateSalesAgent ? salesAgentLeadScope(req) : memberAssignmentWhere(req.user) } : {};
     const where = { AND: [taskQueueWhere({ done: showDone, due: req.query.due, now }), ownership] };
     const [tasks, total, overdueCount, pendingCount] = await Promise.all([
       prisma.leadTask.findMany({ where, orderBy: [{ dueAt: { sort: 'asc', nulls: 'last' } }, { createdAt: 'asc' }, { id: 'asc' }], skip: (page - 1) * limit, take: limit }),

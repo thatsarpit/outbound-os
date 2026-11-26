@@ -8,6 +8,8 @@ export interface WebhookSource {
   createdAt: string
   importSupplierId: number | null
   importTags: string
+  captureOnly?: boolean
+  defaultAssigneeKey?: string | null
 }
 
 export type ReceiptState = 'created' | 'matched' | 'conflict'
