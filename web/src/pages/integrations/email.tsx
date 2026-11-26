@@ -153,9 +153,9 @@ export default function EmailSection() {
           value={
             accountsError && !rawAccounts
               ? '—'
-              : `${summary.receivingCurrent + summary.receivingDirect} / ${summary.receivingEnabled}`
+              : `${summary.receivingEnabled} configured`
           }
-          detail={`${summary.receivingDirect} Cloudflare · ${summary.receivingStale} IMAP stale · ${summary.receivingUnconfirmed} unconfirmed`}
+          detail={`${summary.receivingDirect} Cloudflare · ${summary.receivingCurrent} IMAP current · ${summary.receivingStale + summary.receivingUnconfirmed} need review`}
         />
         <InfoTile
           label="Latest IMAP sync"
@@ -237,7 +237,7 @@ export default function EmailSection() {
                     <dt className="text-text-muted">Receiving replies</dt>
                     <dd
                       className={
-                        ['current', 'direct'].includes(health.receiving)
+                        health.receiving === 'current'
                           ? 'text-success'
                           : ['stale', 'error', 'invalid_timestamp'].includes(health.receiving)
                             ? 'text-warning'
@@ -247,17 +247,32 @@ export default function EmailSection() {
                       {RECEIVING_LABELS[health.receiving]}
                     </dd>
                   </div>
+                  {[
+                    ['Last incoming mail', acc.receivingProvider === 'cloudflare' ? acc.lastCloudflareReceiptAt : acc.lastImapReceiptAt],
+                    ['Last matched email reply', acc.lastMatchedReplyAt],
+                    ['Last confirmed outbound delivery', acc.lastConfirmedDeliveryAt],
+                  ].map(([label, time]) => (
+                    <div key={label} className="flex flex-wrap justify-between gap-2">
+                      <dt className="text-text-muted">{label}</dt>
+                      <dd title={time || undefined}>{time ? formatRelativeTime(time) : 'No record'}</dd>
+                    </div>
+                  ))}
                 </dl>
                 <p className="mb-3 text-xs text-text-secondary">
                   {acc.receivingProvider === 'cloudflare'
-                    ? 'Direct delivery through Cloudflare. IMAP polling is off; delivery receipts are available in Email receipts.'
+                    ? 'Cloudflare delivers directly. Review incoming mail under Email receipts.'
                     : acc.imapHost
                     ? `IMAP: ${acc.imapUser || 'Mailbox address missing'} · ${health.lastSyncAt ? `last success ${formatRelativeTime(health.lastSyncAt)}` : 'no confirmed successful sync'}`
                     : 'Connect a reply inbox to receive customer messages.'}
                 </p>
                 {acc.lastError && (
                   <p className="mb-3 break-words text-xs text-danger">
-                    Last reported error: {acc.lastError}
+                    Sending error · {acc.lastError}
+                  </p>
+                )}
+                {acc.receivingProvider !== 'cloudflare' && acc.lastReceivingError && (
+                  <p className="mb-3 break-words text-xs text-danger">
+                    Receiving error · {acc.lastReceivingError}
                   </p>
                 )}
                 <div className="flex flex-wrap gap-2">

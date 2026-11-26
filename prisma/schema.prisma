@@ -245,7 +245,7 @@ model Message {
   emailMessageId       String? // SMTP Message-ID for threading
   emailRecipient       String? // Normalized address at send time, independent of later lead edits
   emailInReplyTo       String? // In-Reply-To header for threading
-  emailInboundKind     String? // human | delivery_report | automatic_reply | pending; null on legacy rows
+  emailInboundKind     String? // human | delivery_report | automatic_reply | unsubscribe | pending; null on legacy rows
   emailReplyProcessedAt DateTime? // Human-reply side effects committed once, including after body recovery
   imessageMessageId    String? // BlueBubbles GUID for webhook deduplication
   telegramMessageId    String? // Telegram message ID scoped to telegramAccountId
@@ -678,6 +678,7 @@ model EmailAccount {
   status     String    @default("pending") // pending | verified | error
   lastError  String?
   lastSyncAt DateTime? // last IMAP sync timestamp
+  lastReceivingError String?
 
   // Lead pool connections (many-to-many)
   leadPools LeadPoolEmail[]

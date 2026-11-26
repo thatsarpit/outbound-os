@@ -8,6 +8,8 @@ import { createPrismaClient } from '../src/utils/createPrismaClient.js';
 import { InboundEmailIngestion, sanitizeReceivedEmailHtml } from '../src/services/inboundEmailIngestion.js';
 import { InboundEmailSpool } from '../src/utils/inboundEmailSpool.js';
 import { createEmailReceiptRouter } from '../src/routes/emailReceipts.js';
+import { listUnsubscribeHeader } from '../src/utils/emailUnsubscribe.js';
+import { loadEmailReceiptEvidence } from '../src/utils/emailReceiving.js';
 import express from 'express';
 import { once } from 'node:events';
 import { execFileSync } from 'node:child_process';
@@ -25,7 +27,8 @@ async function fixture(run) {
   const db = createPrismaClient(`file:${filename}`);
   const spool = new InboundEmailSpool({ directory: path.join(directory, 'private-mail'), secret: 'fixture-inbound-spool-key-at-least-32' });
   const events = [], scores = [];
-  const service = new InboundEmailIngestion({ db, spool, publish: row => events.push(row), score: id => scores.push(id) });
+  const env = { LEAD_SYNC_ENCRYPTION_KEY: 'fixture-email-unsubscribe-key-at-least-32' };
+  const service = new InboundEmailIngestion({ db, spool, env, publish: row => events.push(row), score: id => scores.push(id) });
   const account = await db.emailAccount.create({ data: { name: 'Fixture sender', email: 'sales@example.test', smtpHost: 'smtp.example.test', smtpUser: 'fixture', smtpPass: 'fixture' } });
   const lead = await db.lead.create({ data: { name: 'Fixture customer', mobile: 'no-phone:inbound-fixture', email: 'customer@example.test', status: 'contacted', emailStatus: 'sent' } });
   const receivedAt = new Date('2026-10-23T20:00:00Z');
@@ -33,9 +36,64 @@ async function fixture(run) {
     `From: ${lead.email}\r\nTo: ${account.email}\r\nSubject: Re: Fixture\r\nMessage-ID: ${id}\r\n${extra}Content-Type: text/plain; charset=utf-8\r\n\r\n${body}`);
   const deliver = (rawMime, options = {}) => service.ingest({ provider: 'cloudflare', dedupeKey: 'cloudflare-inbound:fixture-event-123456', rawMime,
     envelopeFrom: lead.email, envelopeTo: [account.email], strictRecipient: true, receivedAt, ...options });
-  try { await run({ db, spool, service, events, scores, account, lead, receivedAt, mime, deliver, directory }); }
+  try { await run({ db, spool, service, events, scores, account, lead, receivedAt, mime, deliver, directory, env }); }
   finally { await db.$disconnect(); sql.close(); rmSync(directory, { recursive: true, force: true }); }
 }
+
+test('verified unsubscribe stops email across duplicate contacts without creating engagement', () => fixture(async ({ db, deliver, mime, lead, account, env, events }) => {
+  const duplicate = await db.lead.create({ data: {
+    name: 'Duplicate fixture', mobile: 'no-phone:duplicate-unsubscribe', email: lead.email.toUpperCase(), emailStatus: 'complained',
+  } });
+  const queued = await db.message.create({ data: { leadId: duplicate.id, channel: 'email', direction: 'outbound', content: 'Queued fixture' } });
+  const subject = decodeURIComponent(listUnsubscribeHeader(account.email, lead.email, env).split('?subject=')[1].slice(0, -1));
+  const result = await deliver(Buffer.from(mime('Please unsubscribe me.').toString().replace('Re: Fixture', subject)));
+  assert.equal(result.receipt.reason, 'unsubscribe_suppressed_unlinked');
+  assert.equal(result.humanReply, false);
+  assert.equal(events.length, 0);
+  assert.equal((await db.lead.findUnique({ where: { id: lead.id } })).emailOptOut, true);
+  assert.equal((await db.lead.findUnique({ where: { id: duplicate.id } })).emailStatus, 'complained');
+  assert.equal((await db.message.findUnique({ where: { id: queued.id } })).status, 'cancelled');
+}));
+
+test('legacy unsubscribe needs review unless its prior outbound recipient is verified', () => fixture(async ({ db, deliver, mime, lead, account, events }) => {
+  const email = await db.message.create({ data: { leadId: lead.id, channel: 'email', direction: 'outbound', content: 'Queued email' } });
+  const whatsapp = await db.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Queued WhatsApp' } });
+  const pending = await deliver(mime('Please unsubscribe me.'));
+  assert.equal(pending.receipt.reason, 'unsubscribe_needs_review');
+  assert.equal((await db.lead.findUnique({ where: { id: lead.id } })).emailOptOut, false);
+  assert.equal((await db.message.findUnique({ where: { id: email.id } })).providerStatusReason, 'unsubscribe_pending_review');
+  assert.equal((await db.message.findUnique({ where: { id: whatsapp.id } })).status, 'queued');
+  await db.message.create({ data: { leadId: lead.id, emailAccountId: account.id, channel: 'email', direction: 'outbound',
+    emailRecipient: lead.email, emailMessageId: '<verified-outgoing@example.test>', status: 'sent', content: 'Outgoing fixture' } });
+  const result = await deliver(mime('Please unsubscribe me.', 'In-Reply-To: <verified-outgoing@example.test>\r\n', '<opt-out-thread@example.test>'), {
+    dedupeKey: 'cloudflare-inbound:unsubscribe-thread-123',
+  });
+  assert.equal(result.receipt.state, 'matched');
+  assert.equal(result.inbound.emailInboundKind, 'unsubscribe');
+  assert.equal(events.length, 0);
+  const updated = await db.lead.findUnique({ where: { id: lead.id } });
+  assert.equal(updated.emailOptOut, true);
+  assert.equal(updated.status, 'contacted');
+}));
+
+test('the receiving ledger distinguishes a historical address and a matched reply', () => fixture(async ({ db, deliver, mime, lead, account, receivedAt }) => {
+  const outgoing = await db.message.create({ data: { leadId: lead.id, emailAccountId: account.id, channel: 'email', direction: 'outbound',
+    emailRecipient: lead.email, emailMessageId: '<history-outgoing@example.test>', status: 'sent', content: 'Outgoing fixture' } });
+  await db.lead.update({ where: { id: lead.id }, data: { email: 'new-address@example.test' } });
+  const held = await deliver(mime('Can you send the price?'));
+  assert.equal(held.receipt.reason, 'historical_recipient_needs_review');
+  const matched = await deliver(mime('Can you send the price?', 'In-Reply-To: <history-outgoing@example.test>\r\n', '<history-reply@example.test>'), {
+    dedupeKey: 'cloudflare-inbound:history-thread-123',
+  });
+  assert.equal(matched.humanReply, true);
+  await db.emailDeliveryEvent.create({ data: {
+    eventKey: 'fixture-delivery-event', event: 'delivered', recipient: lead.email, emailAccountId: account.id, messageId: outgoing.id,
+    receivedAt, outcome: 'applied',
+  } });
+  const evidence = (await loadEmailReceiptEvidence(db, [account.id])).get(account.id);
+  assert.deepEqual(evidence, { lastCloudflareReceiptAt: receivedAt, lastImapReceiptAt: null, lastMatchedReplyAt: receivedAt,
+    lastConfirmedDeliveryAt: receivedAt });
+}));
 
 test('receipt review protects originals and manually links held email only once through the real ingestion pipeline', () => fixture(async ({ db, service, deliver, mime, lead, account, events }) => {
   const raw = Buffer.from(mime('Please send the specification').toString().replaceAll(lead.email, 'unmatched@example.test'));

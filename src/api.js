@@ -76,6 +76,7 @@ import campaignEngine from './services/campaignEngine.js';
 import { campaignInput } from './services/campaignInput.js';
 import { hasAllLeadTags } from './utils/campaignAudience.js';
 import { verificationEnabled } from './utils/emailVerification.js';
+import { inboxEmailHealth, loadEmailReceiptEvidence, usesCloudflareReceiving } from './utils/emailReceiving.js';
 import replyDetector from './services/replyDetector.js';
 import leadStateService, { LEAD_STATUS } from './domain/leadStateService.js';
 import emailService, { SCHEDULED_EMAIL_KEY_PREFIX } from './services/emailService.js';
@@ -1136,7 +1137,7 @@ app.get('/api/system/health', requireRole('manager'), async (req, res) => {
   try {
     const accounts = await prisma.emailAccount.findMany({
       where: { enabled: true },
-      select: { id: true, email: true, lastSyncAt: true, lastError: true },
+      select: { id: true, email: true, lastSyncAt: true, lastError: true, lastReceivingError: true },
     });
     emailAccounts = accounts.map((a) => ({
       id: a.id,
@@ -1146,6 +1147,7 @@ app.get('/api/system/health', requireRole('manager'), async (req, res) => {
         ? Math.round((Date.now() - a.lastSyncAt.getTime()) / 60000)
         : null,
       lastError: a.lastError || null,
+      lastReceivingError: usesCloudflareReceiving(a) ? null : a.lastReceivingError,
     }));
   } catch (_) {}
 
@@ -1175,7 +1177,7 @@ app.get('/api/system/health', requireRole('manager'), async (req, res) => {
   } else if (!booting && deadWa.length > 0) {
     issues.push({ severity: 'warn', area: 'whatsapp', message: `${deadWa.length} WhatsApp account(s) disconnected: ${deadWa.map((a) => a.name).join(', ')}` });
   }
-  const brokenEmail = emailAccounts.filter((a) => a.lastError);
+  const brokenEmail = emailAccounts.filter((a) => a.lastError || a.lastReceivingError);
   if (brokenEmail.length > 0) {
     issues.push({ severity: 'warn', area: 'email', message: `${brokenEmail.length} email account(s) with errors: ${brokenEmail.map((a) => a.email).join(', ')}` });
   }
@@ -3187,7 +3189,7 @@ app.get('/api/inbox/channel-health', requireRole('agent'), async (_req, res) => 
       }),
       prisma.emailAccount.findMany({
         where: { enabled: true },
-        select: { id: true, status: true, provider: true, imapHost: true },
+        select: { id: true, enabled: true, email: true, status: true, imapHost: true, lastSyncAt: true, lastReceivingError: true },
       }),
       prisma.telegramAccount.findMany({
         where: { enabled: true },
@@ -3199,8 +3201,7 @@ app.get('/api/inbox/channel-health', requireRole('agent'), async (_req, res) => 
     const campaignReady = whatsappStates.filter((state) => state.templates).length;
     const projectReady = whatsappStates.filter((state) => state.session).length;
     const imessageOnline = imessageAccounts.filter((account) => account.status === 'online').length;
-    const emailVerified = emailAccounts.filter((account) => account.status === 'verified').length;
-    const emailInbound = emailAccounts.filter((account) => Boolean(account.imapHost)).length;
+    const emailEvidence = await loadEmailReceiptEvidence(prisma, emailAccounts.map(account => account.id));
     const telegramConnected = telegramAccounts.filter((account) => account.status === 'connected').length;
     const publicWebhookConfigured = Boolean(process.env.PUBLIC_URL || process.env.APP_PUBLIC_URL);
 
@@ -3220,18 +3221,7 @@ app.get('/api/inbox/channel-health', requireRole('agent'), async (_req, res) => 
         online: imessageOnline,
         detail: imessageOnline > 0 ? 'BlueBubbles online' : 'BlueBubbles server offline',
       },
-      email: {
-        status: emailVerified > 0 ? emailInbound > 0 ? 'ready' : 'limited'
-              : 'offline',
-        total: emailAccounts.length,
-        verified: emailVerified,
-        inbound: emailInbound,
-        detail: emailVerified > 0
-          ? emailInbound > 0
-            ? `${emailVerified} sender(s) and reply sync ready`
-            : `${emailVerified} sender(s) ready · replies are send-only`
-          : 'No verified email sender',
-      },
+      email: inboxEmailHealth(emailAccounts, emailEvidence),
       telegram: {
         status: telegramConnected > 0 ? 'ready' : 'offline',
         total: telegramAccounts.length,

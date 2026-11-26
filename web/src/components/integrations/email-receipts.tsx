@@ -36,6 +36,14 @@ interface ReceiptPage {
   receiverEnabled: boolean
 }
 
+const RECEIPT_REASONS: Record<string, string> = {
+  historical_recipient_needs_review: 'This address received earlier outreach. Check which conversation it belongs to.',
+  unsubscribe_needs_review: 'Review this unsubscribe request and verify the contact before linking.',
+  unsubscribe_suppressed_unlinked: 'Email is stopped for this address. More than one contact shares it.',
+  unsubscribe_previous_address: 'The contact uses a different address now. Review the prior address.',
+  unsubscribe_no_current_contact: 'No current contact uses this unsubscribe address.',
+}
+
 /** Held mail stays visible until an operator resolves its customer association. */
 export function EmailReceipts({ accounts }: { accounts: EmailAccount[] }) {
   const { dashboardScope } = useAuthStore()
@@ -91,7 +99,9 @@ export function EmailReceipts({ accounts }: { accounts: EmailAccount[] }) {
       toast.success(
         result.state === 'matched'
           ? 'Email linked to its conversation'
-          : `Email retained for review: ${result.reason?.replace(/_/g, ' ') || result.state}`,
+          : result.reason && RECEIPT_REASONS[result.reason]
+            ? RECEIPT_REASONS[result.reason]
+            : `Email retained for review: ${result.reason?.replace(/_/g, ' ') || result.state}`,
       )
       setSelected(null)
       setPreview(null)
@@ -177,7 +187,7 @@ export function EmailReceipts({ accounts }: { accounts: EmailAccount[] }) {
                 </p>
                 <p className="mt-1 text-xs text-text-muted">
                   {receipt.provider} · {formatRelativeTime(receipt.receivedAt)} · {receipt.state}
-                  {receipt.reason ? ` · ${receipt.reason.replace(/_/g, ' ')}` : ''}
+                  {receipt.reason ? ` · ${RECEIPT_REASONS[receipt.reason] || receipt.reason.replace(/_/g, ' ')}` : ''}
                 </p>
                 {receipt.state === 'partial' && (
                   <p className="mt-1 text-xs text-warning">

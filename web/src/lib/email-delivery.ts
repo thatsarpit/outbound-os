@@ -11,13 +11,17 @@ export function describeEmailDelivery(
           ? 'Delivery report'
           : inbound === 'automatic_reply'
             ? 'Automatic reply'
-            : 'Awaiting classification',
+            : inbound === 'unsubscribe'
+              ? 'Unsubscribe request'
+              : 'Awaiting classification',
       temporary: false,
       failed: false,
       detail:
         inbound === 'pending'
           ? 'This email is still downloading. It has not been counted as a customer reply.'
-          : 'Recorded in the conversation; excluded from customer reply counts.',
+          : inbound === 'unsubscribe'
+            ? 'Email outreach to this address is stopped.'
+            : 'Recorded in the conversation; excluded from customer reply counts.',
     }
   }
   const temporary = ['soft_bounce', 'deferred'].includes(message.providerDeliveryStatus || '')

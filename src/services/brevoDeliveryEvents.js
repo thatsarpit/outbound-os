@@ -1,6 +1,7 @@
 import prisma from '../utils/prismaClient.js';
 import emailService from './emailService.js';
 import { brevoDeliveryTransition, brevoEventKind, normalizeBrevoEvent } from '../utils/brevoDeliveryEvent.js';
+import { suppressEmailLeads } from '../utils/emailUnsubscribe.js';
 
 export const MAX_BREVO_EVENTS = 1000;
 
@@ -124,23 +125,9 @@ class BrevoDeliveryEvents {
     // An authenticated unsubscribe is recipient-wide, even when the original
     // send is not in this CRM. Delivery facts alone never clear suppression.
     if (kind === 'suppression' && leadIds.length) {
-      const where = { id: { in: leadIds } };
-      await tx.lead.updateMany({
-        where: { ...where, emailOptOutAt: null },
-        data: { emailOptOutAt: receipt.occurredAt || new Date() },
-      });
-      const updated = await tx.lead.updateMany({
-        where, data: { emailOptOut: true },
-      });
-      await tx.lead.updateMany({
-        where: { ...where, ...(receipt.event === 'unsubscribe' ? { emailStatus: { not: 'complained' } } : {}) },
-        data: { emailStatus: receipt.event === 'complaint' ? 'complained' : 'unsubscribed' },
-      });
-      await tx.message.updateMany({
-        where: { leadId: { in: leadIds }, channel: 'email', direction: 'outbound', status: 'queued' },
-        data: { status: 'cancelled', providerStatusReason: 'recipient_suppressed' },
-      });
-      suppressed = updated.count;
+      await suppressEmailLeads(tx, leadIds, receipt.occurredAt || new Date(),
+        receipt.event === 'complaint' ? 'complained' : 'unsubscribed');
+      suppressed = leadIds.length;
       outcome = 'applied';
       if (match) reason = null;
     }

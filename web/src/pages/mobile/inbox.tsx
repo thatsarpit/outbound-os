@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { inboxApi } from '@/api/endpoints/inbox'
 import type { InboxChannel, InboxThreadState } from '@/api/types'
 import { ThreadListItem } from '@/components/inbox/thread-list-item'
+import { OtherEmail } from '@/components/inbox/other-email'
 import {
   MobileError,
   MobilePagination,
@@ -94,6 +95,7 @@ export default function MobileInboxPage() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching}
           stale={result.isRefetchError} retry={() => void result.refetch()} />
+        <OtherEmail />
         {hasCapability('page.campaigns') && (
           <Button asChild size="sm" variant="secondary" className="min-h-11">
             <Link to="/delivery">

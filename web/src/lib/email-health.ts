@@ -10,6 +10,7 @@ type EmailHealthAccount = {
   hasImapPass?: boolean
   lastSyncAt?: string | null
   lastError?: string | null
+  lastReceivingError?: string | null
 }
 
 export type EmailReceivingState =
@@ -27,7 +28,7 @@ export function emailAccountHealth(account: EmailHealthAccount, now = Date.now()
   if (!receivingConfigured) receiving = 'not_configured'
   else if (!account.enabled) receiving = 'paused'
   else if (direct) receiving = account.receivingReady ? 'direct' : 'error'
-  else if (account.lastError?.trim()) receiving = 'error'
+  else if ((account.lastReceivingError === undefined ? account.lastError : account.lastReceivingError)?.trim()) receiving = 'error'
   else if (!account.lastSyncAt) receiving = 'never_synced'
   else if (!validSync) receiving = 'invalid_timestamp'
   else if (now - syncTime >= EMAIL_SYNC_STALE_AFTER_MS) receiving = 'stale'

@@ -5,6 +5,7 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 import fetch from 'node-fetch';
 import crypto from 'crypto';
+import { Prisma } from '@prisma/client';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
 import activityLog, { EVENT_TYPES } from '../utils/activityLog.js';
@@ -16,26 +17,17 @@ import leadScorer from './leadScorer.js';
 import { isSameZonedDay } from '../utils/workspaceTime.js';
 import inboundEmailIngestion from './inboundEmailIngestion.js';
 import { EMAIL_INGRESS_MAX_BYTES } from '../utils/emailIngressSignature.js';
-import { usesCloudflareReceiving, emailReceivingStatus } from '../utils/emailReceiving.js';
+import { usesCloudflareReceiving, emailReceivingStatus, loadEmailReceiptEvidence } from '../utils/emailReceiving.js';
 import emailVerification from './emailVerification.js';
-import { recipientAddresses } from '../utils/emailVerification.js';
+import { emailIdentity, recipientAddresses } from '../utils/emailVerification.js';
 import { HUMAN_REPLY_WHERE } from '../utils/emailInbound.js';
+import { listUnsubscribeHeader } from '../utils/emailUnsubscribe.js';
 import { EmailAttachmentError, emailAttachmentIds, resolveEmailAttachments } from './emailAttachments.js';
 
 export const SCHEDULED_EMAIL_KEY_PREFIX = 'scheduled-email:';
 export const SCHEDULED_EMAIL_SUBMITTING = 'scheduled_email_submitting';
 const SCHEDULED_EMAIL_PREPARING = 'scheduled_email_preparing';
 const SCHEDULED_EMAIL_STOP_STATUSES = [LEAD_STATUS.PAUSED, LEAD_STATUS.CLOSED];
-
-/**
- * Unsubscribe requests go to the mailbox that sent the email, which is the one
- * that syncs replies — so an unsubscribe lands where it will be seen. Set
- * EMAIL_UNSUBSCRIBE_ADDRESS to send them all to one address instead.
- */
-function listUnsubscribeHeader(senderEmail) {
-  const address = process.env.EMAIL_UNSUBSCRIBE_ADDRESS || senderEmail;
-  return `<mailto:${address}?subject=Unsubscribe>`;
-}
 
 // Lazily imported to avoid a circular dep with api.js (api.js imports this
 // service via /api/email/* routes). Same pattern as src/services/followup.js.
@@ -237,7 +229,8 @@ class EmailService {
    */
   async listAccounts() {
     const accounts = await prisma.emailAccount.findMany({ orderBy: { id: 'asc' } });
-    return accounts.map(a => this._sanitizeAccount(a));
+    const evidence = await loadEmailReceiptEvidence(prisma, accounts.map(account => account.id));
+    return accounts.map(account => ({ ...this._sanitizeAccount(account), ...evidence.get(account.id) }));
   }
 
   /**
@@ -245,7 +238,9 @@ class EmailService {
    */
   async getAccount(id) {
     const account = await prisma.emailAccount.findUnique({ where: { id } });
-    return account ? this._sanitizeAccount(account) : null;
+    if (!account) return null;
+    const evidence = await loadEmailReceiptEvidence(prisma, [id]);
+    return { ...this._sanitizeAccount(account), ...evidence.get(id) };
   }
 
   /**
@@ -270,6 +265,10 @@ class EmailService {
     if (updates.imapPass) data.imapPass = encrypt(updates.imapPass);
 
     if (Object.keys(data).length === 0) return null;
+    if (Object.keys(data).some(key => key.startsWith('imap'))) {
+      data.lastSyncAt = null;
+      data.lastReceivingError = null;
+    }
 
     // Invalidate transport cache on config change
     this._transportCache.delete(id);
@@ -563,7 +562,11 @@ class EmailService {
     if (!account) throw new Error('Email account not found');
     if (!account.enabled) throw new Error('Email account is disabled');
 
-    await emailVerification.assertRecipients(recipientAddresses([lead.email, cc, bcc]));
+    const recipients = [...new Set(recipientAddresses([lead.email, cc, bcc]).map(emailIdentity).filter(Boolean))];
+    if (!recipients.length || recipients.length > 1000) {
+      throw Object.assign(new Error('Choose between 1 and 1,000 email recipients.'), { statusCode: 400 });
+    }
+    await emailVerification.assertRecipients(recipients);
 
     const capacity = await this._reserveSendCapacity(account.id, { excludeMessageId: existingMessageId });
     if (!capacity.ok) return { success: false, error: capacity.error };
@@ -592,7 +595,7 @@ class EmailService {
       text: body,
       html: fullHtml,
       headers: {
-        'List-Unsubscribe': listUnsubscribeHeader(account.email),
+        'List-Unsubscribe': listUnsubscribeHeader(account.email, lead.email),
       },
     };
 
@@ -630,6 +633,32 @@ class EmailService {
       }
     }
 
+    // Check after preparation so an opt-out received while fetching recipient
+    // readiness applies to both manual and queued sales email.
+    let suppressed;
+    try {
+      suppressed = await prisma.$queryRaw`
+        SELECT id FROM Lead
+        WHERE lower(trim(email)) IN (${Prisma.join(recipients)})
+          AND (emailOptOut = 1 OR lower(COALESCE(emailStatus, '')) IN ('bounced', 'complained', 'suppressed', 'unsubscribed'))
+        LIMIT 1
+      `;
+    } catch (error) {
+      await this._releaseSendCapacity(account.id).catch(() => {});
+      throw error;
+    }
+    if (suppressed.length) {
+      await this._releaseSendCapacity(account.id).catch(() => {});
+      if (existingMessageId) {
+        await prisma.message.updateMany({
+          where: { id: existingMessageId, status: 'sending' },
+          data: { status: 'cancelled', providerStatusReason: 'recipient_suppressed' },
+        });
+        return { skipped: true, reason: 'recipient_suppressed' };
+      }
+      throw Object.assign(new Error('A recipient opted out or is blocked for email.'), { statusCode: 409, reason: 'recipient_suppressed' });
+    }
+
     if (scheduledQueue) {
       const preparing = { id: existingMessageId, status: 'sending', providerStatusReason: SCHEDULED_EMAIL_PREPARING };
       const ready = await prisma.message.updateMany({
@@ -659,7 +688,7 @@ class EmailService {
         const headers = {
           'X-Mailin-custom': `lead_id:${lead.id}|outboundos_message_id:${existingMessageId || ''}`,
           'Idempotency-Key': stableBrevoIdempotencyKey(`outboundos:email:${existingMessageId || `${lead.id}:${normalizedSubject}`}`),
-          'List-Unsubscribe': listUnsubscribeHeader(account.email),
+          'List-Unsubscribe': listUnsubscribeHeader(account.email, lead.email),
           ...(inReplyTo ? { 'In-Reply-To': inReplyTo, References: inReplyTo } : {}),
         };
         const result = await this._brevoRequest(account, '/smtp/email', {
@@ -918,7 +947,7 @@ class EmailService {
     await prisma.$transaction(accounts.map(account => prisma.emailAccount.update({
       where: { id: account.id },
       data: { imapHost: 'imap.gmail.com', imapPort: 993, imapSecure: true,
-        imapUser: user, imapPass: encrypted, lastSyncAt: null, lastError: null },
+        imapUser: user, imapPass: encrypted, lastSyncAt: null, lastReceivingError: null },
     })));
     return { success: true, accounts: await this.listAccounts() };
   }
@@ -932,7 +961,7 @@ class EmailService {
       const replies = await this._syncRepliesForAccount(account);
       return { success: true, replies, account: await this.getAccount(id) };
     } catch (error) {
-      await prisma.emailAccount.update({ where: { id }, data: { lastError: 'Inbox sync failed. Check the Gmail app password and try again.' } });
+      await prisma.emailAccount.update({ where: { id }, data: { lastReceivingError: 'Inbox sync failed. Check the mailbox credentials and try again.' } });
       throw error;
     }
   }
@@ -979,7 +1008,7 @@ class EmailService {
           const actionable = 'Saved password can no longer be decrypted (encryption key changed) — re-enter it in Settings → Email';
           await prisma.emailAccount.update({
             where: { id: account.id },
-            data: { lastError: actionable, status: 'auth_error' },
+            data: { lastReceivingError: actionable },
           }).catch(() => {});
           // Log once at warn (not error) and skip the repeated dashboard event —
           // this state won't change until the operator re-enters the password.
@@ -1000,7 +1029,7 @@ class EmailService {
         });
         await prisma.emailAccount.update({
           where: { id: account.id },
-          data: { lastError: `IMAP: ${error.message}` },
+          data: { lastReceivingError: `IMAP: ${error.message}` },
         }).catch(() => {});
       }
     }
@@ -1131,7 +1160,7 @@ class EmailService {
       // Update last sync timestamp
       await prisma.emailAccount.update({
         where: { id: account.id },
-        data: { lastSyncAt: new Date(), lastError: null },
+        data: { lastSyncAt: new Date(), lastReceivingError: null },
       });
 
     } finally {
