@@ -34,17 +34,11 @@ test('a migrated empty database initializes once even when two processes start t
   });
   await Promise.all([initialize(), initialize()]);
   const file = path.join(directory, KEY_FILENAME);
-  const descriptor = fs.openSync(file, 'r');
-  let original;
-  try {
-    assert.equal(fs.fstatSync(descriptor).mode & 0o777, 0o600);
-    original = fs.readFileSync(descriptor, 'utf8');
-  } finally {
-    fs.closeSync(descriptor);
-  }
+  const original = fs.readFileSync(file, 'utf8');
   ensureInstanceSecrets(env);
   assert.equal(env.LEAD_SYNC_ENCRYPTION_KEY, JSON.parse(original).LEAD_SYNC_ENCRYPTION_KEY);
   assert.equal(fs.readFileSync(file, 'utf8'), original);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
 });
 
 test('startup preserves corrupt keys and refuses to replace keys for an existing workspace', t => {
