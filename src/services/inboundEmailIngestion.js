@@ -10,7 +10,7 @@ import { InboundEmailSpool } from '../utils/inboundEmailSpool.js';
 import { EMAIL_INGRESS_MAX_BYTES } from '../utils/emailIngressSignature.js';
 import { emailAttachmentMetadata } from '../utils/emailAttachments.js';
 import { receivedEmailText } from '../utils/receivedEmailText.js';
-import { hasValidUnsubscribeSubject, requestsEmailUnsubscribe, suppressEmailLeads } from '../utils/emailUnsubscribe.js';
+import { cancelQueuedEmail, hasValidUnsubscribeSubject, requestsEmailUnsubscribe, suppressEmailLeads } from '../utils/emailUnsubscribe.js';
 
 const normalizeAddress = (value) => String(value || '').trim().toLowerCase();
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
@@ -195,9 +195,10 @@ export class InboundEmailIngestion {
         const verifiedThread = parent?.emailRecipient === from && ['sent', 'delivered', 'read'].includes(parent.status)
           && validDestination && (provider === 'imap' || normalizeAddress(envelopeFrom) === from);
         const reviewed = manualMatch && normalizeAddress(lead?.email) === from;
+        const matches = await tx.$queryRaw`SELECT id FROM Lead WHERE lower(trim(email)) = ${from}`;
+        const leadIds = matches.map(row => Number(row.id));
         if (validToken || verifiedThread || reviewed) {
-          const matches = await tx.$queryRaw`SELECT id FROM Lead WHERE lower(trim(email)) = ${from}`;
-          await suppressEmailLeads(tx, matches.map(row => Number(row.id)), when);
+          await suppressEmailLeads(tx, leadIds, when);
           // Never use another address on the same lead as the suppressed identity.
           if (lead && normalizeAddress(lead.email) !== from) {
             lead = null;
@@ -206,6 +207,14 @@ export class InboundEmailIngestion {
             reason = matches.length ? 'unsubscribe_suppressed_unlinked' : 'unsubscribe_no_current_contact';
           }
         } else {
+          // Old mailto links have no signed subject or reply reference. Stop
+          // queued work when the destination and sender agree with delivery
+          // metadata, while keeping permanent suppression for verified mail.
+          if (validDestination && normalizeAddress(envelopeFrom) === from) {
+            for (let offset = 0; offset < leadIds.length; offset += 400) {
+              await cancelQueuedEmail(tx, leadIds.slice(offset, offset + 400), 'unsubscribe_pending_review');
+            }
+          }
           lead = null;
           reason = 'unsubscribe_needs_review';
         }

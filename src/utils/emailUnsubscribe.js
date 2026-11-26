@@ -33,6 +33,13 @@ export function hasValidUnsubscribeSubject(subject, receivingAddress, recipient,
   return Boolean(supplied && expected && timingSafeEqual(Buffer.from(supplied, 'hex'), Buffer.from(expected, 'hex')));
 }
 
+export async function cancelQueuedEmail(tx, leadIds, reason) {
+  await tx.message.updateMany({
+    where: { leadId: { in: leadIds }, channel: 'email', direction: 'outbound', status: 'queued' },
+    data: { status: 'cancelled', providerStatusReason: reason },
+  });
+}
+
 export async function suppressEmailLeads(tx, leadIds, occurredAt, status = 'unsubscribed') {
   for (let offset = 0; offset < leadIds.length; offset += 400) {
     const ids = leadIds.slice(offset, offset + 400);
@@ -43,9 +50,6 @@ export async function suppressEmailLeads(tx, leadIds, occurredAt, status = 'unsu
       where: { ...where, ...(status === 'unsubscribed' ? { emailStatus: { not: 'complained' } } : {}) },
       data: { emailStatus: status },
     });
-    await tx.message.updateMany({
-      where: { leadId: { in: ids }, channel: 'email', direction: 'outbound', status: 'queued' },
-      data: { status: 'cancelled', providerStatusReason: 'recipient_suppressed' },
-    });
+    await cancelQueuedEmail(tx, ids, 'recipient_suppressed');
   }
 }

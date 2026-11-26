@@ -56,9 +56,13 @@ test('verified unsubscribe stops email across duplicate contacts without creatin
 }));
 
 test('legacy unsubscribe needs review unless its prior outbound recipient is verified', () => fixture(async ({ db, deliver, mime, lead, account, events }) => {
+  const email = await db.message.create({ data: { leadId: lead.id, channel: 'email', direction: 'outbound', content: 'Queued email' } });
+  const whatsapp = await db.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Queued WhatsApp' } });
   const pending = await deliver(mime('Please unsubscribe me.'));
   assert.equal(pending.receipt.reason, 'unsubscribe_needs_review');
   assert.equal((await db.lead.findUnique({ where: { id: lead.id } })).emailOptOut, false);
+  assert.equal((await db.message.findUnique({ where: { id: email.id } })).providerStatusReason, 'unsubscribe_pending_review');
+  assert.equal((await db.message.findUnique({ where: { id: whatsapp.id } })).status, 'queued');
   await db.message.create({ data: { leadId: lead.id, emailAccountId: account.id, channel: 'email', direction: 'outbound',
     emailRecipient: lead.email, emailMessageId: '<verified-outgoing@example.test>', status: 'sent', content: 'Outgoing fixture' } });
   const result = await deliver(mime('Please unsubscribe me.', 'In-Reply-To: <verified-outgoing@example.test>\r\n', '<opt-out-thread@example.test>'), {

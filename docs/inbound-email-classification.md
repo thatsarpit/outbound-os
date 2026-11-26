@@ -32,6 +32,8 @@ not change provider-marketing reply attribution or shared-inbox sender routing.
 Explicit requests can be verified by a signed List-Unsubscribe subject, a
 matching same-mailbox reply reference and original recipient, or admin review
 against the current contact address. Unverified requests stay in Other email.
+When the delivery metadata agrees with the sender and receiving account,
+queued email to the sender is cancelled pending review.
 A verified request cancels queued email to matching contacts and sets their
 email opt-out. It stays outside buyer engagement and reply counts. When a
 custom unsubscribe address is used, configure it as a receiving account for
