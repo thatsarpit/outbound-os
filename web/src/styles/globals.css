@@ -127,6 +127,8 @@
   --color-imessage: #0284c7;
   --color-imessage-brand: #0b84ff;
   --color-imessage-muted: color-mix(in srgb, #0284c7 10%, var(--color-surface));
+  --color-webchat: #a34517;
+  --color-webchat-muted: color-mix(in srgb, #a34517 10%, var(--color-surface));
   --color-telegram: #0e7490;
   --color-telegram-muted: color-mix(in srgb, #0e7490 10%, var(--color-surface));
 
@@ -245,6 +247,8 @@
     --color-imessage: #0284c7;
     --color-imessage-brand: #0b84ff;
     --color-imessage-muted: color-mix(in srgb, #0284c7 16%, var(--color-surface));
+    --color-webchat: #fdb27e;
+    --color-webchat-muted: color-mix(in srgb, #fdb27e 15%, var(--color-surface));
     --color-telegram: #22d3ee;
     --color-telegram-muted: color-mix(in srgb, #22d3ee 16%, var(--color-surface));
 
@@ -328,6 +332,8 @@
   --color-whatsapp-muted: color-mix(in srgb, #059669 16%, var(--color-surface));
   --color-email: #9575f7;
   --color-email-muted: color-mix(in srgb, #9575f7 16%, var(--color-surface));
+  --color-webchat: #fdb27e;
+  --color-webchat-muted: color-mix(in srgb, #fdb27e 15%, var(--color-surface));
   --color-imessage: #0284c7;
   --color-imessage-brand: #0b84ff;
   --color-imessage-muted: color-mix(in srgb, #0284c7 16%, var(--color-surface));
@@ -413,6 +419,8 @@
   --color-imessage: var(--color-imessage);
   --color-imessage-brand: var(--color-imessage-brand);
   --color-imessage-muted: var(--color-imessage-muted);
+  --color-webchat: var(--color-webchat);
+  --color-webchat-muted: var(--color-webchat-muted);
   --color-telegram: var(--color-telegram);
   --color-telegram-muted: var(--color-telegram-muted);
 

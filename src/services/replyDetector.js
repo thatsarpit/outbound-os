@@ -1,3 +1,4 @@
+import { matchWebsiteWhatsAppReference, storeWebsiteWhatsAppMessage } from './whatsappWebsiteHandoff.js';
 import { HUMAN_REPLY_WHERE } from '../utils/emailInbound.js';
 import prisma from '../utils/prismaClient.js';
 import { isBsuid } from '../utils/whatsappAddress.js';
@@ -432,31 +433,32 @@ class ReplyDetector {
       }
 
       // ── Record the incoming message ──
-      await prisma.message.create({
-        data: {
-          leadId: lead.id,
-          direction: 'inbound',
-          channel,
-          content: body,
-          waAccount: channel === 'whatsapp' ? (accountId || 0) : 0,
-          waMessageId: channel === 'whatsapp' ? (meta.messageId || null) : null,
-          // The unique key also protects concurrent YCloud redeliveries.
-          ...(channel === 'whatsapp' && meta.source === 'ycloud' && meta.messageId
-            ? { idempotencyKey: `ycloud-inbound:${meta.messageId}` } : {}),
-          imessageAccountId: channel === 'imessage' ? (accountId || null) : null,
-          imessageMessageId: channel === 'imessage' ? (meta.messageId || null) : null,
-          // A photo, document, voice note or video the lead sent, already
-          // stored in the data volume (services/whatsappMedia.js).
-          ...(meta.media?.mediaUrl ? {
-            mediaUrl: meta.media.mediaUrl,
-            mediaType: meta.media.mediaType,
-            mediaFilename: meta.media.mediaFilename,
-          } : {}),
-          providerCreatedAt: providerEventAt,
-          status: 'delivered',
-          sentAt: eventAt,
-        },
-      });
+      const websiteReference = channel === 'whatsapp' && meta.messageId && meta.websiteHandoff && meta.messageType === 'text'
+        ? await matchWebsiteWhatsAppReference(prisma, body, accountId, receivedAt) : null;
+      const inboundMessage = await storeWebsiteWhatsAppMessage(prisma, {
+        leadId: lead.id,
+        direction: 'inbound',
+        channel,
+        content: body,
+        waAccount: channel === 'whatsapp' ? (accountId || 0) : 0,
+        waMessageId: channel === 'whatsapp' ? (meta.messageId || null) : null,
+        // The unique key also protects concurrent YCloud redeliveries.
+        ...(channel === 'whatsapp' && meta.source === 'ycloud' && meta.messageId
+          ? { idempotencyKey: `ycloud-inbound:${meta.messageId}` } : {}),
+        imessageAccountId: channel === 'imessage' ? (accountId || null) : null,
+        imessageMessageId: channel === 'imessage' ? (meta.messageId || null) : null,
+        // A photo, document, voice note or video the lead sent, already
+        // stored in the data volume (services/whatsappMedia.js).
+        ...(meta.media?.mediaUrl ? {
+          mediaUrl: meta.media.mediaUrl,
+          mediaType: meta.media.mediaType,
+          mediaFilename: meta.media.mediaFilename,
+        } : {}),
+        providerCreatedAt: providerEventAt,
+        status: 'delivered',
+        sentAt: eventAt,
+      }, websiteReference);
+      if (!inboundMessage) return;
 
       // ── Cancel pending follow-ups ──
       // First, and whatever the status check below decides: a lead who has

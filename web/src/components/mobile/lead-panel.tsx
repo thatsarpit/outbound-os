@@ -32,6 +32,8 @@ export function MobileLeadPanel({
     retry: retryTimezone,
   } = useWorkspaceTimezone()
   const canEdit = user?.role !== 'viewer' && online
+  const [dealValue, setDealValue] = useState('')
+  const [showDeal, setShowDeal] = useState(false)
   const [note, setNote] = useState('')
   const [title, setTitle] = useState('')
   const [dueAt, setDueAt] = useState('')
@@ -90,6 +92,17 @@ export function MobileLeadPanel({
     },
     onError: error,
   })
+  const closeDeal = useMutation({
+    mutationFn: () => leadsApi.closeDeal(leadId, Number(dealValue)),
+    onSuccess: () => {
+      setShowDeal(false)
+      for (const key of ['lead', 'inbox-thread', 'inbox-threads', 'mobile-leads', 'leads']) {
+        void client.invalidateQueries({ queryKey: [key] })
+      }
+      toast.success('Deal recorded')
+    },
+    onError: error,
+  })
   if (lead.isPending)
     return (
       <p role="status" className="p-4 text-sm text-text-muted">
@@ -113,6 +126,9 @@ export function MobileLeadPanel({
           {data.status.replace(/_/g, ' ')}
           {data.leadTier ? ` · ${data.leadTier.toLowerCase()}` : ''}
         </p>
+        {data.websiteLeadLabel && <p className="mt-2 text-xs font-medium text-accent">
+          {data.websiteLeadLabel}{data.websiteSourceName && ` · ${data.websiteSourceName}`}
+        </p>}
         {data.product && (
           <p className="mt-3 text-sm text-text-secondary">
             {data.product}
@@ -144,6 +160,30 @@ export function MobileLeadPanel({
           legacyId={data.assignedToId}
           legacyName={data.assignedTo?.name}
         />
+      </section>
+      <section className="rounded-xl border border-border bg-surface p-4">
+        <h3 className="font-semibold">Deal</h3>
+        {data.dealValue != null && <p className="mt-2 text-sm text-text-secondary">
+          {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format(data.dealValue)}
+          {data.convertedAt ? ` · ${new Date(data.convertedAt).toLocaleDateString()}` : ''}
+        </p>}
+        {canEdit && data.status !== 'closed' && !showDeal && (
+          <button className={`${mobileButton} mt-3`} onClick={() => setShowDeal(true)}>Record closed deal</button>
+        )}
+        {showDeal && <form className="mt-3 space-y-3" onSubmit={event => {
+          event.preventDefault()
+          if (canEdit && dealValue.trim() && !closeDeal.isPending) closeDeal.mutate()
+        }}>
+          <label className="block space-y-1 text-sm">
+            <span>Deal value in INR</span>
+            <input type="number" inputMode="decimal" min="0" step="0.01" required value={dealValue}
+              className={mobileInput} onChange={event => setDealValue(event.target.value)} />
+          </label>
+          <div className="flex flex-wrap gap-2">
+            <button type="submit" className={mobileButton} disabled={!canEdit || closeDeal.isPending}>Close deal</button>
+            <button type="button" className={mobileButton} disabled={closeDeal.isPending} onClick={() => setShowDeal(false)}>Cancel</button>
+          </div>
+        </form>}
       </section>
       <section className="rounded-xl border border-border bg-surface p-4">
         <h3 className="font-semibold">Follow-ups</h3>

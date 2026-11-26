@@ -8,6 +8,7 @@ import { buildWhatsAppCtaEmail } from '../templates/emailWhatsappCta.js';
 import { buildIndiaMartFirstTouchEmail } from '../templates/indiamartFirstTouch.js';
 import { buildFreshAutomationKey, FRESH_AUTOMATION_KEY_PREFIX } from '../utils/automationKeys.js';
 import { isSendableMobile } from '../utils/inboundLead.js';
+import { assignLiveOutreach } from './intakeAssignment.js';
 
 export const FRESH_LEAD_VARIANT = 'fresh-lead-multichannel-v3';
 // Earlier names for the same first touch. Matching them keeps a lead that was
@@ -168,6 +169,9 @@ class FreshLeadOutreach {
     if (BLOCKED_LEAD_STATUSES.includes(liveLead.status)) {
       return { skipped: true, reason: `lead_${liveLead.status}` };
     }
+    const source = liveLead.source && await prisma.webhookSource.findUnique({ where: { source: liveLead.source }, select: { captureOnly: true } });
+    if (source?.captureOnly) return { skipped: true, reason: 'capture_only' };
+    if (!await assignLiveOutreach(liveLead)) return { skipped: true, reason: 'live_owner_required' };
 
     const summary = {
       whatsapp: 'unavailable',

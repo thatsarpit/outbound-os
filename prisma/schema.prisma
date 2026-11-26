@@ -68,6 +68,9 @@ model Lead {
   importReceipts ConnectorReceipt[]
   importBatchId Int?
 
+  websiteLeadLabel String?
+  websiteSourceName String?
+
   // Pipeline state
   status String @default("new")
   // new | wa_unavailable | wa_undelivered | contacted | replied | engaged | closed | paused
@@ -163,6 +166,7 @@ model Lead {
   pool   LeadPool? @relation(fields: [poolId], references: [id])
 
   messages      Message[]
+  browserChats  BrowserChat[]
   campaignLeads CampaignLead[]
   leadNotes     LeadNote[]
   leadTasks     LeadTask[]
@@ -178,6 +182,7 @@ model Lead {
   @@index([convertedAt])
   @@index([source])
   @@index([originSupplierId])
+  @@index([websiteLeadLabel])
   @@index([assignedAccount])
   @@index([assignedToId])
   @@index([assignedMemberKey])
@@ -206,6 +211,12 @@ model Message {
   direction         String // outbound | inbound
   channel           String           @default("whatsapp") // whatsapp | email | imessage
   content           String
+  websiteHandoffKey String? @unique
+  websiteLeadLabel  String?
+  websiteSourceName String?
+  browserChatId     Int?
+  browserChat       BrowserChat?     @relation(fields: [browserChatId], references: [id], onDelete: SetNull)
+  browserChatAttachment BrowserChatAttachment?
   waAccount         Int              @default(0) // WhatsApp account ID (0 if email)
   emailAccountId    Int? // FK to EmailAccount (null if whatsapp)
   imessageAccountId Int? // FK to IMessageAccount (null unless channel=imessage)
@@ -295,6 +306,7 @@ model Message {
   @@index([providerCampaignId])
   @@index([providerMessageId])
   @@index([emailMessageId])
+  @@index([browserChatId, id])
   @@index([ackStatus])
 }
 
@@ -581,6 +593,10 @@ model WebhookSource {
   // team's webhook can never accidentally feed leads into the team pool.
   poolId         Int?
   enabled        Boolean   @default(true)
+  captureOnly    Boolean   @default(false)
+  defaultAssigneeKey String?
+  whatsappHandoffAccountId Int?
+  websiteLeadLabel String?
   importSupplierId Int?
   importSupplier Supplier? @relation("ConnectorSourceSupplier", fields: [importSupplierId], references: [id], onDelete: Restrict)
   importTags String @default("")
@@ -588,6 +604,38 @@ model WebhookSource {
   lastReceivedAt DateTime?
   totalReceived  Int       @default(0)
   createdAt      DateTime  @default(now())
+}
+
+model BrowserChat {
+  visitorEmail String?
+  visitorPhone String?
+  widgetKey String? // null identifies a staff-created invitation
+  id        Int       @id @default(autoincrement())
+  leadId    Int
+  lead      Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  createdBy String
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  messages  Message[]
+
+  @@index([leadId, createdAt])
+}
+
+// The message and its encrypted attachment commit together. Transcript queries
+// select metadata explicitly and never include the payload.
+model BrowserChatAttachment {
+  messageId   Int      @id
+  message     Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  filename    String
+  contentType String
+  size        Int
+  sha256      String
+  payload     Bytes?
+  expiresAt   DateTime
+
+  @@index([expiresAt])
 }
 
 // A source enquiry is distinct from a contact. Replays resolve to this ledger

@@ -18,8 +18,8 @@ import {
 } from 'lucide-react'
 import { onboardingStatusQuery, type OnboardingStatus } from '@/api/endpoints/onboarding'
 import { inboxApi } from '@/api/endpoints/inbox'
-import type { InboxChannelHealth, InboxChannel } from '@/api/types'
-import { CHANNEL_ORDER, formatChannelHealthDetail } from '@/lib/channels'
+import type { InboxChannelHealth, ConversationChannel } from '@/api/types'
+import { CHANNELS, CONVERSATION_CHANNELS, formatChannelHealthDetail } from '@/lib/channels'
 import { cn } from '@/lib/utils'
 
 type Integration = {
@@ -29,7 +29,7 @@ type Integration = {
   to: string
   /** Reads connected-ness from the onboarding status; omitted = no status shown. */
   connected?: (status: OnboardingStatus) => boolean
-  channel?: InboxChannel
+  channel?: ConversationChannel
   action?: string
 }
 
@@ -83,6 +83,13 @@ const GROUPS: Group[] = [
     title: 'Bring leads in',
     blurb: 'Capture leads from forms, imports and external tools.',
     items: [
+      {
+        name: CHANNELS.webchat.label,
+        detail: 'Embedded chat and hosted links for customer support or sales.',
+        icon: CHANNELS.webchat.icon,
+        to: '/integrations/website-chat',
+        channel: 'webchat',
+      },
       {
         name: 'Website forms',
         detail: 'Plain HTML, Webflow, WordPress, Framer — post a form straight in.',
@@ -162,7 +169,7 @@ export default function IntegrationCatalogue() {
     meta: { silent: true },
   })
   const readyCount = health
-    ? CHANNEL_ORDER.filter((channel) => health[channel].status === 'ready').length
+    ? CONVERSATION_CHANNELS.filter((channel) => health[channel]?.status === 'ready').length
     : null
 
   return (
@@ -250,7 +257,7 @@ function IntegrationCard({
     <>
       <span className="flex items-start justify-between gap-2">
         <span className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-background">
-          <Icon aria-hidden="true" className="h-4 w-4 text-text-secondary" />
+          <Icon aria-hidden="true" className={cn('h-4 w-4', item.channel ? CHANNELS[item.channel].text : 'text-text-secondary')} />
         </span>
         {label && (
           <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-medium', tone)}>

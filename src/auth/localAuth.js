@@ -85,7 +85,7 @@ export function requireRole(minRole) {
 /** Dashboard streams require a user session. Service tokens are handled separately. */
 export async function verifyStreamSession(token) {
   const session = await sessionForToken(token);
-  return session ? { expiresAt: session.expiresAt } : null;
+  return session ? { expiresAt: session.expiresAt, role: session.user.role } : null;
 }
 
 export async function currentUserPayload(req) {

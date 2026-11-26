@@ -28,8 +28,9 @@ import { LeadCallLink } from '@/components/leads/lead-call-link'
 import { leadPhoneHref } from '../../../../shared/leadPhone.js'
 import { MobileLeadPanel } from './lead-panel'
 import { MobileError, mobileInput, mobileButton } from './mobile-shared'
-import { useAuthStore } from '@/stores/auth-store'
+import { useAuthStore, usePrivateSalesAgent } from '@/stores/auth-store'
 import { useOnlineStatus } from '@/hooks/use-online-status'
+import { BrowserChat, WebsiteChatReply } from '@/components/inbox/browser-chat'
 import { CHANNELS, CHANNEL_ORDER } from '@/lib/channels'
 import { buildReplySubject, getRenderedTemplateText } from '@/lib/email-compose'
 import { clearSubmittedDraft, loadDraft, saveDraft, type EmailDraft } from '@/lib/email-drafts'
@@ -91,6 +92,7 @@ export function MobileConversation({
   onReplyContextChange: (context: { channel: InboxChannel; accountId?: number | null; replyMessageId?: number }) => void
 }) {
   const { dashboardScope } = useAuthStore()
+  const privateSales = usePrivateSalesAgent()
   const frame = useConversationViewport()
   const timeline = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
@@ -126,10 +128,12 @@ export function MobileConversation({
     refetchInterval: 10_000,
   })
   const thread = result.data
+  const websiteChat = thread?.source === 'browser_chat_widget' && thread.browserChatEnabled
   const markRead = useConversationRead(thread || null)
-  const channel = CHANNEL_ORDER.includes(selectedChannel as InboxChannel)
+  const availableChannels = privateSales ? (['whatsapp', 'email'] satisfies InboxChannel[]) : CHANNEL_ORDER
+  const channel = availableChannels.includes(selectedChannel as InboxChannel)
     ? selectedChannel as InboxChannel
-    : thread?.messages.length
+    : thread?.messages.length && thread.channel !== 'webchat' && availableChannels.includes(thread.channel)
       ? thread.channel
       : thread?.leadEmail
         ? 'email'
@@ -195,7 +199,7 @@ export function MobileConversation({
             {thread?.leadName || thread?.name || 'Conversation'}
           </span>
           <span className="block truncate text-xs text-text-muted">
-            Reply via {CHANNELS[channel].label}
+            Reply via {CHANNELS[websiteChat ? 'webchat' : channel].label}
             {IS_DEMO ? ' · Sample data' : ''}
             {thread?.replyNeeded ? ' · Needs reply' : ''}
           </span>
@@ -264,7 +268,10 @@ export function MobileConversation({
           )}
         </div>
       )}
-      {channel === 'whatsapp' && !!thread && <WhatsAppReplyWindow key={`${leadId}:${thread.whatsappSession?.accountId}`} thread={thread} />}
+      {thread?.browserChatEnabled && <div className="shrink-0 border-b border-border px-3 py-1">
+        <BrowserChat key={leadId} leadId={leadId} />
+      </div>}
+      {!websiteChat && channel === 'whatsapp' && !!thread && <WhatsAppReplyWindow key={`${leadId}:${thread.whatsappSession?.accountId}`} thread={thread} />}
       <ScheduledEmails emails={thread?.scheduledEmails} leadId={leadId} />
       <div
         ref={timeline}
@@ -330,6 +337,7 @@ export function MobileConversation({
                   key={message.id}
                   message={message}
                   onReply={(m) => {
+                    if (m.channel === 'webchat') return
                     setLocalReply(m)
                     onReplyContextChange({ channel: m.channel })
                     requestAnimationFrame(() =>
@@ -366,7 +374,7 @@ export function MobileConversation({
           Latest messages
         </button>
       )}
-      {!!thread && (
+      {websiteChat ? <WebsiteChatReply key={leadId} leadId={leadId} /> : !!thread && (
         <MobileReplyComposer
           key={`${channel}:${channel === 'email' ? emailContext.accountId : 'default'}`}
           thread={thread}
@@ -438,6 +446,8 @@ function MobileReplyComposer({
   clearReply: () => void
 }) {
   const { dashboardScope, user } = useAuthStore()
+  const privateSales = usePrivateSalesAgent()
+  const availableChannels = privateSales ? (['whatsapp', 'email'] satisfies InboxChannel[]) : CHANNEL_ORDER
   const online = useOnlineStatus()
   const client = useQueryClient()
   const fromId = useId()
@@ -481,7 +491,7 @@ function MobileReplyComposer({
     refetchOnWindowFocus: true,
     queryKey: EMAIL_TEMPLATE_LIST_QUERY_KEY,
     queryFn: templatesApi.list,
-    enabled: channel === 'email' && options,
+    enabled: !privateSales && channel === 'email' && options,
   })
   const disabledReason = !online
     ? 'Offline. Your text draft stays here; reconnect to send.'
@@ -546,8 +556,8 @@ function MobileReplyComposer({
                 accountId,
                 replyToMessageId:
                   replyTarget?.id || (latestEmail?.emailMessageId ? latestEmail.id : undefined),
-                cc: draft.cc.trim() || undefined,
-                bcc: draft.bcc.trim() || undefined,
+                cc: privateSales ? undefined : draft.cc.trim() || undefined,
+                bcc: privateSales ? undefined : draft.bcc.trim() || undefined,
               }
             : {}),
           attachmentIds: attachments.length ? attachments.map((file) => file.id) : undefined,
@@ -624,7 +634,7 @@ function MobileReplyComposer({
                 className="h-11 max-w-full rounded-lg bg-surface-raised px-2 text-base"
                 onChange={(event) => onChannelChange(event.target.value as InboxChannel)}
               >
-                {CHANNEL_ORDER.map((id) => (
+                {availableChannels.map((id) => (
                   <option key={id} value={id}>
                     {CHANNELS[id].label}
                   </option>
@@ -690,7 +700,7 @@ function MobileReplyComposer({
             {!replyTarget && quotedEmailUnavailable && (
               <button type="button" className={mobileButton} onClick={clearReply}>Clear quote</button>
             )}
-            {(channel === 'email' || channel === 'whatsapp') && (
+            {!privateSales && (channel === 'email' || channel === 'whatsapp') && (
               <AttachmentPicker
                 attachments={attachments}
                 onUploadingChange={setUploading}
@@ -734,6 +744,7 @@ function MobileReplyComposer({
                   onChange={(event) => updateDraft({ subject: event.target.value })}
                 />
               </label>
+              {!privateSales && <>
               <label className="block text-xs text-text-secondary">
                 CC
                 <input
@@ -782,6 +793,7 @@ function MobileReplyComposer({
               >
                 {apply.isPending ? 'Applying…' : 'Apply template'}
               </button>
+              </>}
               <p className="text-xs text-text-muted">Drafts are saved separately for each sender.</p>
               <DialogClose className={mobileButton}>Done</DialogClose>
             </DialogContent>

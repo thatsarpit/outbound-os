@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { saveDraft, loadDraft, clearDraft, clearSessionDrafts, clearSubmittedDraft } from '../web/src/lib/email-drafts.ts';
+import { loadedMobileRows, nextMobilePage } from '../web/src/lib/mobile-list.ts';
 
 beforeEach(() => {
   const values = {};
@@ -96,4 +97,12 @@ test('login resumes the selected conversation but rejects external redirect path
   assert.equal(loginReturnPath({ pathname: '/m/inbox', search: '?leadId=12&channel=email' }), '/m/inbox?leadId=12&channel=email');
   for (const pathname of ['//example.test', '/\\example.test', 'https://example.test', '/login', '/\t/example.test', '']) assert.equal(loginReturnPath({ pathname }), null);
   assert.equal(loginReturnPath({ pathname: '/m/tasks', search: 'https://example.test' }), '/m/tasks');
+});
+
+test('mobile lists append pages and keep the earliest copy of an overlapping record', () => {
+  const first = { id: 1, title: 'Updated reply' };
+  const second = { id: 2, title: 'Another reply' };
+  assert.deepEqual(loadedMobileRows([[first], [{ id: 1, title: 'Old reply' }, second]], row => row.id), [first, second]);
+  assert.equal(nextMobilePage({ page: 2, pages: 3 }), 3);
+  assert.equal(nextMobilePage({ page: 3, pages: 3 }), undefined);
 });

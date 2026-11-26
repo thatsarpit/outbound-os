@@ -1,4 +1,4 @@
-const CHANNEL_LABELS = { whatsapp: 'WhatsApp', email: 'Email', imessage: 'iMessage', telegram: 'Telegram' };
+const CHANNEL_LABELS = { whatsapp: 'WhatsApp', email: 'Email', imessage: 'iMessage', telegram: 'Telegram', webchat: 'Website chat' };
 
 /** Push banners use plain text: remove markup, invisible controls and excess whitespace. */
 export function pushPlainText(value, length) {
@@ -18,7 +18,7 @@ function messagePreview(message) {
   const media = { image: 'Photo', video: 'Video', audio: /^\[Voice message\]/i.test(content) ? 'Voice message' : 'Audio', pdf: 'Document', document: 'Document', sticker: 'Sticker' }[message.mediaType];
   if (media) return caption ? `${media}: ${caption}` : media;
   if (/^\[(?:unsupported|Unsupported WhatsApp message)\]$/i.test(content)) return 'New message';
-  return content || 'New message';
+  return content || (message.channel === 'webchat' ? 'Attachment' : 'New message');
 }
 
 export function buildMessagePush(message, previewMode = 'private') {

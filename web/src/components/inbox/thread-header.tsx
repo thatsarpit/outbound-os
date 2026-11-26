@@ -2,7 +2,7 @@ import { CheckCircle, Loader2, Mail, Phone, RotateCcw, User, UserPlus, X } from 
 import { LeadCallLink } from '@/components/leads/lead-call-link'
 import { leadPhoneHref } from '../../../../shared/leadPhone.js'
 import type { ReactNode } from 'react'
-import type { InboxChannel, InboxThreadDetail } from '@/api/types'
+import type { ConversationChannel, InboxThreadDetail } from '@/api/types'
 import { ChannelBadge } from './channel-badge'
 import { ThreadStatePill } from './thread-state-pill'
 
@@ -18,7 +18,7 @@ export function ThreadHeader({
   isMutating = false,
 }: {
   thread?: InboxThreadDetail | null
-  activeChannel: InboxChannel
+  activeChannel: ConversationChannel
   actions?: ReactNode
   drawer?: boolean
   onClose?: () => void

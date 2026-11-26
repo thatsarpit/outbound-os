@@ -59,7 +59,7 @@ router.post('/webhook/ycloud/:accountId', async (req, res) => {
       if (!inbound) {
         // Saving the reply and stopping outreach cannot depend on a media host.
         await replyDetector.handleReply(String(message.from || ''), text, id, {
-          source: 'ycloud', messageId, timestamp: message.sendTime, messageType: message.type,
+          source: 'ycloud', websiteHandoff: true, messageId, timestamp: message.sendTime, messageType: message.type,
           waUserId: senderId || undefined, waUsername: message.customerProfile?.username,
           senderName: message.customerProfile?.name,
         });

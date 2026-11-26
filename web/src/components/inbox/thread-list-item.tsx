@@ -32,11 +32,13 @@ export function ThreadListItem({
   mobile?: boolean
 }) {
   const outreach = thread.outreachChannels
-  const channels = outreach
+  const channels = thread.channel === 'webchat'
+    ? [...(outreach || []).map(getChannel), getChannel('webchat')]
+    : outreach
     ? CHANNEL_ORDER.filter(channel => outreach.includes(channel)).map(getChannel)
     : [getChannel(thread.channel)]
   const channelNames = channels.map(channel => channel.label).join(', ')
-  const channelLabel = outreach ? `Outreach sent via ${channelNames}` : `Latest message via ${channelNames}`
+  const channelLabel = thread.channel === 'webchat' ? channelNames : outreach ? `Outreach sent via ${channelNames}` : `Latest message via ${channelNames}`
   const preview = thread.lastMessagePreview || thread.lastMessage || 'No messages yet'
   const subtitle = getThreadSubtitle(thread)
   const name = thread.leadName || thread.name || 'Unknown'

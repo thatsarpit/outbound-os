@@ -1,6 +1,6 @@
-import { Mail, MessageCircle, MessageSquare, Send } from 'lucide-react'
+import { Mail, MessageCircle, MessageSquare, MessagesSquare, Send } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import type { InboxChannel } from '@/api/types'
+import type { ConversationChannel, InboxChannel } from '@/api/types'
 
 /**
  * Single source of truth for channel identity.
@@ -16,7 +16,7 @@ import type { InboxChannel } from '@/api/types'
  */
 
 export type ChannelMeta = {
-  id: InboxChannel
+  id: ConversationChannel
   /** Full name, for headers and filters. */
   label: string
   /** Shortened for very tight rows. */
@@ -34,7 +34,7 @@ export type ChannelMeta = {
   sendVerb: string
 }
 
-export const CHANNELS: Record<InboxChannel, ChannelMeta> = {
+export const CHANNELS: Record<ConversationChannel, ChannelMeta> = {
   whatsapp: {
     id: 'whatsapp',
     label: 'WhatsApp',
@@ -79,13 +79,26 @@ export const CHANNELS: Record<InboxChannel, ChannelMeta> = {
     border: 'border-telegram/30',
     sendVerb: 'Send Telegram',
   },
+  webchat: {
+    id: 'webchat',
+    label: 'Website chat',
+    shortLabel: 'Web chat',
+    icon: MessagesSquare,
+    text: 'text-webchat',
+    bg: 'bg-webchat-muted',
+    rule: 'bg-webchat',
+    border: 'border-webchat/30',
+    sendVerb: 'Send to Website chat',
+  },
 }
 
 /** Display order wherever channels are listed together. */
 export const CHANNEL_ORDER: InboxChannel[] = ['whatsapp', 'email', 'imessage', 'telegram']
 
-export function getChannel(channel: InboxChannel | string | null | undefined): ChannelMeta {
-  if (channel && channel in CHANNELS) return CHANNELS[channel as InboxChannel]
+export const CONVERSATION_CHANNELS: ConversationChannel[] = [...CHANNEL_ORDER, 'webchat']
+
+export function getChannel(channel: ConversationChannel | string | null | undefined): ChannelMeta {
+  if (channel && channel in CHANNELS) return CHANNELS[channel as ConversationChannel]
   return CHANNELS.whatsapp
 }
 
@@ -95,7 +108,7 @@ export function getChannel(channel: InboxChannel | string | null | undefined): C
  * what identifies a WhatsApp one (the company or number).
  */
 export function getThreadSubtitle(thread: {
-  channel: InboxChannel
+  channel: ConversationChannel
   subject?: string | null
   senderDisplay?: string | null
   leadCompany?: string | null

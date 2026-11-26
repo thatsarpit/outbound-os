@@ -11,7 +11,12 @@ import App from './App'
 import { initSentry, captureError } from './lib/sentry'
 import './styles/globals.css'
 
-initSentry()
+const widgetKey = /^\/chat\/widget\/([a-z][a-z0-9-]{0,39})\/?$/.exec(window.location.pathname)?.[1]
+const isGuestChat = Boolean(widgetKey) || /^\/chat\/?$/.test(window.location.pathname)
+const guestPath = widgetKey ? `/chat/widget/${widgetKey}` : '/chat'
+const guestFragment = isGuestChat ? window.location.hash.slice(1) : ''
+if (guestFragment) history.replaceState(null, '', guestPath)
+if (!isGuestChat) initSentry()
 
 /**
  * Root-level error boundary — the final safety net beneath the route-level
@@ -106,7 +111,20 @@ if (rootEl) {
   // The public demo answers every API call in the browser and needs no
   // sign-in. The import is behind a build-time constant, so ordinary builds
   // leave the sample data out.
-  if (import.meta.env.MODE === 'demo') {
+  if (isGuestChat) {
+    void import('./pages/browser-chat').then(({ default: BrowserChatPage }) => {
+      const mountChat = (fragment: string) => {
+        root.render(<BrowserChatPage key={fragment || guestPath} fragment={fragment} widgetKey={widgetKey} />)
+      }
+      mountChat(guestFragment)
+      window.addEventListener('hashchange', () => {
+        const fragment = window.location.hash.slice(1)
+        if (!fragment) return
+        history.replaceState(null, '', guestPath)
+        mountChat(fragment)
+      })
+    })
+  } else if (import.meta.env.MODE === 'demo') {
     void import('./demo/boot').then(({ startDemo }) => {
       startDemo()
       root.render(
@@ -128,7 +146,7 @@ function startApp(root: ReturnType<typeof createRoot>) {
       root.render(<UnavailableWorkspace />)
       return
     }
-    useAuthStore.getState().setProvider(authConfig.provider)
+    useAuthStore.getState().setProvider(authConfig.provider, authConfig.privateSalesAgents)
     if (authConfig.provider === 'clerk') {
       if (!authConfig.clerkPublishableKey) {
         console.error('Clerk sign-in is enabled but no publishable key is configured.')

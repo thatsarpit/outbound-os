@@ -1,6 +1,7 @@
 import { api } from '../client'
 import type {
   InboxChannel,
+  ConversationChannel,
   InboxChannelHealth,
   InboxSenderAccount,
   InboxSendPayload,
@@ -12,7 +13,7 @@ import type {
 } from '../types'
 
 export interface InboxThreadFilters {
-  channel?: InboxChannel
+  channel?: ConversationChannel
   state?: Exclude<InboxThreadState, 'all'>
   search?: string
   assignedToMe?: boolean

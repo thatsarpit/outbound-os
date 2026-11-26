@@ -26,7 +26,7 @@ export function inboxMessagePreview(message) {
     && /\{\{\s*(?:contact\.|unsubscribe\b)/i.test(message.content || '')) {
     return 'Campaign email sent · open to view the archived template';
   }
-  const text = String(message.content || '').replace(/\s+/g, ' ').trim();
+  const text = String(message.content || '').replace(/\s+/g, ' ').trim() || (message.channel === 'webchat' ? 'Attachment' : '');
   if (message.channel === 'whatsapp' && message.direction === 'inbound'
     && /^\[(unsupported|Unsupported WhatsApp message)\]$/i.test(text)) {
     return 'WhatsApp message content unavailable';

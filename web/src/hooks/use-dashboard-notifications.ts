@@ -2,7 +2,7 @@ import { workspaceApiPath } from '@/lib/workspace-path'
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import { useAuthStore, getSessionToken } from '@/stores/auth-store'
+import { useAuthStore, getSessionToken, usePrivateSalesAgent } from '@/stores/auth-store'
 import type { ActivityLog } from '@/api/types'
 import { notificationActions } from '@/stores/notification-store'
 
@@ -52,12 +52,14 @@ export function useDashboardNotifications() {
   const { user, dashboardScope } = useAuthStore()
   const queryClient = useQueryClient()
   const authenticated = Boolean(user)
+  const privateSales = usePrivateSalesAgent()
 
   useEffect(() => {
     let mounted = true
     const scopeKey = dashboardScope
     notificationActions.resetSession()
     notificationActions.setScopeKey(scopeKey)
+    if (!authenticated || privateSales) return
     let hydrating = false
     let hydrationQueued = false
     let hydrationTimer: number | undefined
@@ -143,9 +145,9 @@ export function useDashboardNotifications() {
       void hydrate()
     }, 60_000)
 
-    if (authenticated) void connect()
+    void connect()
     const resume = () => {
-      if (!authenticated || document.visibilityState !== 'visible' || !navigator.onLine) return
+      if (document.visibilityState !== 'visible' || !navigator.onLine) return
       void queryClient.invalidateQueries({ queryKey: ['inbox-thread'] })
       void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
       void hydrate()
@@ -165,5 +167,5 @@ export function useDashboardNotifications() {
       window.clearTimeout(hydrationTimer)
       window.clearTimeout(retryTimer)
     }
-  }, [authenticated, dashboardScope, queryClient])
+  }, [authenticated, dashboardScope, privateSales, queryClient])
 }

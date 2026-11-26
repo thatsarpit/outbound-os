@@ -1,15 +1,16 @@
 import { useEffect } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Check, ChevronRight } from 'lucide-react'
 import { tasksApi } from '@/api/endpoints/tasks'
 import { useWorkspaceTimezone } from '@/hooks/use-workspace-timezone'
 import { useAuthStore } from '@/stores/auth-store'
 import { useOnlineStatus } from '@/hooks/use-online-status'
+import { loadedMobileRows, nextMobilePage } from '@/lib/mobile-list'
 import { toast } from '@/stores/toast-store'
 import {
   MobileError,
-  MobilePagination,
+  MobileLoadMore,
   MobileRefresh,
   mobileButton,
   mobileDueDate,
@@ -29,18 +30,34 @@ export default function MobileTasksPage() {
   const setFilters = (values: Record<string, string | null>) => {
     setParams(mobileSearchParams(values), { replace: true, preventScrollReset: true })
   }
-  const result = useQuery({
+  const result = useInfiniteQuery({
     refetchOnWindowFocus: true,
     queryKey: ['mobile-tasks', dashboardScope, page, showAll, ownership],
-    queryFn: () => tasksApi.listTeamTasks({ page, limit: 25, done: showAll, scope: ownership }),
-    refetchInterval: 30_000,
+    initialPageParam: page,
+    queryFn: async ({ pageParam }) => {
+      const response = await tasksApi.listTeamTasks({
+        page: pageParam,
+        limit: 25,
+        done: showAll,
+        scope: ownership,
+      })
+      if (!response || !Array.isArray(response.tasks))
+        throw new Error('The follow-up response was incomplete.')
+      return response
+    },
+    getNextPageParam: nextMobilePage,
+    refetchInterval: (query) => 30_000 * (query.state.data?.pages.length ?? 1),
   })
-  const pages = Math.max(1, result.data?.pages ?? 1)
+  const firstPage = result.data?.pages[0]
+  const pages = Math.max(1, firstPage?.pages ?? 1)
   useEffect(() => {
-    if (!result.data || page <= pages) return
+    if (!firstPage || page <= pages) return
     if (new URLSearchParams(window.location.search).toString() !== params.toString()) return
-    setParams(mobileSearchParams({ page: pages === 1 ? null : String(pages) }, params), { replace: true })
-  }, [page, pages, params, result.data, setParams])
+    setParams(mobileSearchParams({ page: null }, params), {
+      replace: true,
+      preventScrollReset: true,
+    })
+  }, [firstPage, page, pages, params, setParams])
 
   const complete = useMutation({
     networkMode: 'always',
@@ -54,36 +71,61 @@ export default function MobileTasksPage() {
     },
     onError: (err: Error) => toast.error(err.message),
   })
-  const rows = Array.isArray(result.data?.tasks) ? result.data.tasks : []
+  const rows = loadedMobileRows(
+    result.data?.pages.map((response) => response.tasks) ?? [],
+    (task) => task.id,
+  )
+  const total = firstPage?.total ?? rows.length
   return (
-    <div className="space-y-4">
-      <div className="flex rounded-lg border border-border bg-surface p-1">
+    <div className="space-y-3">
+      <div
+        className="flex rounded-xl border border-border bg-surface p-1"
+        role="group"
+        aria-label="Follow-up status"
+      >
         {[false, true].map((all) => (
           <button
             type="button"
             key={String(all)}
             aria-pressed={showAll === all}
             onClick={() => setFilters({ show: all ? 'all' : null, page: null })}
-            className={`min-h-11 flex-1 rounded-md text-sm ${showAll === all ? 'bg-accent-muted font-medium text-accent' : 'text-text-muted'}`}
+            className={`min-h-11 flex-1 rounded-lg text-sm focus-visible:outline-2 focus-visible:outline-focus ${showAll === all ? 'bg-accent-muted font-semibold text-accent' : 'text-text-muted'}`}
           >
             {all ? 'All follow-ups' : 'Pending'}
           </button>
         ))}
       </div>
-      <div className="flex items-center gap-2 text-xs text-text-secondary">
+      <div className="flex items-center justify-between gap-2 text-sm font-medium text-text-secondary">
         <label htmlFor="task-ownership">Follow-ups for</label>
         <select
           id="task-ownership"
           value={ownership}
-          onChange={(event) => setFilters({ scope: event.target.value === 'mine' ? 'mine' : null, page: null })}
-          className="min-h-11 rounded-md border border-border bg-surface px-3 text-sm text-text-primary"
+          onChange={(event) =>
+            setFilters({ scope: event.target.value === 'mine' ? 'mine' : null, page: null })
+          }
+          className="min-h-11 min-w-0 max-w-[70%] rounded-lg border border-border bg-surface px-3 text-text-primary"
         >
           <option value="workspace">Workspace leads</option>
           {user?.role !== 'viewer' && <option value="mine">My assigned leads</option>}
         </select>
       </div>
-      <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching}
-        stale={result.isRefetchError} retry={() => void result.refetch()} />
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        {firstPage && (
+          <p className="text-xs font-medium tabular-nums text-text-muted" role="status">
+            {total} {showAll ? 'follow-ups' : 'pending'}
+            {rows.length < total && ` · ${rows.length} loaded`}
+            {!!firstPage.overdueCount && (
+              <span className="text-warning"> · {firstPage.overdueCount} overdue</span>
+            )}
+          </p>
+        )}
+        <MobileRefresh
+          updatedAt={result.dataUpdatedAt}
+          refreshing={result.isFetching}
+          stale={result.isRefetchError}
+          retry={() => void result.refetch()}
+        />
+      </div>
       {result.isPending && result.fetchStatus !== 'paused' ? (
         <p role="status" className="py-10 text-center text-sm text-text-muted">
           Loading follow-ups…
@@ -92,16 +134,11 @@ export default function MobileTasksPage() {
         <MobileError message="Could not load follow-ups." retry={() => result.refetch()} />
       ) : (
         <>
-          <div className="flex items-center justify-between text-xs text-text-muted">
-            <span>
-              {result.data?.total ?? rows.length} {showAll ? 'follow-ups' : 'pending'}
-            </span>
-            <span className={result.data?.overdueCount ? 'text-warning' : ''}>
-              {result.data?.overdueCount ?? 0} overdue
-            </span>
-          </div>
           {rows.length ? (
-            <ul className="divide-y divide-border overflow-hidden rounded-xl border border-border bg-surface">
+            <ul
+              role="list"
+              className="divide-y divide-border-subtle overflow-hidden rounded-2xl border border-border bg-surface"
+            >
               {rows.map((task) => (
                 <li key={task.id} className="flex items-start gap-2 p-3">
                   <button
@@ -115,7 +152,7 @@ export default function MobileTasksPage() {
                   </button>
                   <Link
                     to={`/m/leads?leadId=${task.leadId}`}
-                    className="flex min-h-14 min-w-0 flex-1 items-center gap-2"
+                    className="flex min-h-14 min-w-0 flex-1 items-center gap-2 rounded-md focus-visible:outline-2 focus-visible:outline-focus active:bg-surface-raised"
                   >
                     <span className="min-w-0 flex-1">
                       <span
@@ -139,8 +176,8 @@ export default function MobileTasksPage() {
               ))}
             </ul>
           ) : (
-            <div className="rounded-xl border border-border bg-surface p-8 text-center">
-              <Check className="mx-auto h-8 w-8 text-accent" />
+            <div className="rounded-2xl border border-border bg-surface p-8 text-center">
+              <Check className="mx-auto h-8 w-8 text-accent" aria-hidden="true" />
               <p className="mt-3 font-medium">
                 {showAll ? 'No follow-ups yet' : 'No pending follow-ups'}
               </p>
@@ -152,8 +189,14 @@ export default function MobileTasksPage() {
               </Link>
             </div>
           )}
-          <MobilePagination page={page} pages={pages}
-            onChange={next => setFilters({ page: next === 1 ? null : String(next) })} />
+          <MobileLoadMore
+            hasMore={result.hasNextPage}
+            busy={result.isFetching}
+            loading={result.isFetchingNextPage}
+            failed={result.isFetchNextPageError}
+            onLoad={() => void result.fetchNextPage({ cancelRefetch: false })}
+            onStartOver={page > 1 ? () => setFilters({ page: null }) : undefined}
+          />
         </>
       )}
     </div>

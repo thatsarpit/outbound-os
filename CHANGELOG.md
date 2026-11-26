@@ -6,6 +6,25 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+## [0.6.0] — 26 November 2026
+
+- Offer private Sales workspaces where agents work only their assignments and
+  can claim eligible new WhatsApp inbounds. Admins retain the full Inbox.
+- Allow an admin to own automated first touch and retain live IndiaMART leads.
+  Route newly captured website enquiries by source with outreach paused.
+- Record closed deals from mobile Lead details.
+- Add optional expiring Browser chat links and show their messages alongside
+  existing channels in the Inbox.
+- Add an optional storefront WhatsApp widget handoff with verified,
+  searchable source attribution on the incoming conversation.
+- Add an embeddable website chat with adjustable branding, resumable
+  transcripts, Inbox replies and resolved conversation reopening.
+- Add Website chat to Inbox filters, channel status and Integrations.
+- Allow both sides of Website chat to share photos and plain-text files.
+  Normalize photos, encrypt attachment storage and scope downloads to the
+  conversation and current permissions.
+  Visitors can share optional contact details for agent follow-up.
+
 ## [0.5.2] — 26 November 2026
 
 - Separate email sending verification from receiving. Show the last incoming

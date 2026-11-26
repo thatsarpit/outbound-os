@@ -7,7 +7,7 @@ the full dashboard, account preferences and Home Screen instructions.
 The three mobile destinations are:
 
 - **Inbox:** shared workspace conversations, Needs reply / All, channel filters,
-  search and paginated results. A conversation opens full-screen. Email sender,
+  and search. A conversation opens full-screen. Email sender,
   subject, CC/BCC, templates and attachments are behind Options. Lead details,
   notes and follow-ups are available from the conversation header.
 - **Tasks:** pending/all follow-ups, workspace and assigned-lead filters, overdue counts, completion/reopening and links
@@ -41,6 +41,9 @@ open.
 Inbox, Leads and Tasks show their last successful sync. If a refresh fails
 after rows have loaded, the list stays visible and offers Retry refresh. Inbox
 filters, lead search and follow-up filters are stored in their URLs.
+Use Load more to append results on any of the three lists. Opening a lead or
+conversation and returning keeps the loaded results and restores the scroll
+position. An older link to a specific page starts from that page when it exists.
 Long conversations provide a Latest messages shortcut without pulling you away
 from older messages. The mobile header uses the same brand mark as desktop.
 

@@ -38,6 +38,8 @@ type Thread = {
   assignmentState: 'unassigned' | 'assigned' | 'assigned_to_me'
 }
 
+let liveOwnerKey: string | null = null
+
 const SENDERS: Record<InboxChannel, InboxSenderAccount> = {
   whatsapp: {
     id: 1,
@@ -494,7 +496,7 @@ export async function handleInboxRequest(
   url: string,
   init?: RequestInit,
   leads: Array<
-    Pick<Lead, 'id' | 'name'> & Partial<Pick<Lead, 'assignedToId' | 'assignedMemberKey'>>
+    Pick<Lead, 'id' | 'name'> & Partial<Pick<Lead, 'assignedToId' | 'assignedMemberKey' | 'dealValue' | 'convertedAt'>> & { status?: string }
   > = [],
 ): Promise<Response | null> {
   const method = (init?.method || 'GET').toUpperCase()
@@ -557,6 +559,20 @@ export async function handleInboxRequest(
     return ownership
   }
   if (path.pathname === '/api/workspace/members') return json({ members })
+  if (path.pathname === '/api/workspace/live-owner') {
+    if (method === 'PUT') liveOwnerKey = members[0].key
+    return json({ memberKey: liveOwnerKey })
+  }
+  const deal = path.pathname.match(/^\/api\/leads\/(\d+)\/deal$/)
+  if (deal && method === 'PATCH') {
+    const body = await readBody(init)
+    const lead = leads.find(item => item.id === Number(deal[1]))
+    if (!lead) return json({ error: 'Lead not found.' }, 404)
+    lead.dealValue = Number(body.dealValue)
+    lead.convertedAt = new Date().toISOString()
+    lead.status = 'closed'
+    return json({ ok: true, lead })
+  }
   const assignment = path.pathname.match(/^\/api\/leads\/(\d+)\/assign$/)
   if (assignment && method === 'POST') {
     const body = await readBody(init)
@@ -775,11 +791,13 @@ export async function handleInboxRequest(
           `${t.leadName} ${t.leadCompany} ${t.lastMessage}`.toLowerCase().includes(search),
       )
       .sort((a, b) => String(b.lastMessageAt).localeCompare(String(a.lastMessageAt)))
+    const page = Math.max(1, Number(path.searchParams.get('page')) || 1)
+    const limit = Math.max(1, Number(path.searchParams.get('limit')) || 50)
     return json({
-      threads,
+      threads: threads.slice((page - 1) * limit, page * limit),
       total: threads.length,
-      page: 1,
-      pages: 1,
+      page,
+      pages: Math.ceil(threads.length / limit),
       unread: THREADS.filter((t) => t.unread).length,
       needsReply: THREADS.filter((t) => t.replyNeeded && t.threadState !== 'resolved').length,
     })

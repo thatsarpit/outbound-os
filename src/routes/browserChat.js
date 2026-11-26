@@ -1,0 +1,319 @@
+import { createHash, randomBytes } from 'node:crypto';
+import validator from 'validator';
+import { Router, json } from 'express';
+import rateLimit from 'express-rate-limit';
+import multer from 'multer';
+import prisma from '../utils/prismaClient.js';
+import { requireRole } from '../auth/index.js';
+import { chatWidget } from '../utils/chatWidgets.js';
+import { workspaceMemberIdentity } from '../utils/workspaceMember.js';
+import { salesAgentLeadScope } from '../auth/salesAgentAccess.js';
+import {
+  browserChatFileFields, browserChatFileLimit, browserChatFileRetention, checkBrowserChatFileCapacity,
+  openBrowserChatFile, prepareBrowserChatFile, sealedBrowserChatFile,
+} from '../utils/browserChatFiles.js';
+
+const identityPattern = /^[A-Za-z0-9_-]{43}$/;
+const requestPattern = /^[a-z0-9_-]{16,80}$/i;
+const digest = secret => createHash('sha256').update(secret).digest('hex');
+const positive = value => /^[1-9]\d*$/.test(String(value)) && Number.isSafeInteger(Number(value)) ? Number(value) : null;
+const active = (now) => ({ revokedAt: null, expiresAt: { gt: now } });
+const chatFields = { id: true, visitorEmail: true, visitorPhone: true, widgetKey: true, createdAt: true, expiresAt: true, revokedAt: true };
+const messageFields = { id: true, content: true, direction: true, createdAt: true,
+  browserChatAttachment: { select: browserChatFileFields } };
+const readMultipart = multer({ storage: multer.memoryStorage(),
+  limits: { files: 1, fields: 5, parts: 7, fileSize: browserChatFileLimit, fieldSize: 18 * 1024, fieldNameSize: 32 } }).single('file');
+
+function noStore(_req, res, next) {
+  res.set({ 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff' });
+  next();
+}
+
+function validMessage(body, file) {
+  return typeof body?.content === 'string' && (body.content.trim().length > 0 || file) &&
+    body.content.length <= 4000 && typeof body.clientMessageId === 'string' && requestPattern.test(body.clientMessageId);
+}
+
+async function saveMessage(tx, chat, direction, body, now, file, env) {
+  const key = `browser-chat:${chat.id}:${direction}:${body.clientMessageId}`;
+  const content = body.content.trim();
+  const prior = await tx.message.findUnique({ where: { manualSendKey: key },
+    select: { ...messageFields, browserChatAttachment: { select: { ...browserChatFileFields, sha256: true } } } });
+  if (prior) {
+    const { browserChatAttachment: attachment, ...previous } = prior;
+    const { sha256, ...details } = attachment || {};
+    return prior.content === content && sha256 === file?.sha256 && details.filename === file?.filename
+      ? { message: { ...previous, browserChatAttachment: attachment ? details : null }, duplicate: true }
+      : { conflict: true };
+  }
+  if (file) await checkBrowserChatFileCapacity(tx, chat.id, file.size);
+  const message = await tx.message.create({
+    data: { leadId: chat.leadId, browserChatId: chat.id, channel: 'webchat', direction,
+      content, status: 'delivered', sentAt: now, manualSendKey: key },
+    select: messageFields,
+  });
+  if (file) {
+    const { filename, contentType, size, sha256 } = file;
+    message.browserChatAttachment = await tx.browserChatAttachment.create({
+      data: { messageId: message.id, filename, contentType, size, sha256,
+        expiresAt: new Date(+now + browserChatFileRetention), payload: sealedBrowserChatFile(file, message.id, env) },
+      select: browserChatFileFields,
+    });
+  }
+  await tx.lead.updateMany({
+    where: { id: chat.leadId, OR: [{ lastMessageAt: null }, { lastMessageAt: { lt: now } }] },
+    data: { lastMessageAt: now },
+  });
+  if (direction === 'inbound') {
+    if (chat.widgetKey) {
+      await tx.lead.updateMany({ where: { id: chat.leadId, inboxResolvedAt: { not: null } }, data: { inboxResolvedAt: null } });
+    }
+    await tx.lead.updateMany({ where: { id: chat.leadId, status: { in: ['new', 'contacted', 'wa_unavailable', 'wa_undelivered'] } }, data: { status: 'replied', repliedAt: now } });
+    await tx.message.updateMany({
+      where: { leadId: chat.leadId, direction: 'outbound', status: 'queued', OR: [
+        { automationKey: { not: null } }, { campaignId: { not: null } },
+      ] },
+      data: { status: 'cancelled', providerStatusReason: 'human_reply_received' },
+    });
+  }
+  return { message, duplicate: false };
+}
+
+function sendResult(res, result) {
+  if (!result) return res.status(404).json({ error: 'This chat link is no longer available.' });
+  if (result.conflict) return res.status(409).json({ error: 'This message action was already used.' });
+  return res.status(result.duplicate ? 200 : 201).json(result);
+}
+
+export function createBrowserChatRouters({ db = prisma, guard = requireRole, env = process.env,
+  now = () => new Date(), notify = () => {} } = {}) {
+  const guest = Router();
+  const staff = Router();
+  const failure = (error, _req, res, _next) => {
+    if (error.chatFileError) return res.status(error.status).json({ error: error.message });
+    if (error instanceof multer.MulterError) {
+      return error.code === 'LIMIT_FILE_SIZE'
+        ? res.status(413).json({ error: 'Choose a file under 5 MB.' })
+        : res.status(400).json({ error: 'Attach one file per message.' });
+    }
+    if (error.status === 413) return res.status(413).json({ error: 'The message is too large.' });
+    if (error.status === 400) return res.status(400).json({ error: 'The message is invalid.' });
+    return res.status(503).json({ error: 'Chat is temporarily unavailable. Try again.' });
+  };
+  const handle = action => (req, res, next) => Promise.resolve(action(req, res)).catch(next);
+  const feature = (_req, res, next) => !env.OUTBOUNDOS_WORKSPACE_ID && env.OUTBOUNDOS_BROWSER_CHAT === 'true'
+    ? next() : res.status(404).json({ error: 'Browser chat is unavailable.' });
+
+  const messageWriteLimit = rateLimit({ windowMs: 60_000, limit: 12,
+    keyGenerator: req => req.chatTokenHash, standardHeaders: 'draft-8', legacyHeaders: false });
+  const signupLimit = rateLimit({ windowMs: 60_000, limit: 6, standardHeaders: 'draft-8', legacyHeaders: false });
+  const chatJson = json({ limit: '24kb' });
+  const widgetRequired = (req, res, next) => {
+    const widget = chatWidget(req.params.widget, env);
+    if (!widget) return res.status(404).json({ error: 'This chat is unavailable.' });
+    req.chatWidget = widget;
+    next();
+  };
+  const guestIdentity = (req, res, next) => {
+    const token = req.get('authorization')?.match(/^Bearer (\S+)$/)?.[1];
+    if (!token || !identityPattern.test(token)) return res.status(404).json({ error: 'This chat link is no longer available.' });
+    req.chatTokenHash = digest(token);
+    next();
+  };
+  const guestScope = (req, time) => ({ tokenHash: req.chatTokenHash, widgetKey: req.params.widget || null, ...active(time) });
+  let activeUploads = 0;
+  const withMessage = (action, canUpload = async () => true) => handle(async (req, res) => {
+    if (!req.is('multipart/form-data')) return action(req, res, null);
+    if (!await canUpload(req)) return sendResult(res, null);
+    // Bound concurrent buffering and photo decoding across staff and public routes.
+    if (activeUploads >= 4) return res.status(429).json({ error: 'Uploads are busy. Try again shortly.' });
+    activeUploads += 1;
+    try {
+      const read = await new Promise((resolve, reject) => {
+        const finish = () => {
+          clearTimeout(deadline);
+          res.off('close', onClose);
+        };
+        const onClose = () => { finish(); resolve(false); };
+        const deadline = setTimeout(() => {
+          finish();
+          res.set('Connection', 'close').status(408).json({ error: 'Upload timed out. Try again.' });
+          resolve(false);
+        }, 20_000);
+        deadline.unref();
+        res.once('close', onClose);
+        readMultipart(req, res, error => {
+          finish();
+          if (error && !(error instanceof multer.MulterError)) {
+            return reject(Object.assign(new Error('Invalid file upload.'), { status: 400 }));
+          }
+          return error ? reject(error) : resolve(true);
+        });
+      });
+      if (!read || res.destroyed) return;
+      const result = await prepareBrowserChatFile(req.file);
+      if (!res.destroyed) return await action(req, res, result);
+    } finally {
+      activeUploads -= 1;
+    }
+  });
+  const canGuestUpload = async req => Boolean(await db.browserChat.findUnique({
+    where: guestScope(req, now()), select: { id: true },
+  }));
+  const guestSend = withMessage(async (req, res, file) => {
+    if (!validMessage(req.body, file)) return res.status(400).json({ error: 'Add a file or enter a message up to 4,000 characters.' });
+    const time = now();
+    const data = await db.$transaction(async tx => {
+      const chat = await tx.browserChat.findUnique({ where: guestScope(req, time), select: { id: true, leadId: true, widgetKey: true } });
+      if (!chat) return null;
+      const result = await saveMessage(tx, chat, 'inbound', req.body, time, file, env);
+      return { ...result, leadId: chat.leadId };
+    });
+    if (data?.message && !data.duplicate) notify(data.leadId);
+    return sendResult(res, data && { message: data.message, duplicate: data.duplicate, conflict: data.conflict });
+  }, canGuestUpload);
+  async function download(req, res, message) {
+    const messageId = positive(req.params.messageId);
+    const file = messageId && await db.browserChatAttachment.findFirst({
+      where: { messageId, expiresAt: { gt: now() }, payload: { not: null }, message },
+      select: { messageId: true, filename: true, contentType: true, payload: true },
+    });
+    if (!file) return res.status(404).json({ error: 'This attachment is unavailable.' });
+    const photo = file.contentType === 'image/webp';
+    res.attachment(file.filename);
+    res.set({
+      'Content-Type': photo ? 'image/webp' : 'application/octet-stream',
+      'Content-Security-Policy': "sandbox; default-src 'none'; frame-ancestors 'none'",
+      'X-Download-Options': 'noopen',
+    });
+    return res.send(openBrowserChatFile(file, env));
+  }
+  const guestDownload = handle((req, res) => download(req, res, { channel: 'webchat', browserChat: guestScope(req, now()) }));
+  const guestRead = handle(async (req, res) => {
+    const before = req.query.before === undefined ? null : positive(req.query.before);
+    if (req.query.before !== undefined && !before) return res.status(400).json({ error: 'Invalid history cursor.' });
+    const chat = await db.browserChat.findUnique({
+      where: guestScope(req, now()),
+      select: { lead: { select: { inboxResolvedAt: true } }, expiresAt: true,
+        messages: { ...(before ? { where: { id: { lt: before } } } : {}),
+          orderBy: { id: 'desc' }, take: 101, select: messageFields } },
+    });
+    if (!chat) return res.status(404).json({ error: 'This chat link is no longer available.' });
+    const messages = chat.messages.slice(0, 100).reverse();
+    res.json({ messages, nextBefore: chat.messages.length > 100 ? messages[0].id : null,
+      expiresAt: chat.expiresAt, resolved: Boolean(chat.lead.inboxResolvedAt) });
+  });
+
+  guest.use(noStore, feature, rateLimit({ windowMs: 60_000, limit: 90, standardHeaders: 'draft-8', legacyHeaders: false }));
+  guest.get('/messages', guestIdentity, guestRead);
+  guest.get('/attachments/:messageId', guestIdentity, guestDownload);
+  guest.post('/messages', guestIdentity, messageWriteLimit, chatJson, guestSend);
+  guest.get('/widgets/:widget', widgetRequired, (req, res) => {
+    const { title, welcome, accent } = req.chatWidget;
+    res.json({ title, welcome, accent });
+  });
+  guest.get('/widgets/:widget/messages', widgetRequired, guestIdentity, guestRead);
+  guest.get('/widgets/:widget/attachments/:messageId', widgetRequired, guestIdentity, guestDownload);
+  guest.post('/widgets/:widget/messages', widgetRequired, guestIdentity, messageWriteLimit, chatJson, guestSend);
+  guest.post('/widgets/:widget/start', widgetRequired, signupLimit, guestIdentity, chatJson, withMessage(async (req, res, file) => {
+    const name = typeof req.body?.name === 'string' ? req.body.name.trim() : '';
+    if (!name || name.length > 80 || /[\p{Cc}\p{Cf}]/u.test(name) || !validMessage(req.body, file)) {
+      return res.status(400).json({ error: 'Enter your name and add a file or a message up to 4,000 characters.' });
+    }
+    const email = typeof req.body.email === 'string' ? req.body.email.trim() : '';
+    const phone = typeof req.body.phone === 'string' ? req.body.phone.trim() : '';
+    if (email && (email.length > 254 || !validator.isEmail(email))) {
+      return res.status(400).json({ error: 'Enter a valid email address or leave it blank.' });
+    }
+    const normalizedPhone = phone.replace(/[ .()-]/g, '');
+    if (phone && (phone.length > 36 || !/^\+[1-9]\d{7,14}$/.test(normalizedPhone))) {
+      return res.status(400).json({ error: 'Use an international number starting with +, or leave it blank.' });
+    }
+    const time = now();
+    const data = await db.$transaction(async tx => {
+      const prior = await tx.browserChat.findUnique({ where: { tokenHash: req.chatTokenHash } });
+      if (prior && (prior.widgetKey !== req.params.widget || prior.revokedAt || prior.expiresAt <= time)) return null;
+      if (prior) return { ...await saveMessage(tx, prior, 'inbound', req.body, time, file, env), leadId: prior.leadId };
+      // The first message and lead are created together. Simply loading the
+      // widget does not add a contact to the CRM.
+      const lead = await tx.lead.create({ data: {
+        name, mobile: `no-phone:webchat:${randomBytes(18).toString('hex')}`, source: 'browser_chat_widget',
+        status: 'replied', repliedAt: time,
+      } });
+      const chat = await tx.browserChat.create({ data: {
+        leadId: lead.id, widgetKey: req.params.widget, tokenHash: req.chatTokenHash,
+        // These are self-reported follow-up details. Keep them out of contact
+        // matching, provider routing and automated outreach.
+        visitorEmail: email || null, visitorPhone: normalizedPhone || null,
+        createdBy: 'visitor', expiresAt: new Date(+time + 90 * 86400_000),
+      } });
+      return { ...await saveMessage(tx, chat, 'inbound', req.body, time, file, env), leadId: lead.id };
+    });
+    if (data?.message && !data.duplicate) notify(data.leadId);
+    return sendResult(res, data && { message: data.message, duplicate: data.duplicate, conflict: data.conflict });
+  }));
+  guest.use(failure);
+
+  staff.use(noStore, feature, guard('agent'));
+  staff.use((req, res, next) => {
+    const who = workspaceMemberIdentity(req.user, env);
+    if (!who || req.user.delegated) return res.status(403).json({ error: 'Sign in personally to manage Browser chat.' });
+    req.chatStaff = who.key;
+    next();
+  });
+  staff.get('/:leadId', handle(async (req, res) => {
+    const leadId = positive(req.params.leadId);
+    if (!leadId) return res.status(400).json({ error: 'Choose a lead.' });
+    const chats = await db.browserChat.findMany({ where: { leadId }, select: chatFields, orderBy: { id: 'desc' }, take: 30 });
+    res.json({ chats });
+  }));
+  staff.post('/:leadId', handle(async (req, res) => {
+    const leadId = positive(req.params.leadId);
+    if (!leadId || !await db.lead.findUnique({ where: { id: leadId }, select: { id: true } })) {
+      return res.status(404).json({ error: 'Lead not found.' });
+    }
+    const token = randomBytes(32).toString('base64url');
+    const time = now();
+    const chat = await db.$transaction(async tx => {
+      await tx.browserChat.updateMany({ where: { leadId, widgetKey: null, ...active(time) }, data: { revokedAt: time } });
+      return tx.browserChat.create({
+        data: { leadId, tokenHash: digest(token), createdBy: req.chatStaff, expiresAt: new Date(+time + 24 * 3600_000) },
+        select: chatFields,
+      });
+    });
+    res.status(201).json({ chat, token });
+  }));
+  staff.delete('/:leadId/:chatId', handle(async (req, res) => {
+    const leadId = positive(req.params.leadId), id = positive(req.params.chatId);
+    if (!leadId || !id) return res.status(400).json({ error: 'Choose a lead and chat.' });
+    const result = await db.browserChat.updateMany({ where: { id, leadId, ...active(now()) }, data: { revokedAt: now() } });
+    res.json({ revoked: Boolean(result.count) });
+  }));
+  const staffChatScope = (req, time, leadId, id) => ({
+    id, leadId, ...active(time), lead: salesAgentLeadScope(req),
+  });
+  const canStaffUpload = async req => {
+    const leadId = positive(req.params.leadId), id = positive(req.params.chatId);
+    return Boolean(leadId && id && await db.browserChat.findUnique({
+      where: staffChatScope(req, now(), leadId, id), select: { id: true },
+    }));
+  };
+  staff.get('/:leadId/attachments/:messageId', handle((req, res) => {
+    const leadId = positive(req.params.leadId);
+    if (!leadId) return res.status(404).json({ error: 'This attachment is unavailable.' });
+    return download(req, res, { leadId, channel: 'webchat', lead: salesAgentLeadScope(req) });
+  }));
+  staff.post('/:leadId/:chatId/messages', withMessage(async (req, res, file) => {
+    const leadId = positive(req.params.leadId), id = positive(req.params.chatId);
+    if (!leadId || !id || !validMessage(req.body, file)) return res.status(400).json({ error: 'Choose a chat and add a file or a message up to 4,000 characters.' });
+    const time = now();
+    const data = await db.$transaction(async tx => {
+      const chat = await tx.browserChat.findUnique({ where: staffChatScope(req, time, leadId, id), select: { id: true, leadId: true } });
+      return chat ? saveMessage(tx, chat, 'outbound', req.body, time, file, env) : null;
+    });
+    if (data?.message && !data.duplicate) notify(leadId);
+    return sendResult(res, data);
+  }, canStaffUpload));
+  staff.use(failure);
+  return { guest, staff };
+}

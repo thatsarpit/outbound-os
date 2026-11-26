@@ -8,6 +8,10 @@ export interface WebhookSource {
   createdAt: string
   importSupplierId: number | null
   importTags: string
+  captureOnly?: boolean
+  websiteLeadLabel?: string | null
+  whatsappHandoffAccountId?: number | null
+  defaultAssigneeKey?: string | null
 }
 
 export type ReceiptState = 'created' | 'matched' | 'conflict'

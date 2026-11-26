@@ -496,6 +496,11 @@ export default function LeadsPage() {
       cell: ({ getValue, row }) => (
         <div className="text-text-secondary text-sm">
           <span>{getValue() ? sourceLabel(getValue() as string) : '—'}</span>
+          {row.original.websiteLeadLabel && (
+            <span className="mt-1 block text-xs font-medium text-text-primary">
+              {row.original.websiteLeadLabel}{row.original.websiteSourceName && ` · ${row.original.websiteSourceName}`}
+            </span>
+          )}
           {row.original.originSupplier && (
             <span className="mt-1 block text-xs font-medium text-text-primary">
               {row.original.originSupplier.name}

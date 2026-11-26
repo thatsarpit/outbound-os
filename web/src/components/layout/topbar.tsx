@@ -1,6 +1,6 @@
 import { WorkspaceSwitcher } from '@/components/auth/workspace-boundary'
 import { Link, useLocation } from 'react-router-dom'
-import { useAuthStore } from '@/stores/auth-store'
+import { useAuthStore, usePrivateSalesAgent } from '@/stores/auth-store'
 import { DialogTrigger } from '@/components/ui/dialog'
 import { ROLE_EXPERIENCE } from '@/lib/role-shell'
 import { cn } from '@/lib/utils'
@@ -110,6 +110,7 @@ function UserMenu() {
 }
 
 export function Topbar({ onOpenSearch }: { onOpenSearch: () => void }) {
+  const privateSales = usePrivateSalesAgent()
   const location = useLocation()
   const pathname = location.pathname.replace(/^\/dev\/shell(?:\/|$)/, '/') || '/overview'
   const page = PAGE_TITLES.find((item) => (pathname === '/' ? '/overview' : pathname).startsWith(item.route))
@@ -149,7 +150,7 @@ export function Topbar({ onOpenSearch }: { onOpenSearch: () => void }) {
         </button>
 
         <WorkspaceSwitcher className="max-w-36 lg:max-w-52" />
-        <NotificationCenter />
+        {!privateSales && <NotificationCenter />}
         <ThemeToggle className="h-8 w-8 border-0 bg-transparent" />
         <UserMenu />
       </div>

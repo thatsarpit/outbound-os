@@ -418,6 +418,11 @@ export function LeadDetailDrawer({
                     legacyId={leadDetail ? leadDetail.assignedToId : lead.assignedToId}
                     legacyName={lead.assignedTo?.name}
                   />
+                  {(leadDetail ?? lead).dealValue != null && (
+                    <p className="mt-2 text-sm text-text-secondary">
+                      Closed deal · {new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR' }).format((leadDetail ?? lead).dealValue ?? 0)}
+                    </p>
+                  )}
                 </div>
 
                 {/* The lead-to-customer link. Without it the drawer dead-ends

@@ -1,3 +1,4 @@
+import { memberAssignmentData } from '../utils/workspaceMember.js';
 import { randomUUID } from 'node:crypto';
 import { suppliersForLeadTags } from './settlement.js';
 
@@ -94,7 +95,7 @@ export function validateConnectorRecords(records) {
 }
 
 /** One transaction per bounded batch. No outreach service is imported here. */
-export async function importConnectorRecords(db, source, records, { intakeMode, liveAfter, maxAgeHours = 1 } = {}) {
+export async function importConnectorRecords(db, source, records, { intakeMode, liveAfter, maxAgeHours = 1, ownerKey = null } = {}) {
   const rows = validateConnectorRecords(records);
   return db.$transaction(async (tx) => {
     // Early single-workspace installs used both null and 1 for the same
@@ -110,6 +111,8 @@ export async function importConnectorRecords(db, source, records, { intakeMode, 
     // A replay-only batch never needs to scan contacts or active suppliers.
     if (pending.length && !supplier) throw new Error('Configure an enabled source supplier before importing.');
     const { leads, uncertainEmails } = pending.length ? await findCandidates(tx, source, pending) : { leads: new Map(), uncertainEmails: false };
+    const owner = ownerKey && pending.length ? await tx.workspaceMember.findUnique({ where: { key: ownerKey } }) : null;
+    if (ownerKey && pending.length && owner?.role !== 'admin') throw new Error('Live intake owner is unavailable.');
     const results = [];
     for (const row of rows) {
       const existingReceipt = receipts.get(row.externalId);
@@ -150,6 +153,7 @@ export async function importConnectorRecords(db, source, records, { intakeMode, 
             tenantId: source.tenantId, name: row.name || row.company || 'Imported contact', mobile: phone || `no-phone:connector:${randomUUID()}`, email: email || null,
             company: row.company || null, country: row.country || null, product: row.product || null, quantity: row.quantity || null, notes: row.notes || null,
             source: source.source, poolId: source.poolId, status: 'paused', tags, originSupplierId: supplier.id,
+            ...memberAssignmentData(owner),
             consumedAt: row.acquiredAt ? new Date(row.acquiredAt) : null, emailMarketingConsent: false,
           }, select: leadFields });
           leads.set(lead.id, lead); state = 'created';

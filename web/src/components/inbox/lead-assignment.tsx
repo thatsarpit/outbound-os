@@ -52,6 +52,7 @@ export function LeadAssignment({
         client.invalidateQueries({ queryKey: ['lead', leadId] }),
         client.invalidateQueries({ queryKey: ['lead-detail', leadId] }),
         client.invalidateQueries({ queryKey: ['leads'] }),
+        client.invalidateQueries({ queryKey: ['mobile-leads'] }),
         client.invalidateQueries({ queryKey: ['inbox-thread', leadId] }),
         client.invalidateQueries({ queryKey: ['inbox-threads'] }),
         client.invalidateQueries({ queryKey: ['mobile-tasks'] }),

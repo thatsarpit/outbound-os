@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom'
-import type { InboxChannelHealth, InboxChannel } from '@/api/types'
-import { CHANNELS, CHANNEL_ORDER, formatChannelHealthDetail } from '@/lib/channels'
+import type { InboxChannelHealth, ConversationChannel } from '@/api/types'
+import { CHANNELS, CONVERSATION_CHANNELS, formatChannelHealthDetail } from '@/lib/channels'
 import { cn } from '@/lib/utils'
 
 const STATUS_DOT: Record<string, string> = {
@@ -9,11 +9,12 @@ const STATUS_DOT: Record<string, string> = {
   offline: 'bg-danger',
 }
 
-const SETTINGS_ROUTE: Record<InboxChannel, string> = {
+const SETTINGS_ROUTE: Record<ConversationChannel, string> = {
   whatsapp: '/integrations/whatsapp',
   imessage: '/integrations/imessage',
   email: '/integrations/email',
   telegram: '/integrations/telegram',
+  webchat: '/integrations/website-chat',
 }
 
 /**
@@ -28,9 +29,10 @@ const SETTINGS_ROUTE: Record<InboxChannel, string> = {
 export function ChannelHealthStrip({ health }: { health?: InboxChannelHealth }) {
   if (!health) return null
 
-  const items = CHANNEL_ORDER.map((id) => ({ id, meta: CHANNELS[id], data: health[id] })).filter(
-    (item) => Boolean(item.data),
-  )
+  const items = CONVERSATION_CHANNELS.flatMap(id => {
+    const data = health[id]
+    return data ? [{ id, meta: CHANNELS[id], data }] : []
+  })
   if (items.length === 0) return null
 
   const degraded = items.filter((item) => item.data.status !== 'ready')

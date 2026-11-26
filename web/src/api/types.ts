@@ -24,6 +24,8 @@ export interface AssignedWorkspaceMember {
 }
 
 export interface Lead {
+  websiteLeadLabel?: string | null
+  websiteSourceName?: string | null
   customer?: {
     id: number
     name: string
@@ -482,6 +484,7 @@ export interface InboxThread {
 }
 
 export type InboxChannel = 'whatsapp' | 'email' | 'imessage' | 'telegram'
+export type ConversationChannel = InboxChannel | 'webchat'
 
 export interface InboxChannelHealthItem {
   status: 'ready' | 'limited' | 'offline'
@@ -496,6 +499,7 @@ export interface InboxChannelHealthItem {
 }
 
 export interface InboxChannelHealth {
+  webchat?: InboxChannelHealthItem
   whatsapp: InboxChannelHealthItem
   imessage: InboxChannelHealthItem
   email: InboxChannelHealthItem
@@ -552,7 +556,7 @@ export interface InboxThreadSummary {
   status?: LeadStatus | string
   threadState?: InboxThreadState
   assignmentState?: 'assigned' | 'unassigned' | 'assigned_to_me'
-  channel: InboxChannel
+  channel: ConversationChannel
   /** Outbound channels with at least one accepted send and no known failure for that send. */
   outreachChannels?: InboxChannel[]
   threadKey: string
@@ -578,10 +582,20 @@ export interface InboxThreadSummary {
   }>
 }
 
+export interface BrowserChatAttachment {
+  filename: string
+  contentType: 'image/webp' | 'text/plain'
+  size: number
+  expiresAt: string
+}
+
 export interface InboxMessage {
+  browserChatAttachment?: BrowserChatAttachment | null
+  websiteLeadLabel?: string | null
+  websiteSourceName?: string | null
   id: number
   leadId: number
-  channel: InboxChannel
+  channel: ConversationChannel
   direction: 'outbound' | 'inbound'
   content: string
   subject: string | null
@@ -624,6 +638,8 @@ export interface ScheduledInboxEmail {
 }
 
 export interface InboxThreadDetail extends InboxThreadSummary {
+  source?: string
+  browserChatEnabled?: boolean
   whatsappSession?: {
     accountId: number | null
     senderName: string | null

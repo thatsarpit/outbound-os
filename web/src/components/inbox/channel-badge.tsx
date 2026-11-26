@@ -1,4 +1,4 @@
-import type { InboxChannel } from '@/api/types'
+import type { ConversationChannel } from '@/api/types'
 import { getChannel } from '@/lib/channels'
 import { cn } from '@/lib/utils'
 
@@ -20,7 +20,7 @@ export function ChannelBadge({
   variant = 'chip',
   className,
 }: {
-  channel: InboxChannel
+  channel: ConversationChannel
   variant?: Variant
   className?: string
 }) {
