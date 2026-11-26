@@ -268,6 +268,11 @@ export interface EmailAccount {
   smtpUser: string
   receivingProvider?: 'cloudflare' | 'imap' | 'none'
   receivingReady?: boolean
+  lastReceivingError?: string | null
+  lastCloudflareReceiptAt?: string | null
+  lastImapReceiptAt?: string | null
+  lastMatchedReplyAt?: string | null
+  lastConfirmedDeliveryAt?: string | null
   imapHost: string
   imapPort: number
   imapSecure: boolean
@@ -587,7 +592,7 @@ export interface InboxMessage {
   providerErrorMessage?: string | null
   providerRequestId?: string | null
   providerStatusReason?: string | null
-  emailInboundKind?: 'human' | 'delivery_report' | 'automatic_reply' | 'pending' | null
+  emailInboundKind?: 'human' | 'delivery_report' | 'automatic_reply' | 'unsubscribe' | 'pending' | null
   pricingCategory?: string | null
   pricingType?: string | null
   billable?: boolean | null

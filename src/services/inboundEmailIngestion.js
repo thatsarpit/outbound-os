@@ -10,6 +10,7 @@ import { InboundEmailSpool } from '../utils/inboundEmailSpool.js';
 import { EMAIL_INGRESS_MAX_BYTES } from '../utils/emailIngressSignature.js';
 import { emailAttachmentMetadata } from '../utils/emailAttachments.js';
 import { receivedEmailText } from '../utils/receivedEmailText.js';
+import { hasValidUnsubscribeSubject, requestsEmailUnsubscribe, suppressEmailLeads } from '../utils/emailUnsubscribe.js';
 
 const normalizeAddress = (value) => String(value || '').trim().toLowerCase();
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
@@ -45,9 +46,9 @@ function contentOf(parsed, subject, complete, from) {
 
 /** Shared, provider-independent persistence. No inbound message creates a lead or sends a reply. */
 export class InboundEmailIngestion {
-  constructor({ db = prisma, spool = new InboundEmailSpool(), publish = publishInboundEmailActivity,
+  constructor({ db = prisma, spool = new InboundEmailSpool(), publish = publishInboundEmailActivity, env = process.env,
     score = (id) => leadScorer.calculateScore(id) } = {}) {
-    Object.assign(this, { db, spool, publish, score });
+    Object.assign(this, { db, spool, publish, score, env });
     this.inflight = new Map();
   }
 
@@ -118,7 +119,9 @@ export class InboundEmailIngestion {
     const metadata = emailAttachmentMetadata(parsed);
     const html = complete ? sanitizeReceivedEmailHtml(parsed.html) : null;
     const content = contentOf(parsed, subject, complete, from);
-    const kind = complete ? classifyInboundEmail(parsed) : classifyInboundEmail(parsed) === 'human' ? 'pending' : classifyInboundEmail(parsed);
+    const classified = classifyInboundEmail(parsed);
+    const unsubscribe = complete && classified === 'human' && requestsEmailUnsubscribe(subject, content);
+    const kind = unsubscribe ? 'unsubscribe' : !complete && classified === 'human' ? 'pending' : classified;
 
     const saved = await this.db.$transaction(async (tx) => {
       // A provider retry and an operator action can race. Recheck the receipt
@@ -131,7 +134,7 @@ export class InboundEmailIngestion {
       const matchingAccounts = accounts.filter((account) => recipients.includes(normalizeAddress(account.email)) && (!strictRecipient || account.enabled));
       const accountIds = strictRecipient ? matchingAccounts.map((account) => account.id) : accounts.map((account) => account.id);
       let selectedAccountId = matchingAccounts.length === 1 ? matchingAccounts[0].id : strictRecipient ? null : accountId;
-      let lead = null, reason = null;
+      let lead = null, reason = null, parent = null;
       if (strictRecipient && matchingAccounts.length !== 1) reason = matchingAccounts.length ? 'ambiguous_receiving_account' : 'unknown_receiving_address';
       else if (!from) reason = 'missing_sender_address';
       else if (accounts.some((account) => normalizeAddress(account.email) === from)) reason = 'own_sender_address';
@@ -149,14 +152,14 @@ export class InboundEmailIngestion {
           const originals = await tx.message.findMany({
             where: { emailMessageId: reference, direction: 'outbound', channel: 'email',
               ...(strictRecipient ? { emailAccountId: { in: accountIds } } : {}) },
-            select: { leadId: true, emailAccountId: true }, take: 3,
+            select: { leadId: true, emailAccountId: true, emailRecipient: true, status: true }, take: 3,
           });
           const identities = new Map(originals.map((message) => [`${message.leadId}:${message.emailAccountId}`, message]));
           if (identities.size > 1) { reason = 'ambiguous_thread'; break; }
           if (identities.size === 1) {
-            const original = [...identities.values()][0];
-            lead = await tx.lead.findUnique({ where: { id: original.leadId } });
-            selectedAccountId = original.emailAccountId || selectedAccountId;
+            parent = [...identities.values()][0];
+            lead = await tx.lead.findUnique({ where: { id: parent.leadId } });
+            selectedAccountId = parent.emailAccountId || selectedAccountId;
             break;
           }
         }
@@ -175,9 +178,38 @@ export class InboundEmailIngestion {
           }
         }
         else if (candidates.length === 1) lead = await tx.lead.findUnique({ where: { id: candidates[0].id } });
-        else reason = 'unknown_sender_address';
+        else {
+          const history = await tx.message.findMany({
+            where: { direction: 'outbound', channel: 'email', emailRecipient: from, emailAccountId: selectedAccountId,
+              status: { in: ['sent', 'delivered', 'read'] } },
+            distinct: ['leadId'], select: { leadId: true }, take: 2,
+          });
+          reason = history.length ? 'historical_recipient_needs_review' : 'unknown_sender_address';
+        }
       }
       const receiptData = { emailAccountId: selectedAccountId, rfcMessageId, attachmentMetadata: JSON.stringify(metadata), processedAt: new Date() };
+      if (unsubscribe && from && selectedAccountId && !['own_sender_address', 'missing_sender_address'].includes(reason)) {
+        const receivingAddress = accounts.find(account => account.id === selectedAccountId)?.email;
+        const validDestination = receivingAddress && recipients.includes(normalizeAddress(receivingAddress));
+        const validToken = validDestination && hasValidUnsubscribeSubject(subject, receivingAddress, from, this.env);
+        const verifiedThread = parent?.emailRecipient === from && ['sent', 'delivered', 'read'].includes(parent.status)
+          && validDestination && (provider === 'imap' || normalizeAddress(envelopeFrom) === from);
+        const reviewed = manualMatch && normalizeAddress(lead?.email) === from;
+        if (validToken || verifiedThread || reviewed) {
+          const matches = await tx.$queryRaw`SELECT id FROM Lead WHERE lower(trim(email)) = ${from}`;
+          await suppressEmailLeads(tx, matches.map(row => Number(row.id)), when);
+          // Never use another address on the same lead as the suppressed identity.
+          if (lead && normalizeAddress(lead.email) !== from) {
+            lead = null;
+            reason = 'unsubscribe_previous_address';
+          } else if (!lead) {
+            reason = matches.length ? 'unsubscribe_suppressed_unlinked' : 'unsubscribe_no_current_contact';
+          }
+        } else {
+          lead = null;
+          reason = 'unsubscribe_needs_review';
+        }
+      }
       if (!lead || reason) {
         const held = await tx.inboundEmailReceipt.update({ where: { id: receipt.id }, data: {
           ...receiptData, state: complete ? 'unmatched' : 'partial', reason: reason || 'no_matching_lead',
@@ -211,7 +243,7 @@ export class InboundEmailIngestion {
       const inbound = previous
         ? await tx.message.update({ where: { id: previous.id }, data })
         : await tx.message.create({ data: { ...data, leadId: lead.id, channel: 'email', direction: 'inbound',
-          waAccount: 0, emailAccountId: selectedAccountId, emailSubject: subject, emailMessageId: rfcMessageId,
+          waAccount: 0, emailAccountId: selectedAccountId, emailSubject: unsubscribe ? 'Unsubscribe request' : subject, emailMessageId: rfcMessageId,
           emailInReplyTo: parsed.inReplyTo || null, idempotencyKey: dedupeKey, providerCreatedAt: when, sentAt: when } });
       if (kind === 'pending' || kind === 'human') {
         await tx.message.updateMany({ where: { leadId: lead.id, direction: 'outbound', status: 'queued' },

@@ -1,8 +1,8 @@
 # Inbound email classification
 
 IMAP ingestion classifies matched mail before treating it as a customer reply.
-`Message.emailInboundKind` records `human`, `delivery_report`, `automatic_reply`
-or `pending`. Null remains the legacy value; historical messages have not been
+`Message.emailInboundKind` records `human`, `delivery_report`, `automatic_reply`,
+`unsubscribe` or `pending`. Null remains the legacy value; historical messages have not been
 silently reclassified.
 
 Delivery reports use MIME `message/delivery-status` or `multipart/report` with
@@ -26,6 +26,16 @@ The composer chooses the latest customer or outbound email as its reply
 parent, excluding automatic reports and pending downloads. Sends without an
 SMTP Message-ID use a new email instead of an invalid thread target. This does
 not change provider-marketing reply attribution or shared-inbox sender routing.
+
+## Unsubscribe requests
+
+Explicit requests can be verified by a signed List-Unsubscribe subject, a
+matching same-mailbox reply reference and original recipient, or admin review
+against the current contact address. Unverified requests stay in Other email.
+A verified request cancels queued email to matching contacts and sets their
+email opt-out. It stays outside buyer engagement and reply counts. When a
+custom unsubscribe address is used, configure it as a receiving account for
+automatic processing. Existing provider suppression remains active.
 
 ## Partial downloads and replay
 

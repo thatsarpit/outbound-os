@@ -290,12 +290,15 @@ export function MobileConversation({
           }
         }}
       >
+        {result.isRefetchError && Boolean(thread) && (
+          <MobileError message="Refresh failed. Showing the last loaded conversation." retry={() => result.refetch()} />
+        )}
         <div ref={content} className="space-y-3">
           {result.isPending ? (
             <p role="status" className="py-8 text-center text-sm text-text-muted">
               Loading conversation…
             </p>
-          ) : result.error || !thread ? (
+          ) : !thread ? (
             <MobileError
               message="Could not load this conversation."
               retry={() => result.refetch()}
@@ -367,6 +370,7 @@ export function MobileConversation({
         <MobileReplyComposer
           key={`${channel}:${channel === 'email' ? emailContext.accountId : 'default'}`}
           thread={thread}
+          stale={result.isRefetchError}
           replyTarget={replyTarget}
           clearReply={clearReply}
           channel={channel}
@@ -408,6 +412,7 @@ export function MobileConversation({
 
 function MobileReplyComposer({
   thread,
+  stale,
   channel,
   emailContext,
   quotedEmailUnavailable,
@@ -420,6 +425,7 @@ function MobileReplyComposer({
   clearReply,
 }: {
   thread: InboxThreadDetail
+  stale: boolean
   channel: InboxChannel
   emailContext: ReturnType<typeof inboxEmailContext>
   quotedEmailUnavailable: boolean
@@ -481,6 +487,8 @@ function MobileReplyComposer({
     ? 'Offline. Your text draft stays here; reconnect to send.'
     : user?.role === 'viewer'
       ? 'Read-only access. Ask your administrator for reply access.'
+      : stale
+        ? 'Refresh the conversation before sending. Your draft stays here.'
       : channel === 'email'
         ? !thread.leadEmail
           ? 'This lead has no email address.'

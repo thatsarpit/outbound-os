@@ -6,6 +6,17 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+## [0.5.2] — 26 November 2026
+
+- Separate email sending verification from receiving. Show the last incoming
+  mail, matched reply and confirmed outbound delivery per mailbox.
+- Preserve receiving errors across successful outbound sends.
+- Stop sales email to addresses with a verified unsubscribe request and hold
+  unverified requests for review. Keep unsubscribe mail out of reply metrics.
+- Flag mail from an earlier recipient address for review and open Other email
+  from mobile Inbox.
+- Keep mobile conversation history and drafts visible when a refresh fails.
+
 ## [0.5.1] — 26 November 2026
 
 - Allow pinch zoom in the Home Screen app. Keep the conversation layout stable
