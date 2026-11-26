@@ -1,7 +1,8 @@
-import { Suspense, lazy, useDeferredValue, useEffect, useState } from 'react'
+import { Suspense, lazy, useDeferredValue, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
-import { Inbox, Search } from 'lucide-react'
+import { Link, useSearchParams } from 'react-router-dom'
+import { Inbox, ListChecks, Search } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { inboxApi } from '@/api/endpoints/inbox'
 import type { InboxChannel, InboxThreadState } from '@/api/types'
 import { ThreadListItem } from '@/components/inbox/thread-list-item'
@@ -23,28 +24,25 @@ const MobileConversation = lazy(() =>
 )
 
 export default function MobileInboxPage() {
-  const { dashboardScope } = useAuthStore()
+  const { dashboardScope, hasCapability } = useAuthStore()
   const [params, setParams] = useSearchParams()
   const selected = mobileLeadId(params.get('leadId'))
-  const [search, setSearch] = useState(params.get('search') || '')
+  const search = params.get('search') || ''
   const deferred = useDeferredValue(search.trim())
-  const [channel, setChannel] = useState<'all' | InboxChannel>(() =>
-    CHANNEL_ORDER.includes(params.get('filterChannel') as InboxChannel)
-      ? (params.get('filterChannel') as InboxChannel)
-      : 'all',
-  )
-  const [queue, setQueue] = useState<InboxThreadState>(() => {
-    const value = params.get('state') as InboxThreadState
-    return ['all', 'needs_reply', 'waiting', 'resolved'].includes(value) ? value : 'needs_reply'
-  })
-  const [page, setPage] = useState(Math.max(1, Number(params.get('page')) || 1))
-  const queueParams = () => {
-    const next = new URLSearchParams()
-    if (search.trim()) next.set('search', search.trim())
-    if (channel !== 'all') next.set('filterChannel', channel)
-    if (queue !== 'needs_reply') next.set('state', queue)
-    if (page > 1) next.set('page', String(page))
-    return next
+  const channelValue = params.get('filterChannel') as InboxChannel
+  const channel = CHANNEL_ORDER.includes(channelValue) ? channelValue : 'all'
+  const queueValue = params.get('state') as InboxThreadState
+  const queue = ['all', 'needs_reply', 'waiting', 'resolved'].includes(queueValue) ? queueValue : 'needs_reply'
+  const page = mobileLeadId(params.get('page')) ?? 1
+  const updateParams = (values: Record<string, string | null>, replace = true) => {
+    setParams(current => {
+      const next = new URLSearchParams(current)
+      for (const [key, value] of Object.entries(values)) {
+        if (value == null) next.delete(key)
+        else next.set(key, value)
+      }
+      return next
+    }, { replace, preventScrollReset: true })
   }
   const result = useQuery({
     refetchOnWindowFocus: true,
@@ -60,9 +58,14 @@ export default function MobileInboxPage() {
     refetchInterval: 15_000,
     enabled: !selected,
   })
+  const totalPages = Math.max(1, result.data?.pages ?? 1)
   useEffect(() => {
-    if (result.data) setPage((current) => Math.min(current, Math.max(1, result.data?.pages ?? 1)))
-  }, [result.data])
+    if (selected || !result.data || page <= totalPages) return
+    const next = new URLSearchParams(params)
+    if (totalPages > 1) next.set('page', String(totalPages))
+    else next.delete('page')
+    setParams(next, { replace: true, preventScrollReset: true })
+  }, [page, params, result.data, selected, setParams, totalPages])
 
   if (selected)
     return (
@@ -76,18 +79,16 @@ export default function MobileInboxPage() {
         <MobileConversation
           key={`${dashboardScope}:${selected}`}
           leadId={selected}
-          initialChannel={params.get('channel')}
-          onClose={() => setParams(queueParams())}
-          onChannelNavigate={(channel) =>
-            setParams(
-              () => {
-                const next = queueParams()
-                next.set('leadId', String(selected))
-                next.set('channel', channel)
-                return next
-              },
-              { replace: true },
-            )
+          selectedChannel={params.get('channel')}
+          selectedEmailAccountId={mobileLeadId(params.get('accountId'))}
+          selectedEmailReplyId={mobileLeadId(params.get('replyMessageId'))}
+          onClose={() => updateParams({ leadId: null, channel: null, accountId: null, replyMessageId: null, threadKey: null })}
+          onReplyContextChange={({ channel: nextChannel, accountId, replyMessageId }) =>
+            updateParams({
+              channel: nextChannel,
+              ...(accountId !== undefined ? { accountId: accountId ? String(accountId) : null } : {}),
+              replyMessageId: replyMessageId ? String(replyMessageId) : null,
+            })
           }
         />
       </Suspense>
@@ -95,7 +96,17 @@ export default function MobileInboxPage() {
   const rows = result.data?.threads ?? []
   return (
     <div className="space-y-4">
-      <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching} />
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <MobileRefresh updatedAt={result.dataUpdatedAt} refreshing={result.isFetching} />
+        {hasCapability('page.campaigns') && (
+          <Button asChild size="sm" variant="secondary" className="min-h-11">
+            <Link to="/delivery">
+              <ListChecks className="size-4" aria-hidden="true" />
+              Delivery review
+            </Link>
+          </Button>
+        )}
+      </div>
       <label className="relative block">
         <Search className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-text-muted" />
         <span className="sr-only">Search conversations</span>
@@ -103,10 +114,7 @@ export default function MobileInboxPage() {
           type="search"
           className={`${mobileInput} pl-9`}
           value={search}
-          onChange={(event) => {
-            setSearch(event.target.value)
-            setPage(1)
-          }}
+          onChange={(event) => updateParams({ search: event.target.value || null, page: null })}
           placeholder="Search conversations"
         />
       </label>
@@ -126,10 +134,7 @@ export default function MobileInboxPage() {
             type="button"
             key={value}
             aria-pressed={queue === value}
-            onClick={() => {
-              setQueue(value)
-              setPage(1)
-            }}
+            onClick={() => updateParams({ state: value === 'needs_reply' ? null : value, page: null })}
             className={`min-h-11 flex-1 whitespace-nowrap rounded-md px-1 text-xs ${queue === value ? 'bg-accent-muted font-medium text-accent' : 'text-text-muted'}`}
           >
             {label}
@@ -142,10 +147,7 @@ export default function MobileInboxPage() {
           aria-label="Filter by channel"
           className="min-h-11 max-w-[70%] rounded-lg bg-surface px-3 text-base text-text-secondary"
           value={channel}
-          onChange={(event) => {
-            setChannel(event.target.value as typeof channel)
-            setPage(1)
-          }}
+          onChange={(event) => updateParams({ filterChannel: event.target.value === 'all' ? null : event.target.value, page: null })}
         >
           <option value="all">All channels</option>
           {CHANNEL_ORDER.map((id) => (
@@ -178,10 +180,15 @@ export default function MobileInboxPage() {
                   selected={false}
                   onSelect={() => {
                     const draft = loadDraft(dashboardScope, thread.leadId)
-                    const next = queueParams()
-                    next.set('leadId', String(thread.leadId))
-                    next.set('channel', draft?.channel ?? thread.channel)
-                    setParams(next)
+                    const accountId = draft?.senderAccountId ??
+                      (thread.channel === 'email' ? thread.senderAccountId : null)
+                    updateParams({
+                      leadId: String(thread.leadId),
+                      channel: draft?.channel ?? thread.channel,
+                      accountId: accountId ? String(accountId) : null,
+                      threadKey: thread.threadKey,
+                      replyMessageId: null,
+                    }, false)
                   }}
                 />
               ))}
@@ -205,7 +212,7 @@ export default function MobileInboxPage() {
               </p>
             </div>
           )}
-          <MobilePagination page={page} pages={result.data?.pages ?? 1} onChange={setPage} />
+          <MobilePagination page={page} pages={result.data?.pages ?? 1} onChange={value => updateParams({ page: value > 1 ? String(value) : null })} />
         </>
       )}
     </div>

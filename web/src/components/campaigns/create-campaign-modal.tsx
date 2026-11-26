@@ -50,22 +50,26 @@ const exclusionLabels: Record<string, string> = {
   no_phone_number: 'No phone number',
 }
 
-export function CreateCampaignModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: number) => void }) {
+export function CreateCampaignModal({ onClose, onCreated, draft }: {
+  onClose: () => void
+  onCreated: (id: number) => void
+  draft?: Campaign
+}) {
   const queryClient = useQueryClient()
   const isPreview = useAuthStore((state) => state.dashboardScope === 'demo')
   const [showPreflight, setShowPreflight] = useState(false)
   const [form, setForm] = useState({
-    name: '',
-    description: '',
-    channel: 'whatsapp' as Campaign['channel'],
-    messageTemplate: '',
-    emailSubject: '',
-    targetFilter: '',
-    senderAccountId: null as number | null,
-    whatsappSenderAccountId: null as number | null,
-    waCampaignName: '',
-    variantBTemplate: '',
-    variantBSubject: '',
+    name: draft?.name ?? '',
+    description: draft?.description ?? '',
+    channel: draft?.channel ?? ('whatsapp' as Campaign['channel']),
+    messageTemplate: draft?.messageTemplate ?? '',
+    emailSubject: draft?.emailSubject ?? '',
+    targetFilter: draft?.targetFilter ?? '',
+    senderAccountId: draft?.emailSenderAccountId ?? (draft?.channel === 'email' || draft?.channel === 'both' ? draft.senderAccountId : null),
+    whatsappSenderAccountId: draft?.whatsappSenderAccountId ?? (draft?.channel === 'whatsapp' ? draft.senderAccountId : null),
+    waCampaignName: draft?.waCampaignName ?? '',
+    variantBTemplate: draft?.variantBTemplate ?? '',
+    variantBSubject: draft?.variantBSubject ?? '',
     selectedTemplateId: null as number | null,
   })
 
@@ -132,7 +136,7 @@ export function CreateCampaignModal({ onClose, onCreated }: { onClose: () => voi
   const createMutation = useMutation({
     mutationFn: async () => {
       if (filterLooksInvalid) throw new Error('Target filter must be a JSON object')
-      const campaign = await campaignsApi.create({
+      const payload = {
         name: form.name,
         description: form.description || null,
         channel: form.channel,
@@ -144,17 +148,22 @@ export function CreateCampaignModal({ onClose, onCreated }: { onClose: () => voi
         waCampaignName: requiresWhatsApp ? form.waCampaignName || null : null,
         variantBTemplate: form.variantBTemplate || null,
         variantBSubject: form.variantBSubject || null,
-      })
-      if (!campaign?.id) throw new Error('Campaign creation returned an incomplete response.')
+      }
+      const campaign = draft
+        ? await campaignsApi.update(draft.id, { ...payload, editRevision: draft.updatedAt })
+        : await campaignsApi.create(payload)
+      if (!campaign?.id) throw new Error('Saving the campaign returned an incomplete response.')
       return campaign
     },
     onSuccess: (campaign) => {
       void queryClient.invalidateQueries({ queryKey: ['campaigns'] })
-      toast.success('Draft created')
+      queryClient.setQueryData(['campaign-detail', campaign.id], campaign)
+      void queryClient.invalidateQueries({ queryKey: ['campaign-leads', campaign.id] })
+      toast.success(draft ? 'Draft updated' : 'Draft created')
       onClose()
       onCreated(campaign.id)
     },
-    onError: (error: Error) => toast.error(`Failed to create: ${error.message}`),
+    onError: (error: Error) => toast.error(`Could not save the draft. ${error.message}`),
   })
 
   const launchReady =
@@ -196,7 +205,7 @@ export function CreateCampaignModal({ onClose, onCreated }: { onClose: () => voi
     >
       <DialogContent size="2xl" className="flex max-h-[92dvh] flex-col overflow-hidden p-0">
         <DialogHeader className="shrink-0 gap-1 border-b border-border bg-surface px-5 py-4 pr-12 sm:px-6 sm:pr-12">
-          <DialogTitle className="text-base font-semibold">{showPreflight ? 'Review your campaign' : 'New campaign'}</DialogTitle>
+          <DialogTitle className="text-base font-semibold">{showPreflight ? 'Review your campaign' : draft ? 'Edit draft' : 'New campaign'}</DialogTitle>
           <DialogDescription>
             {showPreflight ? 'Save your draft, then review its recipients and choose a launch time.' : 'Choose your audience and write the message you want them to receive.'}
           </DialogDescription>
@@ -598,10 +607,10 @@ export function CreateCampaignModal({ onClose, onCreated }: { onClose: () => voi
             }}
             disabled={!launchReady}
             pending={createMutation.isPending}
-            pendingLabel="Creating…"
+            pendingLabel="Saving…"
             leftIcon={showPreflight ? <FilePlus2 className="h-4 w-4" /> : undefined}
           >
-            {showPreflight ? 'Create draft' : 'Review'}
+            {showPreflight ? (draft ? 'Save draft' : 'Create draft') : 'Review'}
           </Button>
         </DialogFooter>
       </DialogContent>

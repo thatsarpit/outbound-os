@@ -8,75 +8,124 @@ or a backup.
 
 ## Docker (recommended)
 
-Needs Docker with Compose v2.
+Use Docker with the Compose v2 plugin. Run the command on the machine hosting
+Docker. On Windows, use WSL2 with Docker Desktop integration enabled.
 
-The published image supports Linux amd64 and arm64, including Docker Desktop
-on Apple Silicon. A Docker install does not need Node.js on the host. Windows
-users should run the commands in WSL2 with Docker Desktop integration enabled.
+    git clone https://github.com/thatsarpit/outbound-os.git
+    cd outbound-os
+    bash setup/install.sh
 
-```bash
-git clone https://github.com/thatsarpit/outbound-os.git
-cd outbound-os
-cp .env.example .env
-```
+The installer asks for your admin email, builds the current checkout, starts
+it on loopback, and opens a hidden password prompt. Node.js runs in Docker.
+When it finishes, open the printed sign-in address and follow the app's
+setup wizard. Use the same command again to resume after a failed build or
+interrupted password setup. On a VPS, open the sign-in address through an SSH
+port forward or the HTTPS proxy below.
 
-Edit `.env` and set at least `ADMIN_EMAIL` (and `BUSINESS_NAME`,
-`BUSINESS_TIMEZONE` while you are there). Leave `JWT_SECRET` and
-`LEAD_SYNC_ENCRYPTION_KEY` blank: they are generated on first boot.
+Optional settings for a new install:
 
-```bash
-docker compose up -d
-docker compose ps
-docker compose logs app | grep "First admin"   # generated password, if you set none
-```
+    bash setup/install.sh --email admin@example.com --business "Your business" --timezone Asia/Kolkata --port 3001
 
-Open <http://localhost:3001> and sign in. Change the password under
-**Account**.
+A release that supports guided setup can be selected with
+`--version RELEASE` (omit the leading v). The installer saves its image
+digest in `.env`. New flags are only accepted before the settings are saved.
+In a noninteractive terminal, the installer prints the command for setting
+the first password and exits until that step is complete. Enter the password
+at the private server terminal. Keep credentials out of arguments and chats.
 
-Before connecting WhatsApp, put the app behind HTTPS on a public hostname
-(Caddy, Nginx or a Cloudflare Tunnel all work). Meta will not deliver webhooks
-to `http://` or `localhost`.
+### Publish through HTTPS
 
-Compose publishes the app port on all host interfaces. On a public server,
-restrict that port in the host/cloud firewall and expose HTTPS through your
-proxy. Configure `TRUST_PROXY` for that proxy's actual topology. Do not expose
-an unencrypted sign-in endpoint to the internet.
+On a VPS you can pass `--public-url https://crm.example.com` on first setup.
+Point a host reverse proxy or tunnel at the printed loopback port. Configure
+DNS, a trusted certificate and the correct `TRUST_PROXY` for your topology.
+Then run `bash setup/install.sh --check` to verify health over HTTPS. That
+check covers reachability. Confirm sign-in and provider webhook validation
+before enabling channels. A proxy running in Docker can reach the app over
+a shared Docker network. Its own loopback points at the proxy container.
+
+### Existing and manual Docker setups
+
+Keep the existing `.env` and named volumes. The guided installer declines
+existing configurations it did not create. For manual setup, copy
+`.env.example` to `.env`, set `ADMIN_EMAIL`, then run
+`docker compose up -d`. Supply the first password privately through the
+deployment environment or set it from a private terminal:
+
+    docker compose exec app npm run reset-password -- admin@example.com
+
+You can change your password under **Account**. Password changes and terminal
+resets end older local sessions.
+
+When upgrading to this Compose file, the app and optional MCP ports default
+to loopback. A reverse proxy on the host can keep using those ports. For an
+existing protected network topology that requires another bind address, set
+`OUTBOUNDOS_BIND_ADDRESS` or `OUTBOUNDOS_MCP_BIND_ADDRESS` deliberately.
+Keep unencrypted sign-in off public interfaces.
 
 ## Build from source and upgrade
 
-Compose normally uses the published image; a source checkout alone does not
-mean you are running that checkout. For a deliberate local source build:
+Before upgrading, verify a recovery set using the [backup and restore
+guide](backups.md). Retain the old image alongside the recovery set.
+Restore the pre-upgrade recovery set before starting an older image. Save
+any records you need from after the upgrade before rolling back.
 
-```bash
-docker compose up -d --build --pull never
-```
+- **Guided source build.** Save the current image under a separate local tag,
+  update the checkout and run `docker compose up -d --build --pull never app`.
+- **Guided registry install.** Get `compose-images.env` from the successful
+  [Docker images workflow](https://github.com/thatsarpit/outbound-os/actions/workflows/docker-publish.yml)
+  for the release. Copy `OUTBOUNDOS_APP_IMAGE` into
+  the existing `.env`. If MCP is enabled, copy `OUTBOUNDOS_MCP_IMAGE` as well
+  and include `--profile mcp` in the Compose commands. Keep your existing
+  configuration and save the previous image references with the recovery set.
+- **Manual registry install.** Set `OUTBOUNDOS_VERSION` in `.env` to the release
+  tag without the leading v, then run `docker compose pull && docker compose up -d`.
 
-For a published release, pin `OUTBOUNDOS_VERSION` in `.env` to the release tag
-without the leading `v`. Before upgrading, create a backup:
-
-```bash
-docker compose exec app bash scripts/backup.sh
-docker compose cp app:/app/data/backups ./backups
-docker compose cp app:/app/data/instance-secrets.json ./instance-secrets.json
-```
-
-Keep both copies private and move them off the host. If you explicitly supplied
-`JWT_SECRET` and `LEAD_SYNC_ENCRYPTION_KEY`, preserve those in a separate secret
-backup instead; a generated secrets file may not exist. Retain the old image
-version and rehearse restoring into an isolated volume before a live upgrade.
-An older application image may be incompatible with an upgraded database.
+For a digest-based upgrade, pull the selected images before switching
+containers.
 
 ```bash
 docker compose pull
-docker compose up -d
-docker compose ps
-curl --fail http://localhost:3001/healthz
+docker compose up -d --no-build --pull never --wait --wait-timeout 150
 ```
+
+Check the app with `docker compose ps`. Guided installs can also run
+`bash setup/install.sh --check`. The Docker images workflow tests the exact
+app and MCP digests on Linux amd64 and arm64 before applying release tags.
+The rehearsal checks rollback with a copy of pre-upgrade data. It also exports
+an online backup from the candidate, boots its verified restore, reads a
+restored attachment and encrypted original, and runs an authenticated MCP
+status call against the restored API.
 
 Health verifies process/database readiness. Also sign in and check channel
 readiness and webhook verification before sending. Do not use customer
 outreach as an installation test. Validate a restore with automation disabled
 and provider credentials removed, so restored queues cannot send messages.
+
+Open the account menu and choose **About Outbound OS** to see the dashboard
+and server versions and their source commits. Include **Copy version details**
+when reporting an issue or checking a rollout. Source archives built without
+a recorded commit show a local build.
+
+After an approved test send, open **Delivery review** as a manager or admin.
+Compare **Queue scans** with the **Provider receipts** timestamps for WhatsApp
+or Brevo. A new receipt shows that the instance recorded provider feedback.
+If the provider shows a delivery update and you see no receipt for the test,
+check the webhook URL, credentials and provider logs. An unmatched
+receipt may arrive before its message is saved. Check the provider and
+conversation before retrying the message.
+
+Use **Pause outreach** in Delivery review to hold new automated submissions.
+The pause persists across restarts. Incoming replies and manual replies remain
+available, and provider requests already in progress can finish. When outreach
+resumes, due queues can send again. Review any interrupted running campaign
+before using **Resume campaign**.
+
+Update the API, dashboard and MCP together for the campaign launch review.
+Starting and scheduling a campaign now require the current token from
+**Campaign launch**. For MCP, request `launchReview: 1` from `campaign_leads`
+and use the returned token after operator approval. Schedules saved on this
+release pause for review if their recipient membership or destination changes
+before launch. Older schedules retain their existing approval behavior.
 
 ## Manual (development)
 
@@ -109,6 +158,36 @@ never simulated success.
 - **Lead sources** — Integrations → Webhooks. Pick a preset (website form,
   Facebook Lead Ads, external marketplaces, TradeIndia, JustDial, Engyne Cloud) or map
   your own fields.
+
+## WhatsApp sending limits
+
+Review both limits for each enabled WhatsApp sender before upgrading. The
+hourly limit covers the last 60 minutes. The daily limit follows the
+workspace time zone. A provider submission attempt consumes a slot even when
+the provider rejects it or the outcome is uncertain. Attempts include
+manual replies, templates, and attachments. Reactions and sign-in codes
+use their own controls. Restarting the app or resetting the old reporting
+counters does not clear the limits.
+
+A follow-up waits until a slot may be available. A campaign pauses with the
+remaining recipients pending. Resume it after checking sender capacity.
+Retry a quota-held attachment batch with the same request ID so files
+already accepted are not submitted again.
+
+The migration carries forward recent attempts with a sender and send
+evidence in Message history. Older submissions absent from that history
+cannot be counted. A backup taken before the migration can restore the
+old schema if you need to revert the release.
+
+## Review interrupted WhatsApp messages
+
+An interrupted follow-up that stopped during preparation can return to the
+queue. If submission may have started, Outbound OS holds the message as
+**Confirmation unknown**. Older interrupted messages without a recorded
+submission state are also held. Check the provider's message history before
+sending anything again. A later receipt can update the conversation when its
+provider message ID was saved. When periodic recovery is enabled, it checks active attempts once they have
+been idle for five minutes.
 
 ## Check an install
 

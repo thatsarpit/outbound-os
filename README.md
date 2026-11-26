@@ -153,28 +153,16 @@ one — and it works like a hosted form backend:
 
 ## Quick start (Docker)
 
-You need a machine with Docker. Start with 2 GB of memory for a small deployment and monitor usage.
-Intel and ARM images are published.
+Use Docker Engine with Compose v2. On Windows, run the installer in WSL2.
 
-```bash
-git clone https://github.com/thatsarpit/outbound-os.git
-cd outbound-os
-cp .env.example .env          # set ADMIN_EMAIL; everything else can wait
-docker compose up -d          # pulls the published image; nothing to build
-```
+    git clone https://github.com/thatsarpit/outbound-os.git
+    cd outbound-os
+    bash setup/install.sh
 
-Open <http://localhost:3001> and sign in as `ADMIN_EMAIL`. If you did not set
-`ADMIN_PASSWORD`, the first boot prints a generated one:
-
-```bash
-docker compose logs app | grep "First admin"
-```
-
-Then connect channels in **Settings → WhatsApp**, **Settings → Email** and
-**Integrations**. Nothing sends until you do.
-
-Put it behind HTTPS (Caddy, Nginx, Cloudflare Tunnel) before connecting
-WhatsApp: Meta only delivers webhooks to a public HTTPS address.
+The installer builds the checkout, asks for the first admin password without
+echoing it, and prints the sign-in address. Run the same command to resume.
+The [installation guide](setup/install.md) covers published images, HTTPS,
+existing installs and verified backups.
 
 ### Deploy on Render
 
@@ -182,10 +170,9 @@ WhatsApp: Meta only delivers webhooks to a public HTTPS address.
 
 The included `render.yaml` pulls the published image and mounts a persistent
 disk at `/app/data`. This requires a **paid service and disk**. Enter
-`ADMIN_EMAIL` when Render prompts, then open the service's HTTPS URL. In
-Render's **Logs**, search for `First admin created` to find the generated
-password; change it after signing in. Keep the disk attached when redeploying:
-both the SQLite database and generated credential keys live there. Pin a
+`ADMIN_EMAIL` and `ADMIN_PASSWORD` when Render prompts, then sign in at the
+service's HTTPS URL. Keep the disk attached when redeploying because it
+contains the database and instance keys. Pin a
 released image tag in your fork's Blueprint when you want controlled upgrades.
 The [install guide](https://outboundos.space/docs/install#render) has the steps.
 
@@ -203,16 +190,9 @@ docker compose cp app:/app/data/backups ./backups
 
 ### Updating
 
-```bash
-git pull
-docker compose pull && docker compose up -d
-```
-
-Compose runs the published images from GitHub Container Registry
-(`ghcr.io/thatsarpit/outbound-os`, amd64 and arm64). Pin a version with
-`OUTBOUNDOS_VERSION=0.3.0` in `.env`. Database migrations run automatically
-on start. Running your own changes? `docker compose up -d --build` builds
-from this folder instead.
+Verify a recovery set before updating. Use the [upgrade steps for your
+installation](setup/install.md#build-from-source-and-upgrade). The app applies
+database migrations when it starts.
 
 ---
 
@@ -245,7 +225,7 @@ list, with explanations, is in [`.env.example`](.env.example).
 
 | Setting | Default | What it does |
 |---|---|---|
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | generated | The first admin, created on first boot |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | `admin@example.com` / blank | First admin sign-in. With a blank password, set it from the server terminal. |
 | `AUTH_PROVIDER` | `local` | `local` = email + password; `clerk` = Clerk-hosted sign-in |
 | `BUSINESS_NAME`, `BUSINESS_WEBSITE`, … | — | Your identity in outgoing messages and emails |
 | `BUSINESS_TIMEZONE` | `UTC` | When "today" starts; daily limits and reports use it |

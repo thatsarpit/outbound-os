@@ -51,7 +51,7 @@ export async function api(method, path, opts = {}) {
     fetchOpts.body = JSON.stringify(opts.body);
   }
 
-  log.debug(`→ ${method} ${url.pathname}${url.search}`);
+  log.debug(`→ ${method} ${url.pathname}`);
   const res = await fetch(url, fetchOpts);
   const text = await res.text();
 

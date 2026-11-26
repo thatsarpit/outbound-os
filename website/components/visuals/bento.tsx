@@ -151,7 +151,7 @@ export function Bento() {
       <Tile
         className="bento__tile--wide bento__tile--night"
         title="An AI agent can run the desk"
-        body={`The MCP server gives Claude and other agents ${mcpToolCount} tools on your live CRM — with your approval on anything that sends.`}
+        body={`The MCP server gives Claude and other agents ${mcpToolCount} tools on your CRM. Personal connections can be read-only or include permission to change data.`}
         href="/mcp"
       >
         <div className="b-term">

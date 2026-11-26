@@ -6,6 +6,94 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+## [0.5.0] — 26 November 2026
+
+- Show confirmed outbound channels in each inbox row and keep the selected reply
+  channel explicit in the conversation.
+- Call a lead using the device’s dialer from a conversation or lead details.
+- Distinguish WhatsApp first contact and waiting for a reply from a window that
+  actually expired. Keep email composition independent.
+- Preserve mobile inbox filters and email reply context in links. Require the
+  original mailbox for a quoted email, and show email options in a dialog.
+- Improve keyboard navigation, expose an accessible order action, and require
+  a confirmation before starting a Google Sheets backfill.
+- Add opt-in Clerk workspaces in one Compose project with separate data
+  volumes and runtimes. See [workspace setup](docs/workspaces.md).
+- Add read-only, paginated inbox and follow-up triage tools to MCP.
+- Update Next.js to 16.4.5.
+
+- Update the Effect dependency used by Prisma to address GHSA-7589-6fvf-x4pw.
+- Filter Leads by recorded outbound acceptance independently of pipeline stage.
+- Restore a lead’s previous sales stage after an operator resumes its outreach.
+  Record pause and resume actions in Activity.
+- Rehearse an online recovery-set restore and authenticated MCP connectivity
+  before promoting Docker release images.
+- Report available space on the database volume and warn when it is nearly full.
+- Add a manager-controlled workspace outreach pause in Delivery review that
+  holds new automated submissions across the configured sending channels.
+- Require a current launch review for both immediate and scheduled campaigns,
+  and reject approvals after the draft or pending recipient set changes.
+- Edit and discard campaign drafts from the dashboard. Changing a draft’s
+  channel, audience filters or sender clears its prepared audience.
+- Keep keyboard focus inside open detail drawers and restore it when they close.
+- Cancel or reschedule email while it is still queued on desktop and mobile.
+- Open Delivery review email conversations with the original sender selected
+  and prompt the operator to choose if that sender is unavailable.
+- Test an intake payload from workspace setup without creating leads or sending
+  messages, and show sending verification alongside channel configuration.
+- Preview CSV mapping, duplicate counts and invalid records before importing
+  in the dashboard. Reject stale previews when the file or matching leads change.
+- Import email-only contacts. Skip email-only rows matching an existing
+  address while preserving the existing records and opt-outs.
+
+- Show the dashboard and server version and source revision under **About
+  Outbound OS**. Label development builds and check that Docker release tags
+  match the product version.
+
+- Show the latest WhatsApp and Brevo webhook receipts on file and counts of
+  unmatched receipts in Delivery review.
+
+- Show the last due-work scan for WhatsApp, email, iMessage and scheduled
+  campaigns. Delivery review flags queued messages five minutes past their
+  scheduled time, with a separate filter ordered by oldest scheduled time.
+
+- Add Delivery review for managers and admins. Filter queued, sending, failed
+  and unconfirmed attempts by channel and open the related conversation or
+  campaign for investigation. The legacy requeue action blocks attempts with
+  evidence of provider acceptance and protects against concurrent updates.
+
+- Keep formatting and attachments on scheduled inbox emails, reject invalid
+  dates and deduplicate retries of the same schedule request. Show queued
+  emails and failed or interrupted submissions in the conversation.
+
+- Resume workspace setup on desktop and mobile, including after opening
+  integrations, CSV import or Team. Preserve the checklist when an admin
+  skips a core step and show profile validation beside the affected input.
+- Give compiled dashboard files a separate request budget and cache
+  fingerprinted files to keep refreshes from interrupting setup.
+
+- Gate Docker release tags on fresh install, upgrade, rollback and MCP checks
+  on Linux amd64 and arm64. The release workflow records a matching app and
+  MCP digest pair for Compose upgrades.
+
+- Add guided Docker setup with a private first-password prompt and resumable
+  configuration. App and MCP ports default to loopback. Existing proxies
+  that depend on another bind address can set it explicitly.
+
+- Recover interrupted WhatsApp follow-ups using the saved submission state.
+  Preparation can return to the queue. Submission without a confirmed outcome
+  stays available for review in the conversation.
+
+- Enforce the WhatsApp sender's rolling hourly and workspace-day limits for
+  customer message attempts. Local quota holds defer follow-ups, pause
+  campaigns with pending recipients, and preserve attachment batch identity.
+
+- Set the first local admin password in deployment configuration or through the
+  server's reset command. Startup no longer generates a password for the logs.
+- Changing or resetting a local password ends older API and live-update
+  sessions. The dashboard keeps the new session after a password change.
+  Local users sign in again the first time they upgrade to this release.
+
 ## [0.4.0] — 25 October 2026
 
 Dashboard workflows, retained email and production sign-in repairs from #53,

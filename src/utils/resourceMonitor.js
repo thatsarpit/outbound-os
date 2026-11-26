@@ -4,7 +4,9 @@
  * Exposes metrics via /api/system/health and /api/system/resources
  */
 import os from 'os';
-import { execSync } from 'child_process';
+import path from 'node:path';
+import { statfsSync } from 'node:fs';
+import { sqliteDatabaseUrl } from '../../prisma/database-url.mjs';
 
 class ResourceMonitor {
   constructor() {
@@ -47,13 +49,20 @@ class ResourceMonitor {
     };
   }
 
-  // ── Disk snapshot (root partition) ─────────────────────────
+  // The database can live on a different mount from the container root.
   getDiskUsage() {
     try {
-      const out = execSync("df -m / | tail -1 | awk '{print $2,$3,$4,$5}'").toString().trim();
-      const [total, used, free, pct] = out.split(' ');
-      return { total: parseInt(total), used: parseInt(used), free: parseInt(free), percent: parseInt(pct) };
-    } catch { return { total: 0, used: 0, free: 0, percent: 0 }; }
+      const directory = path.dirname(sqliteDatabaseUrl().slice('file:'.length));
+      const { bsize, blocks, bfree, bavail } = statfsSync(directory);
+      const used = blocks - bfree;
+      const mib = count => Math.floor(count * bsize / 1024 ** 2);
+      return {
+        available: true, total: mib(blocks), used: mib(used), free: mib(bavail),
+        percent: used + bavail > 0 ? Math.ceil(100 * used / (used + bavail)) : 0,
+      };
+    } catch {
+      return { available: false, total: 0, used: 0, free: 0, percent: 0 };
+    }
   }
 
   // ── Full health snapshot ────────────────────────────────────

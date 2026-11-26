@@ -13,6 +13,7 @@ export interface LeadFilters {
   limit?: number
   hasQueuedMessages?: boolean
   status?: string
+  outreachHistory?: 'accepted' | 'no_acceptance'
   tier?: string
   source?: string
   tags?: string
@@ -96,6 +97,7 @@ export const leadsApi = {
     ),
 
   updateLead: (id: number, data: Partial<Lead>) => api.patch<Lead>(`/leads/${id}`, data),
+  setOutreachPaused: (id: number, outreachPaused: boolean) => api.patch<Lead>(`/leads/${id}`, { outreachPaused }),
 
   deleteLead: (id: number) => api.delete(`/leads/${id}`),
 

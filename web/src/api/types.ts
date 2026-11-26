@@ -232,6 +232,8 @@ export interface WhatsAppAccount {
   maxFollowups: number
   followupDelays: string
   messagesSentToday: number
+  hourlyUsed?: number
+  dailyUsed?: number
   /** Who delivers this account's messages. */
   provider: WhatsAppProvider
   providerLabel?: string
@@ -403,6 +405,7 @@ export interface ApiError {
   error: string
   code?: string
   details?: string
+  fields?: Record<string, string>
 }
 
 export interface AuthResponse {
@@ -545,6 +548,8 @@ export interface InboxThreadSummary {
   threadState?: InboxThreadState
   assignmentState?: 'assigned' | 'unassigned' | 'assigned_to_me'
   channel: InboxChannel
+  /** Outbound channels with at least one accepted send and no known failure for that send. */
+  outreachChannels?: InboxChannel[]
   threadKey: string
   subject: string | null
   senderDisplay: string | null
@@ -605,17 +610,27 @@ export interface InboxMessage {
   mediaFilename: string | null
 }
 
+export interface ScheduledInboxEmail {
+  id: number
+  emailSubject: string | null
+  scheduledAt: string | null
+  status: 'queued' | 'sending' | 'unconfirmed' | 'permanently_failed' | 'cancelled'
+  providerStatusReason: string | null
+}
+
 export interface InboxThreadDetail extends InboxThreadSummary {
   whatsappSession?: {
     accountId: number | null
     senderName: string | null
     senderPhone: string | null
+    recipientAvailable?: boolean
     isOpen: boolean
     expiresAt: string | null
     lastInboundAt: string | null
     reason: string
   }
   messages: InboxMessage[]
+  scheduledEmails?: ScheduledInboxEmail[]
   senderAccount: InboxSenderAccount | null
   availableSenderAccounts?: InboxSenderAccount[]
   threadStatus?: 'open' | 'waiting' | 'resolved' | 'archived'

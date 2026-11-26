@@ -1,5 +1,7 @@
+import { workspaceBase } from '@/lib/workspace-path'
 import { DeviceNotifications } from '@/components/notifications/device-notifications'
 import { ClerkPasskeys } from '@/components/auth/clerk-passkeys'
+import { AboutOutboundOS } from '@/components/account/about-outbound-os'
 import { Link, useLocation } from 'react-router-dom'
 import { useEffect, useState, type FormEvent } from 'react'
 import { useClerk, useReverification, useSession, useUser } from '@clerk/react'
@@ -8,6 +10,7 @@ import {
   ArrowUpRight,
   Bell,
   Check,
+  Info,
   Link2,
   LogOut,
   Monitor,
@@ -27,6 +30,7 @@ import { SectionCard } from '@/components/ui/section-card'
 import { Button } from '@/components/ui/button'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { localPasswordError, MIN_PASSWORD_LENGTH } from '../../../shared/localPassword.js'
 
 /**
  * Your own account.
@@ -69,6 +73,7 @@ const ACCOUNT_SECTIONS = [
   { id: 'notifications', label: 'Notifications', icon: Bell },
   { id: 'preferences', label: 'Preferences', icon: Moon },
   { id: 'access', label: 'Workspace access', icon: Link2 },
+  { id: 'about', label: 'About Outbound OS', icon: Info },
 ]
 
 export default function AccountPage() {
@@ -141,7 +146,11 @@ export default function AccountPage() {
             )}
           </div>
           <div id="notifications" className="scroll-mt-5">
-            <DeviceNotifications />
+            {workspaceBase
+              ? <SectionCard title="Device notifications">
+                  <p className="text-sm text-text-secondary">Conversation updates appear in the activity center while the dashboard is open.</p>
+                </SectionCard>
+              : <DeviceNotifications />}
           </div>
           <div id="preferences" className="scroll-mt-5">
             <SectionCard
@@ -204,6 +213,9 @@ export default function AccountPage() {
                 senders and domain connections belong in Integrations.
               </p>
             </SectionCard>
+          </div>
+          <div id="about" className="scroll-mt-5">
+            <AboutOutboundOS />
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-4">
             <div>
@@ -471,16 +483,22 @@ function ChangePasswordForm() {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [pending, setPending] = useState(false)
-  const tooShort = newPassword.length > 0 && newPassword.length < 10
+  const setFromLocal = useAuthStore((state) => state.setFromLocal)
+  const passwordError = localPasswordError(newPassword)
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault()
     setPending(true)
     try {
-      await api.post('/auth/change-password', { currentPassword, newPassword })
+      const session = await api.post<{
+        token: string
+        user: { id: number; name: string; email: string; role: string }
+      }>('/auth/change-password', { currentPassword, newPassword })
+      if (!session?.token || !session.user) throw new Error('Could not refresh your session. Sign in again.')
+      setFromLocal(session)
       setCurrentPassword('')
       setNewPassword('')
-      toast.success('Password changed')
+      toast.success('Password changed. Other sessions were signed out.')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not change the password')
     } finally {
@@ -501,7 +519,7 @@ function ChangePasswordForm() {
       </Field>
       <Field
         label="New password"
-        hint={tooShort ? 'Use at least 10 characters.' : 'At least 10 characters.'}
+        hint={newPassword && passwordError ? passwordError : `At least ${MIN_PASSWORD_LENGTH} characters.`}
       >
         <input
           className={inputClass}
@@ -517,7 +535,7 @@ function ChangePasswordForm() {
           size="sm"
           pending={pending}
           pendingLabel="Saving…"
-          disabled={!currentPassword || newPassword.length < 10}
+          disabled={!currentPassword || Boolean(passwordError)}
         >
           Change password
         </Button>

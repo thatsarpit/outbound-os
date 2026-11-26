@@ -118,7 +118,8 @@ export function registerCampaignTools(server) {
       catch (e) { return err(e.message); }
     });
   server.tool('campaign_leads', 'Read the actual populated campaign audience and per-recipient progress.',
-    { campaign_id: CampaignId, page: Page.optional(), limit: Limit.optional(), status: z.string().optional() },
+    { campaign_id: CampaignId, page: Page.optional(), limit: Limit.optional(), status: z.string().optional(),
+      launchReview: z.literal(1).optional().describe('Request a launch review token for the unfiltered pending audience.') },
     async ({ campaign_id, ...query }) => {
       try { const { data } = await get(`/api/campaigns/${campaign_id}/leads`, query); return ok(data); }
       catch (e) { return err(e.message); }
@@ -130,8 +131,8 @@ export function registerCampaignTools(server) {
       campaign_id: CampaignId,
       scheduledAt: z.string().describe('Future ISO timestamp including Z or UTC offset'),
       timezone: z.string().describe('IANA time zone used to display the scheduled instant'),
-      review: z.object({ updatedAt: z.string(), recipientCount: z.number().int().positive() }).optional()
-        .describe('Supply the campaignUpdatedAt and total from campaign_leads to reject changes since review.'),
+      reviewToken: z.string().regex(/^[a-f0-9]{64}$/)
+        .describe('Use launchReview.token from campaign_leads after the operator reviewed and approved the campaign.'),
     },
     async ({ campaign_id, ...body }) => {
       try { const { data } = await post(`/api/campaigns/${campaign_id}/schedule`, body); return ok(data); }
@@ -147,11 +148,12 @@ export function registerCampaignTools(server) {
   // ── start_campaign ──
   server.tool(
     'start_campaign',
-    'Start a campaign — begins sending messages to matched leads',
-    { campaign_id: CampaignId },
-    async ({ campaign_id }) => {
+    'Start a reviewed campaign after operator approval.',
+    { campaign_id: CampaignId, reviewToken: z.string().regex(/^[a-f0-9]{64}$/)
+      .describe('Use launchReview.token from campaign_leads after the operator approved the launch.') },
+    async ({ campaign_id, reviewToken }) => {
       try {
-        const { data } = await post(`/api/campaigns/${campaign_id}/start`);
+        const { data } = await post(`/api/campaigns/${campaign_id}/start`, { reviewToken });
         return ok(data);
       } catch (e) { return err(e.message); }
     },

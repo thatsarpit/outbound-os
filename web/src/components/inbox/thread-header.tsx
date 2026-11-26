@@ -1,4 +1,7 @@
 import { CheckCircle, Loader2, Mail, Phone, RotateCcw, User, UserPlus, X } from 'lucide-react'
+import { LeadCallLink } from '@/components/leads/lead-call-link'
+import { leadPhoneHref } from '../../../../shared/leadPhone.js'
+import type { ReactNode } from 'react'
 import type { InboxChannel, InboxThreadDetail } from '@/api/types'
 import { ChannelBadge } from './channel-badge'
 import { ThreadStatePill } from './thread-state-pill'
@@ -6,6 +9,7 @@ import { ThreadStatePill } from './thread-state-pill'
 export function ThreadHeader({
   thread,
   activeChannel,
+  actions,
   drawer = false,
   onClose,
   onResolve,
@@ -15,6 +19,7 @@ export function ThreadHeader({
 }: {
   thread?: InboxThreadDetail | null
   activeChannel: InboxChannel
+  actions?: ReactNode
   drawer?: boolean
   onClose?: () => void
   onResolve?: () => void
@@ -24,6 +29,12 @@ export function ThreadHeader({
 }) {
   const isResolved = thread?.threadState === 'resolved'
   const isUnassigned = thread?.assignmentState === 'unassigned'
+  const assignee = thread?.assignedMember?.name
+  const assignmentLabel = assignee
+    ? `Assigned to ${assignee}`
+    : thread?.assignedToId || thread?.assignedMemberKey
+      ? 'Assigned to a teammate'
+      : thread?.threadState === 'unassigned' ? null : 'Unassigned'
 
   return (
     <div className="shrink-0 border-b border-border px-4 py-3 sm:px-5">
@@ -38,11 +49,13 @@ export function ThreadHeader({
                 <h2 className="truncate text-sm font-semibold text-text-primary">
                   {thread?.leadName || thread?.name || 'Loading conversation'}
                 </h2>
-                <ChannelBadge channel={activeChannel} />
+                <span className="inline-flex items-center gap-1.5 text-[11px] text-text-muted">
+                  Reply via <ChannelBadge channel={activeChannel} />
+                </span>
                 {thread?.threadState && <ThreadStatePill state={thread.threadState} compact />}
               </div>
               <div className="mt-1 flex min-w-0 items-center gap-2 text-xs text-text-muted">
-                {thread?.leadMobile && !thread?.leadEmail && (
+                {thread?.leadMobile && leadPhoneHref(thread.leadMobile) && !thread.leadEmail && (
                   <span className="inline-flex min-w-0 items-center gap-1">
                     <Phone className="h-3.5 w-3.5" />
                     {thread.leadMobile}
@@ -67,19 +80,14 @@ export function ThreadHeader({
               </span>
             </p>
           )}
-          {thread && (
-            <p className="mt-2 truncate text-xs text-text-muted">
-              {thread.assignedMember?.name
-                ? `Assigned to ${thread.assignedMember.name}`
-                : thread.assignedToId
-                  ? 'Assigned to a teammate'
-                  : 'Unassigned'}
-            </p>
+          {thread && assignmentLabel && (
+            <p className="mt-2 truncate text-xs text-text-muted">{assignmentLabel}</p>
           )}
         </div>
 
         <div className="flex items-center justify-between gap-3 lg:justify-end">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <LeadCallLink phone={thread?.leadMobile} />
             {thread && (
               <>
                 {!isResolved && onResolve && (
@@ -132,6 +140,7 @@ export function ThreadHeader({
                 )}
               </>
             )}
+            {actions}
           </div>
           {drawer && onClose && (
             <button

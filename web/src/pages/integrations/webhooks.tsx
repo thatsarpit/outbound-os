@@ -1,3 +1,4 @@
+import { workspaceApiPath } from '@/lib/workspace-path'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
@@ -177,7 +178,7 @@ export default function WebhooksSection() {
                     ? 'Historical import URL · no outreach queued'
                     : 'Live inbound URL · outreach rules apply'}
                 </p>
-                <p className="break-all text-xs font-mono text-accent">{`/api/webhooks/${src.importSupplierId ? 'connector' : 'inbound'}/${src.source}`}</p>
+                <p className="break-all text-xs font-mono text-accent">{workspaceApiPath(`/webhooks/${src.importSupplierId ? 'connector' : 'inbound'}/${src.source}`)}</p>
               </div>
               {src.importSupplierId && (
                 <p className="mt-2 break-words [overflow-wrap:anywhere] text-xs text-text-muted">

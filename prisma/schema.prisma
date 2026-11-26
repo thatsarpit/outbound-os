@@ -71,6 +71,7 @@ model Lead {
   // Pipeline state
   status String @default("new")
   // new | wa_unavailable | wa_undelivered | contacted | replied | engaged | closed | paused
+  statusBeforePause String?
 
   // Agent assignment (which team member owns this lead)
   assignedToId Int? // FK to User.id — null = unassigned
@@ -240,6 +241,7 @@ model Message {
   // Email-specific fields
   emailSubject         String? // Subject line (email only)
   emailHtmlBody        String? // Rendered inline HTML retained by the async queue
+  emailAttachmentIds   String? // Ordered media library IDs for a queued email
   emailMessageId       String? // SMTP Message-ID for threading
   emailRecipient       String? // Normalized address at send time, independent of later lead edits
   emailInReplyTo       String? // In-Reply-To header for threading
@@ -259,7 +261,7 @@ model Message {
   providerDeliveryStatus String? // Accepted, temporary failure, delivery or tracked engagement; separate from send acceptance
   providerDeliveryAt   DateTime? // UTC occurrence time of the last applied delivery event
   emailDeliveryEvents  EmailDeliveryEvent[]
-  manualSendKey       String? @unique // Durable claim for manual WhatsApp sends; legacy inbound keys remain unchanged.
+  manualSendKey       String? @unique // Durable request identity for manual WhatsApp sends and scheduled inbox emails.
   idempotencyKey       String? // Client-supplied key preventing duplicate manual/API sends
   // Durable automation identity. Unlike provider/client idempotency keys this
   // is global across nullable account FKs, so a reboot can safely reconcile a
@@ -372,6 +374,7 @@ model Campaign {
   scheduledAt      DateTime?
   scheduleTimezone String?
   scheduleError    String?
+  reviewedAudienceHash String?
   startedAt        DateTime?
   completedAt      DateTime?
   createdAt        DateTime  @default(now())
@@ -470,11 +473,8 @@ model WhatsAppAccount {
   companyUSP      String @default("")
 
   // ── Per-Account Rate Limits ──
-  // Conservative defaults — looks human, protects account warmth.
-  // hourlyLimit:    2/hour (hard cap 3) so 5 sends spread across the day
-  // dailyLimit:     20/day total ceiling (initial + follow-ups + replies)
-  // newLeadsPerDay: 5 NEW leads contacted per account per day (initial outreach budget;
-  //                 follow-ups to existing leads do NOT count against this)
+  // Hourly and daily limits apply to customer message attempts.
+  // New-lead counts remain separate routing statistics.
   hourlyLimit    Int @default(2)
   dailyLimit     Int @default(20)
   newLeadsPerDay Int @default(5)
@@ -483,7 +483,7 @@ model WhatsAppAccount {
   maxFollowups   Int    @default(5)
   followupDelays String @default("[0,240,1440,2880,4320]") // JSON array in minutes
 
-  // ── Counters (reset at midnight IST by resetDailyCounters) ──
+  // Legacy reporting counters. Dispatch limits use WhatsAppDispatch.
   messagesSentToday      Int      @default(0)
   newLeadsContactedToday Int      @default(0)
   lastResetAt            DateTime @default(now())
@@ -494,6 +494,17 @@ model WhatsAppAccount {
 
   // Lead pool connections (many-to-many)
   leadPools LeadPoolWhatsApp[]
+  dispatches WhatsAppDispatch[]
+}
+
+model WhatsAppDispatch {
+  id          Int             @id @default(autoincrement())
+  accountId   Int
+  attemptedAt DateTime
+  account     WhatsAppAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, attemptedAt])
+  @@index([attemptedAt])
 }
 
 model SystemConfig {

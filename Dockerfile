@@ -2,7 +2,7 @@
 # The dashboard is static files, identical on every CPU, so it is built on the
 # build machine's own platform — multi-arch images then emulate only stage 2.
 FROM --platform=$BUILDPLATFORM node:24-slim AS web-builder
-WORKDIR /web
+WORKDIR /app/web
 COPY web/package*.json ./
 RUN npm ci
 # CACHE_BUST is set by CI to the commit SHA so every push produces a unique
@@ -12,8 +12,11 @@ RUN npm ci
 ARG CACHE_BUST=local
 RUN echo "Web build cache bust: $CACHE_BUST"
 COPY web/ ./
-COPY shared/ /shared/
-RUN npm run build
+COPY VERSION /app/VERSION
+COPY shared/ /app/shared/
+ARG OUTBOUNDOS_BUILD_REVISION
+ARG OUTBOUNDOS_RELEASE_TAG
+RUN printf '%s\n%s\n' "$OUTBOUNDOS_BUILD_REVISION" "$OUTBOUNDOS_RELEASE_TAG" > /app/.outboundos-build && npm run build
 
 # ── Stage 2: Production runtime ──────────────────────────────────────────────────
 FROM node:24-slim
@@ -23,7 +26,8 @@ LABEL org.opencontainers.image.title="Outbound OS" \
       org.opencontainers.image.source="https://github.com/thatsarpit/outbound-os" \
       org.opencontainers.image.url="https://outboundos.space" \
       org.opencontainers.image.documentation="https://outboundos.space/docs/install" \
-      org.opencontainers.image.licenses="AGPL-3.0-only"
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      space.outboundos.guided-install="1"
 
 # SQLite for the database, curl for the healthcheck, openssl for Prisma.
 RUN apt-get update && apt-get install -y \
@@ -56,7 +60,8 @@ COPY shared ./shared
 COPY scripts ./scripts
 
 # Copy the pre-built React dashboard from the builder stage
-COPY --from=web-builder /web/dist ./web/dist
+COPY --from=web-builder /app/web/dist ./web/dist
+COPY --from=web-builder /app/VERSION /app/.outboundos-build ./
 
 # Create runtime dirs and hand ownership to the non-root user
 RUN mkdir -p logs backups data && \
@@ -78,4 +83,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
 # pull the new image, restart, and the schema follows. `migrate deploy` only
 # applies migrations already committed in prisma/migrations, never generates
 # new ones, and is a no-op when the database is current.
-CMD ["sh", "-c", "npx prisma migrate deploy && exec node src/index.js"]
+CMD ["sh", "-c", "node src/bootstrapEnv.js && npx prisma migrate deploy && exec node src/index.js"]

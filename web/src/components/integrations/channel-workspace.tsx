@@ -1,9 +1,12 @@
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/stores/auth-store'
 import { cn } from '@/lib/utils'
 
 export function ChannelWorkspace({ channel }: { channel: 'email' | 'whatsapp' }) {
   const canConfigure = useAuthStore((state) => state.hasCapability('page.settings'))
+  const fromSetup = new URLSearchParams(useLocation().search).get('setup')
+  const setupSearch =
+    fromSetup === 'channels' || fromSetup === 'sources' ? `?setup=${fromSetup}` : ''
   const base = `/integrations/${channel}`
   const configuration = channel === 'email' ? 'defaults' : 'configure'
   return (
@@ -11,7 +14,7 @@ export function ChannelWorkspace({ channel }: { channel: 'email' | 'whatsapp' })
       <nav aria-label={`${channel} sections`} className="flex gap-5 border-b border-border">
         <NavLink
           end
-          to={base}
+          to={base + setupSearch}
           className={({ isActive }) =>
             cn(
               'border-b-2 pb-2 text-[13px]',
@@ -25,7 +28,7 @@ export function ChannelWorkspace({ channel }: { channel: 'email' | 'whatsapp' })
         </NavLink>
         {canConfigure && (
           <NavLink
-            to={`${base}/${configuration}`}
+            to={`${base}/${configuration}${setupSearch}`}
             className={({ isActive }) =>
               cn(
                 'border-b-2 pb-2 text-[13px]',

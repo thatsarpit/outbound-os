@@ -1,3 +1,5 @@
+import { isOutreachPaused, OUTREACH_PAUSED } from './outreachPause.js';
+import { recordQueueScan } from './queueHealth.js';
 /**
  * iMessage Service via BlueBubbles Server
  *
@@ -307,7 +309,7 @@ class IMessageService {
    * @param {number|null} accountId — specific IMessageAccount to use (null = auto)
    * @returns {{ success: boolean, messageId?: string, accountId?: number, reason?: string }}
    */
-  async sendMessage(phone, text, accountId = null, { deferCounters = false } = {}) {
+  async sendMessage(phone, text, accountId = null, { deferCounters = false, automated = false } = {}) {
     let account = null;
     let sendStartedAt = new Date();
     try {
@@ -347,6 +349,7 @@ class IMessageService {
       };
 
       const url = buildBlueBubblesApiUrl(account.serverUrl, '/api/v1/message/text', password);
+      if (automated && await isOutreachPaused()) return { success: false, reason: OUTREACH_PAUSED };
       sendStartedAt = new Date();
       const res = await fetch(url, {
         method: 'POST',
@@ -429,7 +432,9 @@ class IMessageService {
       take: Array.isArray(messageIds) ? Math.max(1, messageIds.length) : 10,
     });
 
+    if (!Array.isArray(messageIds)) await recordQueueScan('imessage');
     for (const message of pending) {
+      if (await isOutreachPaused()) break;
       const claimed = await prisma.message.updateMany({
         where: { id: message.id, status: 'queued' }, data: { status: 'sending' },
       });
@@ -451,7 +456,14 @@ class IMessageService {
             });
           }
         }
-        const result = await this.sendMessage(lead.mobile, message.content, sendAccountId, { deferCounters: true });
+        const result = await this.sendMessage(lead.mobile, message.content, sendAccountId, { deferCounters: true, automated: true });
+        if (result.reason === OUTREACH_PAUSED) {
+          await prisma.message.updateMany({
+            where: { id: message.id, status: 'sending' },
+            data: { status: 'queued', providerStatusReason: OUTREACH_PAUSED },
+          });
+          break;
+        }
         if (result.success) {
           const updated = await prisma.message.updateMany({
             where: { id: message.id, status: { in: ['sending', 'queued'] } },

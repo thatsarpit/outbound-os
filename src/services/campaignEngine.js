@@ -1,3 +1,4 @@
+import { whatsappQuotaMessage } from './whatsappDispatch.js';
 import { campaignFilter } from '../utils/campaignFilter.js';
 import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
 import { refreshCampaignMetrics, readCampaignMetrics } from './campaignMetrics.js';
@@ -13,6 +14,8 @@ import { randomDelay, isBusinessHours } from '../utils/delay.js';
 import { whatsappAddress } from '../utils/whatsappAddress.js';
 import { whatsappSession } from '../utils/whatsappSession.js';
 import { reconcileMetaReceipts } from './whatsappDelivery.js';
+import { isOutreachPaused, OUTREACH_PAUSED } from './outreachPause.js';
+import { campaignLaunchReview, requireCampaignLaunchReview } from './campaignLaunchReview.js';
 import {
   campaignChannels, campaignChannelEligibility, campaignSenderId, hasAllLeadTags,
 } from '../utils/campaignAudience.js';
@@ -161,32 +164,48 @@ export class CampaignEngine {
       .replace(/\{\{quantity\}\}/gi, () => lead.quantity || '').trim();
   }
 
-  async startCampaign(campaignId, { expectedSchedule } = {}) {
-    const campaign = await this.db.campaign.findUnique({ where: { id: campaignId } });
+  async startCampaign(campaignId, options) {
+    const { campaign, pending } = await this.db.$transaction(tx => this._claimCampaign(tx, campaignId, options));
+    this._executeCampaign(campaign).catch((error) => logger.error(`Campaign ${campaignId}: ${error.message}`));
+    return { status: 'running', pending };
+  }
+
+  async _claimCampaign(db, campaignId, { expectedSchedule, requireReview = false, reviewToken } = {}) {
+    const campaign = await db.campaign.findUnique({ where: { id: campaignId } });
     if (!campaign) throw new Error('Campaign not found');
     if (!['draft', 'paused', 'scheduled'].includes(campaign.status)) throw new Error('Campaign is not startable');
     if (campaign.status === 'scheduled' && (!expectedSchedule || !campaign.scheduledAt || campaign.scheduledAt > new Date())) {
       throw Object.assign(new Error('Cancel the schedule before starting manually.'), { statusCode: 409 });
     }
+    if (await isOutreachPaused(db)) {
+      throw Object.assign(new Error('Workspace outreach is paused. Resume outreach before starting a campaign.'), { statusCode: 409, reason: OUTREACH_PAUSED });
+    }
     if (!this.businessHours()) throw Object.assign(new Error('Outside configured sending hours. Resume during the sending window.'), { statusCode: 409, reason: 'outside_business_hours' });
+    if (requireReview) await requireCampaignLaunchReview(db, campaign, reviewToken);
+    if (expectedSchedule && campaign.reviewedAudienceHash) {
+      const { audienceHash } = await campaignLaunchReview(db, campaign);
+      if (audienceHash !== campaign.reviewedAudienceHash) {
+        throw Object.assign(new Error('The scheduled audience changed. Review the recipients and choose a new launch time.'), { statusCode: 409 });
+      }
+    }
     const filter = campaignFilter(campaign.targetFilter);
-    if (filter.limit && await this.db.campaignLead.count({ where: { campaignId } }) > filter.limit) {
+    if (filter.limit && await db.campaignLead.count({ where: { campaignId } }) > filter.limit) {
       throw Object.assign(new Error('Populated audience exceeds the campaign limit. Create a correctly capped draft before sending.'), { statusCode: 409, reason: 'audience_limit_exceeded' });
     }
-    const pending = await this.db.campaignLead.count({ where: { campaignId, status: 'pending' } });
+    const pending = await db.campaignLead.count({ where: { campaignId, status: 'pending' } });
     if (!pending) throw Object.assign(new Error('There are no pending recipients to send.'), { statusCode: 409 });
-    const updated = await this.db.campaign.updateMany({
+    const updated = await db.campaign.updateMany({
       where: { id: campaignId, status: campaign.status, updatedAt: campaign.updatedAt,
         ...(expectedSchedule ? { status: 'scheduled', scheduledAt: expectedSchedule.scheduledAt, updatedAt: expectedSchedule.updatedAt } : {}) },
       data: { status: 'running', startedAt: new Date(), completedAt: null, scheduleError: null },
     });
     if (!updated.count) throw new Error('Campaign already running or changed');
-    this._executeCampaign(campaign).catch((error) => logger.error(`Campaign ${campaignId}: ${error.message}`));
-    return { status: 'running', pending };
+    return { campaign, pending };
   }
 
   /** Re-read after any previous recipient/channel's delay, and again after staging a message. */
   async _dispatchContext(campaign, leadId, channel) {
+    if (await isOutreachPaused(this.db)) return { halt: true, reason: OUTREACH_PAUSED };
     const current = await this.db.campaign.findUnique({ where: { id: campaign.id } });
     if (!current || current.status !== 'running') return { halt: true, reason: 'campaign_not_running' };
     if (!this.businessHours()) return { halt: true, reason: 'outside_business_hours' };
@@ -209,6 +228,7 @@ export class CampaignEngine {
       where: { campaignId: campaign.id, status: 'pending' }, orderBy: { id: 'asc' },
     });
     let billingBlocked = false;
+    let quotaBlocked = null;
     try {
       for (const recipient of pending) {
         const claim = await this.db.campaignLead.updateMany({
@@ -244,7 +264,11 @@ export class CampaignEngine {
             if (context.halt) { halted = true; break; }
             if (!context.lead) { reasons.push(`${channel}:${context.reason}`); continue; }
             const result = await this._sendChannel(campaign, context.lead, channel, body, subject);
-            if (result.halt) { halted = true; break; }
+            if (result.halt) {
+              halted = true;
+              if (whatsappQuotaMessage(result.reason)) quotaBlocked = result;
+              break;
+            }
             if (result.success) {
               accepted++;
               // Publish acceptance before the delay so an immediate reply can
@@ -287,7 +311,8 @@ export class CampaignEngine {
         where: { id: campaign.id },
         data: { status: unfinished || billingBlocked ? 'paused' : 'completed',
           completedAt: unfinished || billingBlocked ? null : new Date(),
-          ...(billingBlocked ? { scheduleError: 'The provider rejected payment. Check the sending account balance before resuming.' } : {}) },
+          ...(billingBlocked ? { scheduleError: 'The provider rejected payment. Check the sending account balance before resuming.' } : {}),
+          ...(quotaBlocked ? { scheduleError: `${whatsappQuotaMessage(quotaBlocked.reason)} Resume the campaign when capacity is available.` } : {}) },
       });
       await refreshCampaignMetrics(this.db, campaign.id);
     } catch (error) {
@@ -352,20 +377,29 @@ export class CampaignEngine {
       if (channel === 'email') {
         result = await this.email.sendEmail({ leadId: lead.id, accountId,
           subject: this.personalizeMessage(subjectTemplate || `Re: ${live.lead.product || 'Your inquiry'}`, live.lead),
-          body: liveBody, htmlBody: liveBody.includes('<') ? liveBody : null, existingMessageId: message.id });
+          body: liveBody, htmlBody: liveBody.includes('<') ? liveBody : null, existingMessageId: message.id, automated: true });
       } else if (channel === 'whatsapp') {
+        const beforeSubmit = async () => !await isOutreachPaused(this.db);
         result = campaign.waCampaignName
           ? await this.whatsapp.sendCampaignTemplate(whatsappAddress(live.lead), campaign.waCampaignName,
-            templateParams, accountId, { poolId: live.lead.poolId, source: 'campaign' })
-          : await this.whatsapp.sendMessage(whatsappAddress(live.lead), liveBody, accountId, { poolId: live.lead.poolId });
+            templateParams, accountId, { poolId: live.lead.poolId, source: 'campaign', beforeSubmit })
+          : await this.whatsapp.sendMessage(whatsappAddress(live.lead), liveBody, accountId, { poolId: live.lead.poolId, beforeSubmit });
+        if (result.reason === 'dispatch_cancelled') result = { success: false, reason: OUTREACH_PAUSED };
       } else {
-        result = await this.imessage.sendMessage(live.lead.mobile, liveBody, live.lead.assignedIMessageAccountId || undefined);
+        result = await this.imessage.sendMessage(live.lead.mobile, liveBody, live.lead.assignedIMessageAccountId || undefined, { automated: true });
       }
     } catch (error) {
       logger.error(`Campaign ${campaign.id} ${channel} request confirmation unknown: ${error.message}`);
       result = { success: false, reason: 'confirmation_unknown' };
     }
     const reason = result.reason || result.error || 'send_failed';
+    if (reason === OUTREACH_PAUSED || whatsappQuotaMessage(reason)) {
+      // A local denial made no provider request. Resume can try this channel
+      // again without replaying any other channel already accepted.
+      await this.db.message.updateMany({ where: { id: message.id, status: 'sending' },
+        data: { status: 'cancelled', providerStatusReason: reason } });
+      return { halt: true, reason };
+    }
     const status = result.success ? 'sent' : UNCERTAIN.has(reason) ? 'unconfirmed' : 'failed';
     await this.db.message.update({ where: { id: message.id }, data: {
       content: liveBody,

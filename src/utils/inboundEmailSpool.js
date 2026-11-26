@@ -64,6 +64,13 @@ export class InboundEmailSpool {
     const decipher = createDecipheriv('aes-256-gcm', this._key(), encrypted.subarray(5, 17));
     decipher.setAAD(Buffer.from(dedupeKey));
     decipher.setAuthTag(encrypted.subarray(17, 33));
-    return Buffer.concat([decipher.update(encrypted.subarray(33)), decipher.final()]);
+    const plaintext = decipher.update(encrypted.subarray(33));
+    let final;
+    try {
+      final = decipher.final();
+    } catch (error) {
+      throw new Error('Could not authenticate the encrypted email original. Check the instance key and backup integrity.', { cause: error });
+    }
+    return Buffer.concat([plaintext, final]);
   }
 }

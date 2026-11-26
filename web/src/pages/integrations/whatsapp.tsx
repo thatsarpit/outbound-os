@@ -79,7 +79,7 @@ export default function WhatsAppSection() {
         <InfoTile
           label="Daily send counter"
           value={`${totalToday}`}
-          detail="Rate-limit counters across all senders"
+          detail="Messages sent across all senders"
         />
         <InfoTile
           label="Accounts"
@@ -102,7 +102,7 @@ export default function WhatsAppSection() {
             onClick={() => resetMutation.mutate()}
             leftIcon={<RefreshCw className="w-3.5 h-3.5" />}
           >
-            Reset Counters
+            Reset Legacy Counters
           </Button>
           <Button
             size="sm"

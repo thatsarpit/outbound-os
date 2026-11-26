@@ -1,5 +1,6 @@
 #!/bin/bash
-# backup.sh — SQLite hot backup for Outbound OS
+# backup.sh — legacy database and inbound-originals snapshot
+# For a checked instance backup, use npm run backup:instance.
 # Run via cron: 0 2 * * * /home/user/outbound-os/scripts/backup.sh
 # Keeps 7 daily backups automatically.
 
@@ -81,5 +82,6 @@ if [ "$BACKUP_COUNT" -gt "$MAX_BACKUPS" ]; then
   echo "🗑  Pruned old backups (kept $MAX_BACKUPS)"
 fi
 
-echo "📦 Backup complete: $BACKUP_DIR"
+echo "📦 Database snapshot complete: $BACKUP_DIR"
+echo "This snapshot excludes media and keys. Use npm run backup:instance for recovery."
 ls -lh "$BACKUP_DIR"/*.db.gz 2>/dev/null | awk '{print $5, $9}'

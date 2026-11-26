@@ -1,19 +1,27 @@
 import type { ApiError } from './types'
 import { getSessionToken, useAuthStore } from '@/stores/auth-store'
 
-const API_BASE = '/api'
+import { workspaceApiPath } from '@/lib/workspace-path'
 
 export class ApiClientError extends Error {
   status: number
   code?: string
   details?: string
+  fields?: Record<string, string>
 
-  constructor(message: string, status: number, code?: string, details?: string) {
+  constructor(
+    message: string,
+    status: number,
+    code?: string,
+    details?: string,
+    fields?: Record<string, string>,
+  ) {
     super(message)
     this.name = 'ApiClientError'
     this.status = status
     this.code = code
     this.details = details
+    this.fields = fields
   }
 }
 
@@ -32,7 +40,7 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
     headers['Content-Type'] = 'application/json'
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  const response = await fetch(`${workspaceApiPath(endpoint)}`, {
     ...options,
     headers,
   })
@@ -65,7 +73,13 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
 
   if (!response.ok) {
     const err = data as ApiError
-    throw new ApiClientError(err.error || 'Request failed', response.status, err.code, err.details)
+    throw new ApiClientError(
+      err.error || 'Request failed',
+      response.status,
+      err.code,
+      err.details,
+      err.fields,
+    )
   }
 
   return data as T
@@ -74,7 +88,7 @@ export async function apiFetch<T>(endpoint: string, options: RequestInit = {}): 
 /** A file behind authentication, as a Blob (images, voice notes, PDFs). */
 export async function apiFetchBlob(endpoint: string, signal?: AbortSignal): Promise<Blob> {
   const token = await getSessionToken()
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  const response = await fetch(`${workspaceApiPath(endpoint)}`, {
     signal,
     cache: 'no-store',
     headers: token ? { Authorization: `Bearer ${token}` } : {},

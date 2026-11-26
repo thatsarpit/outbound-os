@@ -140,7 +140,7 @@ export function InstallBand({
             </pre>
             <p className="terminal__done">
               <CircleCheck size={15} aria-hidden="true" />
-              Open http://localhost:3001 and sign in
+              Set your password and open the printed sign-in URL
             </p>
           </div>
         </div>

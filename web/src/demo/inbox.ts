@@ -1,6 +1,8 @@
+import { hasConfirmedOutreach } from '../../../shared/inboxOutreach.js'
+import type { DeliveryReviewFilter, DeliveryReviewItem, QueueWorkerStatus, ReceiptActivity } from '@/api/endpoints/inbox'
 import { queryClient } from '@/lib/query-client'
 import { notificationActions } from '@/stores/notification-store'
-import type { InboxChannel, InboxMessage, InboxSenderAccount, Lead } from '@/api/types'
+import type { InboxChannel, InboxMessage, InboxSenderAccount, Lead, ScheduledInboxEmail } from '@/api/types'
 
 /**
  * A working inbox for the demo, held in memory.
@@ -229,8 +231,27 @@ const DRAWING_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="480" height=
 </svg>`
 
 const files = new Map<number, Blob>()
+const scheduledEmails = new Map<number, ScheduledInboxEmail[]>()
+const scheduleRequests = new Map<string, ScheduledInboxEmail>()
+
+for (const thread of THREADS.filter((row) => row.channel === 'email')) {
+  scheduledEmails.set(thread.leadId, [
+    {
+      id: ++nextId,
+      emailSubject: 'Re: Updated shipping estimate',
+      status: 'queued',
+      scheduledAt: new Date(Date.now() + 86_400_000).toISOString(),
+      providerStatusReason: null,
+    },
+  ])
+}
 
 const MESSAGES: InboxMessage[] = [
+  message(1, 'outbound', 110, 'I emailed the specification sheet for your enquiry.', {
+    channel: 'email', subject: 'Specification sheet', senderAccountId: 2,
+    senderDisplay: SENDERS.email.senderName, emailAccountId: 2, waAccount: null,
+    status: 'sent',
+  }),
   message(
     1,
     'outbound',
@@ -287,6 +308,10 @@ const MESSAGES: InboxMessage[] = [
   ),
   message(3, 'inbound', 122, 'Perfect, shipping docs received. We will confirm payment on Monday.'),
 
+  message(4, 'outbound', 200, 'Thanks for your enquiry. Let me know when you are free to discuss delivery.', {
+    channel: 'whatsapp', waAccount: 1, senderAccountId: 1, status: 'sent',
+    senderDisplay: SENDERS.whatsapp.senderName,
+  }),
   message(
     4,
     'inbound',
@@ -362,11 +387,14 @@ function demoSession(leadId: number) {
   const expiresAt = last
     ? new Date(Date.parse(last.sentAt || last.createdAt) + 24 * 60 * 60_000).toISOString()
     : null
+  const isOpen = Boolean(expiresAt && Date.parse(expiresAt) > Date.now())
   return {
     accountId: 1,
     lastInboundAt: last?.sentAt || null,
     expiresAt,
-    isOpen: Boolean(expiresAt && Date.parse(expiresAt) > Date.now()),
+    isOpen,
+    reason: isOpen ? 'open' : last ? 'expired' : 'no_customer_message',
+    recipientAvailable: Boolean(THREADS.find(thread => thread.leadId === leadId)?.leadMobile),
     senderName: 'Acme Sales',
     senderPhone: '+1 555 010 0000',
   }
@@ -381,6 +409,7 @@ function summary(thread: Thread) {
     last?.mediaType && !last.mediaCaption ? `[${last.mediaFilename}]` : (last?.content ?? '')
   return {
     ...thread,
+    outreachChannels: [...new Set(own.filter(hasConfirmedOutreach).map(message => message.channel))],
     name: thread.leadName,
     senderDisplay:
       thread.channel === 'email'
@@ -470,6 +499,20 @@ export async function handleInboxRequest(
 ): Promise<Response | null> {
   const method = (init?.method || 'GET').toUpperCase()
   const path = new URL(url, window.location.origin)
+  const emailAction = path.pathname.match(/^\/api\/inbox\/threads\/(\d+)\/scheduled-emails\/(\d+)$/)
+  if (emailAction && (method === 'PATCH' || method === 'DELETE')) {
+    const email = scheduledEmails.get(Number(emailAction[1]))?.find(row => row.id === Number(emailAction[2]))
+    if (!email || email.status !== 'queued') return Response.json({ error: 'This sample email is no longer queued.' }, { status: 409 })
+    if (method === 'DELETE') {
+      email.status = 'cancelled'
+      email.providerStatusReason = 'scheduled_email_cancelled_by_operator'
+    } else {
+      const { scheduledAt } = JSON.parse(String(init?.body ?? '{}'))
+      if (!(Date.parse(scheduledAt) > Date.now())) return Response.json({ error: 'Choose a future time.' }, { status: 400 })
+      email.scheduledAt = scheduledAt
+    }
+    return Response.json({ success: true })
+  }
 
   const members = [
     {
@@ -584,6 +627,83 @@ export async function handleInboxRequest(
   if (/\/api\/whatsapp\/accounts\/\d+\/templates$/.test(path.pathname))
     return json({ ok: true, templates: APPROVED_TEMPLATES })
 
+  if (path.pathname === '/api/messages/review' && method === 'GET') {
+    const status = path.searchParams.get('status') ?? 'attention'
+    const channel = path.searchParams.get('channel')
+    const review: DeliveryReviewItem[] = [
+      {
+        id: 90601,
+        leadId: 1,
+        leadName: THREADS[0].leadName,
+        campaignId: null,
+        channel: 'whatsapp',
+        status: 'unconfirmed',
+        detail: 'Check the sending provider’s history before sending again.',
+        providerCode: null,
+        updatedAt: ago(12),
+        scheduledAt: null,
+      },
+      {
+        id: 90602,
+        leadId: 2,
+        leadName: THREADS[1].leadName,
+        campaignId: null,
+        channel: 'email',
+        status: 'bounced',
+        detail: 'The email provider reported a hard bounce. Check the address and its suppression status.',
+        providerCode: null,
+        updatedAt: ago(27),
+        scheduledAt: null,
+      },
+    ]
+    for (const [leadId, emails] of scheduledEmails.entries()) {
+      const thread = THREADS.find((row) => row.leadId === leadId)
+      if (!thread) continue
+      for (const row of emails) {
+        review.push({
+          id: row.id, leadId, leadName: thread.leadName, campaignId: null, channel: 'email',
+          status: 'queued', detail: 'Waiting for the queue worker.', providerCode: null,
+          updatedAt: ago(0), scheduledAt: row.scheduledAt,
+        })
+      }
+    }
+    review.push({
+      id: 90603,
+      leadId: 2,
+      leadName: THREADS[1].leadName,
+      campaignId: null,
+      channel: 'email',
+      status: 'queued',
+      detail: 'Waiting for the queue worker.',
+      providerCode: null,
+      updatedAt: ago(18),
+      scheduledAt: ago(12),
+      overdue: true,
+    })
+    const matchesChannel = review.filter(row => !channel || row.channel === channel)
+    const groups: Record<DeliveryReviewFilter, DeliveryReviewItem[]> = {
+      failed: matchesChannel.filter(row => row.status === 'bounced'),
+      unconfirmed: matchesChannel.filter(row => row.status === 'unconfirmed'),
+      attention: matchesChannel.filter(row => row.status === 'unconfirmed' || row.status === 'bounced'),
+      queued: matchesChannel.filter(row => row.status === 'queued'),
+      overdue: matchesChannel.filter(row => row.overdue),
+      sending: [],
+    }
+    const items = groups[status as DeliveryReviewFilter] || []
+    const counts = Object.fromEntries(Object.entries(groups).map(([filter, rows]) => [filter, rows.length]))
+    const workers: QueueWorkerStatus[] = [
+      { worker: 'whatsapp', intervalMinutes: 2, lastScanAt: ago(1), state: 'recent' },
+      { worker: 'email', intervalMinutes: 2, lastScanAt: ago(12), state: 'stale' },
+      { worker: 'imessage', intervalMinutes: 1, lastScanAt: null, state: 'not_recorded' },
+      { worker: 'campaigns', intervalMinutes: 1, lastScanAt: ago(1), state: 'recent' },
+    ]
+    const receiptActivity: ReceiptActivity[] = [
+      { source: 'whatsapp', lastReceivedAt: ago(4), unmatched: 2 },
+      { source: 'brevo', lastReceivedAt: null, unmatched: 0 },
+    ]
+    return json({ items: items.slice(0, 25), counts, total: items.length, page: 1, pages: 1, workers, receiptActivity, overdueGraceMinutes: 5 })
+  }
+
   if (path.pathname.endsWith('/api/inbox/senders')) {
     return json(Object.values(SENDERS))
   }
@@ -625,6 +745,7 @@ export async function handleInboxRequest(
       whatsappSession: demoSession(thread.leadId),
       status: thread.threadState,
       messages: MESSAGES.filter((m) => m.leadId === thread.leadId),
+      scheduledEmails: scheduledEmails.get(thread.leadId) || [],
       senderAccount: SENDERS[thread.channel],
       availableSenderAccounts: [SENDERS[thread.channel]],
     })
@@ -635,7 +756,7 @@ export async function handleInboxRequest(
     const state = path.searchParams.get('state')
     const search = (path.searchParams.get('search') || '').toLowerCase()
     const threads = THREADS.map(summary)
-      .filter((t) => !channel || t.channel === channel)
+      .filter(t => !channel || MESSAGES.some(m => m.leadId === t.leadId && m.channel === channel))
       .filter(
         (t) => path.searchParams.get('assigned') !== 'false' || t.assignmentState === 'unassigned',
       )
@@ -679,7 +800,7 @@ export async function handleInboxRequest(
       : String(body.text ?? body.body ?? '').trim()
     if (body.channel === 'whatsapp' && !approved && !demoSession(thread.leadId).isOpen)
       return json(
-        { error: 'The 24-hour reply window is closed. Choose an approved template.' },
+        { error: 'WhatsApp requires an approved template for this message.' },
         409,
       )
     if (text.includes('[demo-fail]'))
@@ -687,6 +808,25 @@ export async function handleInboxRequest(
         success: false,
         error: 'Sample provider rejected this send. Your draft is still here.',
       })
+    if (body.scheduledAt != null) {
+      const scheduledAt = String(body.scheduledAt)
+      if (body.channel !== 'email' || !(Date.parse(scheduledAt) > Date.now()) || !text) {
+        return json({ error: 'Enter an email and choose a future date and time.' }, 400)
+      }
+      const key = body.clientMessageId ? `${thread.leadId}:${body.clientMessageId}` : null
+      const previous = key && scheduleRequests.get(key)
+      if (previous) return json({ success: true, scheduled: true, message: previous })
+      const email: ScheduledInboxEmail = {
+        id: ++nextId,
+        emailSubject: String(body.subject || 'No subject'),
+        status: 'queued',
+        scheduledAt,
+        providerStatusReason: null,
+      }
+      scheduledEmails.set(thread.leadId, [email, ...(scheduledEmails.get(thread.leadId) || [])])
+      if (key) scheduleRequests.set(key, email)
+      return json({ success: true, scheduled: true, scheduledAt, message: email })
+    }
     const attachmentIds = Array.isArray(body.attachmentIds) ? (body.attachmentIds as number[]) : []
     const sent: InboxMessage[] = []
 

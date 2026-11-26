@@ -14,6 +14,8 @@ export const MCP_READ_OPERATIONS = Object.freeze({
   get_lead: /^\/api\/leads\/[1-9]\d*$/,
   lead_timeline: /^\/api\/leads\/[1-9]\d*\/timeline$/,
   list_messages: /^\/api\/leads\/[1-9]\d*\/messages$/,
+  list_inbox_threads: /^\/api\/inbox\/threads$/,
+  list_follow_up_tasks: /^\/api\/tasks$/,
   list_media_files: /^\/api\/media$/,
   system_status: /^\/api\/system\/status$/,
   whatsapp_accounts: /^\/api\/whatsapp\/accounts$/,

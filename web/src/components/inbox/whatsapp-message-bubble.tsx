@@ -136,12 +136,14 @@ export function MessageBubble({
                 className="rounded-md bg-warning-muted px-3 py-2 text-xs leading-5 text-warning"
               >
                 {reason === 're_engagement_required'
-                  ? 'Not delivered: the 24-hour reply window closed. Use an approved template and wait for a customer reply.'
+                  ? 'Not delivered. WhatsApp required an approved template for this message.'
                   : reason === 'thread_not_owned'
                     ? 'Not delivered. Your administrator needs to reconnect this conversation. See Message info.'
-                    : message.status === 'unconfirmed' || message.status === 'sending'
-                      ? 'Delivery is unconfirmed. Check this attempt before sending again; it may already have reached Meta.'
-                      : `Not delivered${reason ? `: ${reason.replace(/_/g, ' ')}` : '. The provider did not supply a stored reason.'}`}
+                    : message.status === 'unconfirmed' && message.channel === 'whatsapp'
+                      ? 'WhatsApp may have received this message. Check your provider’s history before sending it again.'
+                      : message.status === 'unconfirmed' || message.status === 'sending'
+                        ? 'Delivery is unconfirmed. Check this attempt before sending again.'
+                        : `Not delivered${reason ? `: ${reason.replace(/_/g, ' ')}` : '. The provider did not supply a stored reason.'}`}
               </p>
             )}
           </div>

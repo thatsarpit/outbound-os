@@ -3,6 +3,8 @@ import 'dotenv/config';
 
 import prisma from '../src/utils/prismaClient.js';
 import { hashPassword } from '../src/auth/rbac.js';
+import { localPasswordError } from '../shared/localPassword.js';
+import { readLocalPassword } from './read-local-password.mjs';
 
 const VALID_ROLES = new Set(['admin', 'manager', 'agent', 'viewer']);
 
@@ -66,12 +68,12 @@ function usage() {
   console.log(`
 Usage:
   node scripts/admin-user.mjs list
-  node scripts/admin-user.mjs upsert --email <email> [--password <password>] [--name <name>] [--role <role>] [--enable|--disable] [--set-report-recipient] [--dry-run]
+  node scripts/admin-user.mjs upsert --email <email> [--password-stdin] [--name <name>] [--role <role>] [--enable|--disable] [--set-report-recipient] [--dry-run]
 
 Examples:
   node scripts/admin-user.mjs list
-  node scripts/admin-user.mjs upsert --email admin@example.com --password "..." --name "Admin" --role admin --set-report-recipient
-  node scripts/admin-user.mjs upsert --email ops@example.com --password "..." --admin
+  node scripts/admin-user.mjs upsert --email admin@example.com --password-stdin --name "Admin" --role admin --set-report-recipient
+  node scripts/admin-user.mjs upsert --email ops@example.com --password-stdin --admin
 `);
 }
 
@@ -113,10 +115,10 @@ async function upsertUser(args) {
   const role = resolveRole(args, existing?.role || 'agent');
   const enabled = resolveEnabled(args, existing?.enabled ?? true);
   const name = String(args.name || args['full-name'] || existing?.name || deriveName(email)).trim();
-  const password = String(args.password || '');
-
-  if (!existing && !password) {
-    throw new Error('Creating a new user requires --password');
+  const reset = args['password-stdin'] === true || args.password !== undefined;
+  if (!existing && !reset) throw new Error('Creating a new user requires --password-stdin');
+  if (args['password-stdin'] && args.password !== undefined) {
+    throw new Error('Use either --password-stdin or --password.');
   }
 
   const nextValues = {
@@ -124,7 +126,7 @@ async function upsertUser(args) {
     name,
     role,
     enabled,
-    willResetPassword: Boolean(password),
+    willResetPassword: reset,
     setReportRecipient: Boolean(args['set-report-recipient']),
   };
 
@@ -144,7 +146,13 @@ async function upsertUser(args) {
   }
 
   const data = { name, role, enabled };
-  if (password) data.passwordHash = hashPassword(password);
+  if (reset) {
+    const password = args['password-stdin'] === true
+      ? await readLocalPassword(`New password for ${email}: `) : args.password;
+    const error = localPasswordError(password);
+    if (error) throw new Error(error);
+    data.passwordHash = hashPassword(password);
+  }
 
   const user = existing
     ? await prisma.user.update({
@@ -153,7 +161,7 @@ async function upsertUser(args) {
       select: { id: true, email: true, name: true, role: true, enabled: true, lastLoginAt: true },
     })
     : await prisma.user.create({
-      data: { email, ...data, passwordHash: hashPassword(password) },
+      data: { email, ...data },
       select: { id: true, email: true, name: true, role: true, enabled: true, lastLoginAt: true },
     });
 

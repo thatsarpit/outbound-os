@@ -2,6 +2,7 @@ import { useDashboardNotifications } from '@/hooks/use-dashboard-notifications'
 import { Suspense, lazy, useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { QueryClientProvider } from '@tanstack/react-query'
+import { workspaceBase } from '@/lib/workspace-path'
 import { queryClient } from '@/lib/query-client'
 import { useAuthStore } from '@/stores/auth-store'
 import { MobileShell } from '@/components/mobile/mobile-shell'
@@ -18,6 +19,7 @@ const MobileInstallPage = lazy(() => import('@/pages/mobile/install'))
 
 /* ── Page imports ── */
 const LoginPage = lazy(() => import('@/pages/login'))
+const DeliveryReviewPage = lazy(() => import('@/pages/delivery-review'))
 const SetupPage = lazy(() => import('@/pages/setup'))
 const IntegrationCataloguePage = lazy(() => import('@/pages/integrations/catalogue'))
 const OverviewPage = lazy(() => import('@/pages/overview'))
@@ -134,30 +136,41 @@ const PAGE_ROUTES: Array<{ path: string; element: React.ReactNode }> = [
   { path: 'activity', element: <ActivityPage /> },
   { path: 'account', element: <AccountPage /> },
   { path: 'setup', element: <SetupPage /> },
+  { path: 'delivery', element: <DeliveryReviewPage /> },
 ]
 
 const pageRoutes = () =>
   PAGE_ROUTES.map((r) => <Route key={r.path} path={r.path} element={r.element} />)
+
+function PrimaryChannel({ children }: { children: React.ReactNode }) {
+  if (!workspaceBase) return children
+  return (
+    <section className="space-y-4 rounded-lg border border-border bg-surface p-5">
+      <h2 className="text-base font-semibold">Channel setup</h2>
+      <p className="text-sm text-text-secondary">This workspace supports CSV imports and website enquiries. Channel connections need a dedicated provider callback for this workspace.</p>
+    </section>
+  )
+}
 
 const configurationRoutes = () => (
   <>
     <Route path="integrations" element={<IntegrationsLayout />}>
       <Route index element={<Navigate to="all" replace />} />
       <Route path="all" element={<IntegrationCataloguePage />} />
-      <Route path="whatsapp" element={<ChannelWorkspace channel="whatsapp" />}>
+      <Route path="whatsapp" element={<PrimaryChannel><ChannelWorkspace channel="whatsapp" /></PrimaryChannel>}>
         <Route index element={<WhatsAppIntegrationPage />} />
         <Route path="configure" element={<WhatsAppSettingsPage />} />
       </Route>
-      <Route path="email" element={<ChannelWorkspace channel="email" />}>
+      <Route path="email" element={<PrimaryChannel><ChannelWorkspace channel="email" /></PrimaryChannel>}>
         <Route index element={<EmailIntegrationPage />} />
         <Route path="defaults" element={<EmailSettingsPage />} />
       </Route>
-      <Route path="imessage" element={<IMessageIntegrationPage />} />
-      <Route path="telegram" element={<TelegramIntegrationPage />} />
+      <Route path="imessage" element={<PrimaryChannel><IMessageIntegrationPage /></PrimaryChannel>} />
+      <Route path="telegram" element={<PrimaryChannel><TelegramIntegrationPage /></PrimaryChannel>} />
       <Route path="webhooks" element={<WebhooksIntegrationPage />} />
       <Route path="sheets" element={<SheetsIntegrationPage />} />
-      <Route path="mcp" element={<McpIntegrationPage />} />
-      <Route path="mcp/authorize" element={<McpAuthorizePage />} />
+      <Route path="mcp" element={<PrimaryChannel><McpIntegrationPage /></PrimaryChannel>} />
+      <Route path="mcp/authorize" element={<PrimaryChannel><McpAuthorizePage /></PrimaryChannel>} />
     </Route>
     <Route path="channels" element={<Navigate to="/integrations" replace />} />
     <Route path="settings" element={<SettingsLayout />}>
@@ -175,7 +188,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider delayDuration={150}>
-        <BrowserRouter>
+        <BrowserRouter basename={workspaceBase || undefined}>
           <AuthInit>
             <Suspense fallback={<FullPageLoader />}>
               <Routes>

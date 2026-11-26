@@ -1,4 +1,5 @@
 import { useAuthStore } from '@/stores/auth-store'
+import { localPasswordError, MIN_PASSWORD_LENGTH } from '../../../shared/localPassword.js'
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
@@ -422,6 +423,8 @@ function UserFormModal({ user, onClose }: { user: TeamUser | null; onClose: () =
     phone: user?.phone || '',
   })
 
+  const passwordError = form.password || !isEdit ? localPasswordError(form.password) : null
+
   const mutation = useMutation({
     mutationFn: (data: typeof form) =>
       isEdit
@@ -502,6 +505,8 @@ function UserFormModal({ user, onClose }: { user: TeamUser | null; onClose: () =
             label={isEdit ? 'New Password (optional)' : 'Password'}
             required={!isEdit}
             type="password"
+            error={form.password ? passwordError ?? undefined : undefined}
+            placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}
           />
@@ -537,7 +542,7 @@ function UserFormModal({ user, onClose }: { user: TeamUser | null; onClose: () =
           </Button>
           <Button
             onClick={() => mutation.mutate(form)}
-            disabled={!form.name || (!isEdit && (!form.email || !form.password))}
+            disabled={!form.name || (!isEdit && !form.email) || Boolean(passwordError)}
             isLoading={mutation.isPending}
           >
             {isEdit ? 'Save' : 'Create'}

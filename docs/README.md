@@ -11,4 +11,5 @@
 - [Email accounts from the command line](EMAIL_CLI_RUNBOOK.md)
 
 - [Dashboard](dashboard.md)
+- [Multiple workspaces on one server](workspaces.md)
 - [Mobile sales workspace](mobile-sales.md)

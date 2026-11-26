@@ -31,6 +31,7 @@ const ROLE_LEVELS = { viewer: 0, agent: 1, manager: 2, admin: 3 };
 
 /** Mount once, near the top of the middleware chain, before any route. */
 export { clerkMiddleware };
+export const clerkSession = req => getAuth(req);
 
 /**
  * Same contract as rbac.js's requireRole: returns Express middleware that

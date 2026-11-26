@@ -1,69 +1,54 @@
-import { useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check, X } from 'lucide-react'
-import { onboardingApi } from '@/api/endpoints/onboarding'
+import { onboardingApi, onboardingStatusQuery } from '@/api/endpoints/onboarding'
 import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/stores/auth-store'
 import { cn } from '@/lib/utils'
 
-const FIRST_RUN_KEY = 'outboundos_setup_prompted'
-
-/**
- * "Finish setting up" on the overview, for admins, until setup is finished or
- * dismissed. The very first time an admin lands on a workspace with no
- * business name, they are taken to the setup wizard once per browser session;
- * after that the checklist is the reminder, never a trap.
- */
+/** A reminder for admins who leave setup with core steps unfinished. */
 export function SetupChecklist() {
-  const isAdmin = useAuthStore((state) => state.user?.role === 'admin')
-  const navigate = useNavigate()
+  const canSetUp = useAuthStore(
+    (state) => state.user?.role === 'admin' && state.hasCapability('page.settings'),
+  )
   const queryClient = useQueryClient()
-
-  const { data: status } = useQuery({
-    queryKey: ['onboarding-status'],
-    queryFn: () => onboardingApi.status(),
-    enabled: isAdmin,
-    meta: { silent: true },
-  })
-
-  useEffect(() => {
-    if (!status?.steps || status.dismissed || status.steps.profile) return
-    let prompted: boolean
-    try {
-      prompted = sessionStorage.getItem(FIRST_RUN_KEY) === '1'
-      sessionStorage.setItem(FIRST_RUN_KEY, '1')
-    } catch {
-      prompted = true
-    }
-    if (!prompted) navigate('/setup')
-  }, [status, navigate])
+  const { data: status } = useQuery({ ...onboardingStatusQuery, enabled: canSetUp })
 
   const dismiss = useMutation({
     mutationFn: () => onboardingApi.dismiss(true),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['onboarding-status'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: onboardingStatusQuery.queryKey }),
   })
 
-  // Missing steps means an older server or an unexpected reply: show nothing
-  // rather than take the whole overview down with it.
-  if (!isAdmin || !status?.steps || status.dismissed) return null
+  if (!canSetUp || !status || status.dismissed || status.complete) return null
 
   const items = [
     { done: status.steps.profile, label: 'Add your business details', to: '/setup?step=business' },
-    { done: status.steps.channel, label: 'Connect WhatsApp, email or another channel', to: '/setup?step=channels' },
-    { done: status.steps.leadSource, label: 'Connect a lead source or import leads', to: '/setup?step=sources' },
-    { done: status.steps.team, label: 'Add your team', to: '/setup?step=team' },
+    {
+      done: status.steps.channel,
+      label: 'Connect WhatsApp, email or another channel',
+      to: '/setup?step=channels',
+    },
+    {
+      done: status.steps.leadSource,
+      label: 'Connect a lead source or import leads',
+      to: '/setup?step=sources',
+    },
+    { done: status.steps.team, label: 'Add your team (optional)', to: '/setup?step=team' },
   ]
-  const doneCount = items.filter((item) => item.done).length
+  const requiredDone = items.slice(0, 3).filter((item) => item.done).length
 
   return (
-    <section className="rounded-lg border border-border bg-surface p-4 sm:p-5" aria-label="Finish setting up">
+    <section
+      className="rounded-lg border border-border bg-surface p-4 sm:p-5"
+      aria-label="Finish setting up"
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2 className="text-sm font-semibold tracking-tight text-text-primary">Finish setting up</h2>
+          <h2 className="text-sm font-semibold tracking-tight text-text-primary">
+            Finish setting up
+          </h2>
           <p className="mt-0.5 text-[12px] text-text-secondary">
-            {doneCount} of {items.length} done. Leads are contacted automatically once a channel
-            and a source are connected.
+            {requiredDone} of 3 core steps complete. You can pick up where you left off.
           </p>
         </div>
         <Button
@@ -92,7 +77,9 @@ export function SetupChecklist() {
               >
                 {item.done && <Check className="h-3 w-3" />}
               </span>
-              <span className={cn(item.done ? 'text-text-muted line-through' : 'text-text-primary')}>
+              <span
+                className={cn(item.done ? 'text-text-muted line-through' : 'text-text-primary')}
+              >
                 {item.label}
               </span>
             </Link>

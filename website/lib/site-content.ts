@@ -237,6 +237,5 @@ export const legalNav = [
 export const installCommands = [
   'git clone https://github.com/thatsarpit/outbound-os.git',
   'cd outbound-os',
-  'cp .env.example .env',
-  'docker compose up -d',
+  'bash setup/install.sh',
 ] as const

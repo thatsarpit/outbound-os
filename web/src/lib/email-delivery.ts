@@ -1,4 +1,4 @@
-import type { InboxMessage } from '@/api/types'
+import type { InboxMessage, InboxThreadDetail } from '@/api/types'
 
 export function describeEmailDelivery(
   message: Pick<InboxMessage, 'status' | 'providerDeliveryStatus' | 'emailInboundKind'>,
@@ -56,4 +56,29 @@ export function isReplyableEmail(
       (message.status !== 'partial' &&
         (!message.emailInboundKind || message.emailInboundKind === 'human')))
   )
+}
+
+/** A reply context belongs to its mailbox. An unavailable original sender
+ * requires an explicit choice before composing with another identity. */
+export function inboxEmailContext(
+  thread: Pick<InboxThreadDetail, 'messages' | 'assignedEmailAccountId' | 'senderAccount' | 'availableSenderAccounts'> | null | undefined,
+  requestedAccountId: number | null,
+) {
+  const messages = thread?.messages.slice().reverse() ?? []
+  const replyable = (message: InboxMessage) => isReplyableEmail(message) &&
+    Boolean(message.emailMessageId && message.emailAccountId) &&
+    (message.direction === 'inbound' || ['sent', 'delivered', 'read'].includes(message.status))
+  const original = messages.find(replyable)
+  const permitted = thread?.availableSenderAccounts ?? []
+  const preferred = requestedAccountId ?? original?.emailAccountId ?? thread?.assignedEmailAccountId ??
+    thread?.senderAccount?.id ?? permitted[0]?.id ?? null
+  const sender = permitted.find(account => account.id === preferred)
+  return {
+    sender,
+    accountId: sender?.id ?? null,
+    unavailableSender: preferred !== null && !sender && Boolean(thread),
+    latestEmail: sender
+      ? messages.find(message => message.emailAccountId === sender.id && replyable(message))
+      : undefined,
+  }
 }

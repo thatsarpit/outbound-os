@@ -1,3 +1,4 @@
+import { LeadCallLink } from './lead-call-link'
 /** The lead detail drawer. Extracted from leads.tsx. */
 import { useState, useEffect } from 'react'
 import { useAuthStore } from '@/stores/auth-store'
@@ -195,7 +196,7 @@ export function LeadDetailDrawer({
 
   return (
     <>
-      <DrawerShell onClose={onClose} panelClassName="lg:max-w-lg">
+      <DrawerShell title={lead.name} onClose={onClose} panelClassName="lg:max-w-lg">
         <div className="relative flex flex-1 flex-col overflow-hidden">
           {/* Header */}
           <div className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-surface/95 px-4 py-4 backdrop-blur-md sm:px-6">
@@ -334,6 +335,7 @@ export function LeadDetailDrawer({
                           </p>
                         )}
                     </div>
+                    <LeadCallLink phone={lead.mobile} />
                   </div>
                   {lead.waUsername && (
                     <div className="flex items-center gap-3 text-sm">
@@ -380,12 +382,13 @@ export function LeadDetailDrawer({
                         </p>
                         <p className="mt-1 text-sm text-text-secondary">
                           {automationAction.isPaused
-                            ? 'Resume to return this lead to the outbound queue.'
+                            ? 'Resume to restore the lead’s previous sales stage. Sending still depends on eligibility.'
                             : 'Pause to stop automated follow-ups while the team handles it manually.'}
                         </p>
                       </div>
                       <button
                         type="button"
+                        aria-label={automationAction.label}
                         onClick={() => onToggleAutomation(lead)}
                         disabled={!canEdit || automationPending}
                         className={cn(

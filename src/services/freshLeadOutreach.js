@@ -1,3 +1,4 @@
+import { isOutreachPaused } from './outreachPause.js';
 import prisma from '../utils/prismaClient.js';
 import config from '../config.js';
 import logger from '../utils/logger.js';
@@ -288,6 +289,8 @@ class FreshLeadOutreach {
       const existing = await findOrAdoptExisting(liveLead.id, 'telegram', key);
       if (existing) {
         summary.telegram = 'already_sent';
+      } else if (await isOutreachPaused()) {
+        summary.telegram = 'paused';
       } else {
         try {
           const { default: telegramService } = await import('./telegram.js');
@@ -295,23 +298,28 @@ class FreshLeadOutreach {
           const result = await telegramService.sendMessage({
             peer: liveLead.telegramPeer,
             message: text,
+            automated: true,
           });
-          await createIdempotently({
-            leadId: liveLead.id,
-            direction: 'outbound',
-            channel: 'telegram',
-            content: text,
-            waAccount: 0,
-            telegramAccountId: result.accountId,
-            telegramMessageId: result.messageId || null,
-            templateVariant: FRESH_LEAD_VARIANT,
-            automationKey: key,
-            // Terminal on purpose: nothing polls Telegram rows, so anything
-            // left 'queued' would never be picked up again.
-            status: 'sent',
-            sentAt: result.sentAt || new Date(),
-          });
-          summary.telegram = 'sent';
+          if (result.paused) {
+            summary.telegram = 'paused';
+          } else {
+            await createIdempotently({
+              leadId: liveLead.id,
+              direction: 'outbound',
+              channel: 'telegram',
+              content: text,
+              waAccount: 0,
+              telegramAccountId: result.accountId,
+              telegramMessageId: result.messageId || null,
+              templateVariant: FRESH_LEAD_VARIANT,
+              automationKey: key,
+              // Terminal on purpose: nothing polls Telegram rows, so anything
+              // left 'queued' would never be picked up again.
+              status: 'sent',
+              sentAt: result.sentAt || new Date(),
+            });
+            summary.telegram = 'sent';
+          }
         } catch (error) {
           logger.warn(`Fresh lead ${liveLead.id}: Telegram send failed - ${error.message}`);
           summary.telegram = 'failed';

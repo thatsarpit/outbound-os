@@ -1,47 +1,40 @@
 #!/usr/bin/env node
-/**
- * Reset a dashboard user's password.
- *
- * Reads the new password from stdin rather than argv so it never lands in
- * shell history or a process listing.
- *
- *   node scripts/reset-password.mjs admin@example.com
- */
 import 'dotenv/config';
+
 import prisma from '../src/utils/prismaClient.js';
-import { hashPassword } from './../src/auth/rbac.js';
-import readline from 'node:readline';
+import { hashPassword } from '../src/auth/rbac.js';
+import { localPasswordError } from '../shared/localPassword.js';
+import { readLocalPassword } from './read-local-password.mjs';
 
-const email = process.argv[2];
-if (!email) {
-  console.error('usage: node scripts/reset-password.mjs <email>');
-  process.exit(1);
-}
-
-const user = await prisma.user.findFirst({ where: { email } });
-if (!user) {
-  console.error(`No user with email ${email}`);
+try {
+  const [address, mode, ...extra] = process.argv.slice(2);
+  const email = address?.trim().toLowerCase();
+  if (!email || extra.length || (mode && !['--initial', '--status'].includes(mode))) {
+    throw new Error('Usage: npm run reset-password -- <email> [--initial|--status]');
+  }
+  const user = await prisma.user.findUnique({
+    where: { email },
+    select: { id: true, role: true, enabled: true, passwordHash: true },
+  });
+  if (!user) throw new Error(`No local user with email ${email}.`);
+  if (mode && (!user.enabled || user.role !== 'admin')) throw new Error('This account is not an enabled local admin.');
+  if (mode === '--status') {
+    console.log(user.passwordHash ? 'configured' : 'needs-password');
+  } else {
+    if (mode === '--initial' && user.passwordHash) throw new Error('The first password is already set. Sign in with it or use the regular reset command.');
+    const password = await readLocalPassword(`New password for ${email}: `);
+    const error = localPasswordError(password);
+    if (error) throw new Error(error);
+    const updated = await prisma.user.updateMany({
+      where: { id: user.id, ...(mode === '--initial' ? { enabled: true, role: 'admin', passwordHash: '' } : {}) },
+      data: { passwordHash: hashPassword(password) },
+    });
+    if (updated.count !== 1) throw new Error('The account changed while setting the password. Review the account and try again.');
+    console.log(`Password updated for ${email}. Previous local sessions are signed out.`);
+  }
+} catch (error) {
+  console.error(error.message);
+  process.exitCode = 1;
+} finally {
   await prisma.$disconnect();
-  process.exit(1);
 }
-
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-const ask = (q) => new Promise((r) => rl.question(q, r));
-
-// Hide the typed characters.
-const mute = () => { rl.output.write = () => {}; };
-process.stdout.write(`New password for ${email}: `);
-mute();
-const pw = (await ask('')).trim();
-rl.close();
-process.stdout.write('\n');
-
-if (pw.length < 8) {
-  console.error('Password must be at least 8 characters.');
-  await prisma.$disconnect();
-  process.exit(1);
-}
-
-await prisma.user.update({ where: { id: user.id }, data: { passwordHash: hashPassword(pw) } });
-console.log(`Password updated for ${email} (${user.role}).`);
-await prisma.$disconnect();

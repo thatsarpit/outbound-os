@@ -5,13 +5,14 @@ import { cn } from '@/lib/utils'
 import { NAVIGATION_GROUPS } from '@/lib/navigation'
 import { PanelLeftClose, PanelLeftOpen, X } from 'lucide-react'
 import { BrandMark } from './brand-mark'
+import { DialogClose } from '@/components/ui/dialog'
 import { useQuery } from '@tanstack/react-query'
 import { systemApi } from '@/api/endpoints/system'
 
-export function Sidebar() {
+export function Sidebar({ mobile = false, onNavigate }: { mobile?: boolean; onNavigate?: () => void }) {
   const { hasCapability, dashboardScope, isManagerOrAbove } = useAuthStore()
   const canViewHealth = isManagerOrAbove()
-  const { sidebarCollapsed, isMobileViewport, toggleSidebar, setSidebarCollapsed } = useUIStore()
+  const { sidebarCollapsed, toggleSidebar } = useUIStore()
   const location = useLocation()
   const { data: health, isError: healthError } = useQuery({
     queryKey: ['system-health', dashboardScope],
@@ -34,17 +35,16 @@ export function Sidebar() {
             ? 'Needs attention'
             : 'Checking system'
 
-  // `sidebarCollapsed` does double duty: on desktop it means the icon rail, on
-  // mobile it means the drawer is closed (and the drawer is always full width).
-  const isRail = sidebarCollapsed && !isMobileViewport
+  const isRail = sidebarCollapsed && !mobile
 
   return (
     <aside
       className={cn(
-        'fixed inset-y-0 left-0 z-40 flex flex-col border-r border-border bg-surface',
-        'transition-[width,transform] duration-200 ease-out',
-        'w-60',
-        sidebarCollapsed ? '-translate-x-full lg:w-14 lg:translate-x-0' : 'translate-x-0',
+        'flex flex-col bg-surface',
+        mobile
+          ? 'h-full w-full pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]'
+          : cn('fixed inset-y-0 left-0 z-40 hidden border-r border-border lg:flex',
+              'transition-[width] duration-200 ease-out', isRail ? 'w-14' : 'w-60'),
       )}
     >
       {/* Brand */}
@@ -58,15 +58,10 @@ export function Sidebar() {
         {!isRail && (
           <>
             <span className="truncate text-sm font-semibold tracking-tight">Outbound OS</span>
-            {isMobileViewport && (
-              <button
-                type="button"
-                onClick={() => setSidebarCollapsed(true)}
-                aria-label="Close navigation"
-                className="ml-auto rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-raised hover:text-text-primary"
-              >
-                <X className="h-4 w-4" />
-              </button>
+            {mobile && (
+              <DialogClose aria-label="Close navigation" className="ml-auto grid size-11 place-items-center rounded-md text-text-secondary hover:bg-surface-raised focus-visible:ring-2 focus-visible:ring-focus">
+                <X className="h-4 w-4" aria-hidden="true" />
+              </DialogClose>
             )}
           </>
         )}
@@ -97,12 +92,11 @@ export function Sidebar() {
                       <li key={item.to}>
                         <NavLink
                           to={preview ? `/dev/shell${item.to}` : item.to}
-                          onClick={() => {
-                            if (isMobileViewport) setSidebarCollapsed(true)
-                          }}
+                          onClick={onNavigate}
                           aria-current={isActive ? 'page' : undefined}
                           className={cn(
-                            'relative flex h-8 items-center rounded-md text-[13px] transition-colors',
+                            'relative flex items-center rounded-md text-[13px] transition-colors',
+                            mobile ? 'min-h-11' : 'h-8',
                             isRail ? 'justify-center px-0' : 'gap-2.5 px-2',
                             isActive
                               ? 'bg-surface-raised font-medium text-text-primary'
@@ -155,23 +149,25 @@ export function Sidebar() {
             <span className="truncate">{healthLabel}</span>
           </span>
         )}
-        <button
-          type="button"
-          onClick={toggleSidebar}
-          aria-expanded={!sidebarCollapsed}
-          aria-label={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}
-          title={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}
-          className={cn(
-            'hidden rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-raised hover:text-text-primary lg:inline-flex',
-            !isRail && 'ml-auto',
-          )}
-        >
-          {sidebarCollapsed ? (
-            <PanelLeftOpen className="h-4 w-4" />
-          ) : (
-            <PanelLeftClose className="h-4 w-4" />
-          )}
-        </button>
+        {!mobile && (
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-expanded={!sidebarCollapsed}
+            aria-label={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+            title={sidebarCollapsed ? 'Expand navigation' : 'Collapse navigation'}
+            className={cn(
+              'hidden rounded-md p-1.5 text-text-muted transition-colors hover:bg-surface-raised hover:text-text-primary lg:inline-flex',
+              !isRail && 'ml-auto',
+            )}
+          >
+            {sidebarCollapsed ? (
+              <PanelLeftOpen className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
+            )}
+          </button>
+        )}
       </div>
     </aside>
   )

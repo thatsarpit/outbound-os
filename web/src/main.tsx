@@ -1,5 +1,7 @@
 import { ClerkProvider } from '@clerk/react'
 import { ClerkAuthBridge } from './components/auth/clerk-auth-bridge'
+import { ClerkWorkspaceBoundary, UnavailableWorkspace } from './components/auth/workspace-boundary'
+import { isWorkspacePath, workspaceBase, workspaceId } from './lib/workspace-path'
 import { LocalAuthBridge } from './components/auth/local-auth-bridge'
 import { loadAuthConfig } from './lib/auth-config'
 import { useAuthStore } from './stores/auth-store'
@@ -122,6 +124,10 @@ if (rootEl) {
 
 function startApp(root: ReturnType<typeof createRoot>) {
   return loadAuthConfig().then((authConfig) => {
+    if (isWorkspacePath && (!workspaceBase || workspaceId === 'primary' || !authConfig.workspacesEnabled)) {
+      root.render(<UnavailableWorkspace />)
+      return
+    }
     useAuthStore.getState().setProvider(authConfig.provider)
     if (authConfig.provider === 'clerk') {
       if (!authConfig.clerkPublishableKey) {
@@ -132,9 +138,9 @@ function startApp(root: ReturnType<typeof createRoot>) {
           <ClerkProvider publishableKey={authConfig.clerkPublishableKey ?? ''} afterSignOutUrl="/">
             {/* Feeds Clerk's hook state into the Zustand auth store —
                 see the module doc in stores/auth-store.ts. */}
-            <ClerkAuthBridge />
+            <ClerkAuthBridge pinOrganization={authConfig.workspacesEnabled} />
             <RootBoundary>
-              <App />
+              {authConfig.workspacesEnabled ? <ClerkWorkspaceBoundary><App /></ClerkWorkspaceBoundary> : <App />}
             </RootBoundary>
           </ClerkProvider>
         </StrictMode>,

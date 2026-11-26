@@ -193,35 +193,35 @@ export async function downloadInboundMedia(media, accountId) {
  * @param {number|null} args.accountId
  */
 export async function sendMediaFile({ address, filePath, mimeType, filename, caption, accountId }) {
-  const transport = await whatsappCloudApi.getTransport(accountId);
   const mime = baseMime(mimeType);
   const buffer = await fs.promises.readFile(filePath);
-
-  const form = new FormData();
-  if (transport.provider === 'meta') {
-    form.append('messaging_product', 'whatsapp');
-    form.append('type', mime);
-  }
-  form.append('file', new Blob([buffer], { type: mime }), filename);
-
-  const uploadUrl = transport.provider === 'ycloud'
-    ? `${ycloudBase()}/whatsapp/media/${encodeURIComponent(transport.phoneNumber)}/upload`
-    : `${graphBase()}/${transport.phoneNumberId}/media`;
-  const uploadRes = await fetchWithTimeout(uploadUrl, {
-    method: 'POST',
-    headers: transport.headers,
-    redirect: 'error',
-    body: form,
-  });
-  const uploaded = await uploadRes.json().catch(() => ({}));
-  if (!uploadRes.ok || !uploaded?.id) {
-    const error = new Error(uploaded?.error?.message || `Meta media upload failed (HTTP ${uploadRes.status})`);
-    error.code = 'upload_failed';
-    throw error;
-  }
-
   const kind = mediaKind(mime);
-  const result = await whatsappCloudApi.sendMediaById(address, uploaded.id, cloudApiType(kind), {
+  const upload = async (transport) => {
+    const form = new FormData();
+    if (transport.provider === 'meta') {
+      form.append('messaging_product', 'whatsapp');
+      form.append('type', mime);
+    }
+    form.append('file', new Blob([buffer], { type: mime }), filename);
+
+    const uploadUrl = transport.provider === 'ycloud'
+      ? `${ycloudBase()}/whatsapp/media/${encodeURIComponent(transport.phoneNumber)}/upload`
+      : `${graphBase()}/${transport.phoneNumberId}/media`;
+    const uploadRes = await fetchWithTimeout(uploadUrl, {
+      method: 'POST',
+      headers: transport.headers,
+      redirect: 'error',
+      body: form,
+    });
+    const uploaded = await uploadRes.json().catch(() => ({}));
+    if (!uploadRes.ok || !uploaded?.id) {
+      const error = new Error(uploaded?.error?.message || `Meta media upload failed (HTTP ${uploadRes.status})`);
+      error.code = 'upload_failed';
+      throw error;
+    }
+    return uploaded.id;
+  };
+  const result = await whatsappCloudApi.sendMediaById(address, upload, cloudApiType(kind), {
     caption,
     filename,
   }, accountId);

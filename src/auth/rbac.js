@@ -7,14 +7,15 @@
  *   manager — agent + campaigns, bulk actions, import/export
  *   admin   — manager + user management, env config, system settings
  *
- * JWT payload: { sub: userId, email, name, role, iat, exp }
+ * JWT payload: { sub: userId, email, name, role, passwordBinding, iat, exp }
  *
  * Password hashing, session tokens and the first-admin seed. The role guards
  * themselves are in auth/index.js.
  */
 
 import '../bootstrapEnv.js';
-import { scryptSync, randomBytes, timingSafeEqual } from 'crypto';
+import { createHmac, scryptSync, randomBytes, timingSafeEqual } from 'crypto';
+import { localPasswordError } from '../../shared/localPassword.js';
 import jwt from 'jsonwebtoken';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
@@ -84,9 +85,25 @@ export function verifyPassword(password, stored) {
 
 // ── Token helpers ─────────────────────────────────────────────────────────────
 
+// Binding a session to the current salted hash revokes it whenever any
+// password writer rotates that hash. The claim never exposes the hash itself.
+function passwordBinding(user) {
+  return createHmac('sha256', JWT_SECRET)
+    .update(JSON.stringify(['outboundos:local-password-session:v1', user.id, user.passwordHash]))
+    .digest('base64url');
+}
+
+export function matchesSessionPassword(payload, user) {
+  if (!user.passwordHash || typeof payload.passwordBinding !== 'string') return false;
+  const actual = Buffer.from(payload.passwordBinding);
+  const expected = Buffer.from(passwordBinding(user));
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
 export function signToken(user) {
+  if (!user.passwordHash) throw new Error('Cannot issue a local session before a password is set.');
   return jwt.sign(
-    { sub: user.id, email: user.email, name: user.name, role: user.role },
+    { sub: user.id, email: user.email, name: user.name, role: user.role, passwordBinding: passwordBinding(user) },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRY }
   );
@@ -181,12 +198,11 @@ export async function ensureDefaultAdmin() {
   const count = await prisma.user.count();
   if (count > 0) return;
 
-  // Never fall back to a fixed password: the source is public, so a constant
-  // here would be a working login on every install that skipped the env var.
-  // Generate one instead and show it once, the way the first boot of most
-  // self-hosted tools does.
   const configuredPass = process.env.ADMIN_PASSWORD || process.env.DASHBOARD_PASSWORD;
-  const defaultPass = configuredPass || randomBytes(18).toString('base64url');
+  if (configuredPass) {
+    const error = localPasswordError(configuredPass);
+    if (error) throw new Error(`Invalid first admin password. ${error}`);
+  }
   const defaultEmail = process.env.ADMIN_EMAIL
     || process.env.DASHBOARD_ADMIN_EMAIL
     || process.env.REPORTS_ADMIN_EMAIL
@@ -196,13 +212,15 @@ export async function ensureDefaultAdmin() {
     data: {
       name: defaultName,
       email: defaultEmail.toLowerCase(),
-      passwordHash: hashPassword(defaultPass),
+      // The operator can set this account's initial password from the local
+      // terminal. An empty hash cannot authenticate.
+      passwordHash: configuredPass ? hashPassword(configuredPass) : '',
       role: 'admin',
     },
   });
   if (configuredPass) {
     logger.info(`👤 First admin created: ${admin.email} (password from ADMIN_PASSWORD)`);
   } else {
-    logger.warn(`👤 First admin created: ${admin.email} with generated password ${defaultPass} — sign in and change it now. It will not be shown again.`);
+    logger.info(`👤 First admin created: ${admin.email}. Set its password with npm run reset-password -- ${admin.email}.`);
   }
 }

@@ -1,4 +1,5 @@
 import { useLocation } from 'react-router-dom'
+import { workspaceBase } from '@/lib/workspace-path'
 import { loginReturnPath } from '@/lib/login-return'
 import { SignIn } from '@clerk/react'
 
@@ -18,7 +19,7 @@ export function ClerkSignIn() {
       routing="hash"
       withSignUp={false}
       transferable={false}
-      fallbackRedirectUrl={from || '/'}
+      fallbackRedirectUrl={workspaceBase + (from || '/')}
       appearance={{
         variables: {
           colorPrimary: 'var(--color-accent)',

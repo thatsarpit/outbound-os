@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
-import { Button, Input } from '@/components/ui'
+import { Button, ErrorState, Input } from '@/components/ui'
+import { ConfirmDialog } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { toast } from '@/stores/toast-store'
 import { Loader2, Sheet, Check, CheckCircle2, AlertCircle, TestTube, Play } from 'lucide-react'
@@ -40,8 +41,9 @@ export default function GoogleSheetsSection() {
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [backfilling, setBackfilling] = useState(false)
+  const [confirmBackfill, setConfirmBackfill] = useState(false)
 
-  const { isLoading, data: sheetsConfig } = useQuery({
+  const { isLoading, isError, data: sheetsConfig, refetch } = useQuery({
     queryKey: ['sheets-config'],
     queryFn: () => api.get<SheetsConfig>('/settings/sheets-webhook'),
     staleTime: Infinity,
@@ -50,7 +52,7 @@ export default function GoogleSheetsSection() {
   // Hydrate form state once on first load
   useEffect(() => {
     if (!sheetsConfig) return
-    const cfg = sheetsConfig as SheetsConfig
+    const cfg = sheetsConfig
     setWebhookUrl(cfg.url ?? '')
     setEnabled(cfg.enabled)
     setEvents(cfg.events)
@@ -102,6 +104,7 @@ export default function GoogleSheetsSection() {
       setBackfillResult(`Error: ${errorMessage(e, 'Backfill failed')}`)
     } finally {
       setBackfilling(false)
+      setConfirmBackfill(false)
     }
   }
 
@@ -113,8 +116,17 @@ export default function GoogleSheetsSection() {
     )
   }
 
+  if (isError || !sheetsConfig) {
+    return <ErrorState compact title="Could not load Google Sheets settings"
+      description="Retry to load the saved destination and sync settings." onRetry={() => void refetch()} />
+  }
+
   return (
     <div className="space-y-4">
+      <ConfirmDialog open={confirmBackfill} onOpenChange={open => { if (!backfilling) setConfirmBackfill(open) }}
+        title="Send existing leads to Google Sheets?"
+        description="This sends all existing leads to the saved Google Sheets destination in the background. It can add rows that were already synced."
+        confirmLabel="Run backfill" isLoading={backfilling} onConfirm={handleBackfill} />
       {/* Setup card */}
       <div className="glass rounded-lg overflow-hidden">
         <div className="border-b border-border px-6 py-5 flex items-center justify-between">
@@ -253,7 +265,7 @@ export default function GoogleSheetsSection() {
             <div>
               <p className="text-sm font-semibold text-text-primary">Backfill existing leads</p>
               <p className="text-xs text-text-muted mt-0.5">
-                Push all leads in your current pool to Google Sheets as{' '}
+                Send all existing leads to the saved Google Sheets destination as{' '}
                 <code className="rounded bg-surface-raised px-1 py-0.5 font-mono text-[10px]">
                   lead.created
                 </code>{' '}
@@ -274,9 +286,9 @@ export default function GoogleSheetsSection() {
           <Button
             variant="secondary"
             size="sm"
-            onClick={handleBackfill}
+            onClick={() => setConfirmBackfill(true)}
             isLoading={backfilling}
-            disabled={backfilling}
+            disabled={backfilling || !sheetsConfig.enabled || !sheetsConfig.url || !sheetsConfig.events.includes('lead.created')}
             className="shrink-0"
           >
             {backfilling ? 'Running…' : 'Run backfill'}

@@ -1,9 +1,11 @@
+import { WorkspaceSwitcher } from '@/components/auth/workspace-boundary'
 import { useInstalledViewport } from '@/hooks/use-installed-viewport'
 import { useEffect } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import {
   CheckSquare,
   Inbox,
+  Info,
   LogOut,
   Monitor,
   Moon,
@@ -70,6 +72,7 @@ export function MobileShell() {
                 <p className="text-[11px] font-medium text-text-muted">
                   {IS_DEMO ? 'Outbound OS · sample workspace' : 'Outbound OS'}
                 </p>
+                <WorkspaceSwitcher className="h-auto min-h-11 max-w-36 justify-start px-0" />
                 <h1 className="text-xl font-semibold tracking-tight">
                   {page?.label ??
                     (location.pathname === '/m/account'
@@ -115,6 +118,12 @@ export function MobileShell() {
                     <Link to="/m/account">
                       <UserRound className="h-4 w-4" />
                       Account
+                    </Link>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem asChild>
+                    <Link to="/m/account#about">
+                      <Info className="h-4 w-4" />
+                      About Outbound OS
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuItem onSelect={toggleTheme}>

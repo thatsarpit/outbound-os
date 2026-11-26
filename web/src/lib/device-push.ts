@@ -1,3 +1,4 @@
+import { workspaceApiPath } from '@/lib/workspace-path'
 // Signing out also unsubscribes this browser. No session token is stored by the worker.
 export async function detachDevicePush(token: string | null) {
   if (!('serviceWorker' in navigator)) return
@@ -7,7 +8,7 @@ export async function detachDevicePush(token: string | null) {
   // Ask the browser first: this also blocks delivery if the CRM is offline.
   await subscription.unsubscribe()
   if (token)
-    await fetch('/api/push/subscriptions', {
+    await fetch(workspaceApiPath('/push/subscriptions'), {
       method: 'DELETE',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ endpoint: subscription.endpoint }),

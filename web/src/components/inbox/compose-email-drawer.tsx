@@ -1,9 +1,9 @@
 import { useAuthStore } from '@/stores/auth-store'
 import { useOnlineStatus } from '@/hooks/use-online-status'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2, Mail, Search, User, X } from 'lucide-react'
-import type { Lead, MediaFile } from '@/api/types'
+import type { InboxSendPayload, Lead, MediaFile } from '@/api/types'
 import { inboxApi } from '@/api/endpoints/inbox'
 import { leadsApi } from '@/api/endpoints/leads'
 import { EMAIL_TEMPLATE_LIST_QUERY_KEY, templatesApi } from '@/api/endpoints/templates'
@@ -12,17 +12,28 @@ import { EmailEditor } from './email-editor'
 import { AttachmentPicker } from './attachment-picker'
 import { SenderAccountSelect } from './sender-account-select'
 import { TemplatePicker } from './template-picker'
-import { getRenderedTemplateText } from '@/lib/email-compose'
+import {
+  emailScheduleDate,
+  getRenderedTemplateText,
+  scheduledEmailRequest,
+} from '@/lib/email-compose'
 import { cn } from '@/lib/utils'
+import { taskDateInput } from '@/lib/task-date'
 import { toast } from '@/stores/toast-store'
 
 type ComposeEmailDrawerProps = {
   onClose: () => void
+  onScheduled: (leadId: number) => void
   /** Pre-select a lead (e.g. from inbox thread) */
   initialLeadId?: number | null
 }
 
-export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawerProps) {
+export function ComposeEmailDrawer({
+  onClose,
+  onScheduled,
+  initialLeadId,
+}: ComposeEmailDrawerProps) {
+  const queryClient = useQueryClient()
   const role = useAuthStore((state) => state.user?.role)
   const online = useOnlineStatus()
   const [search, setSearch] = useState('')
@@ -39,6 +50,8 @@ export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawe
   const [bcc, setBcc] = useState('')
   const [showCcBcc, setShowCcBcc] = useState(false)
   const [scheduleDate, setScheduleDate] = useState('')
+  const scheduleTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const scheduleRequestIds = useRef(new Map<string, string>())
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   // Lead search
@@ -111,7 +124,7 @@ export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawe
       if (!plainBody.trim()) throw new Error('Email body cannot be empty')
 
       const emailHtml = htmlBody.trim()
-      return inboxApi.send({
+      const payload: InboxSendPayload = {
         leadId: selectedLead.id,
         channel: 'email',
         text: plainBody.trim(),
@@ -122,15 +135,23 @@ export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawe
         attachmentIds: attachments.length > 0 ? attachments.map((a) => a.id) : undefined,
         cc: cc.trim() || undefined,
         bcc: bcc.trim() || undefined,
-        scheduledAt: scheduleDate ? new Date(scheduleDate).toISOString() : undefined,
-      })
+        scheduledAt: scheduleDate ? emailScheduleDate(scheduleDate, scheduleTimezone) : undefined,
+      }
+      if (!payload.scheduledAt) return inboxApi.send(payload)
+      const { request } = scheduledEmailRequest(payload, scheduleRequestIds.current)
+      return inboxApi.send(request)
     },
     onSuccess: () => {
       const action = scheduleDate ? 'scheduled' : 'sent'
       toast.success(`Email ${action} to ${selectedLead?.name || selectedLead?.email}`)
+      if (selectedLead) {
+        void queryClient.invalidateQueries({ queryKey: ['inbox-thread', selectedLead.id] })
+        if (scheduleDate) onScheduled(selectedLead.id)
+      }
+      void queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
       onClose()
     },
-    onError: (error: Error) => toast.error(`Send failed: ${error.message}`),
+    meta: { silent: true },
   })
 
   const handleSelectLead = useCallback((lead: Lead) => {
@@ -153,7 +174,7 @@ export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawe
     if (!busy) onClose()
   }
   return (
-    <DrawerShell onClose={close} panelClassName="lg:max-w-2xl">
+    <DrawerShell title="New email" onClose={close} panelClassName="lg:max-w-2xl">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-5 py-4">
         <div className="flex items-center gap-3">
@@ -372,9 +393,14 @@ export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawe
         />
       </fieldset>
 
+      {sendMutation.error && (
+        <p role="alert" className="px-5 pb-3 text-sm text-danger">
+          {sendMutation.error.message}
+        </p>
+      )}
       {/* Footer */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-4">
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <p className="text-xs text-text-muted">
             {selectedLead?.email
               ? `Sending to ${selectedLead.email}`
@@ -387,12 +413,14 @@ export function ComposeEmailDrawer({ onClose, initialLeadId }: ComposeEmailDrawe
               type="datetime-local"
               value={scheduleDate}
               onChange={(e) => setScheduleDate(e.target.value)}
-              min={new Date().toISOString().slice(0, 16)}
+              aria-label={`Email date and time in ${scheduleTimezone}`}
+              min={taskDateInput(new Date().toISOString(), scheduleTimezone)}
               className={cn(
                 'rounded-lg border border-border bg-surface-overlay px-2 py-1.5 text-xs text-text-secondary',
                 'focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent/30',
               )}
             />
+            <span className="text-xs text-text-muted">{scheduleTimezone}</span>
           </div>
         </div>
         <button

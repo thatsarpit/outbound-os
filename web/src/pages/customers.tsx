@@ -263,7 +263,7 @@ function CustomerDrawer({ id, onClose }: { id: number; onClose: () => void }) {
   })
 
   return (
-    <DrawerShell onClose={onClose}>
+    <DrawerShell title={customer?.name ?? 'Customer'} onClose={onClose}>
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <div>
           <h2 className="text-sm font-semibold">{customer?.name ?? 'Customer'}</h2>

@@ -1,5 +1,5 @@
 import { ApiClientError } from '@/api/client'
-import { isReplyableEmail } from '@/lib/email-delivery'
+import { inboxEmailContext } from '@/lib/email-delivery'
 import {
   useCallback,
   useDeferredValue,
@@ -23,7 +23,11 @@ import { ThreadListItem } from '@/components/inbox/thread-list-item'
 import { LeadContextPanel } from '@/components/inbox/lead-context-panel'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { DrawerShell, SkeletonCard, Button } from '@/components/ui'
-import { buildReplySubject, getRenderedTemplateText } from '@/lib/email-compose'
+import {
+  buildReplySubject,
+  getRenderedTemplateText,
+  scheduledEmailRequest,
+} from '@/lib/email-compose'
 import { saveDraft, loadDraft, clearDraft, clearSubmittedDraft } from '@/lib/email-drafts'
 import { ROLE_EXPERIENCE } from '@/lib/role-shell'
 import { cn } from '@/lib/utils'
@@ -146,7 +150,8 @@ function InboxInner() {
       templateId: null,
     })
   }
-  const setComposerChannel = (channel: InboxChannel) => updateRoute({ channel })
+  const setComposerChannel = (channel: InboxChannel, emailAccountId?: number | null) =>
+    updateRoute(emailAccountId ? { channel, accountId: String(emailAccountId) } : { channel })
   const setSenderAccountId = (accountId: number | null) =>
     updateRoute({ accountId: accountId ? String(accountId) : null })
 
@@ -206,15 +211,9 @@ function InboxInner() {
   })
 
   const composerChannel = routedChannel ?? activeThread?.channel ?? 'whatsapp'
-  const availableSenders = activeThread?.availableSenderAccounts ?? []
-  const senderAccountId =
-    availableSenders.find((account) => account.id === routedAccountId)?.id ??
-    activeThread?.senderAccount?.id ??
-    availableSenders[0]?.id ??
-    null
-
-  const latestEmailMessage =
-    activeThread?.messages?.slice().reverse().find(isReplyableEmail) || null
+  const {
+    accountId: senderAccountId, latestEmail: latestEmailMessage, unavailableSender,
+  } = inboxEmailContext(activeThread || null, routedAccountId)
 
   const { data: templates = [], isLoading: templatesLoading } = useQuery({
     queryKey: EMAIL_TEMPLATE_LIST_QUERY_KEY,
@@ -242,7 +241,7 @@ function InboxInner() {
     setCc(draft?.cc ?? '')
     setBcc(draft?.bcc ?? '')
     setComposerSubject(
-      draft?.subject ?? buildReplySubject(latestEmailMessage?.subject || activeThread.subject),
+      draft?.subject ?? buildReplySubject(latestEmailMessage?.subject),
     )
     setAttachments([])
     setHydratedContext(draftContext)
@@ -297,9 +296,11 @@ function InboxInner() {
           : composerChannel === 'email'
             ? !activeThread.leadEmail
               ? 'This lead does not have an email address yet.'
-              : activeThread.availableSenderAccounts?.length
-                ? null
-                : 'No verified sender account is available for this lead.'
+              : unavailableSender
+                ? 'The original sender is unavailable. Choose a sender to write a reply.'
+                : activeThread.availableSenderAccounts?.length
+                  ? null
+                  : 'No verified sender account is available for this lead.'
             : composerChannel === 'telegram'
               ? !activeThread.leadTelegramPeer
                 ? 'Add a Telegram @username, phone number, or peer ID to this lead first.'
@@ -355,7 +356,7 @@ function InboxInner() {
         if (replyDisabledReason) throw new Error(replyDisabledReason)
         const subject =
           composerSubject.trim() ||
-          buildReplySubject(latestEmailMessage?.subject || activeThread?.subject)
+          buildReplySubject(latestEmailMessage?.subject)
 
         const emailHtml = htmlBody.trim()
         return send({
@@ -439,7 +440,7 @@ function InboxInner() {
       }
       updateRoute({ channel: 'email', templateId: null })
       setComposerSubject(
-        data.subject || buildReplySubject(latestEmailMessage?.subject || activeThread?.subject),
+        data.subject || buildReplySubject(latestEmailMessage?.subject),
       )
       const plainText = getRenderedTemplateText(data)
       setReplyText(plainText)
@@ -532,12 +533,12 @@ function InboxInner() {
     assignSelfMutation.isPending
 
   const resolvedThreadError = threadError instanceof Error ? threadError : null
-  const resolvedReplyError = sendMutation.error instanceof Error ? sendMutation.error : null
 
   const handleAddAttachment = (file: MediaFile) => setAttachments((prev) => [...prev, file])
   const handleRemoveAttachment = (id: number) =>
     setAttachments((prev) => prev.filter((a) => a.id !== id))
 
+  const scheduleRequestIds = useRef(new Map<string, string>())
   const scheduleSendMutation = useMutation({
     networkMode: 'always',
     retry: false,
@@ -550,9 +551,9 @@ function InboxInner() {
       const emailHtml = htmlBody.trim()
       const subjectLine =
         composerSubject.trim() ||
-        buildReplySubject(latestEmailMessage?.subject || activeThread?.subject)
-      return inboxApi
-        .send({
+        buildReplySubject(latestEmailMessage?.subject)
+      const { fingerprint, request } = scheduledEmailRequest(
+        {
           leadId: selectedLeadId,
           channel: 'email',
           text: messageBody,
@@ -565,15 +566,14 @@ function InboxInner() {
           cc: cc.trim() || undefined,
           bcc: bcc.trim() || undefined,
           scheduledAt,
-        })
-        .then((response) => ({
-          response,
-          submitted,
-          leadId: selectedLeadId,
-          context: draftContext,
-        }))
+        },
+        scheduleRequestIds.current,
+      )
+      await inboxApi.send(request)
+      return { submitted, leadId: selectedLeadId, context: draftContext, fingerprint }
     },
-    onSuccess: ({ submitted, leadId, context }) => {
+    onSuccess: ({ submitted, leadId, context, fingerprint }) => {
+      scheduleRequestIds.current.delete(fingerprint)
       clearSubmittedDraft(dashboardScope, leadId, submitted)
       // A reply completing after navigation must not clear another lead's editor.
       if (currentDraftContext.current === context) {
@@ -587,13 +587,19 @@ function InboxInner() {
       queryClient.invalidateQueries({ queryKey: ['inbox-thread', leadId] })
       queryClient.invalidateQueries({ queryKey: ['inbox-threads'] })
     },
-    onError: (error: Error) => toast.error(`Schedule failed: ${error.message}`),
+    meta: { silent: true },
   })
+  const scheduleReply = async (scheduledAt: string) => {
+    await scheduleSendMutation.mutateAsync(scheduledAt)
+  }
+  const resolvedReplyError = sendMutation.error instanceof Error ? sendMutation.error : null
 
   return (
     <div className="animate-fade-in space-y-3">
-      <ChannelHealthStrip health={channelHealth} />
-      <OtherEmail />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0 flex-1 basis-64"><ChannelHealthStrip health={channelHealth} /></div>
+        <OtherEmail />
+      </div>
       <div className="flex min-h-[calc(100vh-11rem)] flex-col gap-4 lg:h-[calc(100dvh-9.5rem)] lg:flex-row">
         <div className="glass flex w-full shrink-0 flex-col overflow-hidden rounded-lg border border-border lg:w-80 xl:w-[22rem] lg:min-h-0">
           <div className="border-b border-border px-3 py-3">
@@ -747,10 +753,12 @@ function InboxInner() {
                     persistCurrentDraft()
                     startTransition(() => {
                       const draft = loadDraft(dashboardScope, thread.leadId)
+                      const accountId = draft?.senderAccountId ??
+                        (thread.channel === 'email' ? thread.senderAccountId : null)
                       updateRoute({
                         leadId: String(thread.leadId),
                         channel: draft?.channel ?? thread.channel,
-                        accountId: draft?.senderAccountId ? String(draft.senderAccountId) : null,
+                        accountId: accountId ? String(accountId) : null,
                         threadKey: thread.threadKey,
                         templateId: null,
                       })
@@ -816,21 +824,21 @@ function InboxInner() {
             ) : (
               <>
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <div className="mb-2 flex justify-end">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      aria-expanded={showContext}
-                      onClick={() => setShowContext(!showContext)}
-                      leftIcon={<PanelRight className="h-4 w-4" />}
-                    >
-                      {showContext ? 'Hide details' : 'Lead details'}
-                    </Button>
-                  </div>
                   <ConversationSurface
                     activeThread={activeThread ?? null}
                     threadLoading={threadLoading}
                     threadError={resolvedThreadError}
+                    headerActions={
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        aria-expanded={showContext}
+                        onClick={() => setShowContext(value => !value)}
+                        leftIcon={<PanelRight className="size-4" aria-hidden="true" />}
+                      >
+                        {showContext ? 'Hide details' : 'Lead details'}
+                      </Button>
+                    }
                     replyText={replyText}
                     setReplyText={setReplyText}
                     htmlBody={htmlBody}
@@ -867,7 +875,7 @@ function InboxInner() {
                     onCcChange={setCc}
                     bcc={bcc}
                     onBccChange={setBcc}
-                    onScheduleSend={(scheduledAt) => scheduleSendMutation.mutate(scheduledAt)}
+                    onScheduleSend={scheduleReply}
                   />
                 </div>
                 {/* Third pane: who this is, what is outstanding, what was agreed.
@@ -897,6 +905,7 @@ function InboxInner() {
 
         {selectedLeadId && isMobileViewport && (
           <DrawerShell
+            title={activeThread?.leadName ?? 'Conversation'}
             onClose={() => {
               persistCurrentDraft()
               setSelectedLeadId(null)
@@ -946,13 +955,26 @@ function InboxInner() {
               onCcChange={setCc}
               bcc={bcc}
               onBccChange={setBcc}
-              onScheduleSend={(scheduledAt) => scheduleSendMutation.mutate(scheduledAt)}
+              onScheduleSend={scheduleReply}
             />
           </DrawerShell>
         )}
       </div>
 
-      {showCompose && <ComposeEmailDrawer onClose={() => setShowCompose(false)} />}
+      {showCompose && (
+        <ComposeEmailDrawer
+          onClose={() => setShowCompose(false)}
+          onScheduled={(leadId) =>
+            updateRoute({
+              leadId: String(leadId),
+              channel: 'email',
+              accountId: null,
+              threadKey: null,
+              templateId: null,
+            })
+          }
+        />
+      )}
     </div>
   )
 }

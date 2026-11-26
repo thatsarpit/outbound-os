@@ -5,6 +5,7 @@ import {
   Users,
   Kanban,
   Megaphone,
+  ListChecks,
   FileText,
   CalendarClock,
   ListTodo,
@@ -36,6 +37,7 @@ export const NAVIGATION_GROUPS: Array<{ label: string; items: NavigationItem[] }
     label: 'Outreach',
     items: [
       { to: '/campaigns', label: 'Campaigns', icon: Megaphone, capability: 'page.campaigns' },
+      { to: '/delivery', label: 'Delivery review', icon: ListChecks, capability: 'page.campaigns' },
       { to: '/templates', label: 'Templates', icon: FileText, capability: 'page.templates' },
       { to: '/automation', label: 'Automation', icon: CalendarClock, capability: 'page.settings' },
       { to: '/import', label: 'Import leads', icon: Upload, capability: 'page.import' },

@@ -1,5 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { ArrowLeft } from 'lucide-react'
+import { onboardingStatusQuery } from '@/api/endpoints/onboarding'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import { LoadingState } from '@/components/ui/loading-state'
+import { useAuthStore } from '@/stores/auth-store'
 import { ErrorBoundary } from '@/components/error-boundary'
 import { SystemHealthBanner } from './system-health-banner'
 import { Sidebar } from './sidebar'
@@ -21,6 +28,16 @@ const NAV_SEQUENCES: Record<string, string> = {
   c: '/campaigns',
   p: '/pipeline',
   a: '/analytics',
+}
+
+const SETUP_PROMPT_KEY = 'outboundos_setup_prompted'
+
+function shouldCheckFirstRun() {
+  try {
+    return sessionStorage.getItem(SETUP_PROMPT_KEY) !== '1'
+  } catch {
+    return false
+  }
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -68,10 +85,35 @@ function useNavSequences() {
 }
 
 export function AppShell() {
-  const { sidebarCollapsed, isMobileViewport, setIsMobileViewport, setSidebarCollapsed } =
-    useUIStore()
+  const { sidebarCollapsed, isMobileViewport, setIsMobileViewport } = useUIStore()
   const location = useLocation()
+  const navigate = useNavigate()
+  const canSetUp = useAuthStore(
+    (state) => state.user?.role === 'admin' && state.hasCapability('page.settings'),
+  )
+  const checkFirstRun = canSetUp && location.pathname === '/overview' && shouldCheckFirstRun()
+  const onboarding = useQuery({ ...onboardingStatusQuery, enabled: checkFirstRun })
+  const status = onboarding.data
+  const openSetup =
+    checkFirstRun &&
+    !onboarding.isError &&
+    status &&
+    !status.dismissed &&
+    !status.complete &&
+    (!status.steps.profile ||
+      (!status.steps.channel && !status.steps.leadSource && status.counts.users === 1))
+
+  useEffect(() => {
+    if (!canSetUp || (!openSetup && location.pathname !== '/setup')) return
+    try {
+      sessionStorage.setItem(SETUP_PROMPT_KEY, '1')
+    } catch {
+      /* Setup is still available from Workspace settings. */
+    }
+    if (openSetup) navigate('/setup', { replace: true })
+  }, [canSetUp, location.pathname, navigate, openSetup])
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false)
 
   const togglePalette = useCallback(() => setPaletteOpen((open) => !open), [])
   useCommandPaletteHotkey(togglePalette)
@@ -83,17 +125,25 @@ export function AppShell() {
     const syncViewport = (event?: MediaQueryList | MediaQueryListEvent) => {
       const matches = event?.matches ?? media.matches
       setIsMobileViewport(matches)
-      setSidebarCollapsed(matches)
+      if (!matches) setMobileNavigationOpen(false)
     }
 
     syncViewport(media)
     media.addEventListener('change', syncViewport)
     return () => media.removeEventListener('change', syncViewport)
-  }, [setIsMobileViewport, setSidebarCollapsed])
+  }, [setIsMobileViewport])
 
   // A phone entering the normal sales routes starts in the focused workspace.
   // The explicit full-dashboard choice lasts for this browser tab.
-  const wantsDesktop = new URLSearchParams(location.search).get('view') === 'desktop'
+  const params = new URLSearchParams(location.search)
+  const wantsDesktop = params.get('view') === 'desktop'
+  const setupStep = params.get('setup')
+  const showSetupReturn =
+    canSetUp &&
+    ((location.pathname.startsWith('/integrations/') &&
+      (setupStep === 'channels' || setupStep === 'sources')) ||
+      (location.pathname === '/import' && setupStep === 'sources') ||
+      (location.pathname === '/team' && setupStep === 'team'))
   useEffect(() => {
     try {
       if (wantsDesktop) sessionStorage.setItem('oos_full_dashboard', 'true')
@@ -114,6 +164,10 @@ export function AppShell() {
   } catch {
     /* Storage can be blocked. */
   }
+  // Check first-run setup before routing a phone to the sales-only shell.
+  if (openSetup || (checkFirstRun && onboarding.isPending)) {
+    return <LoadingState label="Checking workspace setup…" className="p-5" />
+  }
   if (isMobileViewport && salesRoute && !desktopChosen) {
     return <Navigate to={`${salesRoute}${location.search}`} replace />
   }
@@ -125,36 +179,40 @@ export function AppShell() {
           surface needs a calm, flat ground. */}
       <Sidebar />
 
-      {isMobileViewport && !sidebarCollapsed && (
-        <button
-          type="button"
-          aria-label="Close navigation"
-          onClick={() => setSidebarCollapsed(true)}
-          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
-        />
-      )}
-
-      {/* The sidebar is fixed so it can act as a mobile drawer; this wrapper
-          carries the matching inset on desktop. 60 = 240px, 14 = 56px rail. */}
       <div
         className={cn(
           'flex min-h-screen flex-col transition-[padding] duration-200 ease-out',
           sidebarCollapsed ? 'lg:pl-14' : 'lg:pl-60',
         )}
       >
-        <Topbar onOpenSearch={togglePalette} />
+        <Dialog open={mobileNavigationOpen} onOpenChange={setMobileNavigationOpen}>
+          <Topbar onOpenSearch={togglePalette} />
+          <DialogContent aria-describedby={undefined} showClose={false}
+            className="bottom-0 left-0 top-0 w-64 max-w-[85vw] translate-x-0 translate-y-0 rounded-none border-y-0 border-l-0 sm:w-64 lg:hidden">
+            <DialogTitle className="sr-only">Main navigation</DialogTitle>
+            <Sidebar mobile onNavigate={() => setMobileNavigationOpen(false)} />
+          </DialogContent>
+        </Dialog>
 
         <main className="flex-1">
           <div className="mx-auto w-full max-w-[1600px] px-4 py-5 sm:px-6">
             {/* App-wide health banner — visible only when a subsystem is down or
                 degraded (AI/email/WhatsApp/DB). Surfaces silent failures. */}
-            {isMobileViewport && (
+            {isMobileViewport && location.pathname !== '/setup' && !showSetupReturn && (
               <Link
                 to="/m/inbox"
                 className="mb-4 inline-flex min-h-11 items-center rounded-lg border border-border px-3 text-sm"
               >
                 Open mobile sales workspace
               </Link>
+            )}
+            {showSetupReturn && (
+              <Button asChild variant="secondary" size="sm" className="mb-4 min-h-10">
+                <Link to={`/setup?step=${setupStep}`}>
+                  <ArrowLeft className="size-4" aria-hidden="true" />
+                  Back to setup
+                </Link>
+              </Button>
             )}
             <SystemHealthBanner />
             {/* Route-level error boundary. Keyed by pathname so a crash on one

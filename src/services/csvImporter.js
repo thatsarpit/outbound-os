@@ -2,6 +2,10 @@ import { withDefaultCountryCode } from '../utils/phoneDefaults.js';
 import prisma from '../utils/prismaClient.js';
 import logger from '../utils/logger.js';
 import { parse } from 'csv-parse/sync';
+import { createHash } from 'node:crypto';
+import { Prisma } from '@prisma/client';
+import isEmail from 'validator/lib/isEmail.js';
+import { emailIdentity } from '../utils/emailVerification.js';
 
 /**
  * CSV Import Engine
@@ -98,7 +102,7 @@ export class CSVImporter {
    * @param {string} filename - Original filename for batch tracking
    * @returns {object} Import results
    */
-  async importCSV(csvText, filename, { poolId = null, tags = [] } = {}) {
+  async importCSV(csvText, filename, { poolId = null, tags = [], preview = false, reviewToken } = {}) {
     let headers, rows;
     try { ({ headers, rows } = this.parseCSV(csvText)); }
     catch (error) { return { success: false, error: error.message, errors: [error.message] }; }
@@ -109,16 +113,26 @@ export class CSVImporter {
 
     const columnMapping = this._mapColumns(headers);
 
-    if (!columnMapping.mobile) {
+    if (!columnMapping.mobile && !columnMapping.email) {
       return {
         success: false,
-        error: 'Could not identify mobile/phone column. Found headers: ' + headers.join(', '),
-        errors: ['Could not identify mobile/phone column. Found headers: ' + headers.join(', ')],
+        error: 'Could not identify a phone or email column. Found headers: ' + headers.join(', '),
+        errors: ['Could not identify a phone or email column. Found headers: ' + headers.join(', ')],
         detectedHeaders: headers,
       };
     }
 
-    return this._runImport(rows, columnMapping, filename, { poolId, tags });
+    const options = { poolId, tags, preview, reviewToken, allowEmailOnly: true };
+    if (!preview && reviewToken !== undefined) {
+      try {
+        return await this.db.$transaction(tx =>
+          new CSVImporter({ db: tx })._runImport(rows, columnMapping, filename, options), { timeout: 20_000 });
+      } catch (error) {
+        logger.warn(`Reviewed CSV import failed: ${error.message}`);
+        return { success: false, error: 'Could not apply the reviewed import. Preview the file again and retry.' };
+      }
+    }
+    return this._runImport(rows, columnMapping, filename, options);
   }
 
   /**
@@ -143,26 +157,39 @@ export class CSVImporter {
     return this._runImport(rows, identity, filename, { poolId, tags });
   }
 
-  async _runImport(rows, columnMapping, filename, { poolId = null, tags: extraTags = [] } = {}) {
-    // Create import batch tracker
-    const batch = await this.db.importBatch.create({
-      data: { filename, totalRows: rows.length, status: 'processing' },
-    });
-
+  async _runImport(rows, columnMapping, filename, { poolId = null, tags: extraTags = [], preview = false, reviewToken, allowEmailOnly = false } = {}) {
+    let batch;
     let imported = 0;
     let duplicates = 0;
     let failed = 0;
 
     const validRows = [];
     const allMobiles = [];
+    const rowIssues = [];
+    const emailOnly = new Set();
+    const emailsWithPhone = new Set();
 
     // 1. Clean and validate row data
-    for (const row of rows) {
+    for (const [index, row] of rows.entries()) {
       let mobile = row[columnMapping.mobile] || '';
+      const email = emailIdentity(row[columnMapping.email]);
+      if (allowEmailOnly && !mobile.trim() && email.length <= 254 && isEmail(email, { allow_ip_domain: false })) {
+        // A missing phone identifies an email-only lead. An invalid supplied
+        // phone remains an error for the operator to correct in the file.
+        const identity = 'no-phone:csv:' + createHash('sha256').update(email).digest('hex');
+        row._cleanMobile = identity;
+        row._emailOnly = email;
+        emailOnly.add(email);
+        validRows.push(row);
+        allMobiles.push(identity);
+        continue;
+      }
       // Handle +(CC)-number format: +(61)-491570157 → 61491570157
       mobile = mobile.replace(/[^0-9+]/g, '');
       if (!mobile || mobile.length < 7) {
         failed++;
+        if (rowIssues.length < 20) rowIssues.push({ record: index + 1,
+          reason: allowEmailOnly && !mobile ? 'Add a valid email or phone number' : 'Invalid phone number' });
         continue;
       }
 
@@ -179,6 +206,7 @@ export class CSVImporter {
       }
 
       row._cleanMobile = mobile;
+      if (email) emailsWithPhone.add(email);
       validRows.push(row);
       allMobiles.push(mobile);
     }
@@ -192,12 +220,49 @@ export class CSVImporter {
 
       const existingMap = new Map();
       for (const lead of existingLeads) existingMap.set(lead.mobile, lead);
+      const matchingEmailLeads = [];
+      const addresses = [...emailOnly];
+      for (let offset = 0; offset < addresses.length; offset += 200) {
+        matchingEmailLeads.push(...await this.db.$queryRaw`
+          SELECT id, lower(trim(email)) AS email FROM Lead
+          WHERE lower(trim(email)) IN (${Prisma.join(addresses.slice(offset, offset + 200))})
+        `);
+      }
+      // An email can be shared by many people. An email-only match should
+      // skip safely and leave all existing records and suppression alone.
+      const existingEmails = new Set([...emailsWithPhone, ...matchingEmailLeads.map(lead => lead.email)]);
+      const skipEmail = row => row._emailOnly && existingEmails.has(row._emailOnly);
 
+      if (preview || reviewToken !== undefined) {
+        const token = createHash('sha256').update(JSON.stringify([
+          filename, poolId, columnMapping, rows,
+          existingLeads.sort((a, b) => a.id - b.id),
+          matchingEmailLeads.sort((a, b) => a.id - b.id),
+        ])).digest('hex');
+        if (preview) {
+          const newMobiles = new Set(validRows.filter(row => !skipEmail(row) && !existingMap.has(row._cleanMobile)).map(row => row._cleanMobile));
+          return {
+            success: true, preview: true, reviewToken: token, columnMapping, totalRows: rows.length,
+            imported: newMobiles.size, skipped: validRows.length - newMobiles.size, failed, rowIssues,
+          };
+        }
+        if (token !== reviewToken) {
+          return { success: false, statusCode: 409, error: 'The file or matching leads changed. Preview the import again.' };
+        }
+      }
+
+      batch = await this.db.importBatch.create({
+        data: { filename, totalRows: rows.length, status: 'processing' },
+      });
       const newLeadsData = [];
       const updatePromises = [];
 
       // 3. Separate logic for new inserts and updates
       for (const row of validRows) {
+        if (skipEmail(row)) {
+          duplicates++;
+          continue;
+        }
         const mobile = row._cleanMobile;
         const existing = existingMap.get(mobile);
 
@@ -263,7 +328,7 @@ export class CSVImporter {
             name: row[columnMapping.name] || 'Unknown',
             mobile,
             company: row[columnMapping.company] || null,
-            email: row[columnMapping.email] || null,
+            email: row._emailOnly || row[columnMapping.email] || null,
             product: row[columnMapping.product] || null,
             country: row[columnMapping.country] || null,
             quantity: row[columnMapping.quantity] || null,
@@ -369,6 +434,7 @@ export class CSVImporter {
 
       logger.info(`📥 CSV Import complete: ${imported} imported, ${duplicates} duplicates, ${failed} failed`);
     } catch (e) {
+      if (reviewToken !== undefined || !batch) throw e;
       logger.error(`CSV Import Batch failed: ${e.message}`);
       await this.db.importBatch.update({
         where: { id: batch.id },

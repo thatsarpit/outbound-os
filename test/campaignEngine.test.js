@@ -200,6 +200,27 @@ test('provider payment refusal pauses the run and leaves later recipients pendin
   assert.equal(attempt.providerStatusReason, 'payment_issue');
 }, { whatsapp: () => ({ success: false, reason: 'payment_issue', errorCode: 'BALANCE_INSUFFICIENT' }) }));
 
+test('a local WhatsApp quota hold pauses the run and resumes its pending recipient', async () => {
+  let capped = true;
+  await fixture(async ({ db, engine, calls, createLead, createCampaign, createWa, running }) => {
+    await createLead(1);
+    await createLead(2);
+    await createWa(8);
+    const campaign = await createCampaign({ channel: 'whatsapp', whatsappSenderAccountId: 8, waCampaignName: 'fixture_template' });
+    await engine.populateCampaign(campaign.id);
+    await engine._executeCampaign(await running(campaign.id));
+    const held = await db.campaign.findUnique({ where: { id: campaign.id } });
+    assert.equal(held.status, 'paused');
+    assert.match(held.scheduleError, /last hour/);
+    assert.equal(calls.whatsapp.length, 1);
+    assert.equal(await db.campaignLead.count({ where: { campaignId: campaign.id, status: 'pending' } }), 2);
+    assert.equal(await db.message.count({ where: { campaignId: campaign.id, status: 'cancelled', providerStatusReason: 'whatsapp_hourly_limit' } }), 1);
+    capped = false;
+    await engine._executeCampaign(await running(campaign.id));
+    assert.equal(await db.campaignLead.count({ where: { campaignId: campaign.id, status: 'sent' } }), 2);
+  }, { whatsapp: () => capped ? { success: false, reason: 'whatsapp_hourly_limit' } : undefined });
+});
+
 test('audience caps apply after exclusions and repeated population cannot expand the approved cap', async () => fixture(async ({ db, engine, createLead, createCampaign }) => {
   await createLead(1, { status: 'paused', score: 100 });
   await createLead(2, { score: 90 });

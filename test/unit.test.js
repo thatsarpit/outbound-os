@@ -48,7 +48,7 @@ describe('RBAC — password hashing', () => {
 
   test('signToken + verifyToken round-trip', async () => {
     const { signToken: st, verifyToken: vt } = await import('../src/auth/rbac.js');
-    const user = { id: 42, email: 'test@example.com', name: 'Test', role: 'manager' };
+    const user = { id: 42, email: 'test@example.com', name: 'Test', role: 'manager', passwordHash: 'fixture-only' };
     const token = st(user);
     assert.ok(typeof token === 'string' && token.length > 20, 'token should be a JWT string');
     const payload = vt(token);

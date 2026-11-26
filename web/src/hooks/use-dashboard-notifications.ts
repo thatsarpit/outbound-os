@@ -1,3 +1,4 @@
+import { workspaceApiPath } from '@/lib/workspace-path'
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/api/client'
@@ -102,7 +103,7 @@ export function useDashboardNotifications() {
 
         void hydrate()
         notificationActions.setConnectionState(false, 'Connecting…')
-        const response = await fetch('/api/events', {
+        const response = await fetch(workspaceApiPath('/events'), {
           headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
           signal,
         })

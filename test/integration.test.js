@@ -8,7 +8,8 @@ import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { execSync } from 'node:child_process';
+import { execFile, execFileSync, execSync, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -107,17 +108,19 @@ after(async () => {
 
 // ── Leads Tests ──────────────────────────────────────────────────────────────
 
-test('dashboard assets and SPA routes share one limit while API, health and webhooks stay independent', async () => {
+test('compiled assets, dashboard navigation and service endpoints keep separate budgets', async () => {
   const directory = path.join(__dirname, '..', 'web', 'dist');
   const index = path.join(directory, 'index.html');
   const asset = path.join(directory, '__rate-limit-fixture.svg');
+  const bundle = path.join(directory, 'assets', '__rate-limit-fixture-a12b34c5.js');
   let temporaryIndex = false;
-  fs.mkdirSync(directory, { recursive: true });
+  fs.mkdirSync(path.dirname(bundle), { recursive: true });
   try {
     fs.writeFileSync(index, '<!doctype html><title>Isolated dashboard fixture</title>', { flag: 'wx' });
     temporaryIndex = true;
   } catch (error) { if (error.code !== 'EEXIST') throw error; }
   fs.writeFileSync(asset, '<svg xmlns="http://www.w3.org/2000/svg"/>', { flag: 'wx' });
+  fs.writeFileSync(bundle, 'export {};', { flag: 'wx' });
   const headers = { 'X-Forwarded-For': '192.0.2.199' };
   try {
     for (let count = 0; count < 300; count++) {
@@ -133,6 +136,13 @@ test('dashboard assets and SPA routes share one limit while API, health and webh
       assert.ok(Number(blocked.headers['retry-after']) > 0);
       assert.equal(blocked.headers['x-ratelimit-limit'], undefined);
     }
+    const compiled = await request('GET', '/assets/__rate-limit-fixture-a12b34c5.js', { headers });
+    assert.equal(compiled.status, 200, 'compiled files still load after the navigation budget is used');
+    assert.equal(compiled.headers['ratelimit-limit'], '1200');
+    assert.equal(compiled.headers['cache-control'], 'public, max-age=31536000, immutable');
+    const missingAsset = await request('GET', '/assets/__rate-limit-missing-fixture.js', { headers });
+    assert.equal(missingAsset.status, 404, 'missing bundles never serve dashboard HTML');
+    assert.equal(missingAsset.headers['ratelimit-remaining'], '1198');
     const api = await request('GET', '/api/auth/config', { headers });
     assert.equal(api.status, 200);
     assert.equal(api.headers['ratelimit-limit'], '100', 'existing API budget is unchanged');
@@ -152,8 +162,185 @@ test('dashboard assets and SPA routes share one limit while API, health and webh
       assert.equal(missing.headers['ratelimit-limit'], undefined);
     }
   } finally {
+    fs.unlinkSync(bundle);
     fs.unlinkSync(asset);
     if (temporaryIndex) fs.unlinkSync(index);
+  }
+});
+
+test('the signed-in version endpoint returns the running server build', async () => {
+  const endpoint = '/api/system/version';
+  const ip = { 'X-Forwarded-For': '198.51.100.244' };
+  assert.equal((await request('GET', endpoint, { headers: ip })).status, 401);
+  const version = await request('GET', endpoint, { headers: { ...authHeader(), ...ip } });
+  assert.equal(version.status, 200);
+  assert.equal(version.headers['cache-control'], 'private, no-store');
+  const { readBuildInfo } = await import('../shared/buildInfo.js');
+  assert.deepEqual(version.body, readBuildInfo());
+});
+
+test('delivery review is manager-only and separates queue state from delivery', async () => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const { hashPassword } = await import('../src/auth/rbac.js');
+  const { default: followup } = await import('../src/services/followup.js');
+  const { default: emailWorker } = await import('../src/services/emailService.js');
+  const { default: imessage } = await import('../src/services/imessage.js');
+  const { default: campaignScheduler } = await import('../src/services/campaignScheduler.js');
+  const { QUEUE_SCAN_INTERVALS } = await import('../src/services/queueHealth.js');
+  const scanKey = worker => 'runtime.queue.' + worker + '.last_scan_at';
+  const scanKeys = Object.keys(QUEUE_SCAN_INTERVALS).map(scanKey);
+  const now = Date.now();
+  const at = minutes => new Date(now + minutes * 60_000);
+  const endpoint = '/api/messages/review';
+  const password = 'delivery review fixture password';
+  const lead = await db.lead.create({ data: { name: 'Delivery review fixture', mobile: '12025550167' } });
+  const users = [];
+  try {
+    const headersByRole = {};
+    for (const role of ['manager', 'viewer']) {
+      const email = 'delivery-review-' + role + '@example.test';
+      const user = await db.user.create({ data: { email, name: role, role, passwordHash: hashPassword(password) } });
+      users.push(user.id);
+      const ip = role === 'manager' ? '192.0.2.245' : '192.0.2.246';
+      const auth = await request('POST', '/api/auth/login', {
+        headers: { 'X-Forwarded-For': ip }, body: { email, password },
+      });
+      assert.equal(auth.status, 200);
+      headersByRole[role] = { Authorization: 'Bearer ' + auth.body.token, 'X-Forwarded-For': ip };
+    }
+
+    await emailWorker.processEmailQueue({ messageIds: [] });
+    assert.equal(await db.systemConfig.count({ where: { key: scanKey('email') } }), 0);
+    await followup.processQueue();
+    await emailWorker.processEmailQueue();
+    await imessage.processQueue();
+    await campaignScheduler.processDue();
+    assert.equal(await db.systemConfig.count({ where: { key: { in: scanKeys } } }), 4, 'empty queues still record a successful scan');
+    await db.systemConfig.update({ where: { key: scanKey('email') }, data: { value: at(-30).toISOString() } });
+    await db.systemConfig.delete({ where: { key: scanKey('imessage') } });
+
+    const common = {
+      leadId: lead.id, direction: 'outbound', content: 'private fixture body',
+      updatedAt: new Date('2026-11-21T00:00:00Z'),
+    };
+    await db.message.createMany({ data: [
+      ...Array.from({ length: 26 }, () => ({
+        ...common, channel: 'whatsapp', status: 'failed', providerStatusReason: 'payment_issue',
+        providerErrorCode: '131042', providerErrorMessage: 'private synthetic provider response',
+      })),
+      { ...common, channel: 'email', status: 'unconfirmed', providerStatusReason: 'private synthetic provider response' },
+      { ...common, channel: 'email', status: 'bounced' },
+      { ...common, channel: 'email', status: 'queued', scheduledAt: at(60) },
+      { ...common, channel: 'email', status: 'queued', scheduledAt: at(-10) },
+      { ...common, channel: 'whatsapp', status: 'queued', scheduledAt: at(-20) },
+      { ...common, channel: 'email', status: 'queued', scheduledAt: at(-1) },
+      { ...common, channel: 'email', status: 'queued' },
+      { ...common, channel: 'imessage', status: 'sending' },
+      { ...common, channel: 'whatsapp', status: 'sent' },
+      { ...common, channel: 'email', status: 'delivered' },
+      { ...common, channel: 'email', direction: 'inbound', status: 'failed' },
+    ] });
+
+    assert.equal((await request('GET', endpoint, { headers: { 'X-Forwarded-For': '198.51.100.245' } })).status, 401);
+    assert.equal((await request('GET', endpoint, { headers: headersByRole.viewer })).status, 403);
+    const headers = headersByRole.manager;
+    const attention = await request('GET', endpoint, { headers });
+    assert.equal(attention.status, 200, JSON.stringify(attention.body));
+    assert.deepEqual(attention.body.counts, { attention: 28, failed: 27, unconfirmed: 1, queued: 5, overdue: 2, sending: 1 });
+    assert.equal(attention.body.total, 28);
+    const workers = Object.fromEntries(attention.body.workers.map(row => [row.worker, row]));
+    assert.equal(workers.whatsapp.state, 'recent');
+    assert.equal(workers.whatsapp.intervalMinutes, 2);
+    assert.equal(workers.campaigns.state, 'recent');
+    assert.equal(workers.email.state, 'stale');
+    assert.equal(workers.email.lastScanAt, at(-30).toISOString());
+    assert.deepEqual(workers.imessage, { worker: 'imessage', intervalMinutes: 1, lastScanAt: null, state: 'not_recorded' });
+    assert.deepEqual(attention.body.receiptActivity, [
+      { source: 'whatsapp', lastReceivedAt: null, unmatched: 0 },
+      { source: 'brevo', lastReceivedAt: null, unmatched: 0 },
+    ]);
+    assert.equal(attention.body.pages, 2);
+    assert.ok(attention.body.items.every(item => ['failed', 'bounced', 'unconfirmed'].includes(item.status)));
+    assert.doesNotMatch(JSON.stringify(attention.body), /private fixture body|private synthetic provider response/);
+
+    const waReceipt = {
+      accountId: 1234, waMessageId: 'wamid.delivery-review-fixture', status: 'delivered',
+    };
+    await db.whatsAppReceipt.createMany({ data: [
+      { ...waReceipt, eventKey: 'review-wa-unmatched', receivedAt: at(-16) },
+      { ...waReceipt, eventKey: 'review-wa-applied', receivedAt: at(-15), appliedAt: at(-15) },
+    ] });
+    const emailReceipt = {
+      event: 'delivered', recipient: 'review-receipt@example.test',
+    };
+    await db.emailDeliveryEvent.createMany({ data: [
+      { ...emailReceipt, eventKey: 'review-brevo-older', occurredAt: at(-10), receivedAt: at(-9), outcome: 'recorded' },
+      { ...emailReceipt, eventKey: 'review-brevo-unmatched', occurredAt: at(-40), receivedAt: at(-8), outcome: 'unmatched', lastAttemptAt: at(0) },
+      { ...emailReceipt, eventKey: 'review-other-provider', provider: 'fixture-other', receivedAt: at(-1), outcome: 'unmatched' },
+    ] });
+
+    const query = endpoint + '?status=failed&channel=whatsapp';
+    const [{ body: first }, { body: last }] = await Promise.all([
+      request('GET', query, { headers }),
+      request('GET', query + '&page=900', { headers }),
+    ]);
+    assert.equal(first.total, 26);
+    assert.equal(first.items.length, 25);
+    assert.equal(last.page, 2);
+    assert.equal(last.items.length, 1);
+    assert.ok(first.items[24].id > last.items[0].id, 'rows with matching timestamps paginate in ID order');
+    assert.equal(first.items[0].providerCode, '131042');
+    assert.match(first.items[0].detail, /billing/);
+    assert.deepEqual(first.receiptActivity, [
+      { source: 'whatsapp', lastReceivedAt: at(-15).toISOString(), unmatched: 1 },
+      { source: 'brevo', lastReceivedAt: at(-8).toISOString(), unmatched: 1 },
+    ], 'instance receipt activity stays visible when filtering messages by channel');
+
+    const queued = await request('GET', endpoint + '?status=queued&channel=email', { headers });
+    const dueAt = queued.body.items.find(row => row.scheduledAt === at(60).toISOString());
+    assert.equal(dueAt.overdue, false);
+    assert.equal(queued.body.counts.overdue, 1, 'counts follow the selected channel');
+    assert.equal(queued.body.overdueGraceMinutes, 5);
+    const overdue = await request('GET', endpoint + '?status=overdue', { headers });
+    assert.deepEqual(overdue.body.items.map(row => [row.scheduledAt, row.overdue]), [
+      [at(-20).toISOString(), true],
+      [at(-10).toISOString(), true],
+    ]);
+    const overdueEmail = await request('GET', endpoint + '?status=overdue&channel=email', { headers });
+    assert.equal(overdueEmail.body.total, 1);
+    const uncertain = await request('GET', endpoint + '?status=unconfirmed&channel=email', { headers });
+    assert.match(uncertain.body.items[0].detail, /check the sending provider/i);
+
+    for (const invalid of ['status=sent', 'channel=sms', 'page=-1', 'page=1&page=2']) {
+      assert.equal((await request('GET', endpoint + '?' + invalid, { headers })).status, 400);
+    }
+    assert.equal(await db.message.count({ where: { leadId: lead.id } }), 37);
+    const requeue = id => request('POST', '/api/messages/' + id + '/requeue', { headers });
+    const rejectedCases = [
+      { direction: 'inbound' },
+      { sentAt: new Date(), providerErrorCode: '131042' },
+      { providerStatusReason: 'confirmation_unknown' },
+      { manualSendKey: 'scheduled-email:review-test-fixture' },
+      { campaignId: 91203 },
+    ];
+    for (const patch of rejectedCases) {
+      const message = await db.message.create({ data: { ...common, status: 'permanently_failed', channel: 'email', ...patch } });
+      assert.equal((await requeue(message.id)).status, 409);
+      assert.equal((await db.message.findUnique({ where: { id: message.id } })).status, 'permanently_failed');
+    }
+
+    const safe = await db.message.create({ data: {
+      ...common, status: 'permanently_failed', channel: 'email', providerStatusReason: 'auth_failed',
+    } });
+    const retries = await Promise.all([requeue(safe.id), requeue(safe.id)]);
+    assert.deepEqual(retries.map(result => result.status).sort(), [200, 409]);
+    assert.equal((await db.message.findUnique({ where: { id: safe.id } })).status, 'queued');
+  } finally {
+    await db.whatsAppReceipt.deleteMany({ where: { waMessageId: 'wamid.delivery-review-fixture' } });
+    await db.emailDeliveryEvent.deleteMany({ where: { recipient: 'review-receipt@example.test' } });
+    await db.lead.delete({ where: { id: lead.id } });
+    await db.user.deleteMany({ where: { id: { in: users } } });
+    await db.systemConfig.deleteMany({ where: { key: { in: scanKeys } } });
   }
 });
 
@@ -724,6 +911,9 @@ describe('System endpoints', () => {
     const res = await request('GET', '/api/system/health', { headers: authHeader() });
     assert.equal(res.status, 200);
     assert.ok(res.body.cpu !== undefined || res.body.status !== undefined);
+    assert.equal(res.body.disk.available, true);
+    assert.ok(res.body.disk.total > 0);
+    assert.ok(res.body.disk.percent >= 0 && res.body.disk.percent <= 100);
   });
 
   test("GET /api/system/status returns live connection counts", async () => {
@@ -1127,7 +1317,23 @@ describe('Meta WhatsApp webhook', () => {
       assert.equal(outbound.mediaType, 'pdf');
       assert.ok(outbound.manualSendKey, 'files use the same durable manual attempt path');
 
-      // 4. Outside the 24-hour window the error says what to do.
+      // 4. The first file reaches the provider and the second waits for capacity.
+      const second = await prisma.mediaFile.create({
+        data: { filename: `second-${storedName}`, originalName: 'second-list.pdf', mimeType: 'application/pdf', size: 13, path: `data/media/${storedName}` },
+      });
+      const batch = { mediaFileIds: [library.id, second.id], clientMessageId: 'fixture-media-quota-batch-01' };
+      const sendBatch = () => request('POST', `/api/leads/${lead.id}/send-media`, {
+        body: batch, headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.243' },
+      });
+      const held = await sendBatch();
+      assert.equal(held.status, 429, JSON.stringify(held.body));
+      assert.equal(held.body.code, 'manual_send_quota');
+      assert.equal(seen.uploads, 2);
+      await prisma.whatsAppAccount.update({ where: { id: account.id }, data: { hourlyLimit: 4 } });
+      assert.equal((await sendBatch()).status, 200);
+      assert.equal(seen.uploads, 3, 'retry sends only the file that did not reach the provider');
+
+      // 5. Outside the 24-hour window the error says what to do.
       windowClosed = true;
       const late = await request('POST', `/api/leads/${lead.id}/send-media`, {
         body: { mediaFileId: library.id },
@@ -1201,6 +1407,33 @@ describe('Built-in email and password sign-in', () => {
     assert.equal(me.body.user.email, email);
   });
 
+  test('initializes a blank admin password once from a trusted terminal', async () => {
+    const { default: prisma } = await import('../src/utils/prismaClient.js');
+    const email = 'initial-admin@example.test';
+    const password = 'first admin fixture password';
+    const reset = path.join(__dirname, '..', 'scripts', 'reset-password.mjs');
+    await prisma.user.create({
+      data: { name: 'Initial admin', email, passwordHash: '', role: 'admin' },
+    });
+    const command = (mode, input) => execFileSync(process.execPath, [reset, email, mode], {
+      input, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
+    try {
+      assert.equal(command('--status'), 'needs-password');
+      assert.ok(!command('--initial', `${password}\n`).includes(password));
+      assert.equal(command('--status'), 'configured');
+      assert.throws(() => command('--initial', 'replacement fixture password\n'),
+        error => error.stderr.includes('The first password is already set'));
+      const result = await request('POST', '/api/auth/login', {
+        headers: { 'X-Forwarded-For': '198.51.100.215' }, body: { email, password },
+      });
+      assert.equal(result.status, 200);
+    } finally {
+      await prisma.user.delete({ where: { email } });
+    }
+  });
+
   test('a disabled user is locked out even with a valid token', async () => {
     const { default: prisma } = await import('../src/utils/prismaClient.js');
     const ok = await request('POST', '/api/auth/login', { body: { email, password } });
@@ -1210,17 +1443,23 @@ describe('Built-in email and password sign-in', () => {
     await prisma.user.update({ where: { email }, data: { enabled: true } });
   });
 
-  test('changing a password needs the current one', async () => {
+  test('password change requires the current password and replaces the local session', async () => {
     const ok = await request('POST', '/api/auth/login', { body: { email, password } });
     const headers = { Authorization: `Bearer ${ok.body.token}` };
     const bad = await request('POST', '/api/auth/change-password', {
       headers, body: { currentPassword: 'nope', newPassword: 'a much longer new password' },
     });
-    assert.equal(bad.status, 401);
+    assert.equal(bad.status, 403);
     const good = await request('POST', '/api/auth/change-password', {
       headers, body: { currentPassword: password, newPassword: 'a much longer new password' },
     });
     assert.equal(good.status, 200);
+    assert.notEqual(good.body.token, ok.body.token);
+    assert.equal((await request('GET', '/api/auth/me', { headers })).status, 401);
+    assert.equal((await request('GET', '/api/events', { headers })).status, 401);
+    assert.equal((await request('GET', '/api/auth/me', {
+      headers: { Authorization: `Bearer ${good.body.token}` },
+    })).status, 200);
     const relogin = await request('POST', '/api/auth/login', { body: { email, password: 'a much longer new password' } });
     assert.equal(relogin.status, 200);
   });
@@ -1243,6 +1482,56 @@ describe('Built-in email and password sign-in', () => {
     }
   });
 
+  test('terminal reset revokes an already-open stream before the next event', async () => {
+    const source = { 'X-Forwarded-For': '192.0.2.218' };
+    const old = await request('POST', '/api/auth/login', {
+      headers: source, body: { email, password: 'a much longer new password' },
+    });
+    assert.equal(old.status, 200);
+    const oldHeaders = { ...source, Authorization: `Bearer ${old.body.token}` };
+
+    let connection;
+    let received = '';
+    let streamEnded;
+    try {
+      await new Promise((resolve, reject) => {
+        connection = http.get(new URL('/api/events', baseUrl), { headers: oldHeaders }, res => {
+          if (res.statusCode !== 200) return reject(new Error(`Stream returned ${res.statusCode}`));
+          streamEnded = new Promise((done, fail) => {
+            res.on('end', done);
+            res.on('error', fail);
+          });
+          res.setEncoding('utf8').on('data', chunk => { received += chunk; });
+          resolve();
+        });
+        connection.setTimeout(8000, () => connection.destroy(new Error('Stream reset timed out')));
+        connection.on('error', reject);
+      });
+
+      const reset = path.join(__dirname, '..', 'scripts', 'reset-password.mjs');
+      const replacement = '  CLI fixture password  ';
+      assert.throws(() => execFileSync(process.execPath, [reset, email], {
+        env: process.env, input: 'short\n', stdio: ['pipe', 'pipe', 'pipe'],
+      }), error => String(error.stderr).includes('Use at least 10 characters.'));
+      assert.equal((await request('GET', '/api/auth/me', { headers: oldHeaders })).status, 200);
+      const output = execFileSync(process.execPath, [reset, email.toUpperCase()], {
+        env: process.env, input: `${replacement}\n`, encoding: 'utf8',
+      });
+      assert.ok(!output.includes(replacement));
+      const { broadcastEvent } = await import('../src/api.js');
+      broadcastEvent('credential-reset-fixture', {});
+      await streamEnded;
+      assert.ok(!received.includes('credential-reset-fixture'));
+      assert.equal((await request('GET', '/api/auth/me', { headers: oldHeaders })).status, 401);
+      const current = await request('POST', '/api/auth/login', {
+        headers: source, body: { email, password: replacement },
+      });
+      assert.equal(current.status, 200);
+    } finally {
+      connection?.destroy();
+    }
+  });
+
   test('rejects requests with no session', async () => {
     const res = await request('GET', '/api/leads');
     assert.equal(res.status, 401);
@@ -1252,12 +1541,21 @@ describe('Built-in email and password sign-in', () => {
 // ── Website form submissions ─────────────────────────────────────────────────
 
 describe('Lead webhook from a plain HTML form', () => {
-  test('accepts a form-encoded post and creates the lead', async () => {
-    const source = await request('POST', '/api/webhooks/sources/from-preset', {
-      headers: authHeader(),
-      body: { presetId: 'website', name: 'Contact form' },
-    });
+  test('returns the configured public origin and accepts a form-encoded lead', async () => {
+    const previous = process.env.PUBLIC_URL;
+    process.env.PUBLIC_URL = 'https://crm.example.test';
+    let source;
+    try {
+      source = await request('POST', '/api/webhooks/sources/from-preset', {
+        headers: authHeader(),
+        body: { presetId: 'website', name: 'Contact form' },
+      });
+    } finally {
+      if (previous === undefined) delete process.env.PUBLIC_URL;
+      else process.env.PUBLIC_URL = previous;
+    }
     assert.equal(source.status, 200);
+    assert.equal(source.body.webhookOrigin, 'https://crm.example.test');
     const { webhookUrl, apiKey } = source.body;
 
     const form = new URLSearchParams({
@@ -1792,15 +2090,22 @@ test('Inbox thread exposes Meta pricing without inventing an amount', async () =
 });
 
 describe('Campaign schedule API', () => {
-  test('requires manager access and persists/cancels a populated future schedule without sending', async () => {
+  test('requires manager review for both launch paths and invalidates an audience swap with an unchanged count', async t => {
     const scheduleRequest = (method, url, options = {}) => request(method, url, { ...options, headers: { ...options.headers, 'X-Forwarded-For': '192.0.2.182' } });
     const { default: db } = await import('../src/utils/prismaClient.js');
     const { signToken } = await import('../src/auth/rbac.js');
     const user = await db.user.create({ data: { name: 'Schedule viewer', email: 'schedule-viewer@example.test', role: 'viewer', passwordHash: 'fixture' } });
     const lead = await db.lead.create({ data: { name: 'Schedule fixture', mobile: '15550001998', email: 'schedule-fixture@example.test' } });
+    const replacement = await db.lead.create({ data: { name: 'Schedule replacement', mobile: '15550001997', email: 'replacement@example.test' } });
     const campaign = await db.campaign.create({ data: { name: 'Schedule fixture', messageTemplate: 'Hello', channel: 'email' } });
     await db.campaignLead.create({ data: { campaignId: campaign.id, leadId: lead.id } });
     const url = `/api/campaigns/${campaign.id}/schedule`;
+    const startUrl = `/api/campaigns/${campaign.id}/start`;
+    const snapshot = async () => {
+      const response = await scheduleRequest('GET', `/api/campaigns/${campaign.id}/leads?launchReview=1`, { headers: authHeader() });
+      assert.equal(response.status, 200);
+      return response.body.launchReview;
+    };
     const scheduledAt = new Date(Date.now() + 86400000);
     scheduledAt.setUTCHours(12, 0, 0, 0);
     const body = { scheduledAt: scheduledAt.toISOString(), timezone: 'UTC' };
@@ -1812,23 +2117,89 @@ describe('Campaign schedule API', () => {
       const viewer = { Authorization: `Bearer ${signToken(user)}` };
       assert.equal((await scheduleRequest('POST', url, { body, headers: viewer })).status, 403);
       assert.equal((await scheduleRequest('DELETE', url, { headers: viewer })).status, 403);
-      const scheduled = await scheduleRequest('POST', url, { body, headers: authHeader() });
+      assert.equal((await scheduleRequest('POST', url, { body, headers: authHeader() })).status, 409);
+      assert.equal((await scheduleRequest('POST', startUrl, { headers: authHeader() })).status, 409);
+      const original = await snapshot();
+      assert.equal(original.recipientCount, 1);
+      await db.campaignLead.updateMany({ where: { campaignId: campaign.id }, data: { leadId: replacement.id } });
+      assert.equal((await scheduleRequest('POST', url, { body: { ...body, reviewToken: original.token }, headers: authHeader() })).status, 409);
+      assert.equal((await scheduleRequest('POST', startUrl, { body: { reviewToken: original.token }, headers: authHeader() })).status, 409);
+      const scheduled = await scheduleRequest('POST', url, { body: { ...body, reviewToken: (await snapshot()).token }, headers: authHeader() });
       assert.equal(scheduled.status, 200);
       assert.equal(scheduled.body.status, 'scheduled');
       assert.equal(scheduled.body.scheduleTimezone, 'UTC');
       assert.equal(await db.message.count({ where: { campaignId: campaign.id } }), 0);
       assert.equal((await scheduleRequest('POST', `/api/campaigns/${campaign.id}/start`, { headers: authHeader() })).status, 409);
+      await db.lead.update({ where: { id: replacement.id }, data: { email: 'changed-after-approval@example.test' } });
+      await db.campaign.update({ where: { id: campaign.id }, data: { scheduledAt: new Date(Date.now() - 1000) } });
+      const { default: scheduler } = await import('../src/services/campaignScheduler.js');
+      await scheduler.processDue();
+      const held = await db.campaign.findUnique({ where: { id: campaign.id } });
+      assert.equal(held.status, 'paused');
+      assert.match(held.scheduleError, /scheduled audience changed/);
+      assert.equal(await db.message.count({ where: { campaignId: campaign.id } }), 0);
+      assert.equal((await scheduleRequest('POST', url, { body: { ...body, reviewToken: (await snapshot()).token }, headers: authHeader() })).status, 200);
       assert.equal((await scheduleRequest('DELETE', url, { headers: authHeader() })).status, 200);
       assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'draft');
       assert.equal((await scheduleRequest('POST', url, { body: { scheduledAt: 'invalid', timezone: 'UTC' }, headers: authHeader() })).status, 400);
+      const { default: engine } = await import('../src/services/campaignEngine.js');
+      const execute = t.mock.method(engine, '_executeCampaign', async () => {});
+      assert.equal((await scheduleRequest('POST', startUrl, { body: { reviewToken: (await snapshot()).token }, headers: authHeader() })).status, 200);
+      assert.equal(execute.mock.callCount(), 1);
     } finally {
       config.businessHours = old;
       await db.campaignLead.deleteMany({ where: { campaignId: campaign.id } });
       await db.campaign.delete({ where: { id: campaign.id } });
       await db.lead.delete({ where: { id: lead.id } });
+      await db.lead.delete({ where: { id: replacement.id } });
       await db.user.delete({ where: { id: user.id } });
     }
   });
+});
+
+test('workspace outreach pause persists, holds due work without retries and audits the operator action', async () => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const { default: followup } = await import('../src/services/followup.js');
+  const { default: email } = await import('../src/services/emailService.js');
+  const { default: imessage } = await import('../src/services/imessage.js');
+  const { default: fresh } = await import('../src/services/freshLeadOutreach.js');
+  const { default: scheduler } = await import('../src/services/campaignScheduler.js');
+  const lead = await db.lead.create({ data: {
+    name: 'Paused outreach fixture', mobile: '12025550191', email: 'pause-fixture@example.test', telegramPeer: 'pause_fixture',
+  } });
+  const campaign = await db.campaign.create({ data: {
+    name: 'Paused scheduled fixture', messageTemplate: 'Fixture', status: 'scheduled',
+    scheduledAt: new Date(), scheduleTimezone: 'UTC',
+  } });
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.214' };
+  try {
+    await db.message.createMany({ data: ['whatsapp', 'email', 'imessage'].map(channel => ({
+      leadId: lead.id, channel, direction: 'outbound', status: 'queued', scheduledAt: new Date(0), content: 'Fixture',
+    })) });
+    const pause = await request('POST', '/api/system/pause', { headers });
+    assert.equal(pause.status, 200);
+    assert.deepEqual(pause.body, { sendingPaused: true });
+    assert.equal((await db.systemConfig.findUnique({ where: { key: 'sending_paused' } })).value, 'true');
+    assert.deepEqual((await request('GET', '/api/system/outreach', { headers })).body, { sendingPaused: true });
+    const ids = (await db.message.findMany({ where: { leadId: lead.id }, select: { id: true } })).map(row => row.id);
+    await followup.processQueue({ messageIds: ids });
+    await email.processEmailQueue({ messageIds: ids });
+    await imessage.processQueue({ messageIds: ids });
+    assert.equal((await fresh.queue(lead, { channels: ['telegram'] })).telegram, 'paused');
+    await scheduler.processDue();
+    assert.equal(await db.message.count({ where: { leadId: lead.id, status: 'queued', retryCount: 0 } }), 3);
+    assert.equal((await db.campaign.findUnique({ where: { id: campaign.id } })).status, 'scheduled');
+    assert.deepEqual((await request('POST', '/api/system/resume', { headers })).body, { sendingPaused: false });
+    const events = await db.activityLog.findMany({ where: { type: 'outreach_pause_changed' }, orderBy: { id: 'asc' } });
+    assert.deepEqual(events.map(row => JSON.parse(row.meta)), [
+      { actorId: 'mcp-service', sendingPaused: true }, { actorId: 'mcp-service', sendingPaused: false },
+    ]);
+  } finally {
+    await db.systemConfig.deleteMany({ where: { key: { in: ['sending_paused', 'runtime.queue.campaigns.last_scan_at'] } } });
+    await db.activityLog.deleteMany({ where: { type: 'outreach_pause_changed' } });
+    await db.campaign.delete({ where: { id: campaign.id } });
+    await db.lead.delete({ where: { id: lead.id } });
+  }
 });
 
 describe('Account dashboard layouts', () => {
@@ -1945,6 +2316,56 @@ test('Inbox filters before pagination and returns stable queue totals', async ()
     assert.equal(all.body.threads[0].leadId, ids[53]);
   } finally {
     await prisma.message.deleteMany({ where: { leadId: { in: ids } } });
+    await prisma.lead.deleteMany({ where: { id: { in: ids } } });
+  }
+});
+
+test('Inbox reports successful outreach channels across the full history of each visible lead', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.73' };
+  const earlier = new Date('2026-01-03T10:00:00Z');
+  const latest = new Date('2026-01-04T10:00:00Z');
+  const later = new Date('2026-01-05T10:00:00Z');
+  const message = (channel, status, date, extra = {}) =>
+    ({ channel, status, sentAt: date, createdAt: date, direction: 'outbound', content: 'Outreach fixture', ...extra });
+  const createLead = (suffix, messages) => prisma.lead.create({
+    data: { name: `Outreach Badge Fixture ${suffix}`, mobile: `no-phone:outreach-badges-${suffix}`, source: 'manual', messages: { create: messages } },
+  });
+  const ids = [];
+  try {
+    const mixed = await createLead('Mixed', [
+      message('whatsapp', 'read', earlier),
+      message('whatsapp', 'sent', earlier),
+      message('email', 'sent', latest),
+      message('imessage', 'queued', later),
+      message('telegram', 'unconfirmed', later),
+    ]);
+    ids.push(mixed.id);
+    const single = await createLead('Single', [
+      message('whatsapp', 'delivered', earlier),
+      message('email', 'failed', latest),
+      message('email', 'sent', latest, { providerDeliveryStatus: 'soft_bounce' }),
+      message('email', 'permanently_failed', latest, { providerDeliveryStatus: 'hard_bounce' }),
+      message('telegram', 'delivered', later, { direction: 'inbound' }),
+    ]);
+    ids.push(single.id);
+    const inboundOnly = await createLead('Inbound', [message('email', 'synced', earlier, { direction: 'inbound' })]);
+    ids.push(inboundOnly.id);
+
+    const all = await request('GET', '/api/inbox/threads?search=Outreach%20Badge%20Fixture', { headers });
+    assert.equal(all.status, 200);
+    assert.deepEqual(all.body.threads.find(thread => thread.leadId === mixed.id).outreachChannels, ['email', 'whatsapp']);
+    assert.deepEqual(all.body.threads.find(thread => thread.leadId === single.id).outreachChannels, ['whatsapp']);
+    assert.deepEqual(all.body.threads.find(thread => thread.leadId === inboundOnly.id).outreachChannels, []);
+    const filtered = await request('GET', `/api/inbox/threads?channel=email&leadId=${mixed.id}&limit=1`, { headers });
+    assert.equal(filtered.status, 200);
+    assert.equal(filtered.body.threads[0].channel, 'email');
+    assert.deepEqual(filtered.body.threads[0].outreachChannels, ['email', 'whatsapp']);
+
+    const detail = await request('GET', `/api/inbox/threads/${mixed.id}`, { headers });
+    assert.equal(detail.status, 200);
+    assert.deepEqual(detail.body.outreachChannels, ['email', 'whatsapp']);
+  } finally {
     await prisma.lead.deleteMany({ where: { id: { in: ids } } });
   }
 });
@@ -2426,6 +2847,140 @@ async function withDeliveryFixture(run) {
   }
 }
 
+test('scheduled inbox email keeps the original payload and holds missing files or interrupted submissions', async t => {
+  const { default: db } = await import('../src/utils/prismaClient.js');
+  const { default: email, SCHEDULED_EMAIL_SUBMITTING } = await import('../src/services/emailService.js');
+  const { default: followup } = await import('../src/services/followup.js');
+  const { default: imessage } = await import('../src/services/imessage.js');
+  const { MEDIA_DIR } = await import('../src/services/whatsappMedia.js');
+  const account = await db.emailAccount.create({ data: {
+    name: 'Scheduled SMTP fixture', email: 'schedule-sender@example.test', smtpHost: 'smtp.example.test',
+    smtpUser: 'fixture', smtpPass: 'fixture', status: 'verified',
+  } });
+  const lead = await db.lead.create({ data: {
+    name: 'Scheduled email fixture', mobile: '12025550138', email: 'schedule-recipient@example.test',
+    assignedEmailAccountId: account.id, status: 'replied',
+  } });
+  const originalReply = await db.message.create({ data: {
+    leadId: lead.id, channel: 'email', direction: 'inbound', status: 'received',
+    content: 'Reply already in the thread', emailMessageId: '<previous-reply@example.test>',
+    emailAccountId: account.id,
+  } });
+  const filename = 'schedule-fixture-' + crypto.randomUUID() + '.txt';
+  const filePath = path.join(MEDIA_DIR, filename);
+  let file;
+  const calls = [];
+  const transport = t.mock.method(email, '_getTransport', () => ({
+    async sendMail(options) {
+      const sending = await db.message.findFirst({ where: { leadId: lead.id, status: 'sending' } });
+      assert.equal(sending?.providerStatusReason, SCHEDULED_EMAIL_SUBMITTING);
+      calls.push(options);
+      return { messageId: '<schedule-fixture@example.test>' };
+    },
+  }));
+  const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.239' };
+  const send = body => request('POST', '/api/inbox/send', { headers, body: {
+    leadId: lead.id, accountId: account.id, channel: 'email', subject: 'Fixture schedule',
+    body: 'Original body', htmlBody: '<strong>Original body</strong>', cc: 'copy@example.test',
+    replyToMessageId: originalReply.id, ...body,
+  } });
+  try {
+    for (const scheduledAt of ['invalid time', new Date(0).toISOString()]) {
+      assert.equal((await send({ scheduledAt })).status, 400);
+    }
+    const date = new Date(Date.now() + 60 * 60_000).toISOString();
+    const wrongMailbox = await send({ accountId: account.id + 1, scheduledAt: date, inReplyTo: '<override@example.test>' });
+    assert.equal(wrongMailbox.status, 409);
+    assert.match(wrongMailbox.body.error, /original mailbox/);
+    assert.equal((await send({ channel: 'whatsapp', scheduledAt: date })).status, 400);
+    assert.equal(await db.message.count({ where: { leadId: lead.id, direction: 'outbound' } }), 0);
+    assert.equal(transport.mock.callCount(), 0);
+
+    fs.mkdirSync(MEDIA_DIR, { recursive: true });
+    fs.writeFileSync(filePath, 'Synthetic attachment', { flag: 'wx' });
+    file = await db.mediaFile.create({ data: {
+      filename, originalName: 'estimate.txt', mimeType: 'text/plain', size: 20, path: 'data/media/' + filename,
+    } });
+    const body = { scheduledAt: date, attachmentIds: [file.id], clientMessageId: 'scheduled-email-fixture-001' };
+    const [first, repeated] = await Promise.all([send(body), send(body)]);
+    assert.equal(first.status, 200, JSON.stringify(first.body));
+    assert.equal(repeated.status, 200, JSON.stringify(repeated.body));
+    const id = first.body.message.id;
+    assert.equal(repeated.body.message.id, id);
+    assert.equal(await db.message.count({ where: { leadId: lead.id, direction: 'outbound' } }), 1);
+    assert.equal(transport.mock.callCount(), 0);
+    const queued = await request('GET', '/api/inbox/threads/' + lead.id, { headers });
+    assert.deepEqual(queued.body.scheduledEmails.map(row => row.status), ['queued']);
+    assert.equal(queued.body.messages.length, 1, 'queued email does not count as a conversation message yet');
+
+    const changeUrl = messageId => `/api/inbox/threads/${lead.id}/scheduled-emails/${messageId}`;
+    const moved = new Date(Date.now() + 120 * 60_000).toISOString();
+    assert.equal((await request('PATCH', changeUrl(id), { headers, body: { scheduledAt: moved } })).status, 200);
+    await email.processEmailQueue({ messageIds: [id] });
+    assert.equal(calls.length, 0, 'a rescheduled message is held until the new time');
+    assert.equal((await db.message.findUnique({ where: { id } })).scheduledAt.toISOString(), moved);
+
+    await db.message.update({ where: { id }, data: { scheduledAt: new Date(0) } });
+    await email.processEmailQueue({ messageIds: [id] });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].html, '<strong>Original body</strong>');
+    assert.equal(calls[0].cc, 'copy@example.test');
+    assert.equal(calls[0].headers['In-Reply-To'], '<previous-reply@example.test>');
+    assert.deepEqual(calls[0].attachments, [{ filename: 'estimate.txt', path: filePath, contentType: 'text/plain' }]);
+    assert.equal((await db.message.findUnique({ where: { id } })).status, 'sent');
+
+    const missing = await send({ ...body, clientMessageId: 'scheduled-email-fixture-002' });
+    assert.equal(missing.status, 200, JSON.stringify(missing.body));
+    const missingId = missing.body.message.id;
+    fs.unlinkSync(filePath);
+    await db.message.update({ where: { id: missingId }, data: { scheduledAt: new Date(0) } });
+    await email.processEmailQueue({ messageIds: [missingId] });
+    assert.equal(calls.length, 1);
+    const failed = await db.message.findUnique({ where: { id: missingId } });
+    assert.equal(failed.status, 'permanently_failed');
+    assert.equal(failed.providerStatusReason, 'email_attachment_unavailable');
+
+    t.mock.method(imessage, 'recoverStuckMessages', async () => ({ count: 0, requeued: 0 }));
+    const stale = await send({ scheduledAt: date, clientMessageId: 'scheduled-email-fixture-003' });
+    assert.equal(stale.status, 200, JSON.stringify(stale.body));
+    const staleId = stale.body.message.id;
+    await db.message.update({ where: { id: staleId }, data: {
+      status: 'sending', providerStatusReason: SCHEDULED_EMAIL_SUBMITTING,
+      scheduledAt: new Date(0), updatedAt: new Date(0),
+    } });
+    await followup.recoverStuckMessages();
+    assert.equal((await db.message.findUnique({ where: { id: staleId } })).status, 'unconfirmed');
+    const review = await request('GET', '/api/inbox/threads/' + lead.id, { headers });
+    assert.ok(review.body.scheduledEmails.some(row => row.id === staleId && row.status === 'unconfirmed'));
+    await email.processEmailQueue({ messageIds: [staleId] });
+    assert.equal(calls.length, 1, 'an interrupted provider submission is never sent again automatically');
+
+    const lateReply = await send({ scheduledAt: date, clientMessageId: 'scheduled-email-fixture-004' });
+    assert.equal(lateReply.status, 200);
+    const cancelledId = lateReply.body.message.id;
+    await db.message.create({ data: {
+      leadId: lead.id, channel: 'email', direction: 'inbound', status: 'received',
+      content: 'New reply after scheduling',
+    } });
+    await db.message.update({ where: { id: cancelledId }, data: { scheduledAt: new Date(0) } });
+    await email.processEmailQueue({ messageIds: [cancelledId] });
+    assert.equal((await db.message.findUnique({ where: { id: cancelledId } })).status, 'cancelled');
+    assert.equal(calls.length, 1, 'a newer reply stops the scheduled send');
+    assert.equal((await request('DELETE', changeUrl(id), { headers })).status, 409, 'accepted mail cannot be cancelled');
+    const toCancel = await send({ scheduledAt: date, clientMessageId: 'scheduled-email-fixture-005' });
+    assert.equal(toCancel.status, 200);
+    const cancelId = toCancel.body.message.id;
+    assert.equal((await request('DELETE', changeUrl(cancelId), { headers })).status, 200);
+    assert.equal((await db.message.findUnique({ where: { id: cancelId } })).providerStatusReason, 'scheduled_email_cancelled_by_operator');
+    assert.equal((await request('PATCH', changeUrl(cancelId), { headers, body: { scheduledAt: moved } })).status, 409);
+  } finally {
+    fs.rmSync(filePath, { force: true });
+    if (file) await db.mediaFile.delete({ where: { id: file.id } });
+    await db.lead.delete({ where: { id: lead.id } });
+    await db.emailAccount.delete({ where: { id: account.id } });
+  }
+});
+
 describe('Brevo delivery receipts', () => {
   test('only the identified campaign recipient changes among many historical emails', async () => withDeliveryFixture(async ({ prisma, lead, createMessage, post, event }) => {
     const target = await createMessage();
@@ -2804,7 +3359,7 @@ describe('Direct Meta transport', () => {
     const previous = process.env.META_GRAPH_API_BASE;
     process.env.META_GRAPH_API_BASE = `http://127.0.0.1:${graph.address().port}`;
     const account = await prisma.whatsAppAccount.create({ data: {
-      name: 'Direct transport fixture', provider: 'meta', cloudApiPhoneId: 'phone-fixture',
+      name: 'Direct transport fixture', provider: 'meta', enabled: true, cloudApiPhoneId: 'phone-fixture',
       cloudApiToken: cloud.encryptToken('fixture-token'), templateLanguage: 'en_US',
     } });
     try {
@@ -3173,6 +3728,121 @@ test('Web Push enforces personal device ownership and retries durable reply curs
   }
 });
 
+test('WhatsApp follow-up quota waits without using a retry and uncertain sends stay held', async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { default: manager } = await import('../src/services/whatsapp.js');
+  const { default: followup } = await import('../src/services/followup.js');
+  const sender = await prisma.whatsAppAccount.create({ data: { name: 'Follow-up quota fixture' } });
+  const lead = await prisma.lead.create({ data: {
+    name: 'Follow-up quota fixture', mobile: '15550104997', assignedAccount: sender.id, status: 'new', leadTier: 'HOT',
+  } });
+  const queued = await prisma.message.create({ data: {
+    leadId: lead.id, direction: 'outbound', channel: 'whatsapp', status: 'queued', content: 'Synthetic follow-up',
+    scheduledAt: new Date(Date.now() - 60_000), waAccount: sender.id, waCampaignName: 'fixture_template',
+  } });
+  const original = manager.sendCampaignTemplate;
+  const retryAt = new Date(Date.now() + 30 * 60_000);
+  let attempts = 0;
+  manager.sendCampaignTemplate = async () => {
+    attempts++;
+    return attempts === 1 ? { success: false, reason: 'whatsapp_hourly_limit', retryAt }
+      : { success: false, reason: 'timeout' };
+  };
+  try {
+    const run = () => followup.processQueue({ messageIds: [queued.id] });
+    const row = () => prisma.message.findUnique({ where: { id: queued.id } });
+    await run();
+    const held = await row();
+    assert.equal(held.status, 'queued');
+    assert.equal(held.retryCount, 0);
+    assert.equal(+held.scheduledAt, +retryAt);
+    await run();
+    assert.equal(attempts, 1);
+    await prisma.message.update({ where: { id: queued.id }, data: { scheduledAt: new Date(Date.now() - 1_000) } });
+    await run();
+    assert.equal((await row()).status, 'unconfirmed');
+    await run();
+    assert.equal(attempts, 2);
+  } finally {
+    manager.sendCampaignTemplate = original;
+    await prisma.lead.delete({ where: { id: lead.id } });
+    await prisma.whatsAppAccount.delete({ where: { id: sender.id } });
+  }
+});
+
+test('a worker killed during provider submission leaves one held WhatsApp attempt', { timeout: 15_000 }, async () => {
+  const { default: prisma } = await import('../src/utils/prismaClient.js');
+  const { default: followup } = await import('../src/services/followup.js');
+  const { default: imessage } = await import('../src/services/imessage.js');
+  const sender = await prisma.whatsAppAccount.create({ data: {
+    name: 'Crash recovery fixture', enabled: true, cloudApiPhoneId: 'fixture-crash-recovery',
+    cloudApiToken: 'synthetic-fixture-only', dailyLimit: 20, hourlyLimit: 10,
+  } });
+  const lead = await prisma.lead.create({ data: {
+    name: 'Crash recovery fixture', mobile: '15550104998', assignedAccount: sender.id, status: 'new', leadTier: 'HOT',
+  } });
+  const message = await prisma.message.create({ data: {
+    leadId: lead.id, direction: 'outbound', channel: 'whatsapp', status: 'queued', content: 'Synthetic follow-up',
+    scheduledAt: new Date(Date.now() - 60_000), waAccount: sender.id, waCampaignName: 'fixture_template',
+  } });
+  let submissions = 0;
+  let received;
+  const requestReceived = new Promise(resolve => { received = resolve; });
+  const graph = http.createServer((req) => {
+    submissions++;
+    req.resume();
+    req.on('end', received);
+    // Keep the response open so the worker cannot record a provider outcome.
+  });
+  const recoverImessage = imessage.recoverStuckMessages;
+  let child;
+  let timer;
+  try {
+    await new Promise(resolve => graph.listen(0, '127.0.0.1', resolve));
+    const { href } = new URL('../src/services/followup.js', import.meta.url);
+    child = spawn(process.execPath, ['--input-type=module', '-e', `
+      import worker from ${JSON.stringify(href)};
+      await worker.processQueue({ messageIds: [Number(process.argv[1])] });
+      process.exit(0);
+    `, String(message.id)], { env: {
+      ...process.env, META_GRAPH_API_BASE: `http://127.0.0.1:${graph.address().port}`,
+    }, stdio: 'ignore' });
+    const exited = new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('exit', (_code, signal) => resolve(signal));
+    });
+    await Promise.race([
+      requestReceived,
+      exited.then(() => { throw new Error('Worker exited before provider submission.'); }),
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('No provider submission received.')), 7000);
+      }),
+    ]);
+    const row = () => prisma.message.findUnique({ where: { id: message.id } });
+    assert.equal((await row()).providerStatusReason, 'provider_pending');
+    child.kill('SIGKILL');
+    assert.equal(await exited, 'SIGKILL');
+
+    await prisma.message.update({ where: { id: message.id }, data: { updatedAt: new Date(Date.now() - 6 * 60_000) } });
+    imessage.recoverStuckMessages = async () => ({ count: 0, confirmed: 0, requeued: 0 });
+    await followup.recoverStuckMessages();
+    const held = await row();
+    assert.equal(held.status, 'unconfirmed');
+    assert.equal(held.providerStatusReason, 'confirmation_unknown');
+    assert.equal(held.retryCount, 0);
+    await followup.processQueue({ messageIds: [message.id] });
+    assert.equal(submissions, 1);
+  } finally {
+    clearTimeout(timer);
+    child?.kill('SIGKILL');
+    imessage.recoverStuckMessages = recoverImessage;
+    graph.closeAllConnections();
+    if (graph.listening) await new Promise(resolve => graph.close(resolve));
+    await prisma.lead.delete({ where: { id: lead.id } });
+    await prisma.whatsAppAccount.delete({ where: { id: sender.id } });
+  }
+});
+
 test('WhatsApp manual replies enforce the window, persist failures, retain reply ownership and deduplicate attempts', async () => {
   const { default: prisma } = await import('../src/utils/prismaClient.js');
   const { default: manager } = await import('../src/services/whatsapp.js');
@@ -3187,9 +3857,23 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
   cloud.listApprovedTemplates = async () => ({ ok: true, templates: [{ name: 'reconnect_fixture', language: 'en_GB', category: 'MARKETING', status: 'APPROVED', body: 'Hello {{1}}, still interested?', bodyVariables: ['1'], manualSupported: true }] });
   const send = (body) => request('POST', '/api/inbox/send', { headers, body: { leadId: lead.id, channel: 'whatsapp', ...body } });
   try {
+    await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', waAccount: account.id, content: 'Initial template', status: 'sent', sentAt: new Date() } });
+    const waiting = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+    assert.equal(waiting.body.whatsappSession.reason, 'no_customer_message');
+    assert.equal(waiting.body.whatsappSession.recipientAvailable, true);
+    assert.equal(waiting.body.whatsappSession.expiresAt, null);
+    const neverOpened = await send({ text: 'Free text before the first reply' });
+    assert.equal(neverOpened.status, 409);
+    assert.match(neverOpened.body.error, /No incoming WhatsApp message/);
+    assert.equal(neverOpened.body.reason, 're_engagement_required');
+    assert.equal(sends, 0);
+
     await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'inbound', waAccount: account.id, content: 'Old enquiry', status: 'delivered', sentAt: new Date('2026-01-01'), createdAt: new Date() } });
     const blocked = await send({ text: 'A normal reply' });
     assert.equal(blocked.status, 409); assert.equal(blocked.body.reason, 're_engagement_required'); assert.equal(sends, 0);
+    assert.match(blocked.body.error, /reply window expired/);
+    const expired = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+    assert.equal(expired.body.whatsappSession.reason, 'expired');
     const template = { name: 'reconnect_fixture', language: 'en_GB', parameters: ['Buyer'] };
     assert.equal((await send({ whatsappTemplate: { ...template, parameters: [] } })).status, 400);
     const accepted = await send({ whatsappTemplate: template, clientMessageId: 'fixture-template-00001' });
@@ -3207,6 +3891,8 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
     assert.equal(explained.status, 400);
 
     await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'inbound', waAccount: account.id, content: 'Yes, please', status: 'delivered', sentAt: new Date() } });
+    const open = await request('GET', `/api/inbox/threads/${lead.id}`, { headers });
+    assert.equal(open.body.whatsappSession.reason, 'open');
     const body = { text: 'Here are the details', clientMessageId: 'fixture-message-00001' };
     const sent = await send(body); assert.equal(sent.status, 200);
     assert.equal(sent.body.message.waMessageId, 'wamid.MANUAL-FIXTURE');
@@ -3263,13 +3949,15 @@ test('WhatsApp manual replies enforce the window, persist failures, retain reply
     const manual = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Interrupted manual attempt', status: 'sending', idempotencyKey: `manual-wa:${lead.id}:fixture-interrupted-0001`, updatedAt: stale } });
     const automated = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Interrupted queue attempt', status: 'sending', updatedAt: stale } });
     const interruptedCampaign = await prisma.message.create({ data: { leadId: lead.id, campaignId: 987654, channel: 'whatsapp', direction: 'outbound', content: 'Synthetic interrupted campaign attempt', status: 'sending', updatedAt: stale } });
+    const preparing = await prisma.message.create({ data: { leadId: lead.id, channel: 'whatsapp', direction: 'outbound', content: 'Stopped before submission', status: 'sending', providerStatusReason: 'whatsapp_preparing', updatedAt: stale } });
     imessage.recoverStuckMessages = async () => ({ count: 0, confirmed: 0, requeued: 0 });
     try {
       const recovered = await followup.recoverStuckMessages();
       assert.ok(recovered.unconfirmed >= 1);
       assert.equal((await prisma.message.findUnique({ where: { id: manual.id } })).status, 'unconfirmed');
-      assert.equal((await prisma.message.findUnique({ where: { id: automated.id } })).status, 'queued');
+      assert.equal((await prisma.message.findUnique({ where: { id: automated.id } })).status, 'unconfirmed');
       assert.equal((await prisma.message.findUnique({ where: { id: interruptedCampaign.id } })).status, 'unconfirmed');
+      assert.equal((await prisma.message.findUnique({ where: { id: preparing.id } })).status, 'queued');
     } finally { imessage.recoverStuckMessages = previousRecovery; }
 
   } finally {
@@ -3406,17 +4094,121 @@ describe('MCP dashboard connection setup', () => {
 });
 
 describe('Audit workflow repairs', () => {
-  test('CSV upload works without removed pool fields and preview accepts unrestricted scope', async () => {
+  test('explicit lead pause and resume preserve sales state and record the reason', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const lead = await db.lead.create({ data: { name: 'Pause stage fixture', mobile: 'no-phone:stage-pause', status: 'engaged' } });
+    const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.207' };
+    try {
+      const pause = (paused, outreachReason) => request('PATCH', `/api/leads/${lead.id}`, {
+        headers, body: { outreachPaused: paused, outreachReason },
+      });
+      assert.equal((await pause(true, 'Review requested')).body.status, 'paused');
+      assert.equal((await pause(true)).body.statusBeforePause, 'engaged', 'a repeated pause preserves the saved state');
+      assert.equal((await pause(false)).body.status, 'engaged');
+      const bulk = action => request('POST', '/api/leads/bulk', { headers, body: { ids: [lead.id], action } });
+      assert.equal((await bulk('pause')).body.updated, 1);
+      assert.equal((await bulk('resume')).body.updated, 1);
+      assert.equal((await db.lead.findUnique({ where: { id: lead.id } })).status, 'engaged');
+      const events = await db.activityLog.findMany({ where: { leadId: lead.id }, orderBy: { id: 'asc' } });
+      assert.equal(events.length, 4);
+      assert.equal(JSON.parse(events[0].meta).reason, 'Review requested');
+      assert.equal(JSON.parse(events[1].meta).to, 'engaged');
+    } finally {
+      await db.activityLog.deleteMany({ where: { leadId: lead.id } });
+      await db.lead.delete({ where: { id: lead.id } });
+    }
+  });
+
+  test('outreach history composes with lead status and uses outbound acceptance evidence', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const headers = { ...authHeader(), 'X-Forwarded-For': '192.0.2.206' };
+    const source = 'history-filter-fixture';
+    const [unconfirmed, accepted, queued] = await Promise.all([
+      { name: 'Unconfirmed', status: 'paused', messages: [{ direction: 'inbound', status: 'received' }, { direction: 'outbound', status: 'unconfirmed' }] },
+      { name: 'Accepted before bounce', status: 'paused', messages: [{ direction: 'outbound', status: 'bounced', sentAt: new Date() }] },
+      { name: 'Only queued', status: 'contacted', messages: [{ direction: 'outbound', status: 'queued' }] },
+    ].map((row, index) => db.lead.create({ data: {
+      name: row.name, status: row.status, source, mobile: 'no-phone:history-filter:' + index,
+      messages: { create: row.messages.map(message => ({ ...message, channel: 'email', content: 'Fixture' })) },
+    } })));
+    try {
+      const list = filter => request('GET', `/api/leads?source=${source}&${filter}`, { headers });
+      const paused = await list('status=paused&outreachHistory=no_acceptance');
+      assert.equal(paused.body.total, 1);
+      assert.deepEqual(paused.body.leads.map(lead => lead.id), [unconfirmed.id]);
+      const sent = await list('outreachHistory=accepted');
+      assert.deepEqual(sent.body.leads.map(lead => lead.id), [accepted.id]);
+      const without = await list('outreachHistory=no_acceptance');
+      assert.deepEqual(without.body.leads.map(lead => lead.id).sort(), [unconfirmed.id, queued.id].sort());
+      assert.equal((await list('outreachHistory=invalid')).status, 400);
+    } finally {
+      await db.lead.deleteMany({ where: { source } });
+    }
+  });
+
+  test('email-only CSV contacts skip matching addresses and preserve suppression', async () => {
+    const { default: db } = await import('../src/utils/prismaClient.js');
+    const filename = 'audit-email-only.csv';
+    const known = await db.lead.create({ data: {
+      name: 'Existing suppressed contact', mobile: '12025550173', email: ' Already-Known@example.test ',
+      emailOptOut: true,
+    } });
+    try {
+      const form = new FormData();
+      form.set('file', new Blob([
+        'name,email,company\nExisting,already-known@example.test,Should not fill\nNew,email-csv@example.test,Fixture\nRepeat,EMAIL-CSV@example.test,Ignored\nInvalid,missing-domain,Example\n',
+      ], { type: 'text/csv' }), filename);
+      const upload = () => fetch(`${baseUrl}/api/import/csv`, {
+        method: 'POST', headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.208' }, body: form,
+      });
+      form.set('preview', '1');
+      const preview = await upload();
+      assert.equal(preview.status, 200);
+      const review = await preview.json();
+      assert.deepEqual([review.imported, review.skipped, review.failed], [1, 2, 1]);
+      form.delete('preview');
+      form.set('reviewToken', review.reviewToken);
+      assert.equal((await upload()).status, 200);
+      const imported = await db.lead.findMany({ where: { email: 'email-csv@example.test' } });
+      assert.equal(imported.length, 1);
+      assert.match(imported[0].mobile, /^no-phone:csv:/);
+      assert.equal(await db.message.count({ where: { leadId: imported[0].id } }), 0);
+      const existing = await db.lead.findUnique({ where: { id: known.id } });
+      assert.equal(existing.company, null);
+      assert.equal(existing.emailOptOut, true);
+    } finally {
+      await db.lead.deleteMany({ where: { OR: [{ id: known.id }, { email: 'email-csv@example.test' }] } });
+      await db.importBatch.deleteMany({ where: { filename } });
+    }
+  });
+
+  test('CSV preview writes nothing and applies only the current reviewed upload', async () => {
     const { default: db } = await import('../src/utils/prismaClient.js');
     const name = 'CSV multiline audit fixture';
     try {
       const form = new FormData();
       form.set('file', new Blob(['name,mobile,notes\r\n"CSV multiline audit fixture",447700900811,"line one\nline two"\r\n'], { type: 'text/csv' }), 'audit-fixture.csv');
-      const result = await fetch(`${baseUrl}/api/import/csv`, { method: 'POST', headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.210' }, body: form });
+      form.set('preview', '1');
+      const upload = () => fetch(`${baseUrl}/api/import/csv`, {
+        method: 'POST', headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.210' }, body: form,
+      });
+      const scanned = await upload();
+      assert.equal(scanned.status, 200);
+      const review = await scanned.json();
+      assert.equal(review.imported, 1);
+      assert.equal(review.columnMapping.mobile, 'mobile');
+      assert.equal(await db.lead.count({ where: { name } }), 0);
+      assert.equal(await db.importBatch.count({ where: { filename: 'audit-fixture.csv' } }), 0);
+      form.delete('preview');
+      form.set('reviewToken', 'a'.repeat(64));
+      assert.equal((await upload()).status, 409);
+      form.set('reviewToken', review.reviewToken);
+      const result = await upload();
       assert.equal(result.status, 200, JSON.stringify(await result.clone().json()));
       const saved = await db.lead.findFirst({ where: { name } });
       assert.ok(saved);
       assert.equal(saved.notes, 'line one\nline two');
+      assert.equal((await upload()).status, 409, 'repeat approval is stale once the matching contact exists');
       const preview = await request('POST', '/api/campaigns/preview-leads', { headers: { ...authHeader(), 'X-Forwarded-For': '192.0.2.211' }, body: { filter: { status: 'new' }, channel: 'whatsapp' } });
       assert.equal(preview.status, 200);
       assert.equal(typeof preview.body.count, 'number');
@@ -3668,6 +4460,10 @@ describe('YCloud WhatsApp provider', () => {
       } else if (req.url.includes('/upload')) res.end(JSON.stringify({ id: 'media-fixture' }));
       else if (req.url.includes('/download/')) { res.setHeader('Content-Type', 'image/png'); res.end(Buffer.from('fixture-image')); }
       else if (req.url === '/v2/whatsapp/messages/sendDirectly') {
+        if (sendFailure === 'gateway') {
+          res.statusCode = 502;
+          return res.end('{}');
+        }
         if (sendFailure === 'balance') {
           res.statusCode = 403;
           return res.end(JSON.stringify({ code: 'BALANCE_INSUFFICIENT', message: 'Payment fixture' }));
@@ -3682,7 +4478,7 @@ describe('YCloud WhatsApp provider', () => {
     await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve));
     previousBase = process.env.YCLOUD_API_BASE;
     process.env.YCLOUD_API_BASE = `http://127.0.0.1:${upstream.address().port}/v2`;
-    account = await prisma.whatsAppAccount.create({ data: { name: 'YCloud fixture', provider: 'ycloud', enabled: true } });
+    account = await prisma.whatsAppAccount.create({ data: { name: 'YCloud fixture', provider: 'ycloud', enabled: true, hourlyLimit: 100, dailyLimit: 100 } });
   });
   after(async () => {
     if (previousBase === undefined) delete process.env.YCLOUD_API_BASE; else process.env.YCLOUD_API_BASE = previousBase;
@@ -3757,6 +4553,85 @@ describe('YCloud WhatsApp provider', () => {
     assert.equal(failure.errorCode, '131042');
     assert.equal(failure.rawError, 'Payment fixture');
     sendFailure = false;
+  });
+
+  test('one shared quota gates concurrent text, template and media sends before provider calls', async () => {
+    calls = [];
+    const source = await prisma.whatsAppAccount.findUnique({ where: { id: account.id } });
+    const first = await prisma.whatsAppAccount.create({ data: {
+      name: 'Limited YCloud fixture', provider: 'ycloud', enabled: true,
+      ycloudApiKey: source.ycloudApiKey, ycloudWabaId: waba, ycloudPhoneNumber: phone,
+      hourlyLimit: 1, dailyLimit: 9,
+    } });
+    const attempts = await Promise.all([1, 2, 3, 4].map(() =>
+      cloud.sendTextMessage('15550100001', 'Synthetic quota fixture', first.id)));
+    assert.equal(attempts.filter(result => result.success).length, 1);
+    assert.equal(attempts.filter(result => result.reason === 'whatsapp_hourly_limit').length, 3);
+    assert.equal(calls.length, 1);
+
+    const template = await cloud.sendCampaignTemplate({ phone: '15550100001', campaignName: 'fixture_template', accountId: first.id });
+    assert.equal(template.reason, 'whatsapp_hourly_limit');
+    const { sendMediaFile } = await import('../src/services/whatsappMedia.js');
+    const file = path.join(__dirname, '..', 'data', 'quota-media-fixture.txt');
+    fs.writeFileSync(file, 'Fixture only');
+    try {
+      const media = await sendMediaFile({ address: '15550100001', filePath: file, mimeType: 'text/plain', filename: 'fixture.txt', accountId: first.id });
+      assert.equal(media.reason, 'whatsapp_hourly_limit');
+    } finally {
+      fs.unlinkSync(file);
+    }
+    assert.equal(calls.length, 1, 'quota denial even skips provider media upload');
+
+    const pool = await prisma.leadPool.create({ data: { name: 'Quota fixture', slug: 'quota-fixture' } });
+    await prisma.leadPoolWhatsApp.createMany({ data: [first.id, account.id].map(whatsappAccountId => ({ poolId: pool.id, whatsappAccountId })) });
+    const { default: manager } = await import('../src/services/whatsapp.js');
+    assert.equal(await manager.getNextAccount({ poolId: pool.id }), account.id);
+    assert.equal(await manager.getNextAccount({ poolId: pool.id }), account.id);
+    const later = await manager.sendMessage('15550100001', 'Synthetic quota fixture', first.id);
+    assert.equal(later.reason, 'whatsapp_hourly_limit');
+    assert.equal(calls.length, 1, 'explicit sender cannot switch accounts');
+  });
+
+  test('quota survives new processes and observes both midnight and rolling-hour boundaries', async () => {
+    const sender = await prisma.whatsAppAccount.create({ data: {
+      name: 'Persistent quota fixture', hourlyLimit: 1, dailyLimit: 1, enabled: true,
+    } });
+    const worker = new URL('../src/services/whatsappDispatch.js', import.meta.url).href;
+    const dbModule = new URL('../src/utils/prismaClient.js', import.meta.url).href;
+    const run = promisify(execFile);
+    const attempt = async (time) => {
+      const { stdout } = await run(process.execPath, ['--input-type=module', '-e', `
+        import { reserveWhatsAppDispatch } from ${JSON.stringify(worker)};
+        import db from ${JSON.stringify(dbModule)};
+        const result = await reserveWhatsAppDispatch(Number(process.argv[1]), new Date(process.argv[2]));
+        console.log(JSON.stringify(result));
+        await db.$disconnect();
+      `, String(sender.id), time], { env: { ...process.env, BUSINESS_TIMEZONE: 'Asia/Kolkata' } });
+      return JSON.parse(stdout.trim().split('\n').at(-1));
+    };
+    const initial = '2026-11-18T17:45:00.000Z';
+    const contenders = await Promise.all([attempt(initial), attempt(initial)]);
+    assert.equal(contenders.filter(result => result.reserved).length, 1);
+    const sameDay = await attempt('2026-11-18T18:25:00.000Z');
+    assert.equal(sameDay.reason, 'whatsapp_daily_limit');
+    assert.equal(sameDay.retryAt, '2026-11-18T18:30:00.000Z');
+    const midnight = await attempt('2026-11-18T18:30:00.000Z');
+    assert.equal(midnight.reason, 'whatsapp_hourly_limit', 'midnight cannot clear the rolling hour');
+    assert.equal(midnight.retryAt, '2026-11-18T18:45:00.000Z');
+    assert.equal((await attempt('2026-11-18T18:45:00.000Z')).reserved, true);
+  });
+
+  test('a gateway error leaves the provider outcome uncertain', async () => {
+    calls = [];
+    sendFailure = 'gateway';
+    try {
+      const result = await cloud.sendTextMessage('15550100001', 'Synthetic gateway fixture', account.id);
+      assert.equal(result.success, false);
+      assert.equal(result.reason, 'confirmation_unknown');
+      assert.equal(calls.length, 1);
+    } finally {
+      sendFailure = false;
+    }
   });
 
   test('thread ownership rejection is actionable and never retried by the transport', async () => {

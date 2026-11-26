@@ -90,9 +90,8 @@ export default function SelfHostedCrmPage() {
               {installCommands.map((line) => `$ ${line}`).join('\n')}
             </Code>
             <p className="landing-note">
-              Open http://localhost:3001 and sign in with the ADMIN_EMAIL you
-              set in .env. If you left ADMIN_PASSWORD empty, a generated one is
-              printed once in the logs.
+              Enter your admin email, set a password in the private terminal
+              prompt and open the sign-in address printed by the installer.
             </p>
           </div>
         </div>
@@ -239,14 +238,10 @@ export default function SelfHostedCrmPage() {
           <div>
             <h3>Updates</h3>
             <p>
-              Make a complete backup and review release notes before pulling
-              the chosen image. Migrations run on start; the backup gives you a
-              recovery path if an upgrade needs to be reversed.
+              Make a complete backup and review the release notes before
+              upgrading. Follow the steps for your installation in the{' '}
+              <Link className="link" href="/docs/backups-and-upgrades">backup, upgrade and recovery guide</Link>.
             </p>
-            <Code label="Update">
-              {'git pull\ndocker compose pull && docker compose up -d'}
-            </Code>
-            <p className="landing-note"><Link className="link" href="/docs/backups-and-upgrades">Read the backup, upgrade and recovery guide</Link> before updating a live workspace.</p>
           </div>
         </div>
       </section>

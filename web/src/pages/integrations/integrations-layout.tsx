@@ -12,6 +12,9 @@ import { INTEGRATION_TABS } from './integrations-nav'
  */
 export default function IntegrationsLayout() {
   const location = useLocation()
+  const fromSetup = new URLSearchParams(location.search).get('setup')
+  const setupSearch =
+    fromSetup === 'channels' || fromSetup === 'sources' ? `?setup=${fromSetup}` : ''
   const tabs = INTEGRATION_TABS
   const canonicalPath = location.pathname.replace(/^\/dev\/shell/, '')
   const active = tabs.find((tab) => canonicalPath.startsWith(tab.to)) ?? tabs[0]
@@ -37,7 +40,7 @@ export default function IntegrationsLayout() {
             return (
               <NavLink
                 key={tab.id}
-                to={tab.to}
+                to={tab.to + setupSearch}
                 className={({ isActive }) =>
                   cn(
                     'flex shrink-0 items-center gap-2 rounded-md px-3 py-2 text-[13px] transition-colors',

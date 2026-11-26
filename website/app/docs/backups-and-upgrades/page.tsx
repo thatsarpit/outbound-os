@@ -76,8 +76,19 @@ docker compose up -d`}
           for anything that needs a new setting.
         </li>
         <li>Take a backup.</li>
-        <li>Pull the new images and restart:</li>
+        <li>Use the upgrade steps for your installation:</li>
       </ol>
+      <p>
+        Guided source builds use a local image tag saved in <code>.env</code>.
+        Save the current image under a rollback tag, update the checkout, then
+        run <code>docker compose up -d --build --pull never app</code>.
+        For a guided registry install, download <code>compose-images.env</code>{' '}
+        from the successful Docker images workflow for the chosen release.
+        Copy <code>OUTBOUNDOS_APP_IMAGE</code> into your existing <code>.env</code>.
+        If you use MCP, copy <code>OUTBOUNDOS_MCP_IMAGE</code> too. Pull the new
+        images before switching containers.
+      </p>
+      <p>For a manual install using the published tag:</p>
       <Code label="Terminal">{'git pull\ndocker compose pull && docker compose up -d'}</Code>
       <p>
         Compose runs the published images from GitHub Container Registry, for
@@ -86,18 +97,17 @@ docker compose up -d`}
         <code>--profile mcp</code> to both commands.
       </p>
       <p>
-        To stay on one version, set <code>OUTBOUNDOS_VERSION=0.2.0</code> in{' '}
-        <code>.env</code>. Running your own changes to the code?{' '}
-        <code>docker compose up -d --build</code> builds from the folder
-        instead.
+        Manual installs can pin <code>OUTBOUNDOS_VERSION=0.2.0</code> in{' '}
+        <code>.env</code>. Verify health with <code>docker compose ps</code>{' '}
+        and sign in after the upgrade.
       </p>
 
       <h2 id="rollback">Roll back</h2>
       <p>
-        Set <code>OUTBOUNDOS_VERSION</code> back to the previous release,
-        start it, and restore the backup you took before upgrading.
-        Migrations only move forward, so a database that has already been
-        migrated should not be run with older code.
+        Restore the pre-upgrade backup before starting the previous image.
+        For a guided registry install, restore the saved app digest and its
+        companion MCP digest if you use MCP. For a manual registry install,
+        select the previous release in <code>OUTBOUNDOS_VERSION</code>.
       </p>
       <Code label=".env, then Terminal">{'OUTBOUNDOS_VERSION=0.2.0\n\ndocker compose pull && docker compose up -d'}</Code>
       <p>

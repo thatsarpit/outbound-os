@@ -1,17 +1,14 @@
 # Outbound OS — self-hosted
 #
-#   cp .env.example .env        # then fill in the values it asks for
-#   docker compose up -d
-#   open http://localhost:3001
+#   bash setup/install.sh
 #
 # The first boot creates the database and the first admin (ADMIN_EMAIL /
-# ADMIN_PASSWORD; if no password is set, `docker compose logs app` shows a
-# generated one once).
+# ADMIN_PASSWORD). If the password is blank, run:
+#   docker compose exec app npm run reset-password -- YOUR_ADMIN_EMAIL
 #
-# Everything the app stores lives in the `outboundos-data` volume. Back it up
-# with:  docker compose exec app bash scripts/backup.sh
-# (writes to /app/data/backups inside the same volume; copy it off the host
-# with `docker compose cp app:/app/data/backups ./backups`).
+# Back up the app volume with docker compose exec -T app npm run backup:instance.
+# See setup/backups.md for off-host storage, host configuration and the separate
+# MCP volume.
 #
 # Optional MCP server, so Claude or another AI client can work your CRM:
 #   docker compose --profile mcp up -d
@@ -19,16 +16,19 @@
 #
 # Images: Compose pulls the published image from GitHub Container Registry
 # and only builds from this folder if it cannot. Pin a version with
-# OUTBOUNDOS_VERSION=0.2.0 in .env (default: latest release). To update:
+# OUTBOUNDOS_VERSION=0.2.0 in .env (default: latest release). To pin the
+# tested app and MCP pair by digest, use the release workflow artifact.
+# To update a tag-based install:
 #   docker compose pull && docker compose up -d
 # To run your own changes instead:  docker compose up -d --build
 
 services:
   app:
-    image: ghcr.io/thatsarpit/outbound-os:${OUTBOUNDOS_VERSION:-latest}
+    image: "${OUTBOUNDOS_APP_IMAGE:-ghcr.io/thatsarpit/outbound-os:${OUTBOUNDOS_VERSION:-latest}}"
     build: .
     pull_policy: missing
     restart: unless-stopped
+    stop_grace_period: 25s
     env_file: .env
     environment:
       # Inside the container the database is always in the mounted folder.
@@ -36,7 +36,7 @@ services:
       API_PORT: "3001"
       NODE_ENV: production
     ports:
-      - "${OUTBOUNDOS_PORT:-3001}:3001"
+      - "${OUTBOUNDOS_BIND_ADDRESS:-127.0.0.1}:${OUTBOUNDOS_PORT:-3001}:3001"
     volumes:
       # A named volume keeps the image's file ownership, so the non-root app
       # user can always write its database. A bind mount (./data) often
@@ -45,7 +45,7 @@ services:
 
   mcp:
     profiles: ["mcp"]
-    image: ghcr.io/thatsarpit/outbound-os-mcp:${OUTBOUNDOS_VERSION:-latest}
+    image: "${OUTBOUNDOS_MCP_IMAGE:-ghcr.io/thatsarpit/outbound-os-mcp:${OUTBOUNDOS_VERSION:-latest}}"
     build:
       context: .
       dockerfile: mcp-outboundos/Dockerfile
@@ -57,11 +57,12 @@ services:
       PORT: "3010"
       OAUTH_STORE_PATH: /app/data/mcp-oauth.json
     ports:
-      - "${OUTBOUNDOS_MCP_PORT:-3010}:3010"
+      - "${OUTBOUNDOS_MCP_BIND_ADDRESS:-127.0.0.1}:${OUTBOUNDOS_MCP_PORT:-3010}:3010"
     volumes:
       - outboundos-mcp:/app/data
     depends_on:
-      - app
+      app:
+        condition: service_healthy
 
 volumes:
   outboundos-data:

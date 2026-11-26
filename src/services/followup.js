@@ -1,3 +1,7 @@
+import { isOutreachPaused, OUTREACH_PAUSED } from './outreachPause.js';
+import { recordQueueScan } from './queueHealth.js';
+import { reconcileMetaReceipts } from './whatsappDelivery.js';
+import { whatsappQuotaMessage } from './whatsappDispatch.js';
 import { suppressedWhatsAppLeads } from './whatsappSuppression.js';
 import prisma from '../utils/prismaClient.js';
 import deliveryRetry from './deliveryRetry.js';
@@ -10,11 +14,11 @@ import whatsappManager from './whatsapp.js';
 import composer from './messageComposer.js';
 import replyDetector from './replyDetector.js';
 import leadStateService from '../domain/leadStateService.js';
-import emailService from './emailService.js';
+import emailService, { SCHEDULED_EMAIL_SUBMITTING } from './emailService.js';
 import imessageService from './imessage.js';
 
-try {
-} catch(e) {}
+const PREPARING = 'whatsapp_preparing';
+const SUBMITTING = 'provider_pending';
 
 /**
  * Follow-up Engine
@@ -34,34 +38,38 @@ class FollowupEngine {
   async recoverStuckMessages() {
     try {
       const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
-      // BlueBubbles can deliver through AppleScript and still time out at the
-      // HTTP layer. Reconcile those rows against BlueBubbles history before a
-      // generic crash recovery has a chance to requeue a duplicate.
-      const imessage = await imessageService.recoverStuckMessages({ staleMinutes: 5 });
-      // A manual request may have reached Meta before the process stopped. Never turn it into automation.
-      const manual = await prisma.message.updateMany({
-        where: { status: 'sending', direction: 'outbound', channel: 'whatsapp', idempotencyKey: { startsWith: 'manual-wa:' }, updatedAt: { lt: fiveMinAgo } },
+      const stale = { status: 'sending', direction: 'outbound', updatedAt: { lt: fiveMinAgo } };
+      const whatsapp = await prisma.message.updateMany({
+        where: { ...stale, channel: 'whatsapp',
+          OR: [{ providerStatusReason: null }, { providerStatusReason: { not: PREPARING } }] },
         data: { status: 'unconfirmed', providerStatusReason: 'confirmation_unknown' },
       });
       const campaign = await prisma.message.updateMany({
-        where: { status: 'sending', direction: 'outbound', campaignId: { not: null }, channel: { not: 'imessage' }, updatedAt: { lt: fiveMinAgo } },
+        where: { ...stale, campaignId: { not: null }, channel: { notIn: ['whatsapp', 'imessage'] } },
         data: { status: 'unconfirmed', providerStatusReason: 'confirmation_unknown' },
       });
+      const scheduledEmail = await prisma.message.updateMany({
+        where: { ...stale, channel: 'email', providerStatusReason: SCHEDULED_EMAIL_SUBMITTING },
+        data: { status: 'unconfirmed', providerStatusReason: 'confirmation_unknown' },
+      });
+      // WhatsApp rows can only be requeued when they have a preparation marker.
+      // Scheduled email submissions that could have reached the provider were held above.
       const result = await prisma.message.updateMany({
-        where: {
-          status: 'sending',
-          direction: 'outbound',
-          channel: { not: 'imessage' },
-          campaignId: null,
-          updatedAt: { lt: fiveMinAgo },
-        },
+        where: { ...stale, campaignId: null,
+          OR: [{ channel: 'whatsapp', providerStatusReason: PREPARING },
+            { channel: { notIn: ['whatsapp', 'imessage'] } }] },
         data: { status: 'queued' },
       });
-      const count = result.count + imessage.count + manual.count + campaign.count;
+      const imessage = await imessageService.recoverStuckMessages({ staleMinutes: 5 }).catch(error => {
+        logger.warn(`Failed to reconcile interrupted iMessage sends: ${error.message}`);
+        return { count: 0, confirmed: 0, requeued: 0 };
+      });
+      const unconfirmed = whatsapp.count + campaign.count + scheduledEmail.count;
+      const count = result.count + imessage.count + unconfirmed;
       if (count > 0) {
-        logger.info(`🔧 Recovered ${count} stuck 'sending' message(s) (${imessage.confirmed} iMessage confirmed, ${result.count + imessage.requeued} requeued)`);
+        logger.info(`Recovered ${count} interrupted messages (${result.count + imessage.requeued} requeued, ${unconfirmed} held for review).`);
       }
-      return { count, requeued: result.count + imessage.requeued, unconfirmed: manual.count + campaign.count, imessage };
+      return { count, requeued: result.count + imessage.requeued, unconfirmed, imessage };
     } catch (e) {
       logger.warn(`Failed to recover stuck messages: ${e.message}`);
       return { count: 0, error: e.message };
@@ -360,7 +368,8 @@ class FollowupEngine {
         take: Array.isArray(messageIds) ? Math.max(1, messageIds.length) : 20,
       });
 
-      if (pendingMessages.length === 0) return;
+      if (!Array.isArray(messageIds)) await recordQueueScan('whatsapp');
+      if (pendingMessages.length === 0 || await isOutreachPaused()) return;
 
       let toProcess = pendingMessages;
 
@@ -390,23 +399,26 @@ class FollowupEngine {
       logger.info(`📤 Processing ${sorted.length} queued messages (priority sorted)...`);
 
       for (const msg of sorted) {
-        let claimedMsg = null;
+        if (await isOutreachPaused()) break;
+        let claimedMsg;
+        let submission;
+        let sendResult;
+        const ownsPreparation = () => ({
+          id: claimedMsg.id, status: 'sending', providerStatusReason: PREPARING,
+          updatedAt: claimedMsg.updatedAt,
+        });
+        const ownsSubmission = () => ({
+          id: claimedMsg.id, status: 'sending', providerStatusReason: SUBMITTING,
+          updatedAt: submission.updatedAt,
+        });
         try {
-          // Atomic queue claim so reply/takeover cancellations can't be sent from stale in-memory snapshots.
-          const claimed = await prisma.message.updateMany({
-            where: {
-              id: msg.id,
-              status: 'queued',
-              direction: 'outbound',
-            },
-            data: { status: 'sending' },
+          // The claim version prevents an old worker from submitting after
+          // recovery returns its preparation to the queue.
+          [claimedMsg] = await prisma.message.updateManyAndReturn({
+            where: { id: msg.id, status: 'queued', direction: 'outbound', updatedAt: msg.updatedAt },
+            data: { status: 'sending', providerStatusReason: PREPARING },
           });
-          if (claimed.count === 0) continue;
-
-          claimedMsg = await prisma.message.findUnique({
-            where: { id: msg.id },
-            include: { lead: true },
-          });
+          if (!claimedMsg) continue;
 
           // Re-fetch lead state after claim to avoid stale decisions.
           const liveLead = await prisma.lead.findUnique({
@@ -416,7 +428,7 @@ class FollowupEngine {
           if (!liveLead || leadStateService.shouldBlockAutomation(liveLead.status)) {
             logger.info(`⏭️ Lead ${claimedMsg.leadId} moved to ${liveLead?.status || 'missing'} before send; cancelling message ${claimedMsg.id}`);
             await prisma.message.updateMany({
-              where: { id: claimedMsg.id, status: 'sending' },
+              where: ownsPreparation(),
               data: { status: 'cancelled' },
             });
             continue;
@@ -448,16 +460,12 @@ class FollowupEngine {
                 );
                 claimedMsg.content = regenerated;
                 sendAccountId = liveLead.assignedAccount;
-                await prisma.message.update({
-                  where: { id: claimedMsg.id },
-                  data: { content: regenerated, waAccount: liveLead.assignedAccount },
-                });
                 logger.info(`✅ Regenerated message ${claimedMsg.id} with correct persona: ${correctProfile.personaName} @ ${correctProfile.companyName}`);
               }
             } catch (regenErr) {
               logger.error(`Failed to regenerate mismatched message ${claimedMsg.id}: ${regenErr.message}. Cancelling to prevent wrong persona send.`);
               await prisma.message.updateMany({
-                where: { id: claimedMsg.id, status: 'sending' },
+                where: ownsPreparation(),
                 data: { status: 'cancelled' },
               });
               continue;
@@ -465,7 +473,7 @@ class FollowupEngine {
           }
 
           if ((await suppressedWhatsAppLeads(prisma, [liveLead.id], sendAccountId || null)).has(liveLead.id)) {
-            await prisma.message.updateMany({ where: { id: claimedMsg.id, status: 'sending' }, data: { status: 'cancelled', providerStatusReason: 'whatsapp_marketing_opted_out' } });
+            await prisma.message.updateMany({ where: ownsPreparation(), data: { status: 'cancelled', providerStatusReason: 'whatsapp_marketing_opted_out' } });
             continue;
           }
 
@@ -475,8 +483,7 @@ class FollowupEngine {
           // Cached in WhatsAppNumberCheck table; re-checked after 30 days.
           // We only run this for the FIRST outreach — once a real send succeeds with
           // ack >= 1, we know the number is valid and skip the check for follow-ups.
-          let sendResult;
-          if (!claimedMsg.waCampaignName && isInitialOutreach && (claimedMsg.lead?.followupCount ?? 0) === 0) {
+          if (!claimedMsg.waCampaignName && isInitialOutreach && (msg.lead?.followupCount ?? 0) === 0) {
             const preCheck = await this._prevalidateWhatsAppNumber(liveLead.mobile);
             if (preCheck === false) {
               logger.warn(`📵 Pre-send check: Lead ${liveLead.id} (*${liveLead.mobile.slice(-4)}) is NOT on WhatsApp — short-circuiting send`);
@@ -485,6 +492,36 @@ class FollowupEngine {
           }
 
           if (!sendResult) {
+            const beforeSubmit = async (accountId) => {
+              // Check again after transport setup. A reply or opt-out can arrive
+              // while the worker waits on local database or sender checks.
+              const lead = await prisma.lead.findUnique({
+                where: { id: claimedMsg.leadId }, select: { id: true, status: true },
+              });
+              if (!lead || leadStateService.shouldBlockAutomation(lead.status) ||
+                (await suppressedWhatsAppLeads(prisma, [lead.id], accountId)).has(lead.id)) {
+                await prisma.message.updateMany({
+                  where: ownsPreparation(), data: { status: 'cancelled', providerStatusReason: 'dispatch_cancelled' },
+                });
+                return false;
+              }
+              if (await isOutreachPaused()) {
+                await prisma.message.updateMany({
+                  where: ownsPreparation(), data: { status: 'queued', providerStatusReason: OUTREACH_PAUSED },
+                });
+                return false;
+              }
+              [submission] = await prisma.message.updateManyAndReturn({
+                where: { ...ownsPreparation(), lead: { status: lead.status } },
+                data: { providerStatusReason: SUBMITTING, waAccount: accountId, content: claimedMsg.content },
+                select: { updatedAt: true, waAccount: true },
+              });
+              if (submission) return true;
+              await prisma.message.updateMany({
+                where: ownsPreparation(), data: { status: 'queued', providerStatusReason: null },
+              });
+              return false;
+            };
             if (claimedMsg.waCampaignName) {
               let templateParams = [];
               try {
@@ -497,24 +534,45 @@ class FollowupEngine {
                 claimedMsg.waCampaignName,
                 templateParams,
                 sendAccountId,
-                { poolId: liveLead.poolId, source: 'outboundos-fresh-lead' }
+                { poolId: liveLead.poolId, source: 'outboundos-fresh-lead', beforeSubmit }
               );
             } else {
               sendResult = await whatsappManager.sendMessage(
                 liveLead.mobile,
                 claimedMsg.content,
-                sendAccountId
+                sendAccountId,
+                { beforeSubmit }
               );
             }
           }
 
+          if (sendResult.reason === 'dispatch_cancelled') continue;
+          const owned = submission ? ownsSubmission() : ownsPreparation();
+          const resolvedAccountId = submission?.waAccount || sendResult.accountId || sendAccountId;
+
           if (sendResult.success) {
+            const sent = await prisma.message.updateMany({
+              where: owned,
+              data: {
+                status: 'sent',
+                providerStatusReason: 'provider_accepted',
+                sentAt: new Date(),
+                waAccount: resolvedAccountId,
+                ...(sendResult.waMessageId ? { waMessageId: sendResult.waMessageId } : {}),
+              },
+            });
+            if (sent.count === 0) continue;
+            if (sendResult.waMessageId && resolvedAccountId) {
+              await reconcileMetaReceipts(sendResult.waMessageId, resolvedAccountId);
+              const delivered = await prisma.message.findUnique({ where: { id: claimedMsg.id }, select: { status: true } });
+              if (!delivered || !['sent', 'delivered', 'read'].includes(delivered.status)) continue;
+            }
             processedAny = true;
 
             // Burn one slot from the account's new-lead budget. The
             // messagesSentToday counter is already incremented inside
-            // whatsappManager.sendMessage(); this counter tracks the *initial
-            // outreach* subset that gates getNextAccount({forInitialOutreach}).
+            // whatsappManager.sendMessage(); this counter tracks the initial
+            // outreach subset for sender reporting and selection.
             if (isInitialOutreach) {
               const acctId = sendResult.accountId || sendAccountId;
               if (acctId) {
@@ -532,16 +590,6 @@ class FollowupEngine {
                 sendResult.identifiers
               );
             }
-
-            const sent = await prisma.message.updateMany({
-              where: { id: claimedMsg.id, status: 'sending' },
-              data: {
-                status: 'sent',
-                sentAt: new Date(),
-                ...(sendResult.waMessageId ? { waMessageId: sendResult.waMessageId } : {}),
-              },
-            });
-            if (sent.count === 0) continue;
 
             const remainingQueued = await prisma.message.count({
               where: {
@@ -605,18 +653,38 @@ class FollowupEngine {
             continue;
           }
 
-          if (sendResult.reason === 'not_on_whatsapp' || sendResult.reason === 'invalid_phone') {
+          if (whatsappQuotaMessage(sendResult.reason)) {
             await prisma.message.updateMany({
-              where: { id: claimedMsg.id, status: 'sending' },
+              where: owned,
+              data: { status: 'queued', scheduledAt: sendResult.retryAt, providerStatusReason: sendResult.reason },
+            });
+            continue;
+          }
+
+          if (['timeout', 'exception', 'no_message_id', 'confirmation_unknown'].includes(sendResult.reason)) {
+            await prisma.message.updateMany({
+              where: owned,
+              data: {
+                status: 'unconfirmed', providerStatusReason: sendResult.reason,
+                ...(sendResult.waMessageId ? { waMessageId: sendResult.waMessageId } : {}),
+              },
+            });
+            continue;
+          }
+
+          if (sendResult.reason === 'not_on_whatsapp' || sendResult.reason === 'invalid_phone') {
+            const failed = await prisma.message.updateMany({
+              where: owned,
               data: {
                 status: 'permanently_failed',
                 retryCount: claimedMsg.maxRetries || 3,
               },
             });
+            if (!failed.count) continue;
 
             const cancelled = await prisma.message.updateMany({
               where: {
-                leadId: claimedMsg.lead.id,
+                leadId: claimedMsg.leadId,
                 status: 'queued',
                 direction: 'outbound',
                 channel: 'whatsapp',
@@ -625,22 +693,22 @@ class FollowupEngine {
             });
 
             await prisma.lead.update({
-              where: { id: claimedMsg.lead.id },
+              where: { id: claimedMsg.leadId },
               data: {
                 isOnWhatsApp: false,
                 status: 'wa_unavailable',
               },
             });
 
-            logger.warn(`📵 Lead ${claimedMsg.lead.id} marked wa_unavailable (not on WhatsApp). Cancelled ${cancelled.count} queued WA msg(s).`);
+            logger.warn(`📵 Lead ${claimedMsg.leadId} marked wa_unavailable (not on WhatsApp). Cancelled ${cancelled.count} queued WA msg(s).`);
 
             // ── Auto-fallback to email if lead has email ──
-            if (claimedMsg.lead.email) {
-              logger.info(`📧 Auto-falling back to email for Lead ${claimedMsg.lead.id}`);
+            if (msg.lead.email) {
+              logger.info(`📧 Auto-falling back to email for Lead ${claimedMsg.leadId}`);
               try {
-                await this._queueInitialEmailOutreach(claimedMsg.lead);
+                await this._queueInitialEmailOutreach(msg.lead);
               } catch (emailErr) {
-                logger.warn(`📧 Email fallback failed for Lead ${claimedMsg.lead.id}: ${emailErr.message}`);
+                logger.warn(`📧 Email fallback failed for Lead ${claimedMsg.leadId}: ${emailErr.message}`);
               }
             }
             continue;
@@ -651,24 +719,30 @@ class FollowupEngine {
 
           if (newRetryCount >= maxRetries) {
             await prisma.message.updateMany({
-              where: { id: claimedMsg.id, status: 'sending' },
+              where: owned,
               data: { status: 'permanently_failed', retryCount: newRetryCount },
             });
-            logger.error(`Message to Lead ${claimedMsg.lead.id} permanently failed after ${newRetryCount} retries`);
+            logger.error(`Message to Lead ${claimedMsg.leadId} permanently failed after ${newRetryCount} retries`);
           } else {
             await prisma.message.updateMany({
-              where: { id: claimedMsg.id, status: 'sending' },
-              data: { status: 'queued', retryCount: newRetryCount }, // Re-queue it so the next run picks it up
+              where: owned,
+              data: { status: 'queued', retryCount: newRetryCount, providerStatusReason: sendResult.reason }, // Re-queue it so the next run picks it up
             });
-            logger.warn(`Failed to send message to Lead ${claimedMsg.lead.id} (retry ${newRetryCount}/${maxRetries})`);
+            logger.warn(`Failed to send message to Lead ${claimedMsg.leadId} (retry ${newRetryCount}/${maxRetries})`);
           }
         } catch (msgError) {
           logger.error(`Queue message ${msg.id} failed: ${msgError.message}`);
           if (claimedMsg?.id) {
-            const fallbackRetry = (claimedMsg.retryCount || 0) + 1;
+            // A write may fail after the provider has accepted the message.
+            // Only return to the queue when the same preparation still owns it.
             await prisma.message.updateMany({
-              where: { id: claimedMsg.id, status: 'sending' },
-              data: { status: 'queued', retryCount: fallbackRetry },
+              where: submission ? ownsSubmission() : ownsPreparation(),
+              data: submission
+                ? {
+                    status: 'unconfirmed', providerStatusReason: 'confirmation_unknown',
+                    ...(sendResult?.waMessageId ? { waMessageId: sendResult.waMessageId } : {}),
+                  }
+                : { status: 'queued', providerStatusReason: null, retryCount: (claimedMsg.retryCount || 0) + 1 },
             }).catch(() => {});
           }
         }
@@ -690,7 +764,7 @@ class FollowupEngine {
             scheduledAt: { lte: new Date() },
           }
         });
-        if (!Array.isArray(messageIds) && morePending > 0 && processedAny && !deferredByBusinessHours) {
+        if (!Array.isArray(messageIds) && morePending > 0 && processedAny && !deferredByBusinessHours && !await isOutreachPaused()) {
           setTimeout(() => this.processQueue(), 1000);
         }
       } catch (err) {

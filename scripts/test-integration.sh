@@ -18,6 +18,8 @@ export AUTH_PROVIDER="local"
 export EMAIL_VERIFICATION_ENABLED="false"
 export CLERK_PUBLISHABLE_KEY=""
 export CLERK_SECRET_KEY=""
+export OUTBOUNDOS_WORKSPACE_ID=""
+export OUTBOUNDOS_WORKSPACES=""
 export MCP_SERVICE_TOKEN="integration-service-token"
 # Prisma 6's macOS arm64 schema engine can exit before its SQLite worker is
 # ready unless Rust logging initializes first. RUST_LOG=debug avoids that race.

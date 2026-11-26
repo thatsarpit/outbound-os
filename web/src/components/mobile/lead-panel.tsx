@@ -1,7 +1,9 @@
+import { LeadCallLink } from '@/components/leads/lead-call-link'
+import { leadPhoneHref } from '../../../../shared/leadPhone.js'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Check, Mail, MessageSquare, Phone, Plus } from 'lucide-react'
+import { Check, Mail, MessageSquare, Plus } from 'lucide-react'
 import { leadsApi } from '@/api/endpoints/leads'
 import { notesApi } from '@/api/endpoints/notes'
 import { tasksApi } from '@/api/endpoints/tasks'
@@ -97,7 +99,7 @@ export function MobileLeadPanel({
   if (lead.error || !lead.data)
     return <MobileError message="Could not load this lead." retry={() => lead.refetch()} />
   const data = lead.data
-  const phone = data.mobile && /^\+?[\d\s()-]{7,20}$/.test(data.mobile) ? data.mobile : null
+  const phone = leadPhoneHref(data.mobile) ? data.mobile : null
   const taskRows = Array.isArray(tasks.data) ? tasks.data : []
   const noteRows = Array.isArray(notes.data) ? notes.data : []
   return (
@@ -126,12 +128,7 @@ export function MobileLeadPanel({
               Conversation
             </Link>
           )}
-          {phone && (
-            <a href={`tel:${phone.replace(/[^\d+]/g, '')}`} className={mobileButton}>
-              <Phone className="h-4 w-4" />
-              Call
-            </a>
-          )}
+          <LeadCallLink phone={phone} />
           {data.email && (
             <a href={`mailto:${data.email}`} className={mobileButton}>
               <Mail className="h-4 w-4" />

@@ -1,3 +1,4 @@
+import { ScheduledEmails } from './scheduled-emails'
 import { ReplyPreview, MessageInteractions } from './message-interactions'
 /**
  * The conversation pane — thread header, timeline and composer for one lead.
@@ -6,8 +7,8 @@ import { ReplyPreview, MessageInteractions } from './message-interactions'
  * props and owns no cross-cutting state, which is why it could be lifted out
  * cleanly while the rest of that file could not.
  */
-import { WhatsAppReplyWindow, isWhatsAppWindowClosed } from './whatsapp-reply-window'
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { WhatsAppReplyWindow, canSendWhatsAppFreeText } from './whatsapp-reply-window'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useConversationRead } from '@/hooks/use-conversation-read'
 import { type EmailTemplate } from '@/api/endpoints/templates'
 import type { InboxChannel, InboxThreadDetail, InboxMessage, MediaFile } from '@/api/types'
@@ -102,12 +103,13 @@ export interface ConversationSurfaceProps {
   activeThread?: InboxThreadDetail | null
   threadLoading: boolean
   threadError: Error | null
+  headerActions?: ReactNode
   replyText: string
   setReplyText: (value: string) => void
   htmlBody: string
   setHtmlBody: (value: string) => void
   composerChannel: InboxChannel
-  setComposerChannel: (value: InboxChannel) => void
+  setComposerChannel: (value: InboxChannel, emailAccountId?: number | null) => void
   composerSubject: string
   setComposerSubject: (value: string) => void
   senderAccountId: number | null
@@ -135,13 +137,14 @@ export interface ConversationSurfaceProps {
   onCcChange: (value: string) => void
   bcc: string
   onBccChange: (value: string) => void
-  onScheduleSend: (scheduledAt: string) => void
+  onScheduleSend: (scheduledAt: string) => Promise<void>
 }
 
 export function ConversationSurface({
   activeThread,
   threadLoading,
   threadError,
+  headerActions,
   replyText,
   setReplyText,
   htmlBody,
@@ -179,7 +182,8 @@ export function ConversationSurface({
 }: ConversationSurfaceProps) {
   const [selectedReply, setSelectedReply] = useState<InboxMessage | null>(null)
   const replyTarget =
-    selectedReply?.leadId === activeThread?.leadId && selectedReply?.channel === composerChannel
+    selectedReply?.leadId === activeThread?.leadId && selectedReply?.channel === composerChannel &&
+    (selectedReply.channel !== 'email' || selectedReply.emailAccountId === senderAccountId)
       ? selectedReply
       : null
 
@@ -192,7 +196,7 @@ export function ConversationSurface({
   const availableSenderAccounts = activeThread?.availableSenderAccounts ?? []
   const sendDisabled =
     replyPending ||
-    (composerChannel === 'whatsapp' && isWhatsAppWindowClosed(activeThread)) ||
+    (composerChannel === 'whatsapp' && !canSendWhatsAppFreeText(activeThread)) ||
     // On WhatsApp, files alone are a message; the text becomes their caption.
     (!replyText.trim() && !(composerChannel === 'whatsapp' && attachments.length > 0)) ||
     Boolean(replyDisabledReason) ||
@@ -208,6 +212,7 @@ export function ConversationSurface({
       <ThreadHeader
         thread={activeThread}
         activeChannel={composerChannel}
+        actions={headerActions}
         drawer={drawer}
         onClose={onClose}
         onResolve={onResolve}
@@ -217,8 +222,9 @@ export function ConversationSurface({
       />
 
       {composerChannel === 'whatsapp' && activeThread && (
-        <WhatsAppReplyWindow key={activeThread.leadId} thread={activeThread} />
+        <WhatsAppReplyWindow key={`${activeThread.leadId}:${activeThread.whatsappSession?.accountId}`} thread={activeThread} />
       )}
+      <ScheduledEmails emails={activeThread?.scheduledEmails} leadId={activeThread?.leadId} />
       <div
         ref={timelineRef}
         {...timelineProps}
@@ -268,7 +274,7 @@ export function ConversationSurface({
                   message={message}
                   onReply={(m) => {
                     setSelectedReply({ ...m })
-                    setComposerChannel(m.channel)
+                    setComposerChannel(m.channel, m.channel === 'email' ? m.emailAccountId : undefined)
                   }}
                 >
                   <EmailMessageCard
@@ -287,7 +293,7 @@ export function ConversationSurface({
                   showChannel={showChannel}
                   onReply={(m) => {
                     setSelectedReply({ ...m })
-                    setComposerChannel(m.channel)
+                    setComposerChannel(m.channel, m.channel === 'email' ? m.emailAccountId : undefined)
                   }}
                   quotedMessage={all.find((m) => m.id === message.replyToMessageId)}
                   showDate={
@@ -316,6 +322,7 @@ export function ConversationSurface({
         </div>
       )}
       <ComposerBar
+        key={`${activeThread?.leadId ?? 'none'}:${composerChannel}:${senderAccountId ?? 'default'}`}
         channel={composerChannel}
         onChannelChange={(channel) => {
           setSelectedReply(null)
