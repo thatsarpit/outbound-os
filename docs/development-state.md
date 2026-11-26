@@ -4,11 +4,11 @@ Updated 26 November 2026.
 
 ## Current release and candidate
 
-The live release baseline is **v0.5.2** at `b5fc874`. Start new work from
-that release or a verified newer main revision. The v0.6.0 candidate adds
-optional private Sales access, source assignment and Browser chat. Use the
-[rollout guide](private-sales-and-browser-chat.md) before enabling either
-feature. The November 16 release reconciliation below is historical.
+The live release baseline is **v0.6.0** at `77c7cb2072ed`, verified on the
+dashboard, API and installed iPhone app. Start new work from that release or
+a verified newer main revision. Use the
+[rollout guide](private-sales-and-browser-chat.md) for private Sales and chat
+configuration. The November 16 release reconciliation below is historical.
 
 ## Live release checkpoint
 

@@ -79,7 +79,7 @@ export default function MobileTasksPage() {
   return (
     <div className="space-y-3">
       <div
-        className="flex rounded-xl border border-border bg-surface p-1"
+        className="flex rounded-xl bg-surface-raised p-0.5"
         role="group"
         aria-label="Follow-up status"
       >
@@ -89,7 +89,7 @@ export default function MobileTasksPage() {
             key={String(all)}
             aria-pressed={showAll === all}
             onClick={() => setFilters({ show: all ? 'all' : null, page: null })}
-            className={`min-h-11 flex-1 rounded-lg text-sm focus-visible:outline-2 focus-visible:outline-focus ${showAll === all ? 'bg-accent-muted font-semibold text-accent' : 'text-text-muted'}`}
+            className={`min-h-11 flex-1 rounded-lg text-sm focus-visible:outline-2 focus-visible:outline-focus ${showAll === all ? 'bg-surface font-semibold text-accent shadow-xs' : 'text-text-muted'}`}
           >
             {all ? 'All follow-ups' : 'Pending'}
           </button>

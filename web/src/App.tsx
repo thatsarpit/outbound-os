@@ -224,6 +224,7 @@ export default function App() {
                 >
                   <Route index element={<Navigate to="inbox" replace />} />
                   <Route path="inbox" element={<MobileInboxPage />} />
+                  <Route path="delivery" element={<DeliveryReviewPage />} />
                   <Route path="tasks" element={<MobileTasksPage />} />
                   <Route path="leads" element={<MobileLeadsPage />} />
                   <Route path="install" element={<MobileInstallPage />} />

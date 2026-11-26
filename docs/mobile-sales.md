@@ -4,24 +4,29 @@ The web dashboard includes a focused phone workspace at `/m/inbox`. Phone visits
 to Overview, Inbox and Leads open it automatically. The profile menu links to
 the full dashboard, account preferences and Home Screen instructions.
 
-The three mobile destinations are:
+The four mobile tabs are:
 
 - **Inbox:** shared workspace conversations, Needs reply / All, channel filters,
-  and search. A conversation opens full-screen. Email sender,
+  and search. The Filters sheet shows channel and assignment. Delivery review opens inside the phone shell and appends more results. A conversation opens full-screen. Email sender,
   subject, CC/BCC, templates and attachments are behind Options. Lead details,
-  notes and follow-ups are available from the conversation header.
+  notes, follow-ups and private chat invitations are available from the conversation header.
 - **Tasks:** pending/all follow-ups, workspace and assigned-lead filters, overdue counts, completion/reopening and links
   to their leads. Open a lead to add another follow-up.
 - **Leads:** searchable contacts, contact details, conversation access, phone
   calls, notes and follow-ups.
+- **Account:** a list of profile, security, device notification, appearance,
+  workspace access and version screens. Each section has a direct link.
 
-This version intentionally omits campaign creation, mass sends, integration
-setup, reporting and administration from phone navigation. These remain in the
-full dashboard. Assignment to the current Clerk user is not exposed because the
-backend does not yet map Clerk identities to numeric local user assignments.
-The queues are shared workspace queues, not personal or organization-isolated
-queues. “Needs reply” is based on the latest visible message; there is no separate
-per-person read/unread state.
+Campaign creation, mass sends, integration setup, reporting and administration
+are available in the full dashboard. When private Sales mode is enabled,
+restricted agents see their assigned conversations and claim eligible new
+inbounds. “Needs reply” is a queue status and the unread indicator represents
+the signed-in person’s own reading position.
+
+Floating tabs leave room for the iPhone home indicator. The bar stays visible
+on the main screens and yields to the composer on a full-screen conversation.
+The bar uses a solid surface when the browser reports reduced transparency or
+increased contrast.
 
 ## Drafts and connectivity
 

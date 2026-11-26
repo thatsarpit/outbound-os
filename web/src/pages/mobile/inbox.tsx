@@ -1,8 +1,10 @@
-import { Suspense, lazy, useDeferredValue, useEffect } from 'react'
+import { Suspense, lazy, useDeferredValue, useEffect, useRef } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
-import { Inbox, ListChecks, Search } from 'lucide-react'
+import { ArrowLeft, Inbox, ListChecks, Search, SlidersHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { LoadingState } from '@/components/ui/loading-state'
 import { inboxApi } from '@/api/endpoints/inbox'
 import type { ConversationChannel, InboxThreadState } from '@/api/types'
 import { ThreadListItem } from '@/components/inbox/thread-list-item'
@@ -32,6 +34,7 @@ export default function MobileInboxPage() {
   const privateSales = usePrivateSalesAgent()
   const { dashboardScope, hasCapability, user } = useAuthStore()
   const [params, setParams] = useSearchParams()
+  const filtersTitle = useRef<HTMLHeadingElement>(null)
   const selected = mobileLeadId(params.get('leadId'))
   const { rememberScroll, returnToList } = useMobileListScroll(selected)
   const search = params.get('search') || ''
@@ -97,13 +100,23 @@ export default function MobileInboxPage() {
     })
   }, [firstPage, page, params, selected, setParams, totalPages])
 
+  function closeConversation() {
+    returnToList(() => updateParams({ leadId: null, channel: null, accountId: null, replyMessageId: null, threadKey: null }))
+  }
+
   if (selected)
     return (
       <Suspense
         fallback={
-          <p role="status" className="p-4 text-sm text-text-muted">
-            Loading conversation…
-          </p>
+          <div className="min-h-dvh bg-background pt-[env(safe-area-inset-top)]">
+            <div className="flex min-h-14 items-center gap-1 border-b border-border-subtle px-2">
+              <button type="button" aria-label="Back to inbox" onClick={closeConversation} className="grid size-11 place-items-center rounded-full">
+                <ArrowLeft className="size-5" aria-hidden="true" />
+              </button>
+              <p className="text-base font-semibold">Conversation</p>
+            </div>
+            <LoadingState variant="inline" label="Loading conversation…" className="p-6" />
+          </div>
         }
       >
         <MobileConversation
@@ -112,17 +125,7 @@ export default function MobileInboxPage() {
           selectedChannel={params.get('channel')}
           selectedEmailAccountId={mobileLeadId(params.get('accountId'))}
           selectedEmailReplyId={mobileLeadId(params.get('replyMessageId'))}
-          onClose={() =>
-            returnToList(() =>
-              updateParams({
-                leadId: null,
-                channel: null,
-                accountId: null,
-                replyMessageId: null,
-                threadKey: null,
-              }),
-            )
-          }
+          onClose={closeConversation}
           onReplyContextChange={({ channel: nextChannel, accountId, replyMessageId }) =>
             updateParams({
               channel: nextChannel,
@@ -140,17 +143,19 @@ export default function MobileInboxPage() {
     (thread) => thread.leadId,
   )
   const total = firstPage?.total ?? rows.length
+  const activeFilters = Number(channel !== 'all') +
+    Number(!privateSales && assignment !== (user?.role === 'agent' ? 'mine' : 'everyone'))
   return (
-    <div className="space-y-3">
+    <div className="space-y-2.5">
       <label className="relative block">
         <Search
-          className="pointer-events-none absolute left-3 top-4 size-4 text-text-muted"
+          className="pointer-events-none absolute left-3 top-3.5 size-4 text-text-muted"
           aria-hidden="true"
         />
         <span className="sr-only">Search conversations</span>
         <input
           type="search"
-          className={`${mobileInput} min-h-12 rounded-xl pl-9`}
+          className={`${mobileInput} min-h-11 rounded-xl pl-9`}
           value={search}
           onChange={(event) => updateParams({ search: event.target.value || null, page: null })}
           placeholder="Search conversations"
@@ -159,7 +164,7 @@ export default function MobileInboxPage() {
       <div
         role="group"
         aria-label="Conversation status"
-        className="flex rounded-xl border border-border bg-surface p-1"
+        className="flex rounded-xl bg-surface-raised p-0.5"
       >
         {(
           [
@@ -176,51 +181,70 @@ export default function MobileInboxPage() {
             onClick={() =>
               updateParams({ state: value === 'needs_reply' ? null : value, page: null })
             }
-            className={`min-h-11 flex-1 whitespace-nowrap rounded-lg px-1 text-xs focus-visible:outline-2 focus-visible:outline-focus ${queue === value ? 'bg-accent-muted font-semibold text-accent' : 'text-text-muted'}`}
+            className={`min-h-11 flex-1 whitespace-nowrap rounded-lg px-1 text-xs focus-visible:outline-2 focus-visible:outline-focus ${queue === value ? 'bg-surface font-semibold text-accent shadow-xs' : 'text-text-muted'}`}
           >
             {label}
           </button>
         ))}
       </div>
-      <div className={privateSales ? 'grid gap-2' : 'grid grid-cols-2 gap-2'}>
-        <label className="min-w-0 space-y-1 text-xs font-medium text-text-secondary">
-          <span>Channel</span>
-          <select
-            aria-label="Filter by channel"
-            className={mobileInput}
-            value={channel}
-            onChange={(event) =>
-              updateParams({
-                filterChannel: event.target.value === 'all' ? null : event.target.value,
-                page: null,
-              })
-            }
-          >
-            <option value="all">All channels</option>
-            {CONVERSATION_CHANNELS.map((id) => (
-              <option key={id} value={id}>
-                {CHANNELS[id].label}
-              </option>
-            ))}
-          </select>
-        </label>
-        {!privateSales && (
-          <label className="min-w-0 space-y-1 text-xs font-medium text-text-secondary">
-            <span>Assigned to</span>
-            <select
-              aria-label="Conversation assignment"
-              className={mobileInput}
-              value={assignment}
-              onChange={(event) => updateParams({ assignment: event.target.value, page: null })}
-            >
-              <option value="everyone">Everyone</option>
-              {user?.role !== 'viewer' && <option value="mine">Me</option>}
-              <option value="unassigned">Unassigned</option>
-            </select>
-          </label>
-        )}
-      </div>
-      <div className="flex flex-wrap items-center gap-2 empty:hidden">
+      <div className="flex flex-wrap items-center gap-1.5 empty:hidden">
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button size="sm" variant={activeFilters ? 'secondary' : 'ghost'} className="min-h-11 px-2"
+              leftIcon={<SlidersHorizontal className="size-4" aria-hidden="true" />}>
+              Filters{activeFilters > 0 && ` (${activeFilters})`}
+            </Button>
+          </DialogTrigger>
+          <DialogContent showClose={false} aria-describedby={undefined} className="mobile-sales mobile-sheet flex flex-col overflow-auto" onOpenAutoFocus={event => {
+            event.preventDefault()
+            filtersTitle.current?.focus()
+          }}>
+            <DialogHeader className="px-4">
+              <DialogTitle ref={filtersTitle} tabIndex={-1}>Inbox filters</DialogTitle>
+            </DialogHeader>
+            <div className="grid gap-4 p-4">
+              <label className="min-w-0 space-y-1 text-xs font-medium text-text-secondary">
+                <span>Channel</span>
+                <select
+                  aria-label="Filter by channel"
+                  className={mobileInput}
+                  value={channel}
+                  onChange={(event) =>
+                    updateParams({
+                      filterChannel: event.target.value === 'all' ? null : event.target.value,
+                      page: null,
+                    })
+                  }
+                >
+                  <option value="all">All channels</option>
+                  {CONVERSATION_CHANNELS.map((id) => (
+                    <option key={id} value={id}>
+                      {CHANNELS[id].label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {!privateSales && (
+                <label className="min-w-0 space-y-1 text-xs font-medium text-text-secondary">
+                  <span>Assigned to</span>
+                  <select
+                    aria-label="Conversation assignment"
+                    className={mobileInput}
+                    value={assignment}
+                    onChange={(event) => updateParams({ assignment: event.target.value, page: null })}
+                  >
+                    <option value="everyone">Everyone</option>
+                    {user?.role !== 'viewer' && <option value="mine">Me</option>}
+                    <option value="unassigned">Unassigned</option>
+                  </select>
+                </label>
+              )}
+            </div>
+            <div className="flex justify-end border-t border-border-subtle p-4">
+              <DialogClose asChild><Button className="min-h-11">Done</Button></DialogClose>
+            </div>
+          </DialogContent>
+        </Dialog>
         {privateSales && (
           <ClaimableInbounds
             onClaim={(leadId) => {
@@ -238,10 +262,10 @@ export default function MobileInboxPage() {
             }}
           />
         )}
-        <OtherEmail />
+        <OtherEmail mobile />
         {hasCapability('page.campaigns') && (
-          <Button asChild size="sm" variant="secondary" className="min-h-11">
-            <Link to="/delivery">
+          <Button asChild size="sm" variant="ghost" className="min-h-11 px-2">
+            <Link to="/m/delivery" state={{ inboxSearch: params.toString() }}>
               <ListChecks className="size-4" aria-hidden="true" />
               Delivery review
             </Link>
@@ -251,7 +275,7 @@ export default function MobileInboxPage() {
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         {firstPage && (
           <p className="text-xs font-medium tabular-nums text-text-muted" role="status">
-            {total} {queue === 'needs_reply' ? 'need a reply' : 'conversations'}
+            {total.toLocaleString()} {queue === 'needs_reply' ? 'need a reply' : 'conversations'}
             {channel !== 'all' ? ` · ${CHANNELS[channel].label}` : ''}
             {rows.length < total && ` · ${rows.length} loaded`}
           </p>

@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery } from '@tanstack/react-query'
 import { ArrowLeft, ArrowRight, ListChecks, RefreshCw } from 'lucide-react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import {
@@ -17,6 +17,8 @@ import { CHANNEL_ORDER, CHANNELS } from '@/lib/channels'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 import { OutreachPause } from '@/components/outreach/outreach-pause'
+import { MobileLoadMore } from '@/components/mobile/mobile-shared'
+import { loadedMobileRows, nextMobilePage } from '@/lib/mobile-list'
 
 const FILTERS: { value: DeliveryReviewFilter; label: string }[] = [
   { value: 'attention', label: 'Needs review' },
@@ -131,7 +133,7 @@ function ProviderReceipts({ activity }: { activity: ReceiptActivity[] | null }) 
   )
 }
 
-function ReviewRow({ item, pathPrefix }: { item: DeliveryReviewItem; pathPrefix: string }) {
+function ReviewRow({ item, pathPrefix, mobile }: { item: DeliveryReviewItem; pathPrefix: string; mobile: boolean }) {
   const channel = CHANNELS[item.channel]
   const status = STATUSES[item.status]
   const thread = new URLSearchParams({ leadId: String(item.leadId), channel: item.channel })
@@ -184,7 +186,7 @@ function ReviewRow({ item, pathPrefix }: { item: DeliveryReviewItem; pathPrefix:
       <div className="flex flex-wrap items-center gap-2">
         <Button asChild size="sm" variant="secondary" className="min-h-10">
           <Link
-            to={pathPrefix + '/inbox?' + thread.toString()}
+            to={(mobile ? '/m' : pathPrefix) + '/inbox?' + thread.toString()}
             aria-label={'Open conversation with ' + item.leadName}
           >
             Open conversation
@@ -202,7 +204,9 @@ function ReviewRow({ item, pathPrefix }: { item: DeliveryReviewItem; pathPrefix:
 
 export default function DeliveryReviewPage() {
   const [params, setParams] = useSearchParams()
-  const { pathname } = useLocation()
+  const { pathname, state } = useLocation()
+  const mobile = pathname === '/m/delivery'
+  const inboxSearch = typeof state?.inboxSearch === 'string' ? state.inboxSearch : ''
   const scope = useAuthStore((state) => state.dashboardScope)
   const status =
     FILTERS.find((filter) => filter.value === params.get('status'))?.value ?? 'attention'
@@ -210,14 +214,19 @@ export default function DeliveryReviewPage() {
   const requestedPage = Number(params.get('page'))
   const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1
   const pathPrefix = pathname.startsWith('/dev/shell/') ? '/dev/shell' : ''
-  const review = useQuery({
+  const review = useInfiniteQuery({
     queryKey: ['delivery-review', scope, status, channel, page],
-    queryFn: () => inboxApi.deliveryReview(status, channel, page),
+    initialPageParam: page,
+    queryFn: ({ pageParam }) => inboxApi.deliveryReview(status, channel, pageParam),
+    getNextPageParam: nextMobilePage,
     refetchOnWindowFocus: true,
-    refetchInterval: 30_000,
+    refetchInterval: query => 30_000 * (query.state.data?.pages.length ?? 1),
     meta: { silent: true },
   })
-  const data = review.isError ? undefined : review.data
+  const data = review.data?.pages[0]
+  const rows = mobile ? loadedMobileRows(review.data?.pages.map(batch => batch.items) ?? [], item => item.id) : data?.items ?? []
+  const refresh = <Button variant="secondary" onClick={() => void review.refetch()} pending={review.isFetching}
+    pendingLabel="Refreshing…" leftIcon={<RefreshCw className="size-4" aria-hidden="true" />}>Refresh</Button>
 
   function setFilters(nextStatus: DeliveryReviewFilter, nextChannel: string, nextPage = 1) {
     const next = new URLSearchParams()
@@ -229,25 +238,25 @@ export default function DeliveryReviewPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader
-        title="Delivery review"
-        description="Check failed and unconfirmed sends and see what’s waiting in the queue."
-        actions={
-          <Button
-            variant="secondary"
-            onClick={() => void review.refetch()}
-            pending={review.isFetching}
-            pendingLabel="Refreshing…"
-            leftIcon={<RefreshCw className="size-4" aria-hidden="true" />}
-          >
-            Refresh
-          </Button>
-        }
-      />
+      {mobile ? (
+        <div className="flex items-center justify-between gap-2">
+          <Link to={{ pathname: "/m/inbox", search: inboxSearch }} className="inline-flex min-h-11 items-center gap-2 text-sm text-text-secondary">
+            <ArrowLeft className="size-4" aria-hidden="true" /> Inbox
+          </Link>
+          {refresh}
+        </div>
+      ) : <PageHeader title="Delivery review"
+        description="Check failed and unconfirmed sends and see what’s waiting in the queue." actions={refresh} />}
 
       <OutreachPause />
       {(data?.workers !== undefined || data?.receiptActivity !== undefined) && (
-        <div className="grid gap-4 xl:grid-flow-col xl:auto-cols-fr">
+        mobile ? <details className="rounded-xl border border-border bg-surface px-4">
+          <summary className="min-h-11 cursor-pointer content-center text-sm font-medium">Queue health and provider receipts</summary>
+          <div className="grid gap-3 pb-3">
+            {data.workers !== undefined && <QueueScans workers={data.workers} />}
+            {data.receiptActivity !== undefined && <ProviderReceipts activity={data.receiptActivity} />}
+          </div>
+        </details> : <div className="grid gap-4 xl:grid-flow-col xl:auto-cols-fr">
           {data.workers !== undefined && <QueueScans workers={data.workers} />}
           {data.receiptActivity !== undefined && <ProviderReceipts activity={data.receiptActivity} />}
         </div>
@@ -301,7 +310,7 @@ export default function DeliveryReviewPage() {
           Check sending hours and sender limits when the queue scan is current.
         </p>
       )}
-      {review.isError ? (
+      {(mobile ? review.isLoadingError : review.isError) ? (
         <ErrorState
           title="Could not load delivery review"
           description="Refresh to see the latest message status."
@@ -309,7 +318,7 @@ export default function DeliveryReviewPage() {
         />
       ) : !data ? (
         <LoadingState variant="table" label="Loading delivery review" />
-      ) : data.items.length === 0 ? (
+      ) : rows.length === 0 ? (
         <EmptyState
           icon={ListChecks}
           title={
@@ -332,11 +341,19 @@ export default function DeliveryReviewPage() {
             aria-label="Outbound messages"
             className="divide-y divide-border-subtle rounded-lg border border-border bg-surface"
           >
-            {data.items.map((item) => (
-              <ReviewRow key={item.id} item={item} pathPrefix={pathPrefix} />
+            {rows.map((item) => (
+              <ReviewRow key={item.id} item={item} pathPrefix={pathPrefix} mobile={mobile} />
             ))}
           </ul>
-          {data.pages > 1 && (
+          {mobile ? (
+            <MobileLoadMore
+              hasMore={review.hasNextPage}
+              busy={review.isFetching}
+              loading={review.isFetchingNextPage}
+              failed={review.isFetchNextPageError}
+              onLoad={() => void review.fetchNextPage({ cancelRefetch: false })}
+            />
+          ) : data.pages > 1 && (
             <nav
               aria-label="Delivery review pages"
               className="flex flex-wrap items-center justify-between gap-2"

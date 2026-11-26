@@ -40,6 +40,10 @@ test('task date editing round-trips workspace time across date boundaries and DS
 test('desktop and mobile tasks share readable lead access without opening settings permissions', () => {
   assert.equal(resolveCapabilityForPath('/tasks'), 'page.leads');
   assert.equal(resolveCapabilityForPath('/m/tasks'), 'page.leads');
+  const deliveryAccess = resolveCapabilityForPath('/delivery');
+  assert.equal(deliveryAccess, 'page.campaigns');
+  assert.equal(resolveCapabilityForPath('/m/delivery'), deliveryAccess);
+  assert.ok(!ROLE_PAGE_CAPABILITIES.agent.includes(deliveryAccess));
   for (const role of ['viewer', 'agent', 'manager', 'admin']) assert.ok(ROLE_PAGE_CAPABILITIES[role].includes(resolveCapabilityForPath('/tasks')));
   assert.ok(!ROLE_PAGE_CAPABILITIES.viewer.includes('page.settings'));
   assert.ok(!ROLE_PAGE_CAPABILITIES.agent.includes('page.team'));

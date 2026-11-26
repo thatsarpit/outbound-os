@@ -219,7 +219,7 @@ function NotificationRow({
   )
 }
 
-export function NotificationCenter() {
+export function NotificationCenter({ mobile = false }: { mobile?: boolean }) {
   const location = useLocation()
   const panelRef = useRef<HTMLDivElement | null>(null)
   const queryClient = useQueryClient()
@@ -320,8 +320,9 @@ export function NotificationCenter() {
         aria-haspopup="dialog"
         aria-expanded={isOpen}
         className={cn(
-          'relative inline-flex h-11 w-11 sm:h-8 sm:w-8 items-center justify-center rounded-md text-text-muted transition-colors',
+          'relative inline-flex h-11 w-11 items-center justify-center rounded-md text-text-muted transition-colors',
           'hover:bg-surface-raised hover:text-text-primary',
+          !mobile && 'sm:h-8 sm:w-8',
           isOpen && 'bg-surface-raised text-text-primary',
         )}
       >
@@ -341,9 +342,10 @@ export function NotificationCenter() {
             'fixed left-3 right-3 top-[calc(env(safe-area-inset-top)+4.25rem)] sm:absolute sm:left-auto sm:right-0 sm:top-[calc(100%+0.375rem)] z-[120] overflow-hidden rounded-lg',
             'border border-border bg-surface-overlay shadow-md animate-fade-in',
             'sm:w-[360px] max-w-[calc(100vw-1.5rem)]',
+            mobile && 'rounded-2xl',
           )}
         >
-          <div className="flex h-9 items-center gap-2 border-b border-border px-3">
+          <div className={cn("flex items-center gap-2 border-b border-border px-3", mobile ? "min-h-12" : "h-9")}>
             <p className="text-[13px] font-semibold text-text-primary">Notifications</p>
             {unreadCount > 0 && (
               <span className="rounded-sm bg-accent-muted px-1 py-px text-[11px] font-medium tabular-nums text-text-secondary">
@@ -354,13 +356,13 @@ export function NotificationCenter() {
               type="button"
               onClick={() => void saveAllReads()}
               disabled={unreadCount === 0 || savingReads}
-              className="ml-auto rounded-sm px-1 py-0.5 text-[11px] font-medium text-text-secondary transition-colors hover:text-text-primary disabled:pointer-events-none disabled:text-text-muted disabled:opacity-50"
+              className={cn("ml-auto rounded-sm px-1 py-0.5 text-[11px] font-medium text-text-secondary transition-colors hover:text-text-primary disabled:pointer-events-none disabled:text-text-muted disabled:opacity-50", mobile && "min-h-11 px-2 text-xs")}
             >
               Mark all read
             </button>
           </div>
 
-          <div className="max-h-[min(26rem,60dvh)] overflow-y-auto">
+          <div className="max-h-[min(26rem,60dvh)] overflow-y-auto overscroll-contain">
             {items.length === 0 ? (
               <p className="px-3 py-8 text-center text-xs text-text-muted">
                 {isLoading ? 'Loading notifications…' : 'No notifications yet.'}
