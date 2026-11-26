@@ -17,7 +17,7 @@ jobs:
     name: Repository hygiene
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -27,7 +27,7 @@ jobs:
     name: API tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -50,7 +50,7 @@ jobs:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -75,7 +75,7 @@ jobs:
       run:
         working-directory: mcp-outboundos
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -91,7 +91,7 @@ jobs:
       run:
         working-directory: website
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v5
         with:
           node-version: 24
@@ -116,7 +116,7 @@ jobs:
     name: MCP image boots from private archive
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Build with restrictive release-file permissions
         run: |
           mkdir -p "$RUNNER_TEMP/mcp-context"
@@ -140,7 +140,7 @@ jobs:
     name: Docker image boots
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Build
         run: docker build --build-arg "OUTBOUNDOS_BUILD_REVISION=$GITHUB_SHA" -t outbound-os:ci .
       - name: First boot from an untouched example config
