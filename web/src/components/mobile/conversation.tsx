@@ -177,7 +177,7 @@ export function MobileConversation({
   return (
     <div
       ref={frame}
-      className="mobile-sales fixed inset-x-0 top-0 z-40 mx-auto flex h-dvh max-w-2xl flex-col overflow-hidden bg-background"
+      className="mobile-sales fixed inset-x-0 top-0 z-40 mobile-conversation mx-auto flex h-dvh max-w-2xl flex-col overflow-hidden bg-background"
     >
       <header className="flex shrink-0 items-center gap-1 border-b border-border bg-surface px-2 pt-[env(safe-area-inset-top)]">
         <button
@@ -195,8 +195,11 @@ export function MobileConversation({
           aria-label={thread ? `Lead details for ${thread.leadName || thread.name || 'this conversation'}` : undefined}
           disabled={!thread}
         >
-          <span className="block truncate text-base font-semibold">
+          <span className="flex items-center gap-1.5 text-base font-semibold">
+            <span className="truncate">
             {thread?.leadName || thread?.name || 'Conversation'}
+            </span>
+            {hasThread && <ChevronDown className="size-3.5 shrink-0 text-text-muted" aria-hidden="true" />}
           </span>
           <span className="block truncate text-xs text-text-muted">
             Reply via {CHANNELS[websiteChat ? 'webchat' : channel].label}
@@ -268,9 +271,6 @@ export function MobileConversation({
           )}
         </div>
       )}
-      {thread?.browserChatEnabled && <div className="shrink-0 border-b border-border px-3 py-1">
-        <BrowserChat key={leadId} leadId={leadId} />
-      </div>}
       {!websiteChat && channel === 'whatsapp' && !!thread && <WhatsAppReplyWindow key={`${leadId}:${thread.whatsappSession?.accountId}`} thread={thread} />}
       <ScheduledEmails emails={thread?.scheduledEmails} leadId={leadId} />
       <div
@@ -409,7 +409,8 @@ export function MobileConversation({
             </div>
             <DialogClose className={mobileButton}>Done</DialogClose>
           </div>
-          <div className="overflow-y-auto p-3">
+          <div className="space-y-3 overflow-y-auto p-3">
+            {thread?.browserChatEnabled && <BrowserChat key={leadId} leadId={leadId} />}
             <MobileLeadPanel key={leadId} leadId={leadId} showConversation={false} />
           </div>
         </DialogContent>

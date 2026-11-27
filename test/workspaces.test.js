@@ -7,6 +7,7 @@ import { clerkMiddleware, getAuth } from '@clerk/express';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
+import { workspaceHome } from '../web/src/lib/workspace-path.ts';
 import { clerkWorkspaceIdentity } from '../src/auth/clerkIdentity.js';
 import { createWorkspaceRouter, workspaceConfig, workspaceRuntime } from '../src/routes/workspaces.js';
 
@@ -29,6 +30,17 @@ test('workspace configuration requires distinct private tenant mappings', () => 
   assert.throws(() => registry([member, { ...member, id: 'other', organizationId: 'org_other' }]));
   assert.throws(() => workspaceConfig({ ...primary, AUTH_PROVIDER: 'local', OUTBOUNDOS_WORKSPACES: '[]' }));
   assert.throws(() => workspaceRuntime({ ...primary, OUTBOUNDOS_WORKSPACE_ID: '../invalid' }));
+});
+
+test('mobile workspace switches keep the top-level tab and discard record-specific paths', () => {
+  assert.equal(workspaceHome('voyd', true), '/w/voyd/m/inbox');
+  assert.equal(workspaceHome('voyd', true, '/m/tasks'), '/w/voyd/m/tasks');
+  assert.equal(workspaceHome('storefronts', true, '/m/account'), '/w/storefronts/m/account');
+  assert.equal(workspaceHome('primary', true, '/m/leads'), '/m/leads');
+  for (const path of ['/m/inbox?leadId=42', '/m/leads/42', '/m/delivery', '/m/account#security']) {
+    assert.equal(workspaceHome('voyd', true, path), '/w/voyd/m/inbox');
+  }
+  assert.equal(workspaceHome('voyd', false, '/m/tasks'), '/w/voyd/');
 });
 
 async function listen(t, app) {

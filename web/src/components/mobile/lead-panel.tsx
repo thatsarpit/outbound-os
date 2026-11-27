@@ -119,9 +119,9 @@ export function MobileLeadPanel({
     <div className="space-y-5">
       <section className="rounded-xl border border-border bg-surface p-4">
         <h2 className="text-lg font-semibold">{data.name || 'Unnamed lead'}</h2>
-        <p className="mt-1 text-sm text-text-secondary">
+        {(data.company || data.country) && <p className="mt-1 text-sm text-text-secondary">
           {[data.company, data.country].filter(Boolean).join(' · ')}
-        </p>
+        </p>}
         <p className="mt-2 text-xs capitalize text-text-muted">
           {data.status.replace(/_/g, ' ')}
           {data.leadTier ? ` · ${data.leadTier.toLowerCase()}` : ''}

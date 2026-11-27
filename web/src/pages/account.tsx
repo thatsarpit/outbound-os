@@ -3,11 +3,13 @@ import { DeviceNotifications } from '@/components/notifications/device-notificat
 import { ClerkPasskeys } from '@/components/auth/clerk-passkeys'
 import { AboutOutboundOS } from '@/components/account/about-outbound-os'
 import { Link, useLocation } from 'react-router-dom'
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useClerk, useReverification, useSession, useUser } from '@clerk/react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  ArrowLeft,
   ArrowUpRight,
+  ChevronRight,
   Bell,
   Check,
   Info,
@@ -79,6 +81,9 @@ const ACCOUNT_SECTIONS = [
 export default function AccountPage() {
   const location = useLocation()
   const mobile = location.pathname.startsWith('/m/')
+  const selectedSection = ACCOUNT_SECTIONS.find(section => location.hash === `#${section.id}`)
+  const mobileSection = mobile ? selectedSection?.id : undefined
+  const accountMenu = useRef<HTMLElement>(null)
   const user = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
   const { theme, setTheme } = useUIStore()
@@ -87,12 +92,17 @@ export default function AccountPage() {
   const canManageTeam = useAuthStore((state) => state.hasCapability('page.team'))
   const [signOutOpen, setSignOutOpen] = useState(false)
   useEffect(() => {
-    const id = location.hash.slice(1)
-    if (!ACCOUNT_SECTIONS.some((section) => section.id === id)) return
+    if (mobile) {
+      const target = mobileSection ? document.getElementById(mobileSection) : accountMenu.current
+      window.scrollTo({ top: 0, behavior: 'instant' })
+      target?.focus({ preventScroll: true })
+      return
+    }
+    if (!selectedSection) return
     // React Router does not scroll to a fragment when the palette changes pages.
-    const frame = requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView())
+    const frame = requestAnimationFrame(() => document.getElementById(selectedSection.id)?.scrollIntoView())
     return () => cancelAnimationFrame(frame)
-  }, [location.hash])
+  }, [mobile, mobileSection, selectedSection])
 
   return (
     <div className={cn('mx-auto max-w-6xl animate-fade-in space-y-5', mobile && 'mobile-account')}>
@@ -103,23 +113,52 @@ export default function AccountPage() {
         />
       )}
       <div className="grid items-start gap-5 lg:grid-cols-[180px_minmax(0,1fr)] lg:gap-8">
-        <nav
-          aria-label="Account sections"
-          className="flex gap-1 overflow-x-auto pb-1 lg:sticky lg:top-5 lg:flex-col lg:overflow-visible"
-        >
-          {ACCOUNT_SECTIONS.map(({ id, label, icon: Icon }) => (
-            <a
-              key={id}
-              href={`#${id}`}
-              className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-md px-3 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <Icon aria-hidden="true" className="h-4 w-4" />
-              {label}
-            </a>
-          ))}
-        </nav>
+        {mobile ? mobileSection ? (
+          <Link to="/m/account" className="inline-flex min-h-11 items-center gap-2 self-start text-sm font-medium text-text-secondary">
+            <ArrowLeft className="size-4" aria-hidden="true" /> Account
+          </Link>
+        ) : (
+          <>
+            <div className="flex items-center gap-3 rounded-xl border border-border bg-surface px-4 py-3">
+              <span className="grid size-10 shrink-0 place-items-center rounded-full bg-accent-muted text-accent">
+                <UserRound className="size-5" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <p className="truncate font-semibold">{user?.name || 'Your account'}</p>
+                <p className="text-sm text-text-secondary">{experience.label}</p>
+              </div>
+            </div>
+            <nav ref={accountMenu} tabIndex={-1} aria-label="Account sections"
+              className="divide-y divide-border-subtle rounded-xl border border-border bg-surface focus:outline-none">
+              {ACCOUNT_SECTIONS.map(({ id, label, icon: Icon }) => (
+                <Link key={id} to={`/m/account#${id}`}
+                  className="flex min-h-12 items-center gap-3 px-4 py-2.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-focus active:bg-surface-raised">
+                  <Icon className="size-4 shrink-0 text-text-secondary" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">{label}</span>
+                  <ChevronRight className="size-4 shrink-0 text-text-muted" aria-hidden="true" />
+                </Link>
+              ))}
+            </nav>
+          </>
+        ) : (
+          <nav
+            aria-label="Account sections"
+            className="flex gap-1 overflow-x-auto pb-1 lg:sticky lg:top-5 lg:flex-col lg:overflow-visible"
+          >
+            {ACCOUNT_SECTIONS.map(({ id, label, icon: Icon }) => (
+              <a
+                key={id}
+                href={`#${id}`}
+                className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-md px-3 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-raised hover:text-text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              >
+                <Icon aria-hidden="true" className="h-4 w-4" />
+                {label}
+              </a>
+            ))}
+          </nav>
+        )}
         <div className="min-w-0 space-y-4">
-          <div id="profile" className="scroll-mt-5">
+          <div id="profile" className="scroll-mt-5 focus:outline-none" tabIndex={mobile ? -1 : undefined} hidden={mobile && mobileSection !== 'profile'}>
             <SectionCard title="Profile" description="Your personal identity in this workspace.">
               {provider === 'clerk' ? (
                 <ClerkProfile />
@@ -133,7 +172,7 @@ export default function AccountPage() {
               )}
             </SectionCard>
           </div>
-          <div id="security" className="scroll-mt-5">
+          <div id="security" className="scroll-mt-5 focus:outline-none" tabIndex={mobile ? -1 : undefined} hidden={mobile && mobileSection !== 'security'}>
             {provider === 'clerk' ? (
               <ClerkSecurity />
             ) : (
@@ -145,14 +184,14 @@ export default function AccountPage() {
               </SectionCard>
             )}
           </div>
-          <div id="notifications" className="scroll-mt-5">
+          <div id="notifications" className="scroll-mt-5 focus:outline-none" tabIndex={mobile ? -1 : undefined} hidden={mobile && mobileSection !== 'notifications'}>
             {workspaceBase
               ? <SectionCard title="Device notifications">
                   <p className="text-sm text-text-secondary">Conversation updates appear in the activity center while the dashboard is open.</p>
                 </SectionCard>
               : <DeviceNotifications />}
           </div>
-          <div id="preferences" className="scroll-mt-5">
+          <div id="preferences" className="scroll-mt-5 focus:outline-none" tabIndex={mobile ? -1 : undefined} hidden={mobile && mobileSection !== 'preferences'}>
             <SectionCard
               title="Preferences"
               description="Appearance is saved in this browser or Home Screen app."
@@ -189,7 +228,7 @@ export default function AccountPage() {
               </p>
             </SectionCard>
           </div>
-          <div id="access" className="scroll-mt-5">
+          <div id="access" className="scroll-mt-5 focus:outline-none" tabIndex={mobile ? -1 : undefined} hidden={mobile && mobileSection !== 'access'}>
             <SectionCard
               title="Workspace access"
               description="Permissions are assigned by your workspace administrator."
@@ -214,10 +253,10 @@ export default function AccountPage() {
               </p>
             </SectionCard>
           </div>
-          <div id="about" className="scroll-mt-5">
+          <div id="about" className="scroll-mt-5 focus:outline-none" tabIndex={mobile ? -1 : undefined} hidden={mobile && mobileSection !== 'about'}>
             <AboutOutboundOS />
           </div>
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-4">
+          <div hidden={Boolean(mobileSection)} className={cn("flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-4", !mobileSection && "flex")}>
             <div>
               <p className="text-[13px] font-medium">Done on this device?</p>
               <p className="mt-1 text-xs text-text-muted">

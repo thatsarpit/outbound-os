@@ -10,7 +10,10 @@ export const isWorkspacePath = typeof window !== 'undefined' && /^\/w(?:\/|$)/.t
 export const workspaceApiPath = (path: string) =>
   workspaceBase ? `/api/workspaces/${workspaceId}${path}` : `/api${path}`
 
-export function workspaceHome(id: string, mobile: boolean) {
+const mobileWorkspaceTabs = new Set(['/m/inbox', '/m/tasks', '/m/leads', '/m/account'])
+
+export function workspaceHome(id: string, mobile: boolean, currentPath = '') {
   const base = id === 'primary' ? '' : `/w/${id}`
-  return base + (mobile ? '/m/inbox' : '/')
+  const mobilePath = mobileWorkspaceTabs.has(currentPath) ? currentPath : '/m/inbox'
+  return base + (mobile ? mobilePath : '/')
 }

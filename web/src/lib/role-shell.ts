@@ -4,6 +4,7 @@ export type AppRole = User['role']
 
 export const ROUTE_CAPABILITIES = [
   { route: '/m/inbox', capability: 'page.inbox' },
+  { route: '/m/delivery', capability: 'page.campaigns' },
   { route: '/m/tasks', capability: 'page.leads' },
   { route: '/m/leads', capability: 'page.leads' },
   { route: '/m/install', capability: 'page.account' },

@@ -1,15 +1,17 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/api/client'
 import type { EmailAccount } from '@/api/types'
 import { useAuthStore } from '@/stores/auth-store'
 import { Button } from '@/components/ui'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { Mail } from 'lucide-react'
 import { EmailReceipts } from '@/components/integrations/email-receipts'
 
 /** Unlinked mail belongs in the inbox too, without creating sales contacts. */
-export function OtherEmail() {
+export function OtherEmail({ mobile = false }: { mobile?: boolean }) {
+  const title = useRef<HTMLHeadingElement>(null)
   const { user, dashboardScope } = useAuthStore()
   const [open, setOpen] = useState(false)
   // Raw business mail retains the same admin boundary as email integration review.
@@ -31,13 +33,17 @@ export function OtherEmail() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="secondary" className="min-h-11 lg:min-h-8" leftIcon={<Mail aria-hidden="true" className="size-4" />}>
+        <Button size="sm" variant={mobile ? "ghost" : "secondary"} className={cn("min-h-11 lg:min-h-8", mobile && "px-2")} leftIcon={<Mail aria-hidden="true" className="size-4" />}>
           Other email{receipts.data ? ` (${receipts.data.total})` : ''}
         </Button>
       </DialogTrigger>
-      <DialogContent size="2xl" className="flex max-h-[90dvh] flex-col">
+      <DialogContent size="2xl" className={cn("flex max-h-[90dvh] flex-col", mobile && "mobile-sales mobile-sheet")}
+        onOpenAutoFocus={mobile ? event => {
+          event.preventDefault()
+          title.current?.focus()
+        } : undefined}>
         <DialogHeader className="shrink-0 pr-12">
-          <DialogTitle>Other email</DialogTitle>
+          <DialogTitle ref={title} tabIndex={mobile ? -1 : undefined}>Other email</DialogTitle>
           <DialogDescription>Account notices and mail without a linked sales conversation.</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 overflow-y-auto p-3 sm:p-4">

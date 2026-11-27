@@ -1,6 +1,6 @@
 import { WorkspaceSwitcher } from '@/components/auth/workspace-boundary'
-import { useEffect, useLayoutEffect } from 'react'
-import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Suspense, useEffect, useLayoutEffect } from 'react'
+import { Link, Outlet, useLocation } from 'react-router-dom'
 import {
   CheckSquare,
   Inbox,
@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { mobileLeadId } from './mobile-shared'
 import { ErrorBoundary } from '@/components/error-boundary'
+import { LoadingState } from '@/components/ui/loading-state'
 import { ToastContainer } from '@/components/ui/toast'
 import {
   DropdownMenu,
@@ -49,7 +50,10 @@ export function MobileShell() {
   const conversationOpen =
     location.pathname === '/m/inbox' &&
     !!mobileLeadId(new URLSearchParams(location.search).get('leadId'))
-  const page = destinations.find((item) => location.pathname.startsWith(item.to))
+  const page = destinations.find((item) => location.pathname === item.to)
+  const reviewingDelivery = location.pathname === '/m/delivery'
+  const title = reviewingDelivery ? 'Delivery review' : page?.label ??
+    (location.pathname === '/m/install' ? 'Install app' : 'Sales workspace')
   // Inbox has a single editor on either layout. Keep its viewport state fresh
   // even when the phone opens the dedicated sales routes directly.
   useEffect(() => {
@@ -68,26 +72,21 @@ export function MobileShell() {
     <div className="mobile-sales min-h-dvh bg-background">
       <div className="mx-auto flex min-h-dvh max-w-2xl flex-col bg-background">
         {!conversationOpen && (
-          <header className="sticky top-0 z-30 flex min-h-[calc(4rem+env(safe-area-inset-top))] items-center justify-between gap-3 border-b border-border bg-surface/95 px-4 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
+          <header className="mobile-sales__header sticky top-0 z-30 flex min-h-[calc(3.5rem+env(safe-area-inset-top))] items-center justify-between gap-3 border-b border-border-subtle bg-background pt-[env(safe-area-inset-top)]">
             <div className="flex min-w-0 items-center gap-2.5 py-2">
-              <BrandMark className="size-9 shrink-0 text-accent" />
+              <BrandMark className="size-7 shrink-0 text-accent" />
               <div className="min-w-0">
                 <h1 className="truncate text-xl font-semibold tracking-tight">
-                  {page?.label ??
-                    (location.pathname === '/m/account'
-                      ? 'Account'
-                      : location.pathname === '/m/install'
-                        ? 'Install app'
-                        : 'Sales workspace')}
+                  {title}
                 </h1>
                 {IS_DEMO && (
                   <p className="text-[11px] font-medium text-text-muted">Sample workspace</p>
                 )}
-                <WorkspaceSwitcher className="block h-auto max-w-36 px-0 text-text-secondary [&:is(button)]:flex [&:is(button)]:min-h-11 [&:is(button)]:justify-start" />
+                <WorkspaceSwitcher mobile />
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1">
-              {!privateSales && <NotificationCenter />}
+              {!privateSales && <NotificationCenter mobile />}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <button
@@ -171,36 +170,32 @@ export function MobileShell() {
         <main
           className={cn(
             'min-w-0 flex-1',
-            !conversationOpen && 'px-4 pt-3 pb-[calc(4.5rem+env(safe-area-inset-bottom))]',
+            !conversationOpen && 'mobile-sales__content pt-2.5',
           )}
         >
           <ErrorBoundary key={location.pathname}>
-            <Outlet />
+            <Suspense fallback={<LoadingState variant="inline" label="Opening page…" className="p-4" />}>
+              <Outlet />
+            </Suspense>
           </ErrorBoundary>
         </main>
         {!conversationOpen && (
           <nav
             aria-label="Sales navigation"
-            className="fixed inset-x-0 bottom-0 z-30 mx-auto flex max-w-2xl gap-1 border-t border-border bg-surface/95 px-3 pt-1.5 pb-[calc(0.25rem+env(safe-area-inset-bottom))]"
+            className="mobile-sales__tabs"
           >
             {destinations
               .filter((item) => !item.capability || hasCapability(item.capability))
               .map(({ to, label, icon: Icon }) => (
-                <NavLink
+                <Link
                   key={to}
                   to={to}
-                  className={({ isActive }) =>
-                    cn(
-                      'group flex min-h-14 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-xl text-[11px] font-medium transition-colors focus-visible:outline-2 focus-visible:outline-focus active:bg-surface-raised',
-                      isActive ? 'font-semibold text-accent' : 'text-text-muted',
-                    )
-                  }
+                  aria-current={page?.to === to || (reviewingDelivery && to === '/m/inbox') ? 'page' : undefined}
+                  className="mobile-sales__tab focus-visible:outline-2 focus-visible:outline-focus"
                 >
-                  <span className="grid h-7 w-14 max-w-full place-items-center rounded-full group-aria-[current=page]:bg-accent-muted">
-                    <Icon className="size-5" aria-hidden="true" />
-                  </span>
-                  {label}
-                </NavLink>
+                  <Icon className="size-5" aria-hidden="true" />
+                  <span>{label}</span>
+                </Link>
               ))}
           </nav>
         )}

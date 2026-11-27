@@ -113,7 +113,7 @@ export default function MobileLeadsPage() {
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         {firstPage && (
           <p className="text-xs font-medium tabular-nums text-text-muted" role="status">
-            {total} leads{rows.length < total && ` · ${rows.length} loaded`}
+            {total.toLocaleString()} leads{rows.length < total && ` · ${rows.length} loaded`}
           </p>
         )}
         <MobileRefresh

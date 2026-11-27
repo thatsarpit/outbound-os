@@ -735,14 +735,8 @@
 .mobile-sales [role='menuitem'] {
   touch-action: manipulation;
 }
-.mobile-sales main {
-  scroll-padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
-}
 .mobile-sales form input {
   min-height: 44px;
-}
-.mobile-sales nav[aria-label='Sales navigation'] {
-  backdrop-filter: blur(16px);
 }
 .mobile-sales .animate-fade-in {
   animation: none;
@@ -776,4 +770,119 @@
 .mobile-sales input,
 .mobile-sales textarea {
   border-radius: 0.875rem;
+}
+
+
+/* Keep the same insets for the floating tabs and the content that scrolls beneath them. */
+:root {
+  --sales-tab-inset: max(0.5rem, env(safe-area-inset-bottom));
+  --sales-tab-clearance: calc(var(--sales-tab-inset) + 4.75rem);
+  --sales-gutter-start: max(1rem, env(safe-area-inset-left));
+  --sales-gutter-end: max(1rem, env(safe-area-inset-right));
+}
+
+html:has(.mobile-sales__tabs) {
+  scroll-padding-top: calc(3.5rem + env(safe-area-inset-top));
+  scroll-padding-bottom: var(--sales-tab-clearance);
+}
+
+.mobile-sales__header,
+.mobile-sales__content {
+  padding-inline: var(--sales-gutter-start) var(--sales-gutter-end);
+}
+
+.mobile-sales__content {
+  padding-bottom: var(--sales-tab-clearance);
+}
+
+.mobile-sales__tabs {
+  position: fixed;
+  z-index: 30;
+  inset-inline: var(--sales-gutter-start) var(--sales-gutter-end);
+  bottom: var(--sales-tab-inset);
+  max-inline-size: 30rem;
+  margin-inline: auto;
+  display: flex;
+  gap: 0.2rem;
+  padding: 0.25rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 1.9rem;
+  background: var(--color-surface);
+  box-shadow: 0 4px 18px rgb(0 0 0 / 16%);
+}
+
+@supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+  .mobile-sales__tabs {
+    background: color-mix(in oklab, var(--color-surface) 91%, transparent);
+    -webkit-backdrop-filter: saturate(1.2) blur(18px);
+    backdrop-filter: saturate(1.2) blur(18px);
+  }
+}
+
+.mobile-sales__tab {
+  display: flex;
+  flex: 1;
+  min-inline-size: 0;
+  min-block-size: 3rem;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.25rem 0.125rem;
+  border-radius: 1.5rem;
+  color: var(--color-text-secondary);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.mobile-sales__tab[aria-current='page'],
+.mobile-sales__tab:active {
+  background: var(--color-accent-muted);
+  color: var(--color-accent);
+  font-weight: 650;
+}
+
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .mobile-sales__tabs {
+    background: var(--color-surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+.mobile-sales input[type='datetime-local'] {
+  display: block;
+  inline-size: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+
+.mobile-sales input[type='datetime-local']::-webkit-date-and-time-value {
+  min-block-size: 1.5rem;
+  text-align: start;
+}
+
+.mobile-sheet {
+  inset: auto max(0.5rem, env(safe-area-inset-right)) max(0.5rem, env(safe-area-inset-bottom)) max(0.5rem, env(safe-area-inset-left));
+  translate: none;
+  margin-inline: auto;
+  inline-size: auto;
+  max-block-size: calc(100dvh - env(safe-area-inset-top) - max(0.5rem, env(safe-area-inset-bottom)) - 0.5rem);
+  border-radius: 1.5rem;
+}
+
+.mobile-sheet > button[aria-label='Close'] {
+  display: grid;
+  place-items: center;
+  min-block-size: 2.75rem;
+  min-inline-size: 2.75rem;
+  inset-block-start: 0.65rem;
+  inset-inline-end: 0.65rem;
+}
+
+.mobile-conversation {
+  padding-inline: env(safe-area-inset-left) env(safe-area-inset-right);
 }

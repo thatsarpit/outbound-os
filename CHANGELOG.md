@@ -6,6 +6,17 @@ include breaking changes, and they are called out here.
 
 ## [Unreleased]
 
+## [0.6.1] — 27 November 2026
+
+- Show available workspaces in a mobile sheet and keep the selected top-level
+  tab on a workspace switch.
+- Add floating mobile tabs that respect the iPhone home indicator, with
+  larger tap areas and a high-contrast fallback.
+- Put Inbox filters in a sheet, keep Delivery review inside the mobile
+  workspace, and give each Account section its own screen.
+- Keep conversation loading clear of the status bar and move private
+  invitations into lead details. Detect when the Home Screen app is installed.
+
 ## [0.6.0] — 26 November 2026
 
 - Offer private Sales workspaces where agents work only their assignments and
