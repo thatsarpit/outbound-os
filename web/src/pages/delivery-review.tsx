@@ -17,7 +17,7 @@ import { CHANNEL_ORDER, CHANNELS } from '@/lib/channels'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/stores/auth-store'
 import { OutreachPause } from '@/components/outreach/outreach-pause'
-import { MobileLoadMore } from '@/components/mobile/mobile-shared'
+import { MobileLoadMore, MobileRefresh } from '@/components/mobile/mobile-shared'
 import { loadedMobileRows, nextMobilePage } from '@/lib/mobile-list'
 
 const FILTERS: { value: DeliveryReviewFilter; label: string }[] = [
@@ -248,6 +248,13 @@ export default function DeliveryReviewPage() {
       ) : <PageHeader title="Delivery review"
         description="Check failed and unconfirmed sends and see what’s waiting in the queue." actions={refresh} />}
 
+      {mobile && data && (
+        <MobileRefresh
+          updatedAt={review.dataUpdatedAt}
+          refreshing={review.isFetching}
+          stale={review.isRefetchError}
+        />
+      )}
       <OutreachPause />
       {(data?.workers !== undefined || data?.receiptActivity !== undefined) && (
         mobile ? <details className="rounded-xl border border-border bg-surface px-4">
